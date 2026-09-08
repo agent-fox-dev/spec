@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 )
 
 // --- TS-08-14: Verify that spec new with a valid PRD file auto-initializes

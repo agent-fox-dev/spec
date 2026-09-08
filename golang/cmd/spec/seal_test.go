@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 )
 
 // --- TS-NS-1: spec seal transitions an active spec to sealed state ---

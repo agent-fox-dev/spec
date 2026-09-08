@@ -235,7 +235,7 @@ This PRD defines the work to port the `agentspec` Python package and the `spec` 
 
 ## Design Decisions
 
-1. **Single Go module, multiple packages**: The Go implementation stays in the existing `github.com/agent-fox-dev/spec-format` module with `agentspec/` and `cmd/spec/` as sub-packages. This simplifies dependency management within the monorepo.
+1. **Single Go module, multiple packages**: The Go implementation stays in the existing `github.com/agent-fox-dev/spec` module with `agentspec/` and `cmd/spec/` as sub-packages. This simplifies dependency management within the monorepo.
 2. **Tool schemas from embedded JSON Schema files**: Rather than generating JSON schemas from Go struct types at runtime, the Go implementation bundles the canonical JSON Schema files and resolves `$ref` at initialization time. This guarantees schema parity with Python.
 3. **Synchronous AI calls with context.Context**: AI calls are synchronous from the caller's perspective, with `context.Context` for cancellation and timeout. Streaming happens internally within the client.
 4. **$variable substitution via strings.Replacer**: Prompt templates use simple `$variable` replacement rather than Go's `text/template`, matching the Python `string.Template.safe_substitute` behavior.

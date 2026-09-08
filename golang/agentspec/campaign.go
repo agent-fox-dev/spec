@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 	"github.com/goccy/go-yaml"
 )
 

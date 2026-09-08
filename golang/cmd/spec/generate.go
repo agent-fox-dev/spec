@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/agent-fox-dev/spec-format/agentspec"
+	"github.com/agent-fox-dev/spec/agentspec"
 	"github.com/spf13/cobra"
 )
 

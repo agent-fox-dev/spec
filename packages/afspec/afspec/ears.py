@@ -2,7 +2,7 @@
 
 Renders EARS (Easy Approach to Requirements Syntax) sentences from
 decomposed criterion fields using the six templates defined in
-specification/spec-format.md section 6.2.1.
+specification/spec.md section 6.2.1.
 """
 
 from __future__ import annotations

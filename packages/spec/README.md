@@ -8,7 +8,7 @@ errors go to stderr, making the tool suitable for both human and agent use.
 ## Installation
 
 ```bash
-pip install "spec @ git+https://github.com/agent-fox-dev/spec-format.git@v1.4.1#subdirectory=packages/spec"
+pip install "spec @ git+https://github.com/agent-fox-dev/spec.git@v1.4.1#subdirectory=packages/spec"
 ```
 
 ## Quick Start

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 )
 
 // isZeroAssessment returns true if the Assessment has all zero-value fields.

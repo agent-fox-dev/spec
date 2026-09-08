@@ -168,12 +168,12 @@ exception as an `AgentError`. Error categories classified as retryable:
 
 ## Known Limitations
 
-- **Go CLI has no per-phase model support** ([#94](https://github.com/agent-fox-dev/spec-format/issues/94)):
+- **Go CLI has no per-phase model support** ([#94](https://github.com/agent-fox-dev/spec/issues/94)):
   Per-phase fields (`assess_model`, `refine_model`, `generate_model`) are
   implemented in the Python `agentspec` library only. The Go binary uses a single
   hardcoded tier across all phases.
 
-- **No 1M context-window variant** ([#95](https://github.com/agent-fox-dev/spec-format/issues/95)):
+- **No 1M context-window variant** ([#95](https://github.com/agent-fox-dev/spec/issues/95)):
   The model registry does not include extended-context variants such as
   `claude-opus-4-6[1m]`. Specifying a 1M model ID raises a `ConfigError`
   (Python) or returns an error (Go).

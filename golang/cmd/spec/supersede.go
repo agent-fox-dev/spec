@@ -3,7 +3,7 @@ package spec
 import (
 	"fmt"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 	"github.com/spf13/cobra"
 )
 

@@ -1,4 +1,4 @@
-module github.com/agent-fox-dev/spec-format
+module github.com/agent-fox-dev/spec
 
 go 1.26.5
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 	"golang.org/x/sync/errgroup"
 )
 

@@ -9,7 +9,7 @@ artifacts. Used by the [`spec`](../spec/) CLI.
 ## Installation
 
 ```bash
-pip install "agentspec @ git+https://github.com/agent-fox-dev/spec-format.git@v1.4.1#subdirectory=packages/agentspec"
+pip install "agentspec @ git+https://github.com/agent-fox-dev/spec.git@v1.4.1#subdirectory=packages/agentspec"
 ```
 
 Requires Python 3.12+.

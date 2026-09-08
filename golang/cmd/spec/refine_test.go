@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/spec-format/agentspec"
+	"github.com/agent-fox-dev/spec/agentspec"
 )
 
 // --- Test helpers ---

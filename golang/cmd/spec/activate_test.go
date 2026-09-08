@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 )
 
 // --- TS-NS-1..4: spec activate transitions a draft spec to active state ---

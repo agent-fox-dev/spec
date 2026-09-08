@@ -22,7 +22,7 @@ testdata/                 # Shared test fixtures
 ```
 
 The Go module lives in `golang/` under module path
-`github.com/agent-fox-dev/spec-format`.
+`github.com/agent-fox-dev/spec`.
 
 ## Setup
 

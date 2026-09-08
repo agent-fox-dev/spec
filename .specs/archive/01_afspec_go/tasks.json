@@ -553,7 +553,7 @@
           "id": "5.1",
           "title": "Scaffold Go module, package structure, and embedded schemas",
           "details": [
-            "Verify go.mod has module path github.com/agent-fox-dev/spec-format and Go 1.26.5",
+            "Verify go.mod has module path github.com/agent-fox-dev/spec and Go 1.26.5",
             "Create package afspec in project root; create internal/ subpackages: internal/prd, internal/marshal, internal/validate, internal/lifecycle, internal/render, internal/discover",
             "Copy JSON Schema files to schemas/ directory",
             "Add //go:embed schemas/*.json directive in schemas.go; implement Schemas() returning map[string][]byte"

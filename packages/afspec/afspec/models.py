@@ -84,7 +84,7 @@ def valid_transition(current: SubtaskState, target: SubtaskState) -> bool:
     """Check if a subtask state transition is legal.
 
     Returns True if the transition from current to target is in the legal
-    transition set defined in specification/spec-format.md section 8.3.1.
+    transition set defined in specification/spec.md section 8.3.1.
     """
     return (current, target) in _LEGAL_TRANSITIONS
 
@@ -98,7 +98,7 @@ class PRDFrontmatter(BaseModel):
     """YAML frontmatter from prd.md.
 
     Fields are declared in the order they appear in the YAML frontmatter,
-    matching specification/spec-format.md section 4.1.
+    matching specification/spec.md section 4.1.
     """
 
     spec_id: str = ""

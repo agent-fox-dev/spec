@@ -652,7 +652,7 @@
       ],
       "input": "Inspect the package-level doc comment in the afspec package",
       "expected": "The package godoc contains a statement about lack of goroutine-safety and the requirement for external synchronization",
-      "assertion_pseudocode": "pkgDoc = getPackageDoc(\"github.com/agent-fox-dev/spec-format\"); assert contains(pkgDoc, \"goroutine\") || contains(pkgDoc, \"concurrent\") || contains(pkgDoc, \"synchronize\")"
+      "assertion_pseudocode": "pkgDoc = getPackageDoc(\"github.com/agent-fox-dev/spec\"); assert contains(pkgDoc, \"goroutine\") || contains(pkgDoc, \"concurrent\") || contains(pkgDoc, \"synchronize\")"
     }
   ],
   "property_tests": [
@@ -1385,7 +1385,7 @@
       ],
       "input": "Inspect the package doc comment (the comment block above 'package afspec' in the root .go file)",
       "expected": "The package doc comment contains language about goroutine safety, concurrent access, or external synchronization requirements",
-      "assertion_pseudocode": "pkgDoc = runGoDoc(\"github.com/agent-fox-dev/spec-format\"); assert contains(pkgDoc, \"goroutine\") || contains(pkgDoc, \"concurrent\") || contains(pkgDoc, \"synchronize\") || contains(pkgDoc, \"thread\")"
+      "assertion_pseudocode": "pkgDoc = runGoDoc(\"github.com/agent-fox-dev/spec\"); assert contains(pkgDoc, \"goroutine\") || contains(pkgDoc, \"concurrent\") || contains(pkgDoc, \"synchronize\") || contains(pkgDoc, \"thread\")"
     }
   ],
   "smoke_tests": [

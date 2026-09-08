@@ -5,7 +5,7 @@
 package main
 
 import (
-	spec "github.com/agent-fox-dev/spec-format/cmd/spec"
+	spec "github.com/agent-fox-dev/spec/cmd/spec"
 )
 
 // version is set at build time via ldflags (-X main.version=...).

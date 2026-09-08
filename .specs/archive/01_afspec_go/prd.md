@@ -172,7 +172,7 @@ Standalone convenience constructors:
 ## Technical Boundaries
 
 - Go 1.26.5 (as specified in the existing `go.mod`; this is an intentionally forward-looking version already set in the project).
-- Module path: `github.com/agent-fox-dev/spec-format`.
+- Module path: `github.com/agent-fox-dev/spec`.
 - Package name: `afspec` — all public functions and methods in project root, internal helpers in `internal/` subpackages.
 - JSON Schema files copied to `schemas/` in the project root as the source of truth, embedded via `//go:embed`.
 - JSON Schema validation: `github.com/santhosh-tekuri/jsonschema/v6`.

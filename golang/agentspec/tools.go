@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	afspec "github.com/agent-fox-dev/spec-format"
+	afspec "github.com/agent-fox-dev/spec"
 )
 
 // artifactEntry caches the cleaned input_schema for one artifact type.

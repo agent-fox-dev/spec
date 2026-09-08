@@ -42,7 +42,7 @@ optional artifact:
 
 The full specification — field-level schemas, EARS pattern definitions, ID
 formats, validation rules, subtask state machine, and rendering — is at
-**[spec-format.md](specification/spec-format.md)**.
+**[spec-format.md](specification/spec.md)**.
 
 JSON Schemas for all artifacts are available in `specification/schemas/`
 (`prd-frontmatter.v1.json`, `requirements.v1.json`, `test_spec.v1.json`,
@@ -81,13 +81,13 @@ spec status 01_my_feature          # show session state
 Install the spec CLI via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/spec-format/refs/heads/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/spec/refs/heads/main/install.sh | sh
 ```
 
 ### Go library
 
 ```bash
-go get github.com/agent-fox-dev/spec-format@v1.4.1
+go get github.com/agent-fox-dev/spec@v1.4.1
 ```
 
 ## Development
@@ -100,7 +100,7 @@ make check          # full quality suite: lint + all tests
 
 ## Documentation
 
-- [Spec Format Reference](specification/spec-format.md) — field-level schemas, EARS patterns, validation rules, and rendering
+- [Spec Format Reference](specification/spec.md) — field-level schemas, EARS patterns, validation rules, and rendering
 - [CLI Reference](docs/cli.md) — commands, flags, agent/skill workflow, and usage
 - [Configuration](docs/configuration.md) — LLM provider setup, model selection, and config files
 - [Go Library API](golang/README.md) — afspec Go library API for loading and manipulating specs
