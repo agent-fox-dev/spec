@@ -41,13 +41,22 @@ optional artifact:
   verification and nothing is built without a requirement.
 
 The full specification — field-level schemas, EARS pattern definitions, ID
-formats, validation rules, subtask state machine, and rendering — is at
-**[spec-format.md](specification/spec.md)**.
+formats, validation rules, task state machine, and rendering — is at
+**[spec-format-v2.md](specification/spec-format-v2.md)**. Version 1.3 is kept
+for reference at [spec-format.md](specification/spec-format.md).
 
 JSON Schemas for all artifacts are available in `specification/schemas/`
-(`prd-frontmatter.v1.json`, `requirements.v1.json`, `test_spec.v1.json`,
-`tasks.v1.json`). These schemas can be used for external validation or code
-generation. The Go package bundles them.
+(`prd-frontmatter.v2.json`, `requirements.v2.json`, `test_spec.v2.json`,
+`tasks.v2.json`, plus the v1 set). These schemas can be used for external
+validation or code generation.
+
+## Implementations
+
+This repository is the home of the **format**. The reference implementation —
+the `afspec` Go library, the `agentspec` generation pipeline and the `spec`
+CLI — lives in [agent-fox](https://github.com/agent-fox-dev/agent-fox); it
+bundles a copy of the schemas above. The Python packages under `packages/`
+implement format version 1 and are being phased out.
 
 ## Creating a Spec Package
 
@@ -81,27 +90,24 @@ spec status 01_my_feature          # show session state
 Install the spec CLI via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/spec/refs/heads/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/agent-fox/refs/heads/main/install.sh | sh
 ```
 
 ### Go library
 
 ```bash
-go get github.com/agent-fox-dev/spec@v1.4.1
+go get github.com/agent-fox-dev/agentfox
 ```
 
 ## Development
 
-See [Development Guide](docs/development.md) for setup, testing, and contributing.
+The Python workspace is driven through `make`:
 
 ```bash
-make check          # full quality suite: lint + all tests
+make check          # lint + all tests
 ```
 
 ## Documentation
 
-- [Spec Format Reference](specification/spec.md) — field-level schemas, EARS patterns, validation rules, and rendering
-- [CLI Reference](docs/cli.md) — commands, flags, agent/skill workflow, and usage
-- [Configuration](docs/configuration.md) — LLM provider setup, model selection, and config files
-- [Go Library API](golang/README.md) — afspec Go library API for loading and manipulating specs
-- [Development Guide](docs/development.md) — setup, testing, and contributing
+- [Spec Format Reference v2](specification/spec-format-v2.md) — field-level schemas, EARS patterns, validation rules, and rendering
+- [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
