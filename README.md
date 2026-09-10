@@ -52,11 +52,11 @@ validation or code generation.
 
 ## Implementations
 
-This repository is the home of the **format**. The reference implementation —
-the `afspec` Go library, the `agentspec` generation pipeline and the `spec`
-CLI — lives in [agent-fox](https://github.com/agent-fox-dev/agent-fox); it
-bundles a copy of the schemas above. The Python packages under `packages/`
-implement format version 1 and are being phased out.
+This repository is the home of the **format** only — it contains no
+implementation code. The reference implementation — the `afspec` Go library,
+the `specgen` generation pipeline and the `spec` CLI — lives in
+[agent-fox](https://github.com/agent-fox-dev/agent-fox); it bundles a copy of
+the schemas above.
 
 ## Creating a Spec Package
 
@@ -97,14 +97,6 @@ curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/agent-fox/refs/heads/
 
 ```bash
 go get github.com/agent-fox-dev/agentfox
-```
-
-## Development
-
-The Python workspace is driven through `make`:
-
-```bash
-make check          # lint + all tests
 ```
 
 ## Documentation

@@ -11,8 +11,9 @@ Before making any changes, orient yourself:
 2. **Read `.specs/steering.md`** if it exists — project-level directives that
    apply to all agents and skills. Follow any instructions found there.
 3. **Read ADRs and errata** in `docs/` for architectural context.
-4. **Explore the codebase:** `<main_package>/` is the main package, `<test_directory>/` has
-   unit, property, and integration tests. Their location is language dependent.
+4. **Explore the codebase:** this repository currently contains no
+   implementation code — `specification/` holds the format specification and
+   JSON schemas (read-only, see `.specs/steering.md`).
 5. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
 
 **Important:** Read all documents and code in depth — don't skim.
@@ -25,8 +26,7 @@ Do not implement anything before completing these steps.
 ## Project Structure
 
 ```
-<main_package>/         # Main package
-<test_directory>/       # Tests directory
+specification/          # The spec-format specification and JSON schemas (read-only)
 docs/                   # Documentation
 .specs/                 # Specs to be implemented
 .specs/archive/         # Old specs. Ignore for coding tasks, except for reference
@@ -50,16 +50,11 @@ libraries — API signatures in specs may be unverified assumptions.
 
 | Command | What it does |
 |---------|-------------|
-| `make check` | Run lint + all tests (use before committing) |
-| `make test` | Run all tests (`uv run pytest -q`) |
+| `make check` | Placeholder — this repository currently has no implementation code |
+| `make test` | Placeholder — this repository currently has no implementation code |
 
-Run the full quality suite before committing:
-
-```
-make check
-```
-
-**Important:** If `make check` or `make test` are not present, look for language specific test suites.
+**Important:** If this repository gains implementation code, wire `make check`
+and `make test` to the appropriate language-specific tooling.
 
 ## Git Workflow
 

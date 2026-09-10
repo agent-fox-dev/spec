@@ -1,15 +1,11 @@
-.PHONY: clean check test
+.PHONY: check test
 
-clean:
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name '*.pyc' -delete 2>/dev/null || true
-	find . -type f -name '*.pyo' -delete 2>/dev/null || true
-	rm -rf .pytest_cache/ *.egg-info/ dist/ .ruff_cache/ .mypy_cache/ .hypothesis/
-	rm -rf packages/*/.pytest_cache packages/*/.mypy_cache packages/*/.ruff_cache
-	rm -rf packages/*/build packages/*/dist packages/*/*.egg-info
+# This repository currently contains no implementation code — only the
+# spec-format specification and documentation. These targets are placeholders
+# kept for consistency with the standard agent workflow (see AGENTS.md).
 
 check:
-	echo "TODO: check"
+	@echo "No code in this repository — nothing to lint."
 
 test:
-	echo "TODO: test"
+	@echo "No code in this repository — nothing to test."
