@@ -58,32 +58,46 @@ the `specgen` generation pipeline and the `spec` CLI — lives in
 [agent-fox](https://github.com/agent-fox-dev/agent-fox); it bundles a copy of
 the schemas above.
 
-## Creating a Spec Package
+## Generating a Spec Package
 
-The `spec` CLI creates a spec from a PRD in three steps. Run all
-commands from the project root (the default spec directory `.specs/` and its
-campaign are auto-initialised on first use).
-
-```bash
-# 1. Start a new spec from a PRD file.
-#    The agent assesses the PRD and returns questions for refinement.
-spec new path/to/prd.md --name my_feature
-
-# 2. Refine (repeatable). Answer the agent's questions as JSON.
-#    The agent re-assesses until the PRD is ready.
-spec refine 01_my_feature --answers answers.json
-
-# 3. Generate the JSON artifacts (requirements, test_spec, tasks).
-spec generate 01_my_feature
-```
-
-After generation, validate and inspect the result:
+The `spec` CLI turns a product idea into a complete, validated package in one
+unattended run — there is no session state and no interactive refinement
+loop. It takes exactly one positional input:
 
 ```bash
-spec validate 01_my_feature        # schema + cross-file integrity checks
-spec render 01_my_feature --combined   # render as a single markdown document
-spec status 01_my_feature          # show session state
+spec path/to/prd.md                                   # a file's contents are the idea
+spec https://github.com/org/repo/issues/42             # the issue and its comments are the idea
+spec "add dark mode to the settings screen"            # any other text is the idea
+spec -                                                  # read the idea from stdin
 ```
+
+Nobody is waiting to answer questions, so the run resolves every open
+question itself, records each in a `## Design Decisions` section of the PRD,
+and reports the ones it is least sure of as `open_questions` in the result.
+It then generates `requirements.json`, `test_spec.json` and `tasks.json` in
+that order — each validated against the format's schema and its cross-file
+rules before it is written — writes the package under `.specs/{NN}_{name}/`,
+and activates it if it validates. A package that fails cross-file validation
+is still written to disk, with the broken rules named in the result.
+
+Output is one JSON object on stdout — spec id, artifacts written, requirement
+and test counts, the validation report, derived traceability coverage, and
+any `open_questions` — with progress on stderr. Exit codes: `0` a valid
+package was written, `1` the run failed (the stage is named in the JSON),
+`2` a usage error.
+
+| Flag | Effect |
+| --- | --- |
+| `--specs-dir` | Where `NN_name` packages live (default `.specs/`, or `$AF_SPEC_DIR`) |
+| `--name` | Override the spec name the model chooses |
+| `--architecture` | Also write the optional `architecture.md` |
+| `--no-activate` | Leave a valid package in `draft` instead of activating it |
+| `--comment` | Post the finished PRD back to the source issue |
+| `--dry-run` | Write nothing to disk or GitHub; report what would be written |
+
+Lifecycle management for an existing package — activating, sealing,
+archiving, superseding, validating, rendering — has no CLI surface; it's
+library API in `afspec` for an embedder to call.
 
 ## Installation
 
