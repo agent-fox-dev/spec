@@ -1,8 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(uv *)",
-      "Bash(ruff *)",
       "Bash(go test *)",
       "Bash(go vet *)",
       "Bash(go build *)",
@@ -12,8 +10,7 @@
       "Bash(cd * && go test *)",
       "Bash(cd * && go build *)",
       "Bash(cd * && go vet *)",
-      "Bash(cd * && make *)",
-      "Bash(cd * && uv *)"
+      "Bash(cd * && make *)"
     ]
   }
 }
