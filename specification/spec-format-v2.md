@@ -670,10 +670,10 @@ is exactly what v1 did.
 | `dependencies[].from_group/to_group/sentinel` | `dependencies[].spec/reason` |
 | subtask states `queued`, `pending_reevaluation` | dropped; `pending`, `in_progress`, `done`, `dropped` remain |
 
-A deterministic converter (`spec migrate`) can produce a v2 spec from a
-v1 spec for everything except the missing task ownership of edge-case and
-property tests (C7/C8), which v1 never had; the converter attaches those
-tests to the task that owns the parent requirement.
+A v1 spec converts to v2 deterministically for everything except the
+missing task ownership of edge-case and property tests (C7/C8), which v1
+never had; a conversion attaches those tests to the task that owns the
+parent requirement.
 
 ---
 

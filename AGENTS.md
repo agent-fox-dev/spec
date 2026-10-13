@@ -28,7 +28,6 @@ Do not implement anything before completing these steps.
 ```
 specification/          # The format reference and the canonical JSON Schemas
 afspec/                 # Main package (tests alongside as *_test.go)
-afspec/legacy/          # Spec format v1.3 types, input to afspec.Migrate
 afspec/schemas/         # Embedded copies of specification/schemas/*.v2.json
 afspec/testdata/        # Test fixtures
 docs/                   # Documentation

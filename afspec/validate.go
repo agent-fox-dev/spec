@@ -228,13 +228,13 @@ type prdFrontmatterForSchema struct {
 // legacyVersionEntry describes a spec still written in an older format
 // version. Validating it against the v2 schemas produces a schema error per
 // artifact plus every shape difference underneath; one sentence naming the
-// version and how to convert it is more use than that list.
+// version and where the conversion is described is more use than that list.
 func legacyVersionEntry(version int) ValidationEntry {
 	return ValidationEntry{
 		Category: "integrity",
 		Check:    "schema_version",
 		Artifact: "prd.md",
-		Message: fmt.Sprintf("spec declares schema_version %d; this library reads version %d — convert it with afspec.Migrate",
+		Message: fmt.Sprintf("spec declares schema_version %d; this library reads version %d only — format v2 §13 maps each v1 construct to its v2 form",
 			version, SchemaVersion),
 	}
 }
