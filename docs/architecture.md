@@ -122,6 +122,13 @@ schema combinators (`schema`) and the indexed search (`codesearch`).
 - `MaxTurns`, `MaxCostUSD` and `Timeout` from the per-phase bounds, and
   `Prune` so old tool results leave the request before the window fills.
 
+Each phase declares its kind (`prd`, `requirements`, `test_spec`, `tasks`,
+`architecture`), and the runner builds its agent on that kind's model and
+effort from the run's `agentrun.Plan`: the tier's choice for the phase, or a
+`--phase-model` override. A submit tool's rejection runs
+`afspec.ValidateGenerationStepComplete` and the project audit together, so it
+names every problem in one pass.
+
 The driver's event stream feeds the progress lines and the per-phase counts
 (`tool_calls`, `tool_errors`); its `RunResult` is the phase's usage and stop
 reason, which `agentrun` maps onto the envelope's error categories.

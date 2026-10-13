@@ -228,9 +228,17 @@ type InputInfo struct {
 	ContextBytes      int    `json:"context_bytes,omitempty"`
 }
 
-// ModelInfo records which model served the run.
+// ModelInfo records which models served the run: what --model resolved to,
+// and the model and effort of every phase.
 type ModelInfo struct {
-	Spec   string `json:"spec"`
+	Spec   string                    `json:"spec"`
+	ID     string                    `json:"id"`
+	Effort string                    `json:"effort,omitempty"`
+	Phases map[string]PhaseModelInfo `json:"phases,omitempty"`
+}
+
+// PhaseModelInfo is the model one phase runs on.
+type PhaseModelInfo struct {
 	ID     string `json:"id"`
 	Effort string `json:"effort,omitempty"`
 }
@@ -251,6 +259,8 @@ type UsageInfo struct {
 type PhaseInfo struct {
 	Name                string         `json:"name"`
 	Scope               string         `json:"scope,omitempty"`
+	Model               string         `json:"model,omitempty"`
+	Effort              string         `json:"effort,omitempty"`
 	Turns               int            `json:"turns"`
 	StopReason          string         `json:"stop_reason"`
 	InputTokens         int64          `json:"input_tokens"`
@@ -269,6 +279,8 @@ func PhaseFromResult(res agentrun.Result, scope string) PhaseInfo {
 	return PhaseInfo{
 		Name:                res.Name,
 		Scope:               scope,
+		Model:               res.Model.ID(),
+		Effort:              string(res.Model.Effort),
 		Turns:               res.Turns,
 		StopReason:          string(res.StopReason),
 		InputTokens:         res.Usage.InputTokens,
@@ -416,14 +428,19 @@ func (r *Run) SetInput(in Input) {
 	}
 }
 
-// SetModel records the resolved model.
-func (r *Run) SetModel(m agentrun.Model) {
+// SetModels records the resolved models.
+func (r *Run) SetModels(plan agentrun.Plan) {
 	if r == nil {
 		return
 	}
+	info := &ModelInfo{Spec: plan.Default.Spec, ID: plan.Default.ID(), Effort: string(plan.Default.Effort),
+		Phases: make(map[string]PhaseModelInfo, len(plan.Phases))}
+	for phase, m := range plan.Phases {
+		info.Phases[phase] = PhaseModelInfo{ID: m.ID(), Effort: string(m.Effort)}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.model = &ModelInfo{Spec: m.Spec, ID: m.ID(), Effort: string(m.Effort)}
+	r.model = info
 }
 
 // Warn records a non-fatal problem. code's stage is looked up, never passed

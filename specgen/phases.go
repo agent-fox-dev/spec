@@ -111,6 +111,7 @@ func (a *agentAuthor) WritePRD(ctx context.Context, req prdRequest) (PRD, agentr
 	var sink prdSink
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:   "prd",
+		Kind:   agentrun.PhasePRD,
 		System: prdSystemPrompt(),
 		User: prdUserPrompt(req.Root, req.SourceKind, req.SourceOrigin, req.Input, req.Context,
 			req.Profile.LanguageBlock(), landscapeBlock(req.Landscape, req.SpecRoot), steeringBlock(req.Steering), splitBlock(req.Split), req.RepoMap),
@@ -145,6 +146,7 @@ func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest)
 	name := ArtifactToolName(req.Step)
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:   "generate:" + string(req.Step),
+		Kind:   string(req.Step),
 		System: generationSystemPrompt(),
 		User: generationUserPrompt(req.Step, req.SpecID, req.SpecName, req.Root, req.PRD,
 			landscapeBlock(req.Landscape, req.SpecRoot), steeringBlock(req.Steering),
@@ -181,6 +183,7 @@ func (a *agentAuthor) WriteArchitecture(ctx context.Context, req architectureReq
 	})
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:               "architecture",
+		Kind:               agentrun.PhaseArchitecture,
 		System:             generationSystemPrompt(),
 		User:               user,
 		RepoMap:            req.RepoMap,
@@ -206,11 +209,11 @@ func renderTasks(partial *afspec.PartialSpec) string {
 	if partial == nil || partial.Tasks == nil {
 		return ""
 	}
-	raw, err := afspec.MarshalJSON(partial.Tasks)
+	raw, err := compactJSON(partial.Tasks)
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("\n## tasks.json\n\n```json\n%s\n```\n", strings.TrimSpace(string(raw)))
+	return fmt.Sprintf("\n## tasks.json\n\n```json\n%s\n```\n", raw)
 }
 
 // textSink is the guarded destination of a phase whose result is one document.

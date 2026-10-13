@@ -43,8 +43,8 @@ func TestMainRunsExecWithTheResolvedDeps(t *testing.T) {
 	if seen.Input.Kind != KindText || seen.Input.Body != "an idea" {
 		t.Errorf("input = %+v", seen.Input)
 	}
-	if seen.Model.ID() != "claude-opus-5-5" || seen.Model.Effort != "xhigh" {
-		t.Errorf("model = %+v", seen.Model)
+	if seen.Models.Default.ID() != "claude-opus-5-5" || seen.Models.Default.Effort != "xhigh" {
+		t.Errorf("model = %+v", seen.Models.Default)
 	}
 	if env.Model == nil || env.Model.Spec != "ADVANCED" || env.Model.ID != "claude-opus-5-5" {
 		t.Errorf("envelope model = %+v", env.Model)
@@ -136,13 +136,13 @@ func TestEffortComesFromTheFlagThenTheEnvironment(t *testing.T) {
 	t.Setenv(EffortEnv, "low")
 	app, seen := newApp(t, nil)
 	_, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
-	if seen.Model.Effort != "low" {
-		t.Errorf("env effort = %q, want low", seen.Model.Effort)
+	if seen.Models.Default.Effort != "low" {
+		t.Errorf("env effort = %q, want low", seen.Models.Default.Effort)
 	}
 	app, seen = newApp(t, nil)
 	_, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "--effort", "off", "x"}, "")
-	if seen.Model.Effort != "" {
-		t.Errorf("--effort off = %q, want none", seen.Model.Effort)
+	if seen.Models.Default.Effort != "" {
+		t.Errorf("--effort off = %q, want none", seen.Models.Default.Effort)
 	}
 	t.Setenv(EffortEnv, "loud")
 	app, _ = newApp(t, nil)
@@ -157,8 +157,8 @@ func TestAnEffortTheModelDoesNotTakeIsClampedWithAWarning(t *testing.T) {
 	withoutIndex(t)
 	app, seen := newApp(t, nil)
 	env, _, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--model", "claude-haiku-4-5", "--effort", "max", "x"}, "")
-	if seen.Model.Effort != "high" {
-		t.Errorf("effort = %q, want high", seen.Model.Effort)
+	if seen.Models.Default.Effort != "high" {
+		t.Errorf("effort = %q, want high", seen.Models.Default.Effort)
 	}
 	if !hasWarning(env, WarnEffortClamped) {
 		t.Errorf("warnings = %+v", env.Warnings)
@@ -280,4 +280,63 @@ func hasWarning(env Envelope, code WarnCode) bool {
 		}
 	}
 	return false
+}
+
+func TestPhaseModelChoosesOnePhasesModel(t *testing.T) {
+	scripted(t)
+	withoutIndex(t)
+	app, seen := newApp(t, nil)
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(),
+		"--phase-model", "tasks=claude-haiku-4-5:low", "--phase-model", "prd=ADVANCED", "x"}, "")
+	if code != ExitOK {
+		t.Fatalf("code = %d: %+v", code, env.Error)
+	}
+	if got := seen.Runner.ModelFor(agentrun.PhaseTasks).String(); got != "claude-haiku-4-5/low" {
+		t.Errorf("tasks runs on %s", got)
+	}
+	if got := seen.Runner.ModelFor(agentrun.PhasePRD).String(); got != "claude-opus-5-5/xhigh" {
+		t.Errorf("prd runs on %s", got)
+	}
+	if got := seen.Runner.ModelFor(agentrun.PhaseRequirements).String(); got != "claude-sonnet-5-5/high" {
+		t.Errorf("requirements runs on %s", got)
+	}
+	if env.Model == nil || len(env.Model.Phases) != len(agentrun.Phases) ||
+		env.Model.Phases["tasks"] != (PhaseModelInfo{ID: "claude-haiku-4-5", Effort: "low"}) {
+		t.Errorf("envelope model = %+v", env.Model)
+	}
+	if env.Model.ID != "claude-sonnet-5-5" || env.Model.Effort != "high" {
+		t.Errorf("the default = %s/%s", env.Model.ID, env.Model.Effort)
+	}
+}
+
+func TestABadPhaseModelIsAUsageError(t *testing.T) {
+	for _, v := range []string{"review=ADVANCED", "tasks", "tasks=:high"} {
+		app, _ := newApp(t, nil)
+		env, code, _ := runApp(t, app, []string{"--phase-model", v, "x"}, "")
+		if code != ExitUsage || env.Error == nil || env.Error.Category != "usage" {
+			t.Errorf("%q: code=%d error=%+v", v, code, env.Error)
+		}
+	}
+	scripted(t)
+	app, _ := newApp(t, nil)
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--phase-model", "tasks=gpt-9", "x"}, "")
+	if code != ExitFailed || env.Error == nil || env.Error.Category != agentrun.CategoryModel {
+		t.Errorf("an unknown phase model: code=%d error=%+v", code, env.Error)
+	}
+}
+
+func TestClampedEffortsAreWarnedOncePerModel(t *testing.T) {
+	scripted(t)
+	withoutIndex(t)
+	app, _ := newApp(t, nil)
+	env, _, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--model", "claude-haiku-4-5", "--effort", "max", "x"}, "")
+	var clamps []Warning
+	for _, w := range env.Warnings {
+		if w.Code == WarnEffortClamped {
+			clamps = append(clamps, w)
+		}
+	}
+	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, requirements, test_spec, tasks, architecture") {
+		t.Errorf("clamp warnings = %+v", clamps)
+	}
 }

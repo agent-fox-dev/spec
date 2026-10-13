@@ -3,6 +3,7 @@ package specgen
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -166,13 +167,16 @@ func (a *artifactSink) rejectionDetail() string {
 		return ""
 	}
 	last := a.last
-	if i := strings.Index(last, "\n"); i >= 0 {
-		// Keep the count line and the first error, not the whole list.
-		rest := strings.TrimSpace(last[i+1:])
-		if j := strings.Index(rest, "\n"); j >= 0 {
-			rest = rest[:j]
+	if lines := strings.Split(last, "\n"); len(lines) > 1 {
+		// Keep the count line and the first problem, not the whole list.
+		last = strings.TrimSpace(lines[0])
+		for _, l := range lines[1:] {
+			// A group heading ends with a colon; the first problem does not.
+			if l = strings.TrimSpace(l); l != "" && !strings.HasSuffix(l, ":") {
+				last += " " + l
+				break
+			}
 		}
-		last = strings.TrimSpace(last[:i]) + " " + rest
 	}
 	return fmt.Sprintf("%d submission(s) were rejected; the last failure: %s", a.rejected, last)
 }
@@ -252,15 +256,9 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 			if partial.SpecName != "" {
 				content["spec_name"] = partial.SpecName
 			}
-			if err := validateArtifactContent(content, step, partial); err != nil {
+			if code, err := checkArtifact(content, step, partial, audit); err != nil {
 				sink.reject(err.Error())
-				return core.ErrResult("validation_failed", err.Error())
-			}
-			if audit != nil {
-				if err := audit(content); err != nil {
-					sink.reject(err.Error())
-					return core.ErrResult("project_mismatch", err.Error())
-				}
+				return core.ErrResult(code, err.Error())
 			}
 			sink.set(content)
 			res := core.OKResult(map[string]any{"accepted": true, "artifact": string(step)})
@@ -277,29 +275,82 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 // A step that fails leaves partial untouched, so the next attempt validates
 // against the same upstream artifacts as the one before it.
 func validateArtifactContent(content map[string]any, step afspec.GenerationStep, partial *afspec.PartialSpec) error {
+	_, err := checkArtifact(content, step, partial, nil)
+	return err
+}
+
+// checkArtifact is every check a submission must pass, run in ONE pass: the
+// schema, the cross-file rules (even when the schema fails) and the project
+// audit. A rejection costs the model a full regeneration of the artifact, so
+// it must name every problem at once rather than one class per attempt. The
+// returned code is the tool error's: validation_failed when the format's own
+// rules fail, project_mismatch when only the audit does.
+func checkArtifact(content map[string]any, step afspec.GenerationStep, partial *afspec.PartialSpec,
+	audit func(map[string]any) error) (string, error) {
+
+	var schemaErrs, ruleErrs []afspec.ValidationEntry
+	var decodeErr error
+	candidate := *partial
 	decoded, err := afspec.DecodeArtifact(step, content)
 	if err != nil {
-		return err
+		decodeErr = err
+	} else {
+		// Validate a COPY of the accumulated state, so a rejected artifact
+		// cannot be left behind for the next attempt to validate against.
+		switch artifact := decoded.(type) {
+		case *afspec.RequirementsV2Json:
+			candidate.Requirements = artifact
+		case *afspec.TestSpecV2Json:
+			candidate.TestSpec = artifact
+		case *afspec.TasksV2Json:
+			candidate.Tasks = artifact
+		}
+		for _, e := range afspec.ValidateGenerationStepComplete(step, candidate).Errors {
+			if e.Category == "schema" {
+				schemaErrs = append(schemaErrs, e)
+			} else {
+				ruleErrs = append(ruleErrs, e)
+			}
+		}
+	}
+	var auditErr error
+	if audit != nil {
+		auditErr = audit(content)
 	}
 
-	// Validate a COPY of the accumulated state, so a rejected artifact cannot
-	// be left behind for the next attempt to validate against.
-	candidate := *partial
-	switch artifact := decoded.(type) {
-	case *afspec.RequirementsV2Json:
-		candidate.Requirements = artifact
-	case *afspec.TestSpecV2Json:
-		candidate.TestSpec = artifact
-	case *afspec.TasksV2Json:
-		candidate.Tasks = artifact
+	problems := len(schemaErrs) + len(ruleErrs)
+	if decodeErr != nil {
+		problems++
+	}
+	if auditErr != nil {
+		problems++
+	}
+	if problems == 0 {
+		*partial = candidate
+		return "", nil
 	}
 
-	if result := afspec.ValidateGenerationStep(step, candidate); !result.Valid {
-		return fmt.Errorf("the %s artifact has %d validation error(s):\n%s",
-			step, len(result.Errors),
-			strings.TrimRight(afspec.FormatValidationEntries(result.Errors), "\n"))
+	var b strings.Builder
+	fmt.Fprintf(&b, "the %s artifact has %d problem(s); fix every one of them before you submit again.\n", step, problems)
+	if decodeErr != nil {
+		fmt.Fprintf(&b, "- %v\n", decodeErr)
 	}
-
-	*partial = candidate
-	return nil
+	b.WriteString(afspec.FormatValidationEntries(schemaErrs))
+	if len(ruleErrs) > 0 {
+		if len(schemaErrs) > 0 {
+			b.WriteString("Cross-file rules that fail as well (one may follow from a schema error above):\n")
+		}
+		b.WriteString(afspec.FormatValidationEntries(ruleErrs))
+	}
+	if auditErr != nil {
+		if problems > 1 {
+			b.WriteString("The project's own tooling:\n")
+		}
+		b.WriteString("- " + strings.ReplaceAll(strings.TrimSpace(auditErr.Error()), "\n", "\n  ") + "\n")
+	}
+	code := "validation_failed"
+	if problems == 1 && auditErr != nil {
+		code = "project_mismatch"
+	}
+	return code, errors.New(strings.TrimRight(b.String(), "\n"))
 }

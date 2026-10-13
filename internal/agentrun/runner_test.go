@@ -311,3 +311,131 @@ func (*stubIndex) Tools() []core.Tool {
 
 func (*stubIndex) Invalidate(string) {}
 func (*stubIndex) Close() error      { return nil }
+
+func TestATierChoosesAModelPerPhase(t *testing.T) {
+	plan, err := ResolvePlan("advanced", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		PhasePRD:          "claude-opus-5-5/xhigh",
+		PhaseRequirements: "claude-opus-5-5/high",
+		PhaseTestSpec:     "claude-sonnet-5-5/high",
+		PhaseTasks:        "claude-sonnet-5-5/high",
+		PhaseArchitecture: "claude-sonnet-5-5/high",
+	}
+	for phase, w := range want {
+		if got := plan.For(phase).String(); got != w {
+			t.Errorf("%s = %s, want %s", phase, got, w)
+		}
+	}
+	if plan.Default.String() != "claude-opus-5-5/xhigh" {
+		t.Errorf("default = %s", plan.Default)
+	}
+	std, _ := ResolvePlan("STANDARD", "", false, nil)
+	if std.For(PhasePRD).String() != "claude-sonnet-5-5/high" || std.For(PhaseTasks).String() != "claude-sonnet-5-5/medium" {
+		t.Errorf("STANDARD = %v", std.Phases)
+	}
+}
+
+func TestAnExplicitEffortAndAModelIdApplyToEveryPhase(t *testing.T) {
+	plan, err := ResolvePlan("ADVANCED", core.EffortLow, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range Phases {
+		if plan.For(phase).Effort != core.EffortLow {
+			t.Errorf("%s effort = %q", phase, plan.For(phase).Effort)
+		}
+	}
+	plan, _ = ResolvePlan("claude-opus-5-5", "", false, nil)
+	for _, phase := range Phases {
+		if got := plan.For(phase).String(); got != "claude-opus-5-5" {
+			t.Errorf("%s = %s", phase, got)
+		}
+	}
+}
+
+func TestAPhaseChoiceDecidesItsPhaseAlone(t *testing.T) {
+	choices := []PhaseChoice{
+		mustChoice(t, "tasks=claude-haiku-4-5:medium"),
+		mustChoice(t, "test_spec=ADVANCED"),
+		mustChoice(t, "architecture=claude-opus-5-5"),
+	}
+	plan, err := ResolvePlan("STANDARD", "", false, choices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for phase, w := range map[string]string{
+		PhasePRD:          "claude-sonnet-5-5/high",
+		PhaseTasks:        "claude-haiku-4-5/medium",
+		PhaseTestSpec:     "claude-sonnet-5-5/high", // ADVANCED's test_spec entry
+		PhaseArchitecture: "claude-opus-5-5",        // an id with no effort sends none
+	} {
+		if got := plan.For(phase).String(); got != w {
+			t.Errorf("%s = %s, want %s", phase, got, w)
+		}
+	}
+	// An explicit --effort reaches a choice that names none, not one that does.
+	plan, _ = ResolvePlan("STANDARD", core.EffortLow, true, choices)
+	if plan.For(PhaseArchitecture).Effort != core.EffortLow || plan.For(PhaseTasks).Effort != core.EffortMedium {
+		t.Errorf("efforts = %v", plan.Phases)
+	}
+	// An effort the phase's model does not take is clamped, and says so.
+	plan, _ = ResolvePlan("STANDARD", "", false, []PhaseChoice{mustChoice(t, "tasks=claude-haiku-4-5:max")})
+	if m := plan.For(PhaseTasks); m.Effort != core.EffortHigh || m.Clamped != core.EffortMax {
+		t.Errorf("clamp = %+v", m)
+	}
+	if _, err := ResolvePlan("STANDARD", "", false, []PhaseChoice{mustChoice(t, "prd=gpt-9")}); CategoryOf(err) != CategoryModel ||
+		!strings.Contains(err.Error(), "--phase-model prd") {
+		t.Errorf("unknown model: %v", err)
+	}
+}
+
+func TestParsePhaseChoice(t *testing.T) {
+	c := mustChoice(t, " Tasks = anthropic/claude-sonnet-5-5:OFF ")
+	if c.Phase != PhaseTasks || c.Model != "anthropic/claude-sonnet-5-5" || !c.HasEffort || c.Effort != "" {
+		t.Errorf("choice = %+v", c)
+	}
+	c = mustChoice(t, "prd=some:model")
+	if c.Model != "some:model" || c.HasEffort {
+		t.Errorf("a colon that names no effort is part of the model: %+v", c)
+	}
+	for _, bad := range []string{"tasks", "=claude-opus-5-5", "review=ADVANCED", "tasks=", "tasks=:high"} {
+		if _, err := ParsePhaseChoice(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestEachPhaseRunsOnItsOwnModel(t *testing.T) {
+	plan, err := ResolvePlan("ADVANCED", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := faux.New()
+	var got string
+	r := newRunner(t, p, Config{Model: plan.Default, PhaseModels: plan.Phases})
+	res, _ := r.Run(context.Background(), Phase{
+		Name: "generate:tasks", Kind: PhaseTasks, User: "Go.", Terminator: terminator,
+		Custom: []core.Tool{submitTool(&got)},
+	})
+	if res.Model.String() != "claude-sonnet-5-5/high" {
+		t.Errorf("result model = %s", res.Model)
+	}
+	if reqs := p.Requests(); len(reqs) == 0 || reqs[0].Effort != core.EffortHigh {
+		t.Errorf("the request's effort = %v", reqs)
+	}
+	if r.ModelFor("").String() != "claude-opus-5-5/xhigh" {
+		t.Errorf("a phase with no kind runs on %s", r.ModelFor(""))
+	}
+}
+
+func mustChoice(t *testing.T, raw string) PhaseChoice {
+	t.Helper()
+	c, err := ParsePhaseChoice(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}

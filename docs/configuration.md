@@ -10,11 +10,13 @@ over the variable that supplies its default.
 |---|---|
 | `AF_MODEL` | The model when `--model` is not given: a tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or a catalog model id. |
 | `AGENTKIT_MODEL` | Read when `AF_MODEL` is unset. |
-| `AF_MODEL_EFFORT` | The effort when `--effort` is not given: `off`, `low`, `medium`, `high`, `xhigh` or `max`. An invalid value is a usage error. |
+| `AF_MODEL_EFFORT` | The effort of every phase when `--effort` is not given: `off`, `low`, `medium`, `high`, `xhigh` or `max`. An invalid value is a usage error. |
 
-With neither set the model is the `STANDARD` tier. The tiers, and the
-context window, output cap and price of every model id, come from AgentKit's
-embedded catalog; see [cli.md](cli.md#the-model-and-the-ceilings).
+With neither set the model is the `STANDARD` tier. A tier chooses a model and
+an effort per phase, and `--phase-model PHASE=MODEL[:EFFORT]` changes one
+phase (it has no environment variable). The context window, output cap and
+price of every model id come from AgentKit's embedded catalog; see
+[cli.md](cli.md#the-model-and-the-ceilings).
 
 ## The model credential
 

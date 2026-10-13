@@ -52,7 +52,8 @@ type Deps struct {
 	Forge    issuex.Client
 	Run      *Run
 	Progress *Progress
-	Model    agentrun.Model
+	// Models is the model and effort of every phase.
+	Models agentrun.Plan
 	// Index is the run's code-search index; nil when it could not be built,
 	// and IndexUnavailable then says why.
 	Index            tools.Index
@@ -270,7 +271,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 		}
 	}
 
-	model, err := c.ResolveModel()
+	plan, err := c.ResolveModels()
 	if err != nil {
 		var ue *UsageError
 		if errors.As(err, &ue) {
@@ -278,18 +279,15 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 		}
 		return ExitFailed, nil, &ErrorInfo{Stage: "preflight", Category: agentrun.CategoryOf(err), Message: err.Error(), err: err}
 	}
-	if model.Clamped != "" {
-		if model.Effort == "" {
-			run.Warn(WarnEffortClamped, "low", "model %s takes no effort at or below %s; none is sent", model.ID(), model.Clamped)
-		} else {
-			run.Warn(WarnEffortClamped, "low", "effort %s clamped to %s for model %s", model.Clamped, model.Effort, model.ID())
-		}
+	warnClamped(run, plan)
+	run.SetModels(plan)
+	for _, phase := range agentrun.Phases {
+		progress.Detail("model for %s: %s", phase, plan.For(phase))
 	}
-	run.SetModel(model)
-	progress.Detail("model: %s (effort %q)", model.ID(), model.Effort)
 
 	cfg := agentrun.Config{
-		Model:        model,
+		Model:        plan.Default,
+		PhaseModels:  plan.Phases,
 		Provider:     testProvider,
 		Workspace:    ws,
 		TrustProject: c.TrustProject,
@@ -326,7 +324,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 		Forge:            forge,
 		Run:              run,
 		Progress:         progress,
-		Model:            model,
+		Models:           plan,
 		Index:            index,
 		IndexUnavailable: unavailable,
 	}
@@ -338,6 +336,33 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 		return a.PreflightExec(ctx, deps)
 	}
 	return a.Exec(ctx, deps)
+}
+
+// warnClamped records, once per model, effort and phases, an effort a phase's
+// model does not take and what it was lowered to.
+func warnClamped(run *Run, plan agentrun.Plan) {
+	type key struct{ id, asked, got string }
+	var order []key
+	phases := map[key][]string{}
+	for _, phase := range agentrun.Phases {
+		m := plan.For(phase)
+		if m.Clamped == "" {
+			continue
+		}
+		k := key{m.ID(), string(m.Clamped), string(m.Effort)}
+		if _, seen := phases[k]; !seen {
+			order = append(order, k)
+		}
+		phases[k] = append(phases[k], phase)
+	}
+	for _, k := range order {
+		which := strings.Join(phases[k], ", ")
+		if k.got == "" {
+			run.Warn(WarnEffortClamped, "low", "model %s takes no effort at or below %s; none is sent (%s)", k.id, k.asked, which)
+		} else {
+			run.Warn(WarnEffortClamped, "low", "effort %s clamped to %s for model %s (%s)", k.asked, k.got, k.id, which)
+		}
+	}
 }
 
 func usage(err error) (int, any, *ErrorInfo) {

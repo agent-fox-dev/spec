@@ -95,8 +95,9 @@ type Observer interface {
 	Detail(format string, args ...any)
 	// Raw writes model prose verbatim, shown only under --show-text.
 	Raw(s string)
-	// PhaseStart reports that a model phase begins, with its ceilings.
-	PhaseStart(phase string, maxTurns int, budgetUSD float64)
+	// PhaseStart reports that a model phase begins, with the model and effort
+	// it runs on and its ceilings.
+	PhaseStart(phase, model string, maxTurns int, budgetUSD float64)
 	// PhaseEnd reports that the phase ended.
 	PhaseEnd(phase, stopReason string, turns int, costUSD float64, elapsed time.Duration)
 	// Turn reports one finished model turn and the phase's spend so far.
@@ -106,8 +107,11 @@ type Observer interface {
 // Config is what a Runner is built with: everything that is the same for
 // every phase of one run.
 type Config struct {
-	// Model is the resolved model. Required.
+	// Model is the resolved default model. Required.
 	Model Model
+	// PhaseModels holds the model of each phase kind that runs on another
+	// one than Model (see Phases). A kind it does not hold runs on Model.
+	PhaseModels map[string]Model
 	// Client is the Anthropic SDK client every phase sends through. Required
 	// unless Provider is set.
 	Client *sdk.Client
@@ -139,6 +143,9 @@ type Config struct {
 type Phase struct {
 	// Name identifies the step in errors, progress and the cost report.
 	Name string
+	// Kind is the phase's entry in Phases, which picks its model. Empty runs
+	// on the default model.
+	Kind string
 	// System and User are the two prompts.
 	System string
 	User   string
@@ -163,7 +170,9 @@ type Phase struct {
 
 // Result is what a finished phase reports.
 type Result struct {
-	Name       string
+	Name string
+	// Model is the model and effort the phase ran on.
+	Model      Model
 	Turns      int
 	StopReason core.RunStopReason
 	Usage      core.Usage
@@ -195,8 +204,17 @@ func NewRunner(cfg Config) (*Runner, error) {
 	return &Runner{cfg: cfg}, nil
 }
 
-// Model reports the model every phase runs on.
+// Model reports the default model: the one a phase with no model of its own
+// runs on.
 func (r *Runner) Model() Model { return r.cfg.Model }
+
+// ModelFor reports the model a phase of the given kind runs on.
+func (r *Runner) ModelFor(kind string) Model {
+	if m, ok := r.cfg.PhaseModels[kind]; ok && m.ID() != "" {
+		return m
+	}
+	return r.cfg.Model
+}
 
 // Index reports the run's code-search index, nil when there is none.
 func (r *Runner) Index() tools.Index { return r.cfg.Index }
@@ -216,9 +234,10 @@ func (r *Runner) ResolvedBounds() (maxTurns int, maxBudgetUSD float64) {
 // names a stop the phase could not get past.
 func (r *Runner) Run(ctx context.Context, p Phase) (Result, error) {
 	if o := r.cfg.Observer; o != nil {
-		o.PhaseStart(p.Name, r.cfg.Bounds.ResolvedMaxTurns(), r.cfg.Bounds.ResolvedMaxBudget())
+		o.PhaseStart(p.Name, r.ModelFor(p.Kind).String(), r.cfg.Bounds.ResolvedMaxTurns(), r.cfg.Bounds.ResolvedMaxBudget())
 	}
 	out, err := r.run(ctx, p)
+	out.Model = r.ModelFor(p.Kind)
 	if o := r.cfg.Observer; o != nil {
 		o.PhaseEnd(p.Name, string(out.StopReason), out.Turns, out.Usage.CostUSD, out.Elapsed)
 	}
@@ -274,12 +293,13 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 		system += projectContextBlock(r.cfg.Workspace.Root)
 	}
 	system += toolsNote(granted)
+	model := r.ModelFor(p.Kind)
 
 	agent, err := agentkit.New(agentkit.Config{
 		Client:     r.cfg.Client,
 		Provider:   r.cfg.Provider,
-		Model:      r.cfg.Model.ID(),
-		Effort:     r.cfg.Model.Effort,
+		Model:      model.ID(),
+		Effort:     model.Effort,
 		System:     system,
 		Tools:      granted,
 		MaxTurns:   r.cfg.Bounds.ResolvedMaxTurns(),
