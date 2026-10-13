@@ -11,9 +11,9 @@ func TestValidFixturesPassEveryRule(t *testing.T) {
 	for _, fixture := range []string{
 		fixtureValidSpec,
 		fixtureV2Example,
-		"../testdata/draft_spec",
-		"../testdata/alpha_prefix_spec",
-		"../testdata/valid_spec_with_arch",
+		"testdata/draft_spec",
+		"testdata/alpha_prefix_spec",
+		"testdata/valid_spec_with_arch",
 	} {
 		t.Run(fixture, func(t *testing.T) {
 			spec := loadFixture(t, fixture)
@@ -364,7 +364,7 @@ func TestScaffoldIsIncompleteNotSchemaInvalid(t *testing.T) {
 	if len(result.Errors) != 1 || result.Errors[0].Check != "completeness" {
 		t.Fatalf("want a single completeness error, got %v", result.Errors)
 	}
-	if !strings.Contains(result.Errors[0].Message, "spec generate") {
+	if !strings.Contains(result.Errors[0].Message, "generate its requirements") {
 		t.Errorf("the completeness message does not say what to do next: %q", result.Errors[0].Message)
 	}
 }
@@ -383,7 +383,7 @@ func TestScaffoldSurvivesASaveLoadRoundTrip(t *testing.T) {
 	}
 	reloaded, err := LoadSpec(dir)
 	if err != nil {
-		t.Fatalf("LoadSpec of a scaffold = %v; a scaffold must load so that `spec generate` can fill it in", err)
+		t.Fatalf("LoadSpec of a scaffold = %v; a scaffold must load so that a generation run can fill it in", err)
 	}
 	if !reloaded.IsScaffold() {
 		t.Error("the reloaded scaffold is not reported as one")
@@ -452,7 +452,7 @@ func messages(result ValidationResult) []string {
 
 // TestLegacySpecIsReportedAsAVersionMismatch guards the operator experience of
 // the migration this format change requires: a version 1 spec produces one
-// sentence naming the version and the command that converts it, not a schema
+// sentence naming the version and the function that converts it, not a schema
 // error per artifact plus every shape difference underneath.
 func TestLegacySpecIsReportedAsAVersionMismatch(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
@@ -468,8 +468,8 @@ func TestLegacySpecIsReportedAsAVersionMismatch(t *testing.T) {
 	if result.Errors[0].Check != "schema_version" {
 		t.Errorf("check = %q; want schema_version", result.Errors[0].Check)
 	}
-	if !strings.Contains(result.Errors[0].Message, "spec migrate") {
-		t.Errorf("the message does not name the command that converts it: %q", result.Errors[0].Message)
+	if !strings.Contains(result.Errors[0].Message, "afspec.Migrate") {
+		t.Errorf("the message does not name the function that converts it: %q", result.Errors[0].Message)
 	}
 }
 

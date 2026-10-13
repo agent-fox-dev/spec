@@ -74,7 +74,7 @@ func TestNextIDsIgnoreMalformedIDs(t *testing.T) {
 }
 
 func TestNextIDsHandleAlphaPrefixes(t *testing.T) {
-	spec := loadFixture(t, "../testdata/alpha_prefix_spec")
+	spec := loadFixture(t, "testdata/alpha_prefix_spec")
 	if got := NextRequirementID(*spec.Requirements); got != "abc-REQ-3" {
 		t.Errorf("NextRequirementID = %q; want abc-REQ-3", got)
 	}

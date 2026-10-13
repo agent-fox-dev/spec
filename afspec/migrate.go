@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/agent-fox-dev/agentfox/afspec/legacy"
+	"github.com/agent-fox-dev/spec/afspec/legacy"
 )
 
 // MigrationReport records what a v1 → v2 conversion did and what a human still

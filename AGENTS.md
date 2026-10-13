@@ -11,8 +11,9 @@ Before making any changes, orient yourself:
 2. **Read `.specs/steering.md`** if it exists — project-level directives that
    apply to all agents and skills. Follow any instructions found there.
 3. **Read ADRs and errata** in `docs/` for architectural context.
-4. **Explore the codebase:** `<main_package>/` is the main package, `<test_directory>/` has
-   unit, property, and integration tests. Their location is language dependent.
+4. **Explore the codebase:** `afspec/` is the main package, with its tests
+   alongside as `*_test.go` and their fixtures in `afspec/testdata/`.
+   `specification/` holds the format reference and the canonical JSON Schemas.
 5. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
 
 **Important:** Read all documents and code in depth — don't skim.
@@ -25,8 +26,11 @@ Do not implement anything before completing these steps.
 ## Project Structure
 
 ```
-<main_package>/         # Main package
-<test_directory>/       # Tests directory
+specification/          # The format reference and the canonical JSON Schemas
+afspec/                 # Main package (tests alongside as *_test.go)
+afspec/legacy/          # Spec format v1.3 types, input to afspec.Migrate
+afspec/schemas/         # Embedded copies of specification/schemas/*.v2.json
+afspec/testdata/        # Test fixtures
 docs/                   # Documentation
 build/docs/             # golang docs
 .specs/                 # Specs to be implemented
@@ -52,8 +56,9 @@ libraries — API signatures in specs may be unverified assumptions.
 | Command | What it does |
 |---------|-------------|
 | `make check` | Run lint + all tests (use before committing) |
-| `make test` | Run all tests (`uv run pytest -q`) |
-| `make lint` | formatting and static checks |
+| `make test` | Run all tests (`go test ./... -count=1`) |
+| `make lint` | Formatting and static checks (`gofmt -l`, `go vet ./...`) |
+| `make doc` | Refresh the Go package docs in `build/docs/` |
 
 Run the full quality suite before committing:
 

@@ -14,7 +14,7 @@ const SchemaVersion = 2
 // $schema, spec_id, spec_name and schema_version so that Save + LoadSpec
 // round-trips. The artifact bodies are empty: a spec with no requirements, no
 // tests and no tasks is *incomplete*, not schema-invalid, and Validate
-// reports it as such (§10, bootstrap mode) until `spec generate` fills it in.
+// reports it as such (§10, bootstrap mode) until a generation run fills it in.
 //
 // Validation of specID and specName is deferred to Spec.Validate.
 func CreateSpec(specID, specName string) *Spec {
@@ -53,7 +53,7 @@ func CreateSpec(specID, specName string) *Spec {
 
 // IsScaffold reports whether the spec is still an empty scaffold: no
 // requirements, no tests and no tasks. A scaffold is incomplete rather than
-// invalid, which is what lets `spec new` write a spec before `spec generate`
+// invalid, which is what lets a tool save a spec before a generation run
 // has produced its content.
 func (s *Spec) IsScaffold() bool {
 	return s.Requirements != nil && len(s.Requirements.Requirements) == 0 &&

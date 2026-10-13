@@ -37,7 +37,7 @@ func TestLoadSpecPopulatesEveryArtifact(t *testing.T) {
 }
 
 func TestLoadSpecReadsOptionalArchitecture(t *testing.T) {
-	spec := loadFixture(t, "../testdata/valid_spec_with_arch")
+	spec := loadFixture(t, "testdata/valid_spec_with_arch")
 	if spec.Architecture == "" {
 		t.Error("architecture.md was present but Architecture is empty")
 	}
@@ -48,10 +48,10 @@ func TestLoadSpecFailures(t *testing.T) {
 		name string
 		dir  string
 	}{
-		{"missing artifact", "../testdata/missing_req"},
-		{"malformed JSON", "../testdata/malformed_json"},
-		{"malformed YAML frontmatter", "../testdata/malformed_yaml"},
-		{"directory does not exist", "../testdata/does_not_exist"},
+		{"missing artifact", "testdata/missing_req"},
+		{"malformed JSON", "testdata/malformed_json"},
+		{"malformed YAML frontmatter", "testdata/malformed_yaml"},
+		{"directory does not exist", "testdata/does_not_exist"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,9 +88,9 @@ func TestSaveRoundTripIsByteIdentical(t *testing.T) {
 	for _, fixture := range []string{
 		fixtureValidSpec,
 		fixtureV2Example,
-		"../testdata/draft_spec",
-		"../testdata/alpha_prefix_spec",
-		"../testdata/valid_spec_with_arch",
+		"testdata/draft_spec",
+		"testdata/alpha_prefix_spec",
+		"testdata/valid_spec_with_arch",
 	} {
 		t.Run(filepath.Base(fixture), func(t *testing.T) {
 			spec := loadFixture(t, fixture)
