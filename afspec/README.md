@@ -158,6 +158,20 @@ The cross-file rules, all errors:
 | `(Criterion).RenderEARSSentence() string` | The EARS sentence |
 | `(Criterion).RenderEARS() string` | The sentence plus `→ contract` when there is one |
 
+Without a budget, a render drops nothing from the package. The `prd` part
+opens with the frontmatter, one field per line. Every artifact field follows,
+and the tasks render begins with the test commands (`spec_tests` included) and
+the cross-spec dependencies. Two things are left out because they add nothing
+to the metadata: the artifacts' `$schema` URIs and their own copies of the
+spec's identity. A criterion's `pattern` is carried by its EARS sentence.
+
+A scoped render shows the frontmatter, the introduction, the glossary, every
+external API, the test commands and the dependencies, since all of them
+belong to the whole spec. Requirements, execution paths, tests and tasks that
+the task does not own are listed one line each, by id and title.
+`WithMaxTokens` is the one way to drop detail: it removes the architecture
+first, then slims the tests.
+
 ### Derivation
 
 | Function | Description |

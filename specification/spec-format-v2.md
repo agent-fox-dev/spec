@@ -596,8 +596,8 @@ Rendering is deterministic: same JSON in, same Markdown out.
 | Target | Content |
 |---|---|
 | Per-file | Markdown for one artifact. |
-| Combined | PRD body, then `architecture.md` if present, then requirements, tests, tasks. |
-| Scoped to task `N` | PRD body and architecture unfiltered; the requirements that own the task's criteria in full and all others as one line each; the task's tests in full; the paths verified by those tests; task `N` in full and all other tasks as one line each. |
+| Combined | PRD frontmatter and body, then `architecture.md` if present, then requirements, tests, tasks. |
+| Scoped to task `N` | PRD frontmatter, body and architecture unfiltered; the requirements that own the task's criteria in full and all others as one line each; the paths verified by the task's tests in full and all others as one line each; the introduction, glossary and every external API; the task's tests in full and all others as one line each; the test commands and dependencies; task `N` in full and all other tasks as one line each. |
 
 The scoped render is what a coder receives. Because C7 and C8 guarantee
 that every task lists its tests and criteria, the v1 inference chain
@@ -612,6 +612,16 @@ does not exist in v2.
   as a title alone is a v1 bug, not a feature.
 - Every task renders `steps`, `touches`, `criteria`, `tests`, `done_when`
   and the implicit definition of done.
+- Nothing in the package is dropped. Every frontmatter field and every
+  artifact field is rendered, including `test_commands` (`spec_tests` too),
+  the cross-spec `dependencies`, and each external API symbol's import path,
+  signature and notes. The exceptions are the artifacts' `$schema` and their
+  copies of the spec's identity, which repeat the frontmatter, and a
+  criterion's `pattern`, which its EARS sentence carries. A scoped render
+  names what the task does not own by id and title. Only a caller's token
+  budget drops more.
+- A value inside a table cell has `|` escaped and newlines written as
+  `<br>`, so it stays in its cell.
 
 ---
 

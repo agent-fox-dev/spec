@@ -65,7 +65,7 @@ func (s *Spec) renderCombinedLevel1() string {
 	var sb strings.Builder
 
 	sb.WriteString("# PRD\n\n")
-	sb.WriteString(s.PRDBody)
+	sb.WriteString(s.prdSection())
 	sb.WriteString("\n")
 
 	sb.WriteString("# Requirements\n\n")
@@ -95,7 +95,7 @@ func (s *Spec) renderCombinedSlim() string {
 	var sb strings.Builder
 
 	sb.WriteString("# PRD\n\n")
-	sb.WriteString(s.PRDBody)
+	sb.WriteString(s.prdSection())
 	sb.WriteString("\n")
 
 	sb.WriteString("# Requirements\n\n")
