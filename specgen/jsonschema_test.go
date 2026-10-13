@@ -132,10 +132,9 @@ func TestPropertyOrderFollowsTheDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The document's order, minus the one property a tool schema cannot
-	// declare: $schema is dropped by the converter and written by the submit
-	// handler.
-	want := []string{"spec_id", "spec_name", "schema_version", "tests"}
+	// The document's order, minus $schema, which a tool schema cannot
+	// declare, and the identity fields the submit handler writes.
+	want := []string{"tests"}
 	if !slices.Equal(s.PropertyOrder, want) {
 		t.Errorf("PropertyOrder = %v, want %v", s.PropertyOrder, want)
 	}
@@ -160,7 +159,8 @@ func TestConstraintsSurviveTheConversion(t *testing.T) {
 	if test.Properties["verifies"].UniqueItems == nil {
 		t.Error("uniqueItems was lost")
 	}
-	if s.Properties["schema_version"].HasConst == false {
+	raw, _, _ := ToolSchema(afspec.Schemas()[afspec.TestSpecSchemaName])
+	if raw.Properties["schema_version"] == nil || !raw.Properties["schema_version"].HasConst {
 		t.Error("the schema_version const was lost")
 	}
 	if s.AdditionalProperties == nil || s.AdditionalProperties.Allowed {

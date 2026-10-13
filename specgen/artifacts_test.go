@@ -12,6 +12,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
+	"github.com/agent-fox-dev/agentkit-go/schema"
 	"github.com/agent-fox-dev/agentkit-go/tools"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -430,5 +431,58 @@ func TestARejectionNamesEveryProblemInOnePass(t *testing.T) {
 	pythonic["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
 	if code, err := checkArtifact(pythonic, afspec.StepTasks, &partial, audit); err == nil || code != "project_mismatch" {
 		t.Errorf("audit only: code = %q, err = %v", code, err)
+	}
+}
+
+// Every artifact's tool schema has a strict form: strict mode cannot declare
+// a dictionary object, and a tool schema without a strict form loses the
+// API's guarantee that the first submission has the artifact's shape.
+func TestEveryArtifactToolSchemaHasAStrictForm(t *testing.T) {
+	for _, step := range afspec.GenerationSteps {
+		s, err := ArtifactSchema(step)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if !schema.StrictSubsetOK(s) {
+			t.Errorf("%s: the tool schema has no strict form", step)
+		}
+		for _, f := range programFields {
+			if s.Properties[f] != nil {
+				t.Errorf("%s: the tool schema declares %s, which the handler writes", step, f)
+			}
+		}
+	}
+}
+
+// The glossary is asked for as a list of entries, which strict mode can
+// declare, and stored as the object the format defines. A submission in the
+// stored form, which a tool sent without the strict flag can receive, is
+// accepted too.
+func TestTheGlossaryIsSubmittedAsEntriesAndStoredAsAnObject(t *testing.T) {
+	for name, glossary := range map[string]any{
+		"entries": []any{map[string]any{"term": "widget", "definition": "A counted thing."}},
+		"object":  map[string]any{"widget": "A counted thing."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ws := goWorkspace(t)
+			artifacts, _ := loadFixture(t, "01", "test_feature")
+			submitted := deepCopy(t, artifacts[afspec.StepRequirements])
+			submitted["glossary"] = glossary
+			runner, _ := fauxRunner(t, ws,
+				toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
+			partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
+			a := &agentAuthor{runner: runner}
+			got, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
+				Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
+				Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+			})
+			if err != nil {
+				t.Fatalf("GenerateArtifact: %v", err)
+			}
+			g, ok := got["glossary"].(map[string]any)
+			if !ok || g["widget"] != "A counted thing." || len(g) != 1 {
+				t.Errorf("glossary = %#v, want the object form", got["glossary"])
+			}
+		})
 	}
 }

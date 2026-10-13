@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -45,24 +46,97 @@ const schemaProperty = "$schema"
 
 // programFields are the other top-level fields of an artifact that the
 // pipeline already knows: the format version and the spec's identity. Like
-// $schema they are written by the submit handler and are not required of the
+// $schema they are written by the submit handler and are not asked of the
 // model: one that has to restate a constant gets it wrong often enough (a
 // missing schema_version rejected the first submission in four of five scopes
 // of one run), and each miss costs a regeneration of the artifact.
 var programFields = []string{"spec_id", "spec_name", "schema_version"}
 
-// optionalProgramFields takes the program-supplied fields out of a converted
-// tool schema's required list, at the top level only. They stay declared:
-// additionalProperties is false, so a model that still sends one out of habit
-// is not rejected for it, and the submit handler overwrites whatever it sent.
-func optionalProgramFields(s *schema.Schema) {
-	required := s.Required[:0]
-	for _, name := range s.Required {
-		if !slices.Contains(programFields, name) {
-			required = append(required, name)
-		}
+// dropProgramFields takes the program-supplied fields out of a converted tool
+// schema, at the top level only. Declared as optional they would each be a
+// union with null in the strict subset, and a request may carry only 16 of
+// those across all its strict tools. A model that sends one out of habit is
+// not rejected for it: the tool's PrepareArguments deletes it before the
+// arguments are validated, and the submit handler writes the real value.
+func dropProgramFields(s *schema.Schema) {
+	for _, name := range programFields {
+		delete(s.Properties, name)
 	}
-	s.Required = required
+	s.PropertyOrder = slices.DeleteFunc(s.PropertyOrder, func(n string) bool { return slices.Contains(programFields, n) })
+	s.Required = slices.DeleteFunc(s.Required, func(n string) bool { return slices.Contains(programFields, n) })
+}
+
+// dictionaryEntries names the two fields of an entry, for each top-level
+// property the format declares as a dictionary object (term -> definition).
+//
+// A strict tool schema cannot declare a dictionary: strict mode requires
+// every key of an object to be listed, and a dictionary's keys are the data.
+// So the tool asks for a list of entries instead, and the submit handler turns
+// the list back into the object the format stores.
+var dictionaryEntries = map[string][2]string{"glossary": {"term", "definition"}}
+
+// dictionariesAsEntries rewrites each top-level dictionary property of a
+// converted tool schema into a list of entries. A dictionary with no entry
+// form is an error, so a format change that adds one fails here, by name,
+// rather than on every request.
+func dictionariesAsEntries(s *schema.Schema, step afspec.GenerationStep) error {
+	for _, name := range s.PropertyList() {
+		p := s.Properties[name]
+		if p == nil || p.AdditionalProperties == nil || p.AdditionalProperties.Schema == nil {
+			continue
+		}
+		f, ok := dictionaryEntries[name]
+		if !ok {
+			return fmt.Errorf("specgen: the %s schema declares %q as a dictionary object, which a strict "+
+				"tool schema cannot carry, and this package has no entry form for it", step, name)
+		}
+		desc := strings.TrimSpace(p.Description + " One entry per " + f[0] + ".")
+		s.Properties[name] = schema.Array(schema.Object(
+			schema.Prop(f[0], schema.String("The "+f[0]+".")),
+			schema.Prop(f[1], p.AdditionalProperties.Schema),
+		), desc)
+	}
+	return nil
+}
+
+// dictionariesAsSubmitted is the repair shim for a model that sends a
+// dictionary in the form the format stores, as the artifacts it is shown do:
+// the object becomes the list of entries the tool asks for, in key order.
+// Under strict mode the API never lets that shape through; a tool sent
+// without the flag can receive it.
+func dictionariesAsSubmitted(args map[string]any) {
+	for name, f := range dictionaryEntries {
+		dict, ok := args[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		list := make([]any, 0, len(dict))
+		for _, k := range slices.Sorted(maps.Keys(dict)) {
+			list = append(list, map[string]any{f[0]: k, f[1]: dict[k]})
+		}
+		args[name] = list
+	}
+}
+
+// entriesAsDictionaries is dictionariesAsEntries in reverse, on submitted
+// arguments: each list of entries becomes the object the format stores. A
+// later entry for the same key wins.
+func entriesAsDictionaries(content map[string]any) {
+	for name, f := range dictionaryEntries {
+		list, ok := content[name].([]any)
+		if !ok {
+			continue
+		}
+		dict := make(map[string]any, len(list))
+		for _, e := range list {
+			if m, ok := e.(map[string]any); ok {
+				if k, ok := m[f[0]].(string); ok {
+					dict[k] = m[f[1]]
+				}
+			}
+		}
+		content[name] = dict
+	}
 }
 
 // ArtifactSchema returns the tool schema for one generation step, converted
@@ -111,7 +185,15 @@ func ArtifactSchema(step afspec.GenerationStep) (*schema.Schema, error) {
 				"artifact cannot be filled in", step, schemaProperty)
 			return
 		}
-		optionalProgramFields(s)
+		dropProgramFields(s)
+		if err := dictionariesAsEntries(s, step); err != nil {
+			entry.err = err
+			return
+		}
+		if _, err := schema.StrictSubset(s); err != nil {
+			entry.err = fmt.Errorf("specgen: the %s tool schema has no strict form: %w", step, err)
+			return
+		}
 		entry.schema, entry.uri = s, uri
 	})
 	return entry.schema, entry.err
@@ -223,6 +305,10 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 		// validation rather than refused: the handler writes it anyway.
 		PrepareArguments: func(args map[string]any) map[string]any {
 			delete(args, schemaProperty)
+			for _, name := range programFields {
+				delete(args, name)
+			}
+			dictionariesAsSubmitted(args)
 			return args
 		},
 		PromptGuidelines: []string{
@@ -234,6 +320,7 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 				return core.ErrResult("invalid_json", fmt.Sprintf(
 					"the %s arguments are not a JSON object: %v", step, err))
 			}
+			entriesAsDictionaries(content)
 			// The artifact's $schema is a fact about the format rather than a
 			// judgement about this spec, so it is written here rather than
 			// asked for: the model is not shown the field, and what it would

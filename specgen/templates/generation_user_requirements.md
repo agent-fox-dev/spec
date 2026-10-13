@@ -48,7 +48,7 @@ For anything that spawns processes, loops, retries or calls a service, also cons
 
 Prefer measurable constraints over qualitative language. Avoid the words *appropriate*, *properly*, *correctly*, *reasonable*, *as needed* and *etc*: they are flagged and they make a criterion untestable.
 
-Use the `glossary` for project-specific vocabulary a newcomer would not know. Do not define every identifier — the glossary is documentation, not a validation target.
+Use the `glossary` for project-specific vocabulary a newcomer would not know. Submit it as a list of `{term, definition}` entries; it is stored as an object from term to definition, which is how `requirements.json` shows it to the later steps. Do not define every identifier — the glossary is documentation, not a validation target.
 
 ## Execution paths
 
@@ -61,9 +61,9 @@ The fragment below is structurally correct for a recipe-manager system. Use your
 ```json
 {
   "introduction": "The recipe catalog stores user-created recipes and their ingredients.",
-  "glossary": {
-    "recipe": "A named collection of ingredients and preparation steps in the catalog."
-  },
+  "glossary": [
+    {"term": "recipe", "definition": "A named collection of ingredients and preparation steps in the catalog."}
+  ],
   "requirements": [
     {
       "id": "07-REQ-1",
