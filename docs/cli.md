@@ -72,10 +72,28 @@ Each artifact is submitted through a tool whose schema is the format's own JSON
 Schema, and whose handler runs every cross-file rule decidable at that point
 (`afspec.ValidateGenerationStepComplete`). A violation comes back to the model
 naming the rule, and it corrects itself: the repair loop is the agent loop, and
-the turn ceiling is the repair budget. Every repair is a full regeneration of
-the artifact, so one rejection names every problem at once: the schema errors
-first, then the cross-file rules that fail as well (run even when the schema
-does not pass), then the project audit below. With `--architecture` a fifth phase writes
+the turn ceiling is the repair budget. One rejection names every problem at
+once: the schema errors first, then the cross-file rules that fail as well (run
+even when the schema does not pass), then the project audit below. The model
+corrects the failing fields with `patch_<artifact>`, JSON-pointer `add`,
+`remove` and `replace` operations on the submission that was turned back,
+instead of writing the whole artifact again; the patched artifact is checked
+exactly like a submission.
+
+An artifact that passes every rule but has warnings on its own file (vague
+wording such as "properly" or "as needed", an error outcome without a
+`contract`, a scope past the format's limits) is sent back once with them. The
+model fixes what it agrees with, or keeps the artifact with a patch of no
+operations; the next submission is accepted with whatever warnings remain.
+
+The PRD phase hands on what it learned reading the code as `codebase_notes`
+(at most 12000 bytes): the files, the real signatures, the conventions. Every
+later phase of the package is shown them, and so is each later scope's PRD
+phase in a split, so the same code is not read again phase after phase.
+
+The glossary of `requirements.json` is submitted as a list of
+`{term, definition}` entries, because a strict tool schema cannot declare an
+object keyed by its data, and is stored as the object the format defines. With `--architecture` a fifth phase writes
 `architecture.md`; a failure there is a `architecture_not_written` warning,
 not a failed run.
 

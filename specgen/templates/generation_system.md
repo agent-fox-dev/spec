@@ -35,7 +35,7 @@ prefix of the ids you write.
 ```json
 {
   "introduction": "One or two sentences describing the system being specified.",
-  "glossary": {},
+  "glossary": [],
   "requirements": [],
   "execution_paths": []
 }

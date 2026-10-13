@@ -85,6 +85,8 @@ type artifactRequest struct {
 	RelevantFiles []RelevantFile
 	// RepoMap is the run's repository map, or "".
 	RepoMap string
+	// CodebaseNotes are what the PRD phase learned reading the code, or "".
+	CodebaseNotes string
 }
 
 type architectureRequest struct {
@@ -94,8 +96,14 @@ type architectureRequest struct {
 	PRD           string
 	Partial       *afspec.PartialSpec
 	RelevantFiles []RelevantFile
+	// Profile and Steering complete, with RepoMap, what every phase of the
+	// run is told about the project.
+	Profile  project.Profile
+	Steering string
 	// RepoMap is the run's repository map, or "".
 	RepoMap string
+	// CodebaseNotes are what the PRD phase learned reading the code, or "".
+	CodebaseNotes string
 }
 
 // agentAuthor runs the phases against the configured model.
@@ -110,11 +118,11 @@ type agentAuthor struct {
 func (a *agentAuthor) WritePRD(ctx context.Context, req prdRequest) (PRD, agentrun.Result, error) {
 	var sink prdSink
 	res, err := a.runner.Run(ctx, agentrun.Phase{
-		Name:   "prd",
-		Kind:   agentrun.PhasePRD,
-		System: prdSystemPrompt(),
-		User: prdUserPrompt(req.Root, req.SourceKind, req.SourceOrigin, req.Input, req.Context,
-			req.Profile.LanguageBlock(), landscapeBlock(req.Landscape, req.SpecRoot), steeringBlock(req.Steering), splitBlock(req.Split), req.RepoMap),
+		Name:               "prd",
+		Kind:               agentrun.PhasePRD,
+		System:             prdSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
+		Prefix:             prdInputPrompt(req.Root, req.SourceKind, req.SourceOrigin, req.Input, req.Context),
+		User:               prdUserPrompt(req.Root, landscapeBlock(req.Landscape, req.SpecRoot), splitBlock(req.Split)),
 		RepoMap:            req.RepoMap,
 		Terminator:         ToolSubmitPRD,
 		Custom:             []core.Tool{submitPRDTool(&sink, a.ws)},
@@ -147,15 +155,16 @@ func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest)
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:   "generate:" + string(req.Step),
 		Kind:   string(req.Step),
-		System: generationSystemPrompt(),
+		System: generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
 		User: generationUserPrompt(req.Step, req.SpecID, req.SpecName, req.Root, req.PRD,
-			landscapeBlock(req.Landscape, req.SpecRoot), steeringBlock(req.Steering),
-			priorArtifactsBlock(*req.Partial, req.Step),
-			req.Profile.LanguageBlock(),
-			relevantFilesBlock(req.RelevantFiles), req.RepoMap),
-		RepoMap:            req.RepoMap,
-		Terminator:         name,
-		Custom:             []core.Tool{submitArtifactTool(req.Step, toolSchema, req.Partial, &sink, audit)},
+			codebaseNotesBlock(req.CodebaseNotes), landscapeBlock(req.Landscape, req.SpecRoot),
+			priorArtifactsBlock(*req.Partial, req.Step), relevantFilesBlock(req.RelevantFiles)),
+		RepoMap:    req.RepoMap,
+		Terminator: name,
+		Custom: []core.Tool{
+			submitArtifactTool(req.Step, toolSchema, req.Partial, &sink, audit),
+			patchArtifactTool(req.Step, req.Partial, &sink, audit),
+		},
 		BuiltinTools:       agentrun.WithCodeSearch(agentrun.ReadOnlyFileTools, a.codeSearch),
 		MaxTokens:          generateMaxTokens,
 		LoadProjectContext: true,
@@ -177,14 +186,14 @@ func (a *agentAuthor) WriteArchitecture(ctx context.Context, req architectureReq
 		"spec_name":            req.SpecName,
 		"root":                 req.Root,
 		"prd":                  strings.TrimSpace(req.PRD),
+		"notes_block":          codebaseNotesBlock(req.CodebaseNotes),
 		"relevant_files_block": relevantFilesBlock(req.RelevantFiles),
 		"prior_block":          priorArtifactsBlock(*req.Partial, afspec.StepTasks) + renderTasks(req.Partial),
-		"repo_map_block":       repoMapBlock(req.RepoMap),
 	})
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:               "architecture",
 		Kind:               agentrun.PhaseArchitecture,
-		System:             generationSystemPrompt(),
+		System:             generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
 		User:               user,
 		RepoMap:            req.RepoMap,
 		Terminator:         ToolSubmitArchitecture,

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/schema"
@@ -51,7 +52,15 @@ type PRD struct {
 	// RelevantFiles lists the files the PRD phase found important for later
 	// generation phases.
 	RelevantFiles []RelevantFile `json:"relevant_files,omitempty"`
+	// CodebaseNotes is what the phase learned reading the code, for the
+	// phases after it. It is bounded by maxCodebaseNotes.
+	CodebaseNotes string `json:"codebase_notes,omitempty"`
 }
+
+// maxCodebaseNotes bounds the notes a PRD phase hands on, in bytes. Every
+// later phase of the package reads them, so past this they cost more than
+// the reads they save.
+const maxCodebaseNotes = 12000
 
 // OpenQuestion is one decision made under uncertainty.
 //
@@ -97,6 +106,13 @@ func prdSchema() *schema.Schema {
 		), "Set ONLY when the input is more than one spec's worth of work. List every scope, "+
 			"first one first — the PRD you submit covers that first scope alone.")),
 		schema.Opt("relevant_files", relevantFilesArraySchema()),
+		schema.Opt("codebase_notes", schema.String(
+			"What you learned reading the code that the later phases need and the PRD does not say: "+
+				"the files and modules involved and what each does, the real names and signatures of the "+
+				"types and functions the work touches, the conventions to follow (errors, tests, naming), "+
+				"and what you checked and ruled out. Facts with file paths, in Markdown, at most about "+
+				"1500 words. The phases that write the requirements, tests and tasks read this instead "+
+				"of reading the same code again.")),
 	)
 }
 
@@ -155,6 +171,7 @@ func submitPRDTool(sink *prdSink, ws *tools.Workspace) core.Tool {
 			}
 			prd.SpecName = strings.TrimSpace(prd.SpecName)
 			prd.Title = strings.TrimSpace(prd.Title)
+			prd.CodebaseNotes = boundNotes(prd.CodebaseNotes)
 
 			if !validName(prd.SpecName) {
 				return core.ErrResult("invalid_spec_name", fmt.Sprintf(
@@ -195,6 +212,24 @@ func submitPRDTool(sink *prdSink, ws *tools.Workspace) core.Tool {
 			return res
 		},
 	}
+}
+
+// boundNotes trims notes to maxCodebaseNotes, at a line boundary where there
+// is one, and says that it did. Long notes are not worth a rejection: the
+// PRD is the result, and the notes are a saving on the phases after it.
+func boundNotes(notes string) string {
+	notes = strings.TrimSpace(notes)
+	if len(notes) <= maxCodebaseNotes {
+		return notes
+	}
+	cut := notes[:maxCodebaseNotes]
+	if i := strings.LastIndexByte(cut, '\n'); i > maxCodebaseNotes/2 {
+		cut = cut[:i]
+	}
+	for !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "\n[…the rest of the notes was cut]"
 }
 
 // checkSplit is the split's own contract, checked where the model can still

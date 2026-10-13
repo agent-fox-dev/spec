@@ -165,21 +165,22 @@ func TestTS14_38_BudgetZeroDisablesTheMapAndKeepsPromptsIdentical(t *testing.T) 
 		t.Fatalf("%d phases reached the model, want %d", len(reqs), want)
 	}
 	for i, req := range reqs {
-		prompt := requestUserText(req)
-		if strings.Contains(prompt, "## Repository map") || strings.Contains(prompt, "{{") {
-			t.Errorf("phase %d has a map block or an unfilled placeholder:\n%s", i, prompt)
+		for _, prompt := range []string{requestUserText(req), blocksText(req.System)} {
+			if strings.Contains(prompt, "## Repository map") || strings.Contains(prompt, "{{") {
+				t.Errorf("phase %d has a map block or an unfilled placeholder:\n%s", i, prompt)
+			}
 		}
 	}
 
-	// The PRD prompt equals the template without the placeholder, filled the
-	// way the pipeline fills it.
-	want := fill(strings.ReplaceAll(template("prd_user.md"), "{{repo_map_block}}", ""), map[string]string{
-		"root": ws.Root, "source_kind": "text", "source_origin": "argument", "input": o.Input.Body,
-		"context_block": "", "project_block": project.DetectProfile(ws.Root).LanguageBlock(),
-		"landscape_block": "", "steering_block": "", "split_block": "",
-	})
-	if got := requestUserText(reqs[0]); got != want {
-		t.Errorf("the PRD prompt differs from the one built without the map:\n got: %q\nwant: %q", got, want)
+	// The PRD phase's system prompt is the mandate and the run context
+	// without a map, and its task is the template filled the way the
+	// pipeline fills it.
+	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root).LanguageBlock(), "", "")
+	if got := blocksText(reqs[0].System); !strings.HasPrefix(got, wantSystem) {
+		t.Errorf("the PRD system prompt does not start with the one built without the map:\n got: %q", got)
+	}
+	if got, want := requestUserText(reqs[0]), prdUserPrompt(ws.Root, "", ""); got != want {
+		t.Errorf("the PRD task differs from the one built without the map:\n got: %q\nwant: %q", got, want)
 	}
 }
 
@@ -229,13 +230,12 @@ func TestTS14_40_SpecReusesTheMapAcrossAllScopesOfASplit(t *testing.T) {
 		t.Fatalf("%d phases reached the model, want %d (a PRD and %d generation phases per scope)",
 			len(reqs), want, len(afspec.GenerationSteps))
 	}
-	first := mapSection(requestUserText(reqs[0]))
+	first := mapSection(blocksText(reqs[0].System))
 	if first == "" {
-		t.Fatalf("the first PRD prompt has no map block:\n%s", requestUserText(reqs[0]))
+		t.Fatalf("the first PRD system prompt has no map block:\n%s", blocksText(reqs[0].System))
 	}
 	for i, req := range reqs {
-		prompt := requestUserText(req)
-		sec := mapSection(prompt)
+		sec := mapSection(blocksText(req.System))
 		if sec != first {
 			t.Errorf("phase %d's map block differs from the first phase's:\n%s", i, sec)
 		}

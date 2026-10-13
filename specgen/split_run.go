@@ -91,7 +91,7 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 				break
 			}
 			split := &splitContext{Plan: e.planSnapshot(plan), Index: i, SpecsDir: e.specsDir,
-				SpecRoot: specRoot, Drafts: drafted(drafts, plan, e)}
+				SpecRoot: specRoot, Drafts: drafted(drafts, plan, e), Notes: notesOf(drafts)}
 			var err error
 			prd, err = e.writePRD(ctx, split, label)
 			if err != nil {
@@ -229,6 +229,17 @@ func (e *runEnv) planSnapshot(plan *SplitPlan) *SplitPlan {
 	cp := *plan
 	cp.Scopes = slices.Clone(plan.Scopes)
 	return &cp
+}
+
+// notesOf is the codebase notes of the PRDs this run wrote, by scope index.
+func notesOf(drafts map[int]PRD) map[int]string {
+	out := map[int]string{}
+	for i, d := range drafts {
+		if d.CodebaseNotes != "" {
+			out[i] = d.CodebaseNotes
+		}
+	}
+	return out
 }
 
 // drafted is the drafts whose packages are not on disk: still being

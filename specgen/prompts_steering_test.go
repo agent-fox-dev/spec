@@ -14,13 +14,10 @@ func TestSteeringReachesThePRDAndGenerationPrompts(t *testing.T) {
 	if !strings.Contains(block, "BEGIN STEERING") || !strings.Contains(block, "Always write tests first.") {
 		t.Fatalf("block = %q", block)
 	}
-	prd := prdUserPrompt("/r", "text", "", "idea", "", "", "", block, "", "")
-	if !strings.Contains(prd, "Always write tests first.") {
-		t.Error("the PRD prompt lacks the steering")
-	}
-	gen := generationUserPrompt("requirements", "01", "x", "/r", "prd", "", block, "", "", "", "")
-	if !strings.Contains(gen, "Always write tests first.") {
-		t.Error("the generation prompt lacks the steering")
+	// Every phase is told about the project in the same block, at the end
+	// of its system prompt.
+	if run := runContextBlock("", "# Steering\n\nAlways write tests first.\n", ""); !strings.Contains(run, block) {
+		t.Error("the run context lacks the steering")
 	}
 	if steeringBlock("  \n") != "" {
 		t.Error("an empty steering produced a block")

@@ -37,4 +37,8 @@ Each entry names the question, the answer you went with, and why you are unsure.
 
 Do not use `open_questions` as a way to avoid deciding. Every question in it must ALSO be answered in `## Design Decisions` and reflected in the PRD body.
 
+## Handing on what you read
+
+The phases after you write the requirements, the tests and the tasks against the same code, and each of them reads it again unless you tell it what you found. Put that in `codebase_notes`: the files and modules the work touches and what each does, the real names and signatures of the types and functions it calls or changes, the conventions to follow (how errors are returned, where tests live and how they are named), and what you checked and ruled out. Write facts with file paths, not a second PRD, and keep it to about 1500 words. Mark anything you inferred rather than read.
+
 When the PRD is complete, call `submit_prd` exactly once.

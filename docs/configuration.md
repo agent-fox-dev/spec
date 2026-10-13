@@ -74,5 +74,8 @@ every phase as the project's directives.
 | Per-phase turns | 60 (`--max-turns`) |
 | Per-phase spend | $5.00 (`--budget`) |
 | Repository map | 6000 tokens (`--repo-map-tokens`) |
+| Codebase notes a PRD phase hands on | 12000 bytes, cut at a line boundary |
+| Earlier scopes' notes shown to a later scope's PRD phase | 16000 bytes, nearest scope first |
+| Warnings sent back for review | 25 listed, once per phase |
 | Old tool results pruned from the request | once it reaches 35% of the model's context window; the last 4 turns are kept whole |
 | `steering.md`, `AGENTS.md`, `CLAUDE.md` in a prompt | 24 KB each; larger files are left out |
