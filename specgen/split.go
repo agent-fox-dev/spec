@@ -239,6 +239,10 @@ type splitContext struct {
 	// be empty, which leaves the earlier scopes' content out of the block.
 	SpecsDir string
 	SpecRoot string
+	// Drafts are the PRDs this run has written for scopes whose packages are
+	// still being generated, by scope index: a later scope's PRD is written
+	// against them before they reach the disk.
+	Drafts map[int]PRD
 }
 
 // Scope is the scope being written.
@@ -269,6 +273,8 @@ func splitBlock(c *splitContext) string {
 		case s.Written():
 			state = "written"
 			label = "`" + s.Dir + "`"
+		case c.hasDraft(i):
+			state = "PRD written; its package is being generated"
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", i+1, label, oneLine(s.Scope), state)
 	}
@@ -280,8 +286,8 @@ func splitBlock(c *splitContext) string {
 	fmt.Fprintf(&b, "\nWrite the PRD for scope %d only: **%s** — %s\n\n", c.Index+1, sc.Name, oneLine(sc.Scope))
 	fmt.Fprintf(&b, "- Its `spec_name` is `%s`. Submit exactly that name.\n", sc.Name)
 	b.WriteString("- Cover nothing an earlier spec of this split already covers, and nothing a " +
-		"later one will. Read the earlier packages under the spec root: their PRDs state what " +
-		"they deliver, and this PRD builds on it rather than restating it.\n")
+		"later one will. What the earlier scopes deliver is summarised above, from their PRDs; " +
+		"this PRD builds on it rather than restating it.\n")
 	b.WriteString("- Where this scope consumes what an earlier spec of this split delivers, name " +
 		"that spec in `## Dependencies` with the reason.\n")
 	b.WriteString("- The split has been decided. Do not report a `recommended_split`; if this scope " +
@@ -294,34 +300,48 @@ func splitBlock(c *splitContext) string {
 // a PRD is more than it needs.
 const earlierBytes = 2500
 
-// earlierScopesBlock inlines the Intent, Goals and Non-goals of the scopes
-// already written to disk, so a later scope neither re-reads those PRDs nor
-// restates them.
+// hasDraft reports whether this run wrote the PRD of scope i and holds it in
+// memory: its package is still being generated, or a dry run wrote none.
+func (c *splitContext) hasDraft(i int) bool {
+	_, ok := c.Drafts[i]
+	return ok
+}
+
+// earlierScopesBlock inlines the Intent, Goals and Non-goals of the earlier
+// scopes, so a later scope neither re-reads those PRDs nor restates them: from
+// prd.md for a package on disk, and from this run's draft for one still being
+// generated.
 func earlierScopesBlock(c *splitContext) string {
-	if c.SpecsDir == "" {
-		return ""
-	}
 	var b strings.Builder
 	for i, s := range c.Plan.Scopes {
-		if i >= c.Index || !s.Written() {
+		if i >= c.Index {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(c.SpecsDir, s.Dir, "prd.md"))
-		if err != nil {
-			continue
+		var text, name, where string
+		if s.Written() && c.SpecsDir != "" {
+			if raw, err := os.ReadFile(filepath.Join(c.SpecsDir, s.Dir, "prd.md")); err == nil {
+				text, name, where = string(raw), s.Dir, s.Dir+"/prd.md"
+			}
 		}
-		text := prdSections(string(raw), "Intent", "Goals", "Non-goals")
+		if text == "" && c.hasDraft(i) {
+			text, name = c.Drafts[i].Body, s.Name
+		}
+		text = prdSections(text, "Intent", "Goals", "Non-goals")
 		if text == "" {
 			continue
 		}
 		if len(text) > earlierBytes {
-			text = text[:earlierBytes] + "\n[…cut; the full PRD is in " + s.Dir + "/prd.md]"
+			cut := "\n[…cut]"
+			if where != "" {
+				cut = "\n[…cut; the full PRD is in " + where + "]"
+			}
+			text = text[:earlierBytes] + cut
 		}
 		if b.Len() == 0 {
 			b.WriteString("\n### What the earlier scopes deliver\n\n" +
 				"Taken from their PRDs, so you need not read them.\n")
 		}
-		fmt.Fprintf(&b, "\n**`%s`**\n\n%s\n", s.Dir, text)
+		fmt.Fprintf(&b, "\n**`%s`**\n\n%s\n", name, text)
 	}
 	return b.String()
 }

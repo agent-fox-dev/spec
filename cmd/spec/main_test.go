@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
 	"os"
 	"strings"
 	"testing"
@@ -34,5 +35,21 @@ func TestSpecAcceptsSharedDryRun(t *testing.T) {
 		strings.NewReader(""), &stdout, &stderr)
 	if code != cli.ExitOK {
 		t.Fatalf("code = %d, stderr: %s", code, stderr.String())
+	}
+}
+
+// --max-parallel defaults to the pipelined split and refuses less than one.
+func TestMaxParallelFlag(t *testing.T) {
+	fs := flag.NewFlagSet("spec", flag.ContinueOnError)
+	newApp().Flags(fs)
+	if f := fs.Lookup("max-parallel"); f == nil || f.DefValue != "3" {
+		t.Fatalf("--max-parallel = %+v", f)
+	}
+	cleanEnv(t)
+	var stdout, stderr bytes.Buffer
+	code := newApp().Main(context.Background(), []string{"--max-parallel", "0", "--dir", t.TempDir(), "an idea"},
+		strings.NewReader(""), &stdout, &stderr)
+	if code != cli.ExitUsage || !strings.Contains(stdout.String(), "--max-parallel must be at least 1") {
+		t.Errorf("code = %d\n%s", code, stdout.String())
 	}
 }

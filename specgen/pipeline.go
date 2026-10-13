@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-fox-dev/agentkit-go/tools"
@@ -55,6 +57,13 @@ type Options struct {
 	// bound by the one phase's ceiling alone. Zero means no cap beyond the
 	// per-phase bound.
 	TotalBudgetUSD float64
+
+	// MaxParallel is how many packages of a split are generated at once. The
+	// PRD phases still run one after another, each seeing the PRDs before it;
+	// a scope's package is generated as soon as its PRD exists, beside the
+	// next scope's PRD phase. One or less writes the scopes strictly one after
+	// another, each scope's PRD waiting for the package before it.
+	MaxParallel int
 
 	// RepoMapTokens is the token budget of the repository map in every
 	// phase's user prompt. Zero, the zero value, disables it.
@@ -556,7 +565,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		o.Progress.Step("plan", "resuming the split planned for %s: %d of %d scopes to write",
 			plan.Input.Origin, plan.Pending(), len(plan.Scopes))
 	} else {
-		prd, err := env.writePRD(ctx, nil)
+		prd, err := env.writePRD(ctx, nil, "")
 		if err != nil {
 			return nil, err
 		}
@@ -590,7 +599,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	// ---------------------------------------------------- one package --
 	if plan == nil {
-		pkg, _, err := env.buildPackage(ctx, *first, "")
+		slot, err := env.reservePackage(*first, "")
+		if err != nil {
+			return result, err
+		}
+		pkg, err := env.buildPackage(ctx, *first, "", slot, nil)
 		if pkg != nil {
 			result.Package = *pkg
 		}
@@ -598,109 +611,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 
 	// ------------------------------------------------------ the split --
-	//
-	// A package that does not validate stops nothing: it is on disk, its
-	// errors name the rules, and the scopes after it are not made better by
-	// being skipped. Every other failure stops the run where it is, with the
-	// plan recording what exists, so the next run on the same input starts
-	// from the scope that failed rather than from the beginning.
-	var invalid []string
-	wrote := 0
-	for i := range plan.Scopes {
-		sc := &plan.Scopes[i]
-		if sc.Written() {
-			continue
-		}
-		label := fmt.Sprintf("scope %d of %d (%s)", i+1, len(plan.Scopes), sc.Name)
-		o.Progress.Step("write", "%s: %s", label, oneLine(sc.Scope))
-
-		var prd PRD
-		if first != nil && i == 0 {
-			prd, first = *first, nil
-		} else {
-			// The interior boundary: this scope's PRD phase has not begun. A
-			// run already over its ceiling stops here with the plan in place,
-			// so the next run on the same input resumes from this scope.
-			if spent := o.Run.CostUSD(); o.TotalBudgetUSD > 0 && spent >= o.TotalBudgetUSD {
-				result.setSplit(splitReport(root, specsDir, plan, i))
-				bf := failf("budget", agentrun.CategoryBudget,
-					"the run has spent $%.2f of its $%.2f total budget; the packages written so far "+
-						"are on disk, re-run on the same input to continue", spent, o.TotalBudgetUSD)
-				bf.TotalBudget = o.TotalBudgetUSD
-				return result, scoped(label, bf)
-			}
-			prd, err = env.writePRD(ctx, &splitContext{Plan: plan, Index: i, SpecsDir: specsDir, SpecRoot: relativeTo(root, specsDir)})
-			if err != nil {
-				result.setSplit(splitReport(root, specsDir, plan, i))
-				return result, scoped(label, err)
-			}
-			// The plan names the package, not the model: a name the model
-			// changed here would leave the next run unable to tell that
-			// this scope was written.
-			if prd.SpecName != sc.Name {
-				o.Run.Warn(cli.WarnScopeRenamed, "low", "%s: the PRD phase named the spec %q; the planned name is used",
-					label, prd.SpecName)
-				prd.SpecName = sc.Name
-			}
-			if len(prd.RecommendedSplit) > 0 {
-				o.Run.Warn(cli.WarnScopeCountMismatch, "low", "%s: the PRD phase reported this scope as %d specs' worth of work; "+
-					"it is written as one, since the split was already decided",
-					label, len(prd.RecommendedSplit))
-			}
-		}
-
-		// The scope is recorded in the plan the moment its package is on
-		// disk, before the read-back, the activation and the comment: a run
-		// killed after the write must not leave a package the next run does
-		// not know about and writes a second time.
-		env.onWritten = func(specID, dirName string) {
-			sc.SpecID, sc.Dir = specID, dirName
-			if err := plan.save(specsDir); err != nil {
-				o.Run.Warn(cli.WarnSplitPlanUpdateFailed, "high", "the split plan could not be updated after %s: %v", label, err)
-			}
-		}
-		pkg, dirName, err := env.buildPackage(ctx, prd, label)
-		env.onWritten = nil
-		if pkg != nil {
-			if wrote == 0 {
-				result.Package = *pkg
-			} else {
-				result.FollowOnSpecs = append(result.FollowOnSpecs, *pkg)
-			}
-		}
-		if err != nil {
-			var f *Failure
-			if !errors.As(err, &f) || f.Category != CategoryInvalid {
-				result.setSplit(splitReport(root, specsDir, plan, i))
-				return result, err
-			}
-			invalid = append(invalid, pkg.SpecDir)
-			sc.Invalid = true
-		}
-		wrote++
-		sc.SpecID, sc.Dir = pkg.SpecID, dirName
-		if !o.DryRun {
-			if err := plan.save(specsDir); err != nil {
-				o.Run.Warn(cli.WarnSplitPlanUpdateFailed, "high", "the split plan could not be updated after %s: %v", label, err)
-			}
-		}
-	}
-
-	result.setSplit(splitReport(root, specsDir, plan, -1))
-	if !o.DryRun {
-		if err := plan.remove(specsDir); err != nil {
-			o.Run.Warn(cli.WarnSplitPlanNotRemoved, "low", "the split is complete and its plan could not be removed: %v", err)
-		} else {
-			result.SplitPlan = ""
-		}
-	}
-	if len(invalid) > 0 {
-		return result, failf("validate", CategoryInvalid,
-			"%d of %d packages do not validate (%s); each is on disk and each error names the "+
-				"rule it broke", len(invalid), len(plan.Scopes), strings.Join(invalid, ", "))
-	}
-	o.Progress.Step("validate", "the split is complete: %d packages", len(plan.Scopes))
-	return result, nil
+	return env.writeSplit(ctx, plan, first, result)
 }
 
 // buildRepoMap builds the run's repository map. It never fails the run:
@@ -722,28 +633,48 @@ func buildRepoMap(ctx context.Context, o Options) string {
 
 // runEnv is what every package of a run shares.
 type runEnv struct {
-	o         Options
-	root      string
-	specsDir  string
-	author    author
-	profile   project.Profile
-	landscape []afspec.SpecMeta
+	o        Options
+	root     string
+	specsDir string
+	author   author
+	profile  project.Profile
 	// repoMap is the run's repository map, or "" when it is disabled or could
 	// not be built.
 	repoMap string
+
+	// mu guards what the packages of a split, generated concurrently, share:
+	// the landscape, the numbering and the split plan.
+	mu        sync.Mutex
+	landscape []afspec.SpecMeta
 	// lastID is the highest numeric prefix this run has assigned, so a dry
 	// run — which leaves nothing on disk to count — still numbers its
 	// packages consecutively.
 	lastID int
-	// onWritten, when set, is told the package's id and directory as soon as
-	// the package is on disk: a split records the scope in its plan.
-	onWritten func(specID, dirName string)
+}
+
+// setLandscapeStatus records a package's new status in the landscape.
+func (e *runEnv) setLandscapeStatus(specID, status string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i := range e.landscape {
+		if e.landscape[i].SpecID == specID {
+			e.landscape[i].Status = status
+		}
+	}
+}
+
+// landscapeNow is a copy of the landscape, for a phase to read while other
+// packages are being written.
+func (e *runEnv) landscapeNow() []afspec.SpecMeta {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.landscape)
 }
 
 // writePRD runs the PRD phase, for the whole input or for one scope of it.
-func (e *runEnv) writePRD(ctx context.Context, split *splitContext) (PRD, error) {
+func (e *runEnv) writePRD(ctx context.Context, split *splitContext, label string) (PRD, error) {
 	o := e.o
-	done := o.Progress.Begin("writing the PRD from %s", o.Input.Origin)
+	done := o.Progress.Begin("%swriting the PRD from %s", prefixed(label), o.Input.Origin)
 	prd, stats, err := e.author.WritePRD(ctx, prdRequest{
 		Root:         e.root,
 		SourceKind:   o.Input.Kind.String(),
@@ -751,7 +682,7 @@ func (e *runEnv) writePRD(ctx context.Context, split *splitContext) (PRD, error)
 		Input:        o.Input.Body,
 		Context:      o.Input.Context,
 		Profile:      e.profile,
-		Landscape:    e.landscape,
+		Landscape:    e.landscapeNow(),
 		SpecRoot:     relativeTo(e.root, e.specsDir),
 		Steering:     project.Steering(e.specsDir),
 		Split:        split,
@@ -772,6 +703,8 @@ func (e *runEnv) writePRD(ctx context.Context, split *splitContext) (PRD, error)
 // allocateID is the next free numeric prefix: one past the highest on disk
 // or the highest this run has used, whichever is larger.
 func (e *runEnv) allocateID() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	n := maxSpecNumber(e.specsDir) + 1
 	if n <= e.lastID {
 		n = e.lastID + 1
@@ -780,48 +713,83 @@ func (e *runEnv) allocateID() string {
 	return formatSpecID(n)
 }
 
-// buildPackage turns one PRD into one package: the three generation phases,
-// the optional architecture document, the write, the validation and the
-// activation. label names the scope in progress messages and errors; it is
-// empty for an undivided input.
+// slot is the number and directory reserved for one package.
+type slot struct {
+	specID  string
+	dirName string
+	path    string
+}
+
+// reservePackage takes the package's number before any of its phases run.
 //
-// The package is returned alongside any error once it has a directory, so a
-// caller can report what exists — an invalid package in particular is on
-// disk and worth naming.
-func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Package, string, error) {
-	o := e.o
-	wrap := func(err error) error {
-		if err == nil || label == "" {
-			return err
-		}
-		return scoped(label, err)
-	}
+// The number is reserved on disk now, by creating the package's directory,
+// not when the package is written after four paid phases: a second run, or a
+// person's mkdir, in the meantime would otherwise take the same number, and
+// the ids inside the artifacts carry it, so the package cannot be renumbered
+// afterwards. buildPackage gives the number back when it fails before the
+// write. A dry run writes nothing and reserves nothing. A split reserves its
+// packages one at a time, in scope order, so the numbers follow the plan
+// whichever package finishes first.
+func (e *runEnv) reservePackage(prd PRD, label string) (slot, error) {
 	if !afspec.IsSpecName(prd.SpecName) {
-		return nil, "", wrap(failf("scaffold", "internal",
+		return slot{}, scopedIf(label, failf("scaffold", "internal",
 			"the spec name %q does not make an NN_snake_case directory name", prd.SpecName))
 	}
-	// The number is reserved on disk now, by creating the package's
-	// directory, not when the package is written after four paid phases: a
-	// second run, or a person's mkdir, in the meantime would otherwise take
-	// the same number, and the ids inside the artifacts carry it, so the
-	// package cannot be renumbered afterwards. A run that fails before the
-	// write gives the number back. A dry run writes nothing and reserves
-	// nothing.
 	var specID string
-	if o.DryRun {
+	if e.o.DryRun {
 		specID = e.allocateID()
 	} else {
-		id, err := reserveSpecDir(e.specsDir, prd.SpecName, e.lastID)
+		e.mu.Lock()
+		floor := e.lastID
+		e.mu.Unlock()
+		id, err := reserveSpecDir(e.specsDir, prd.SpecName, floor)
 		if err != nil {
-			return nil, "", wrap(fail("scaffold", CategoryDisk, err))
+			return slot{}, scopedIf(label, fail("scaffold", CategoryDisk, err))
 		}
 		specID = id
 		if n, err := strconv.Atoi(id); err == nil {
-			e.lastID = n
+			e.mu.Lock()
+			e.lastID = max(e.lastID, n)
+			e.mu.Unlock()
 		}
 	}
 	dirName := specID + "_" + prd.SpecName
-	specPath := filepath.Join(e.specsDir, dirName)
+	return slot{specID: specID, dirName: dirName, path: filepath.Join(e.specsDir, dirName)}, nil
+}
+
+// scopedIf is scoped for a split's scope, and err unchanged for an undivided
+// input, whose label is empty.
+func scopedIf(label string, err error) error {
+	if err == nil || label == "" {
+		return err
+	}
+	return scoped(label, err)
+}
+
+// prefixed is a progress line's prefix for a split's scope, "" otherwise.
+func prefixed(label string) string {
+	if label == "" {
+		return ""
+	}
+	return label + ": "
+}
+
+// buildPackage turns one PRD into one package in the slot reserved for it:
+// the three generation phases, the optional architecture document, the
+// write, the validation and the activation. label names the scope in progress
+// messages and errors; it is empty for an undivided input. onWritten, when
+// set, is told the package's id and directory the moment it is on disk.
+//
+// The package is returned alongside any error once it has a directory, so a
+// caller can report what exists — an invalid package in particular is on
+// disk and worth naming. Packages of a split are built concurrently, so
+// everything this shares with them goes through e.mu.
+func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slot,
+	onWritten func(specID, dirName string)) (*Package, error) {
+
+	o := e.o
+	wrap := func(err error) error { return scopedIf(label, err) }
+	specID, dirName, specPath := sl.specID, sl.dirName, sl.path
 	written := false
 	if !o.DryRun {
 		defer func() {
@@ -852,7 +820,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 
 	partial := afspec.PartialSpec{SpecID: specID, SpecName: prd.SpecName}
 	for _, step := range afspec.GenerationSteps {
-		done := o.Progress.Begin("generating %s", afspec.ArtifactFileName(step))
+		done := o.Progress.Begin("%sgenerating %s", prefixed(label), afspec.ArtifactFileName(step))
 		_, stats, err := e.author.GenerateArtifact(ctx, artifactRequest{
 			Step:          step,
 			SpecID:        specID,
@@ -860,7 +828,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 			Root:          e.root,
 			PRD:           spec.PRDBody,
 			Profile:       e.profile,
-			Landscape:     e.landscape,
+			Landscape:     e.landscapeNow(),
 			SpecRoot:      relativeTo(e.root, e.specsDir),
 			Steering:      project.Steering(e.specsDir),
 			Partial:       &partial,
@@ -870,7 +838,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 		recordPhase(o.Run, stats, prd.SpecName)
 		done(cli.PhaseSummary(stats))
 		if err != nil {
-			return pkg, dirName, wrap(fail(string(step), agentrun.CategoryOf(err), err))
+			return pkg, wrap(fail(string(step), agentrun.CategoryOf(err), err))
 		}
 		pkg.Artifacts = append(pkg.Artifacts, afspec.ArtifactFileName(step))
 	}
@@ -879,7 +847,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 	spec.Tasks = partial.Tasks
 
 	if o.Architecture {
-		done := o.Progress.Begin("writing architecture.md")
+		done := o.Progress.Begin("%swriting architecture.md", prefixed(label))
 		doc, stats, err := e.author.WriteArchitecture(ctx, architectureRequest{
 			SpecID: specID, SpecName: prd.SpecName, Root: e.root, PRD: spec.PRDBody, Partial: &partial,
 			RelevantFiles: prd.RelevantFiles, RepoMap: e.repoMap,
@@ -902,12 +870,12 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 	// ------------------------------------------------------------ write --
 	if !o.DryRun {
 		if err := writeSpec(spec, specPath); err != nil {
-			return pkg, dirName, wrap(err)
+			return pkg, wrap(err)
 		}
 		written = true
-		o.Progress.Step("write", "wrote %s", specPath)
-		if e.onWritten != nil {
-			e.onWritten(specID, dirName)
+		o.Progress.Step("write", "%swrote %s", prefixed(label), specPath)
+		if onWritten != nil {
+			onWritten(specID, dirName)
 		}
 	}
 	pkg.Artifacts = append([]string{"prd.md"}, pkg.Artifacts...)
@@ -926,7 +894,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 	if !o.DryRun {
 		loaded, err := afspec.LoadSpec(specPath)
 		if err != nil {
-			return pkg, dirName, wrap(fail("validate", CategoryDisk,
+			return pkg, wrap(fail("validate", CategoryDisk,
 				fmt.Errorf("the package was written to %s and cannot be read back: %w", specPath, err)))
 		}
 		validated = loaded
@@ -940,22 +908,24 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 	// not: the landscape lists it, so the next PRD is written against it. A
 	// dry run wrote nothing, so there is nothing for a later scope to read.
 	if !o.DryRun {
+		e.mu.Lock()
 		e.landscape = append(e.landscape, afspec.SpecMeta{
 			SpecID: specID, SpecName: prd.SpecName, Status: pkg.Status, Dir: specPath,
 		})
+		e.mu.Unlock()
 	}
 
 	if !report.Valid {
-		o.Progress.Step("validate", "the package does not validate: %d error(s)", report.ErrorCount)
+		o.Progress.Step("validate", "%sthe package does not validate: %d error(s)", prefixed(label), report.ErrorCount)
 		if o.Comment && !o.DryRun && o.Input.Issue != nil {
 			o.Run.Warn(cli.WarnCommentNotPosted, "low", "the PRD was not posted on %s: the package does not "+
 				"validate, and a PRD whose package is invalid is not one to circulate", o.Input.Issue)
 		}
-		return pkg, dirName, wrap(failf("validate", CategoryInvalid,
+		return pkg, wrap(failf("validate", CategoryInvalid,
 			"the generated package has %d validation error(s); it is on disk at %s and each "+
 				"error names the rule it broke", report.ErrorCount, pkg.SpecDir))
 	}
-	o.Progress.Step("validate", "valid: %d requirements, %d tests, %d tasks",
+	o.Progress.Step("validate", "%svalid: %d requirements, %d tests, %d tasks", prefixed(label),
 		pkg.Requirements, pkg.Tests, pkg.Tasks)
 
 	// --------------------------------------------------------- activate --
@@ -965,8 +935,8 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 			o.Run.Warn(cli.WarnActivationFailed, "high", "the spec validates but could not be activated: %v", err)
 		} else {
 			pkg.Status = activated.Status
-			e.landscape[len(e.landscape)-1].Status = activated.Status
-			o.Progress.Step("activate", "activated %s", dirName)
+			e.setLandscapeStatus(specID, activated.Status)
+			o.Progress.Step("activate", "%sactivated %s", prefixed(label), dirName)
 		}
 	}
 
@@ -983,12 +953,12 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string) (*Pack
 			o.Progress.Step("prd", "posted the PRD to %s", url)
 		}
 	}
-	return pkg, dirName, nil
+	return pkg, nil
 }
 
-// splitReport renders the plan for the result. failedAt is the index of the
-// scope this run stopped on, or -1.
-func splitReport(root, specsDir string, plan *SplitPlan, failedAt int) []ScopeReport {
+// splitReport renders the plan for the result. failed holds the scopes this
+// run stopped on.
+func splitReport(root, specsDir string, plan *SplitPlan, failed map[int]bool) []ScopeReport {
 	out := make([]ScopeReport, 0, len(plan.Scopes))
 	for i, s := range plan.Scopes {
 		r := ScopeReport{Name: s.Name, Scope: s.Scope, Status: ScopePending}
@@ -1000,7 +970,7 @@ func splitReport(root, specsDir string, plan *SplitPlan, failedAt int) []ScopeRe
 			}
 			r.SpecID = s.SpecID
 			r.SpecDir = relativeTo(root, filepath.Join(specsDir, s.Dir))
-		case i == failedAt:
+		case failed[i]:
 			r.Status = ScopeFailed
 		}
 		out = append(out, r)

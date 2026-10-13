@@ -64,7 +64,8 @@ activates it if it validates.
 
 An input that is more than one spec's worth of work is split: the PRD phase
 reports every scope, and spec writes all of them, one package per scope, each
-built on the ones before it. The split is recorded in the spec root as
+built on the ones before it. The scopes' PRDs are written in order; a scope's
+package is generated as soon as its PRD exists, up to --max-parallel at once. The split is recorded in the spec root as
 <first_scope>.split.json until the last package is written; a run that stops
 early is resumed by running spec on the same input again.
 
@@ -90,6 +91,7 @@ type specFlags struct {
 	architecture bool
 	noActivate   bool
 	comment      bool
+	maxParallel  int
 }
 
 // specOptions builds the specgen.Options for one run from the parsed flags
@@ -105,6 +107,7 @@ func (f *specFlags) specOptions(d cli.Deps) specgen.Options {
 		Architecture:     f.architecture,
 		Activate:         !f.noActivate,
 		Comment:          f.comment,
+		MaxParallel:      f.maxParallel,
 		DryRun:           d.Common.DryRun,
 		TotalBudgetUSD:   d.Common.TotalBudgetUSD,
 		RepoMapTokens:    d.Common.RepoMapTokens,
@@ -144,6 +147,8 @@ func newApp() cli.App {
 			fs.BoolVar(&f.architecture, "architecture", false, "also write the optional architecture.md")
 			fs.BoolVar(&f.noActivate, "no-activate", false, "leave a valid package in draft instead of activating it")
 			fs.BoolVar(&f.comment, "comment", false, "post the finished PRD back to the issue the input came from")
+			fs.IntVar(&f.maxParallel, "max-parallel", specgen.DefaultMaxParallel,
+				"how many packages of a split are generated at once, beside the next scope's PRD; 1 writes the scopes one after another")
 		},
 		// Generating an artifact is one long structured answer plus however
 		// many repairs the rules demand. The turn ceiling is the repair
@@ -156,6 +161,9 @@ func newApp() cli.App {
 
 		PreCheck: func(c *cli.Common) error {
 			common = c
+			if f.maxParallel < 1 {
+				return cli.Usagef("--max-parallel must be at least 1, got %d", f.maxParallel)
+			}
 			if f.name != "" && !specgen.ValidSpecName(f.name) {
 				return cli.Usagef("--name %q must match [a-z][a-z0-9]*(_[a-z0-9]+)*", f.name)
 			}

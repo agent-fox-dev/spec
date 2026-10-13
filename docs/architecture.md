@@ -106,6 +106,12 @@ schema combinators (`schema`) and the indexed search (`codesearch`).
    a fresh agent that sees the PRD and the artifacts before it; the optional
    **architecture** phase runs; the package is saved with `afspec`, read back,
    validated, activated, and its PRD posted under `--comment`.
+   A split pipelines its scopes (`specgen/split_run.go`): the PRD phases run
+   in order, and each scope's package is built on its own goroutine as soon as
+   its PRD exists, up to `--max-parallel` at once. The numbering, the
+   landscape of existing specs and the split plan are shared between those
+   goroutines under one lock; numbers are reserved by the coordinator, in
+   scope order.
 5. **`internal/cli`** builds the envelope from the result and the run's
    bookkeeping (warnings, phases, forge writes) and prints it.
 
