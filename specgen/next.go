@@ -1,0 +1,51 @@
+package specgen
+
+import (
+	"fmt"
+
+	"github.com/agent-fox-dev/spec/internal/cli"
+)
+
+// Next implements cli.NextProvider. It suggests
+// impl on every written package that validates, in split order, and spec
+// again on the same input when the split is unfinished. Every value is a fact the
+// pipeline established — SpecDir, Validation.Valid, SplitPlan and the input's
+// own origin — never anything a model wrote.
+func (r *Result) Next() []cli.Next {
+	if r == nil {
+		return nil
+	}
+	var out []cli.Next
+
+	pkgs := make([]Package, 0, 1+len(r.FollowOnSpecs))
+	if r.SpecDir != "" {
+		pkgs = append(pkgs, r.Package)
+	}
+	pkgs = append(pkgs, r.FollowOnSpecs...)
+	var ready []Package
+	for _, p := range pkgs {
+		// A dry run wrote no package, so there is none to implement.
+		if p.Validation.Valid && p.SpecDir != "" && !r.DryRun {
+			ready = append(ready, p)
+		}
+	}
+	for _, p := range ready {
+		why := "the package validates and is ready to implement"
+		if len(ready) > 1 {
+			why = fmt.Sprintf("the package validates and is ready to implement (%d of this run's packages are ready, in split order)", len(ready))
+		}
+		out = append(out, cli.Next{Tool: "impl", Input: p.SpecDir, Flags: []string{}, Why: why})
+	}
+
+	if r.Resumable() {
+		in := r.inputRef
+		if in == "" {
+			in = cli.SameInputPlaceholder
+		}
+		out = append(out, cli.Next{
+			Tool: "spec", Input: in, Flags: []string{},
+			Why: "the split is unfinished; running spec on the same input continues from the next scope",
+		})
+	}
+	return out
+}
