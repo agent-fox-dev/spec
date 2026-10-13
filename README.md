@@ -52,17 +52,17 @@ validation or code generation.
 
 ## Implementations
 
-This repository holds the format and its reference library:
+This repository holds the format, its reference library and the command that
+writes packages of it:
 
 | Path | What it is |
 | --- | --- |
 | `specification/` | The format: the reference documents and the canonical JSON Schemas |
 | [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save and render spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
+| `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline, built on `afspec` and [agentkit-go](https://github.com/agent-fox-dev/agentkit-go) |
 
-The `specgen` generation pipeline and the `spec` CLI live in
-[agent-fox](https://github.com/agent-fox-dev/agent-fox) and use `afspec` as a
-library. See [docs/architecture.md](docs/architecture.md) for how the pieces
-fit together.
+See [docs/architecture.md](docs/architecture.md) for how the pieces fit
+together.
 
 ## Generating a Spec Package
 
@@ -99,7 +99,15 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--architecture` | Also write the optional `architecture.md` |
 | `--no-activate` | Leave a valid package in `draft` instead of activating it |
 | `--comment` | Post the finished PRD back to the source issue |
-| `--dry-run` | Write nothing to disk or GitHub; report what would be written |
+| `--dry-run` | Write nothing to disk or to the forge; report what would be written |
+| `--model`, `--effort` | A tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or Claude model id, and its reasoning effort |
+| `--budget`, `--max-turns`, `--total-budget` | Per-phase and whole-run ceilings |
+| `--preflight` | Run every check that would refuse the run, then stop before any model call |
+
+The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
+Bedrock. Every flag, the envelope, the error categories and the warning codes
+are in [docs/cli.md](docs/cli.md); the environment variables in
+[docs/configuration.md](docs/configuration.md).
 
 Lifecycle management for an existing package — activating, sealing,
 archiving, superseding, validating, rendering — has no CLI surface; it's
@@ -107,11 +115,16 @@ library API in [`afspec`](afspec/README.md) for an embedder to call.
 
 ## Installation
 
-Install the spec CLI via the install script:
+Build the `spec` command from a checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/agent-fox/refs/heads/main/install.sh | sh
+git clone https://github.com/agent-fox-dev/spec && cd spec
+make build          # writes build/spec
 ```
+
+`go install …/cmd/spec@version` does not work yet: the module carries a
+`replace` for agentkit-go until that module is tagged (see
+[ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md)).
 
 ### Go library
 
@@ -121,11 +134,13 @@ go get github.com/agent-fox-dev/spec/afspec
 
 ## Development
 
-The library needs Go 1.27 or later.
+The library and the command need Go 1.27 or later. The tests need no network
+and no API key: the command's tests run against a scripted model.
 
 | Command | What it does |
 | --- | --- |
 | `make check` | `make lint` then `make test` |
+| `make build` | Build the `spec` command into `build/spec` |
 | `make test` | `go test ./... -count=1` |
 | `make test-fast` | The tests with `-short` |
 | `make lint` | `gofmt -l` must report nothing, then `go vet ./...` |
@@ -139,4 +154,7 @@ The library needs Go 1.27 or later.
 - [Spec Format Reference v2](specification/spec-format-v2.md) — field-level schemas, EARS patterns, validation rules, and rendering
 - [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
 - [afspec](afspec/README.md) — the Go library's API
-- [Architecture](docs/architecture.md) — repository layout, the schema copies, and how agent-fox consumes the library
+- [The spec command](docs/cli.md) — input, flags, the output envelope, errors and warnings
+- [Configuration](docs/configuration.md) — environment variables and limits
+- [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
+- [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
