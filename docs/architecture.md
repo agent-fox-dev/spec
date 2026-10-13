@@ -14,11 +14,14 @@ specification/              # The format (no code)
 afspec/                     # The reference library, package afspec
   schemas/                  #   Embedded copies of the v2 schemas
   legacy/                   #   Version 1.3 types and a read-only loader
+  testdata/                 #   Spec package fixtures for the tests
 docs/                       # Repository documentation
 .specs/                     # Spec packages for work on this repository
 ```
 
 Tests sit next to the code they test, as `*_test.go` files in `afspec/`.
+`make doc` writes the Go package reference to `build/docs/`, which is not
+committed.
 
 ## The format and the library
 

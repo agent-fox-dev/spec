@@ -132,6 +132,7 @@ The library needs Go 1.27 or later.
 | `make lint` | `gofmt -l` must report nothing, then `go vet ./...` |
 | `make format` | `gofmt -w .` |
 | `make coverage` | Test coverage per function |
+| `make doc` | Write `go doc -all` for each package to `build/docs/` |
 | `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
 
 ## Documentation
