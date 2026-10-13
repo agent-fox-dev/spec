@@ -121,8 +121,11 @@ schema combinators (`schema`) and the indexed search (`codesearch`).
 
 - the phase's system prompt, the project's `AGENTS.md` and `CLAUDE.md` under
   `--trust-project`, and a closing note naming the granted tools;
-- the phase's own terminating tool, whose handler validates the submission
-  and either returns `Terminate` or an error the model reads and repairs;
+- the phase's optional `Prefix`, sent as the driver's cached prefix ahead of
+  the task (the PRD phase's input);
+- the phase's own terminating tools, whose handlers validate the submission
+  and either return `Terminate` or an error the model reads and repairs (a
+  generation phase has two: `submit_<step>` and `patch_<step>`);
 - the read-only built-ins and, with an index, `code_search` — never a shell,
   so no guard is needed and `agentkit.New` would refuse one without it;
 - `MaxTurns`, `MaxCostUSD` and `Timeout` from the per-phase bounds, and
@@ -133,7 +136,33 @@ Each phase declares its kind (`prd`, `requirements`, `test_spec`, `tasks`,
 effort from the run's `agentrun.Plan`: the tier's choice for the phase, or a
 `--phase-model` override. A submit tool's rejection runs
 `afspec.ValidateGenerationStepComplete` and the project audit together, so it
-names every problem in one pass.
+names every problem in one pass, and holds the rejected submission for the
+step's patch tool (`specgen/patch.go`) to correct in place.
+
+### What a phase is sent, and what is cached
+
+A request is the tools, then the system prompt, then the messages, and the
+provider caches it by prefix: whatever two requests share from the start is
+paid for once at the full rate. The prompts are laid out for that
+(ADR 04):
+
+| Part | PRD phase | Generation and architecture phases |
+|---|---|---|
+| system | the mandate, then the run context: language, `steering.md`, repository map | the format's rules, then the same run context |
+| prefix | the input and `--context` | — |
+| task | the landscape of specs and, in a split, the scope block | the PRD, the codebase notes, the landscape, the relevant files, the artifacts before it, the step's instructions |
+
+The run context (`runContextBlock`) is the same for every phase of a run, so
+the packages of a split that run the same step on the same model read it,
+and the 6000-token map in it, from the cache; every scope's PRD phase shares
+the input as well. Tool sets differ between steps, and tools come first, so
+the steps of one package do not share a prefix with each other.
+
+Every tool is declared strict while the request stays within the API's strict
+limits (20 tools, 16 union parameters); agentkit-go decides which. The
+artifact schemas are kept strict-expressible: the identity fields the handler
+writes are not declared, and a dictionary such as the glossary is asked for as
+a list of entries.
 
 The driver's event stream feeds the progress lines and the per-phase counts
 (`tool_calls`, `tool_errors`); its `RunResult` is the phase's usage and stop
