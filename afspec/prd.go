@@ -57,7 +57,7 @@ func parsePRD(data []byte, filePath string) (*prdFrontmatter, string, error) {
 			frontmatterStr = rest[:closingIdx]
 			body = ""
 		} else {
-			// Missing closing delimiter — match Python behavior: treat rest as frontmatter
+			// Missing closing delimiter — the frontmatter never ends
 			return nil, "", &LoadError{
 				Msg:  "prd.md missing closing --- delimiter",
 				File: filePath,
@@ -102,7 +102,7 @@ func parsePRD(data []byte, filePath string) (*prdFrontmatter, string, error) {
 		}
 	}
 
-	// Ensure slices are non-nil (match Python behavior where empty lists are [])
+	// Ensure slices are non-nil, so an absent list marshals as [] rather than null
 	if fm.Supersedes == nil {
 		fm.Supersedes = []string{}
 	}

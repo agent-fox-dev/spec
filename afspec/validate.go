@@ -228,13 +228,13 @@ type prdFrontmatterForSchema struct {
 // legacyVersionEntry describes a spec still written in an older format
 // version. Validating it against the v2 schemas produces a schema error per
 // artifact plus every shape difference underneath; one sentence naming the
-// version and the command that converts it is more use than that list.
+// version and how to convert it is more use than that list.
 func legacyVersionEntry(version int) ValidationEntry {
 	return ValidationEntry{
 		Category: "integrity",
 		Check:    "schema_version",
 		Artifact: "prd.md",
-		Message: fmt.Sprintf("spec declares schema_version %d; this library reads version %d — run `spec migrate` to convert it",
+		Message: fmt.Sprintf("spec declares schema_version %d; this library reads version %d — convert it with afspec.Migrate",
 			version, SchemaVersion),
 	}
 }
@@ -246,7 +246,7 @@ func scaffoldEntry() ValidationEntry {
 	return ValidationEntry{
 		Category: "integrity",
 		Check:    "completeness",
-		Message:  "spec is an empty scaffold: run `spec generate` to produce requirements, tests and tasks",
+		Message:  "spec is an empty scaffold: generate its requirements, tests and tasks",
 	}
 }
 

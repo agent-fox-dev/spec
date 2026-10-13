@@ -12,13 +12,13 @@ import (
 )
 
 // schemaFieldOrder maps Go struct types to their JSON Schema property order.
-// This ensures MarshalJSON produces fields in the same order as the Python library.
+// This ensures MarshalJSON produces fields in the order the schemas declare them.
 var schemaFieldOrder map[reflect.Type][]string
 
 // omitWhenNilFields defines which fields should be omitted when their value is nil.
 // Fields NOT listed here are always included (nil values become JSON null).
-// This matches the Python library's behavior, where:
-// - Criterion pattern fields (trigger, condition, etc.) are omitted when None
+// In particular:
+// - Criterion pattern fields (trigger, condition, etc.) are omitted when nil
 // - Schema-optional fields ($schema, external_apis, etc.) are omitted when absent
 var omitWhenNilFields map[reflect.Type]map[string]bool
 
@@ -181,8 +181,8 @@ func isNilValue(v reflect.Value) bool {
 // MarshalJSON serializes a spec artifact struct to deterministic JSON.
 // Struct fields are serialized in JSON Schema property order and all
 // map[string]T keys are sorted alphabetically. The output uses 2-space
-// indentation with a trailing newline, matching the Python library's
-// json.dumps(indent=2) output byte-for-byte.
+// indentation with a trailing newline, so that a spec on disk round-trips
+// through LoadSpec and Save byte-for-byte.
 func MarshalJSON(v interface{}) ([]byte, error) {
 	if v == nil {
 		return []byte("null\n"), nil
@@ -196,7 +196,7 @@ func MarshalJSON(v interface{}) ([]byte, error) {
 }
 
 // jsonWriter is a custom JSON encoder that produces deterministic output
-// matching the Python library's json.dumps(indent=2) format.
+// in the format MarshalJSON documents.
 type jsonWriter struct {
 	buf   bytes.Buffer
 	depth int
@@ -255,7 +255,7 @@ func (w *jsonWriter) writeValue(v reflect.Value) error {
 			return fmt.Errorf("unsupported float value: %v", f)
 		}
 		if f == math.Trunc(f) && math.Abs(f) < 1e15 {
-			// Whole number — output as integer to match Python behavior
+			// Whole number — output as an integer, without a decimal point
 			fmt.Fprintf(&w.buf, "%d", int64(f))
 		} else {
 			fmt.Fprintf(&w.buf, "%g", f)
