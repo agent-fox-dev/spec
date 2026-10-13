@@ -10,3 +10,6 @@
 stuff.md
 prompts.md
 hack/*
+# build output
+/build/
+coverage.txt
