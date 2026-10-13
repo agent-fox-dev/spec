@@ -370,8 +370,8 @@ func TestRejectionDetailNamesTheCountAndTheLastFailure(t *testing.T) {
 	if sink.rejectionDetail() != "" {
 		t.Error("nothing was rejected, so there is no detail")
 	}
-	sink.reject("the tasks artifact has 2 validation error(s):\n[C7] test TS-01-3 is not owned by any task\n[C8] criterion X")
-	sink.reject("the tasks artifact has 1 validation error(s):\n[C7] test TS-01-4 is not owned by any task")
+	sink.reject(nil, "the tasks artifact has 2 validation error(s):\n[C7] test TS-01-3 is not owned by any task\n[C8] criterion X")
+	sink.reject(nil, "the tasks artifact has 1 validation error(s):\n[C7] test TS-01-4 is not owned by any task")
 	got := sink.rejectionDetail()
 	for _, want := range []string{"2 submission(s) were rejected", "1 validation error(s)", "TS-01-4"} {
 		if !strings.Contains(got, want) {
@@ -406,7 +406,7 @@ func TestARejectionNamesEveryProblemInOnePass(t *testing.T) {
 	first["tests"] = []any{"TS-01-1"}
 
 	before := partial
-	code, err := checkArtifact(bad, afspec.StepTasks, &partial, audit)
+	code, err := checkArtifact(bad, afspec.StepTasks, &partial, audit, false)
 	if err == nil {
 		t.Fatal("a broken plan was accepted")
 	}
@@ -429,7 +429,7 @@ func TestARejectionNamesEveryProblemInOnePass(t *testing.T) {
 	// The audit alone is a project_mismatch.
 	pythonic := deepCopy(t, artifacts[afspec.StepTasks])
 	pythonic["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
-	if code, err := checkArtifact(pythonic, afspec.StepTasks, &partial, audit); err == nil || code != "project_mismatch" {
+	if code, err := checkArtifact(pythonic, afspec.StepTasks, &partial, audit, false); err == nil || code != "project_mismatch" {
 		t.Errorf("audit only: code = %q, err = %v", code, err)
 	}
 }

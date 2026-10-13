@@ -231,13 +231,38 @@ type artifactSink struct {
 	// artifact can say what it was stuck on.
 	rejected int
 	last     string
+	// held is the submission most recently turned back, which the step's
+	// patch tool edits instead of the model regenerating all of it.
+	held map[string]any
+	// reviewed is set once the step's warnings have been sent back: they are
+	// sent back once, and the next submission is accepted with them.
+	reviewed bool
 }
 
-func (a *artifactSink) reject(reason string) {
+// reject records a submission turned back and holds it for the patch tool.
+func (a *artifactSink) reject(content map[string]any, reason string) {
 	a.mu.Lock()
 	a.rejected++
 	a.last = reason
+	a.held = content
 	a.mu.Unlock()
+}
+
+// heldSubmission is the submission most recently turned back, or nil.
+func (a *artifactSink) heldSubmission() map[string]any {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.held
+}
+
+// reviewDue reports whether the step's warnings are still to be sent back,
+// and marks them sent: the caller sends them, or there were none to send.
+func (a *artifactSink) reviewDue() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	due := !a.reviewed
+	a.reviewed = true
+	return due
 }
 
 // rejectionDetail is "" when nothing was rejected, else a sentence naming how
@@ -320,39 +345,101 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 				return core.ErrResult("invalid_json", fmt.Sprintf(
 					"the %s arguments are not a JSON object: %v", step, err))
 			}
-			entriesAsDictionaries(content)
-			// The artifact's $schema is a fact about the format rather than a
-			// judgement about this spec, so it is written here rather than
-			// asked for: the model is not shown the field, and what it would
-			// have typed cannot be wrong.
-			if uri := artifactSchemaURI(step); uri != "" {
-				if content == nil {
-					content = map[string]any{}
-				}
-				content[schemaProperty] = uri
-			}
-			// So are the format version and the spec's identity: the pipeline
-			// knows all three, and the model's copy could only differ.
 			if content == nil {
 				content = map[string]any{}
 			}
-			content["schema_version"] = afspec.SchemaVersion
-			if partial.SpecID != "" {
-				content["spec_id"] = partial.SpecID
-			}
-			if partial.SpecName != "" {
-				content["spec_name"] = partial.SpecName
-			}
-			if code, err := checkArtifact(content, step, partial, audit); err != nil {
-				sink.reject(err.Error())
-				return core.ErrResult(code, err.Error())
-			}
-			sink.set(content)
-			res := core.OKResult(map[string]any{"accepted": true, "artifact": string(step)})
-			res.Terminate = true
-			return res
+			entriesAsDictionaries(content)
+			return settleArtifact(content, step, partial, sink, audit)
 		},
 	}
+}
+
+// settleArtifact accepts a submission, from the submit tool or the patch
+// tool, or turns it back with every problem it has.
+//
+// A submission that passes every rule is turned back once more when the
+// validator has warnings on it — vague wording, a missing contract, a scope
+// past the format's limits — because a warning nobody reads is the same
+// wording in the finished spec. The model fixes what it agrees with, or
+// keeps the artifact as it is; either way the next submission is accepted.
+func settleArtifact(content map[string]any, step afspec.GenerationStep, partial *afspec.PartialSpec,
+	sink *artifactSink, audit func(map[string]any) error) core.ToolResult {
+
+	// The artifact's $schema is a fact about the format rather than a
+	// judgement about this spec, so it is written here rather than asked
+	// for: the model is not shown the field, and what it would have typed
+	// cannot be wrong.
+	if uri := artifactSchemaURI(step); uri != "" {
+		content[schemaProperty] = uri
+	}
+	// So are the format version and the spec's identity: the pipeline knows
+	// all three, and the model's copy could only differ.
+	content["schema_version"] = afspec.SchemaVersion
+	if partial.SpecID != "" {
+		content["spec_id"] = partial.SpecID
+	}
+	if partial.SpecName != "" {
+		content["spec_name"] = partial.SpecName
+	}
+	code, err := checkArtifact(content, step, partial, audit, sink.reviewDue())
+	if err != nil {
+		sink.reject(content, err.Error())
+		msg := err.Error()
+		if code != codeReviewWarnings {
+			msg += fmt.Sprintf("\n\nTo correct it, call %s with operations on just the fields that fail, "+
+				"or call %s with the whole artifact again.", PatchToolName(step), ArtifactToolName(step))
+		}
+		return core.ErrResult(code, msg)
+	}
+	sink.set(content)
+	res := core.OKResult(map[string]any{"accepted": true, "artifact": string(step)})
+	res.Terminate = true
+	return res
+}
+
+// codeReviewWarnings is the tool error of a submission that passes every rule
+// and is sent back once for its warnings.
+const codeReviewWarnings = "review_warnings"
+
+// reviewedChecks are the warnings sent back to the step whose artifact they
+// are on. Each is something the model can fix in place.
+var reviewedChecks = []string{"vague_language", "missing_contract", "scope_limit"}
+
+// maxReviewedWarnings bounds the list sent back: past it, the model is told
+// how many more there are.
+const maxReviewedWarnings = 25
+
+// reviewedWarnings are the warnings on step's own artifact that the model is
+// asked to review.
+func reviewedWarnings(all []afspec.ValidationEntry, step afspec.GenerationStep) []afspec.ValidationEntry {
+	file := afspec.ArtifactFileName(step)
+	var out []afspec.ValidationEntry
+	for _, w := range all {
+		if w.Artifact == file && slices.Contains(reviewedChecks, w.Check) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func reviewMessage(step afspec.GenerationStep, warnings []afspec.ValidationEntry) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "the %s artifact passes every rule, and the validator has %d warning(s) on it: "+
+		"wording or sizing that a reader of the spec, or the coder implementing it, would trip over.\n",
+		step, len(warnings))
+	shown := warnings
+	if len(shown) > maxReviewedWarnings {
+		shown = shown[:maxReviewedWarnings]
+	}
+	b.WriteString(afspec.FormatValidationEntries(shown))
+	if n := len(warnings) - len(shown); n > 0 {
+		fmt.Fprintf(&b, "- and %d more of the same kinds\n", n)
+	}
+	fmt.Fprintf(&b, "Fix the ones worth fixing: a vague word becomes the observable behaviour it stands for. "+
+		"Use %s to change just those fields, or %s for the whole artifact. To keep the artifact as it is, "+
+		"call %s with no operations. Your next submission is accepted with whatever warnings remain.",
+		PatchToolName(step), ArtifactToolName(step), PatchToolName(step))
+	return errors.New(b.String())
 }
 
 // validateArtifactContent decodes a model's arguments for one generation
@@ -362,7 +449,7 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 // A step that fails leaves partial untouched, so the next attempt validates
 // against the same upstream artifacts as the one before it.
 func validateArtifactContent(content map[string]any, step afspec.GenerationStep, partial *afspec.PartialSpec) error {
-	_, err := checkArtifact(content, step, partial, nil)
+	_, err := checkArtifact(content, step, partial, nil, false)
 	return err
 }
 
@@ -373,9 +460,9 @@ func validateArtifactContent(content map[string]any, step afspec.GenerationStep,
 // returned code is the tool error's: validation_failed when the format's own
 // rules fail, project_mismatch when only the audit does.
 func checkArtifact(content map[string]any, step afspec.GenerationStep, partial *afspec.PartialSpec,
-	audit func(map[string]any) error) (string, error) {
+	audit func(map[string]any) error, review bool) (string, error) {
 
-	var schemaErrs, ruleErrs []afspec.ValidationEntry
+	var schemaErrs, ruleErrs, warnings []afspec.ValidationEntry
 	var decodeErr error
 	candidate := *partial
 	decoded, err := afspec.DecodeArtifact(step, content)
@@ -392,13 +479,15 @@ func checkArtifact(content map[string]any, step afspec.GenerationStep, partial *
 		case *afspec.TasksV2Json:
 			candidate.Tasks = artifact
 		}
-		for _, e := range afspec.ValidateGenerationStepComplete(step, candidate).Errors {
+		result := afspec.ValidateGenerationStepComplete(step, candidate)
+		for _, e := range result.Errors {
 			if e.Category == "schema" {
 				schemaErrs = append(schemaErrs, e)
 			} else {
 				ruleErrs = append(ruleErrs, e)
 			}
 		}
+		warnings = reviewedWarnings(result.Warnings, step)
 	}
 	var auditErr error
 	if audit != nil {
@@ -413,6 +502,9 @@ func checkArtifact(content map[string]any, step afspec.GenerationStep, partial *
 		problems++
 	}
 	if problems == 0 {
+		if review && len(warnings) > 0 {
+			return codeReviewWarnings, reviewMessage(step, warnings)
+		}
 		*partial = candidate
 		return "", nil
 	}
