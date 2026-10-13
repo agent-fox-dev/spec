@@ -1,10 +1,14 @@
-.PHONY: check test test-fast lint format coverage doc json-gen
+.PHONY: check build test test-fast lint format coverage doc json-gen
 
 SCHEMAS_DIR := $(CURDIR)/afspec/schemas
 DOC_DIR     ?= build/docs
 
 # Run lint + all tests
 check: lint test
+
+# Build the spec command into build/spec
+build:
+	go build -o build/spec ./cmd/spec
 
 # Run all tests
 test:
