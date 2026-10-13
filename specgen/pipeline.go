@@ -834,6 +834,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			Partial:       &partial,
 			RelevantFiles: prd.RelevantFiles,
 			RepoMap:       e.repoMap,
+			CodebaseNotes: prd.CodebaseNotes,
 		})
 		recordPhase(o.Run, stats, prd.SpecName)
 		done(cli.PhaseSummary(stats))
@@ -850,7 +851,8 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		done := o.Progress.Begin("%swriting architecture.md", prefixed(label))
 		doc, stats, err := e.author.WriteArchitecture(ctx, architectureRequest{
 			SpecID: specID, SpecName: prd.SpecName, Root: e.root, PRD: spec.PRDBody, Partial: &partial,
-			RelevantFiles: prd.RelevantFiles, RepoMap: e.repoMap,
+			RelevantFiles: prd.RelevantFiles, RepoMap: e.repoMap, CodebaseNotes: prd.CodebaseNotes,
+			Profile: e.profile, Steering: project.Steering(e.specsDir),
 		})
 		recordPhase(o.Run, stats, prd.SpecName)
 		done(cli.PhaseSummary(stats))

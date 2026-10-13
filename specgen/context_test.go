@@ -29,7 +29,9 @@ func TestCallerContextReachesThePRDPrompt(t *testing.T) {
 		if len(reqs) == 0 {
 			t.Fatal("the PRD phase sent no request")
 		}
-		return body, transcript(reqs[0])
+		// The input and the context are the phase's cached prefix, ahead of
+		// its task.
+		return body, prefixText(reqs[0])
 	}
 
 	body, sent := prompt(t, block)
@@ -47,4 +49,15 @@ func TestCallerContextReachesThePRDPrompt(t *testing.T) {
 	if strings.Contains(sent, "Additional context") {
 		t.Errorf("a prompt with no --context mentions one:\n%s", sent)
 	}
+}
+
+// prefixText is the text of a request's cached prefix.
+func prefixText(req core.Request) string {
+	var b strings.Builder
+	for _, m := range req.Prefix {
+		if um, ok := m.(core.UserMessage); ok {
+			b.WriteString(blocksText(um.Content))
+		}
+	}
+	return b.String()
 }

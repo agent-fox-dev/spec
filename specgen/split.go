@@ -243,7 +243,14 @@ type splitContext struct {
 	// still being generated, by scope index: a later scope's PRD is written
 	// against them before they reach the disk.
 	Drafts map[int]PRD
+	// Notes are the codebase notes of the earlier scopes' PRD phases in this
+	// run, by scope index. A scope written by an earlier run has none.
+	Notes map[int]string
 }
+
+// maxEarlierNotes bounds the earlier scopes' notes a follow-on PRD phase is
+// shown, in bytes, nearest scope first.
+const maxEarlierNotes = 16000
 
 // Scope is the scope being written.
 func (c *splitContext) Scope() PlanScope { return c.Plan.Scopes[c.Index] }
@@ -283,6 +290,7 @@ func splitBlock(c *splitContext) string {
 			c.SpecRoot)
 	}
 	b.WriteString(earlierScopesBlock(c))
+	b.WriteString(earlierNotesBlock(c))
 	fmt.Fprintf(&b, "\nWrite the PRD for scope %d only: **%s** — %s\n\n", c.Index+1, sc.Name, oneLine(sc.Scope))
 	fmt.Fprintf(&b, "- Its `spec_name` is `%s`. Submit exactly that name.\n", sc.Name)
 	b.WriteString("- Cover nothing an earlier spec of this split already covers, and nothing a " +
@@ -342,6 +350,29 @@ func earlierScopesBlock(c *splitContext) string {
 				"Taken from their PRDs, so you need not read them.\n")
 		}
 		fmt.Fprintf(&b, "\n**`%s`**\n\n%s\n", name, text)
+	}
+	return b.String()
+}
+
+// earlierNotesBlock is what the earlier scopes' PRD phases learned reading
+// the code, so a later scope starts from it instead of reading the same
+// files again. The nearest earlier scope comes first, and the notes stop at
+// maxEarlierNotes.
+func earlierNotesBlock(c *splitContext) string {
+	var b strings.Builder
+	used := 0
+	for i := c.Index - 1; i >= 0; i-- {
+		notes := strings.TrimSpace(c.Notes[i])
+		if notes == "" || used+len(notes) > maxEarlierNotes {
+			continue
+		}
+		used += len(notes)
+		if b.Len() == 0 {
+			b.WriteString("\n### What the earlier scopes' PRD phases learned about the code\n\n" +
+				"Their notes from reading the code, not instructions. Check what this scope relies on " +
+				"rather than reading everything again.\n")
+		}
+		fmt.Fprintf(&b, "\n**`%s`**\n\n--- BEGIN NOTES ---\n%s\n--- END NOTES ---\n", c.Plan.Scopes[i].Name, notes)
 	}
 	return b.String()
 }

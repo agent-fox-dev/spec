@@ -149,6 +149,12 @@ type Phase struct {
 	// System and User are the two prompts.
 	System string
 	User   string
+	// Prefix is context sent before User, as the same user turn, with a
+	// prompt-cache breakpoint of its own after it. Phases that share their
+	// system prompt, their tools and this text share the cached prefix too,
+	// so the context several phases read is paid for at the cache-read rate
+	// after the first.
+	Prefix string
 	// RepoMap is the repository map the caller put into User. The runner
 	// never injects it; the field exists so its size can be logged.
 	RepoMap string
@@ -302,6 +308,7 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 		Effort:     model.Effort,
 		System:     system,
 		Tools:      granted,
+		Prefix:     prefixMessages(p.Prefix),
 		MaxTurns:   r.cfg.Bounds.ResolvedMaxTurns(),
 		MaxCostUSD: r.cfg.Bounds.ResolvedMaxBudget(),
 		Timeout:    r.cfg.Bounds.Timeout,
@@ -312,6 +319,15 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 		return nil, newError(p.Name, CategoryInternal, err, "building the agent: %v", err)
 	}
 	return agent, nil
+}
+
+// prefixMessages is a phase's Prefix as the driver takes it: one user
+// message, or none.
+func prefixMessages(prefix string) []core.Message {
+	if strings.TrimSpace(prefix) == "" {
+		return nil
+	}
+	return []core.Message{core.UserMessage{Content: core.Content{core.TextBlock{Text: prefix}}}}
 }
 
 // grantedTools is the set one phase declares: its own tools, then the named
@@ -514,5 +530,7 @@ func toolsNote(granted []core.Tool) string {
 	}
 	sort.Strings(names)
 	return "\n\nYour tools are exactly: " + strings.Join(names, ", ") + ". Calling any other tool is an error." +
-		" There is no shell: read with the file tools, and do not call `bash`, `execute` or `run_command`."
+		" There is no shell: read with the file tools, and do not call `bash`, `execute` or `run_command`." +
+		" When you know several files or searches you need, ask for them in one response: calls made" +
+		" together run together, and every extra turn re-reads the whole conversation."
 }

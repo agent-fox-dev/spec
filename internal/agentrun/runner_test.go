@@ -439,3 +439,42 @@ func mustChoice(t *testing.T, raw string) PhaseChoice {
 	}
 	return c
 }
+
+// A phase's Prefix reaches the request as the driver's cached prefix, ahead
+// of the prompt, and an empty one sends none.
+func TestAPhasePrefixIsTheRequestsCachedPrefix(t *testing.T) {
+	for _, prefix := range []string{"Shared context.", ""} {
+		p := faux.New()
+		var got string
+		r := newRunner(t, p, Config{})
+		_, _ = r.Run(context.Background(), Phase{
+			Name: "answer", User: "Go.", Prefix: prefix, Terminator: terminator,
+			Custom: []core.Tool{submitTool(&got)},
+		})
+		req := p.Requests()[0]
+		if prefix == "" {
+			if len(req.Prefix) != 0 {
+				t.Errorf("an empty prefix sent %v", req.Prefix)
+			}
+			continue
+		}
+		if len(req.Prefix) != 1 || !strings.Contains(messageText(req.Prefix[0]), prefix) {
+			t.Errorf("prefix = %+v", req.Prefix)
+		}
+		if strings.Contains(messageText(req.Messages[0]), prefix) {
+			t.Error("the prefix was also sent in the prompt")
+		}
+	}
+}
+
+func messageText(m core.Message) string {
+	var b strings.Builder
+	if um, ok := m.(core.UserMessage); ok {
+		for _, blk := range um.Content {
+			if tb, ok := blk.(core.TextBlock); ok {
+				b.WriteString(tb.Text)
+			}
+		}
+	}
+	return b.String()
+}

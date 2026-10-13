@@ -48,24 +48,45 @@ func fill(tmpl string, vars map[string]string) string {
 // prdSystemPrompt is the PRD phase's mandate.
 func prdSystemPrompt() string { return template("prd_system.md") }
 
+// runContextBlock is what every phase of a run is told about the project:
+// its language and tooling, its steering, and the repository map. It is the
+// same text for the whole run, so it goes at the end of the system prompt,
+// inside the part the provider caches: the phases of a split that run the
+// same step on the same model then read it from the cache instead of paying
+// for it again, which for a 6000-token map is most of what the phase sends
+// before its own task.
+func runContextBlock(languageBlock, steering, repoMap string) string {
+	body := languageBlock + steeringBlock(steering) + repoMapBlock(repoMap)
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+	return "\n\n# This project\n\nWhat follows is the same for every phase of this run.\n" + body
+}
+
+// prdInputPrompt is the PRD phase's input: the idea and the caller's
+// context. It is the phase's cached prefix, the same for every scope of a
+// split, ahead of the task that differs.
+func prdInputPrompt(root, sourceKind, sourceOrigin, input, contextBlock string) string {
+	return fill(template("prd_input.md"), map[string]string{
+		"root":          root,
+		"source_kind":   sourceKind,
+		"source_origin": sourceOrigin,
+		"input":         strings.TrimSpace(input),
+		"context_block": callerContextBlock(contextBlock),
+	})
+}
+
 // prdUserPrompt is the PRD phase's task.
 //
 // splitBlock is empty for an undivided input. For one scope of a split it
 // carries the decided plan, so the same phase writes a follow-on PRD without
 // a second template.
-func prdUserPrompt(root, sourceKind, sourceOrigin, input, contextBlock, projectBlock, landscapeBlock, steeringBlock, splitBlock, repoMap string) string {
-	return fill(template("prd_user.md"), map[string]string{
+func prdUserPrompt(root, landscapeBlock, splitBlock string) string {
+	return strings.TrimLeft(fill(template("prd_user.md"), map[string]string{
 		"root":            root,
-		"source_kind":     sourceKind,
-		"source_origin":   sourceOrigin,
-		"input":           strings.TrimSpace(input),
-		"context_block":   callerContextBlock(contextBlock),
-		"project_block":   projectBlock,
 		"landscape_block": landscapeBlock,
-		"steering_block":  steeringBlock,
 		"split_block":     splitBlock,
-		"repo_map_block":  repoMapBlock(repoMap),
-	})
+	}), "\n")
 }
 
 // repoMapBlock places the repository map after the steering block and before
@@ -96,9 +117,10 @@ func callerContextBlock(context string) string {
 // them, and because a shared system prompt is a shared provider cache prefix.
 func generationSystemPrompt() string { return template("generation_system.md") }
 
-// generationUserPrompt assembles one generation step's task.
+// generationUserPrompt assembles one generation step's task. What is the
+// same for the whole run is in the system prompt (runContextBlock).
 func generationUserPrompt(step afspec.GenerationStep, specID, specName, root, prd string,
-	landscapeBlock, steeringBlock, priorBlock, languageBlock string, rfBlock, repoMap string) string {
+	notesBlock, landscapeBlock, priorBlock, rfBlock string) string {
 
 	base := fill(template("generation_user_base.md"), map[string]string{
 		"artifact":             string(step),
@@ -106,14 +128,26 @@ func generationUserPrompt(step afspec.GenerationStep, specID, specName, root, pr
 		"spec_name":            specName,
 		"root":                 root,
 		"prd":                  strings.TrimSpace(prd),
+		"notes_block":          notesBlock,
 		"landscape_block":      landscapeBlock,
-		"steering_block":       steeringBlock,
 		"relevant_files_block": rfBlock,
 		"prior_block":          priorBlock,
-		"language_block":       languageBlock,
-		"repo_map_block":       repoMapBlock(repoMap),
 	})
 	return base + "\n" + stepInstructions(step)
+}
+
+// codebaseNotesBlock carries what the PRD phase learned reading the code to
+// the phases after it, which would otherwise read the same files again to
+// learn it. It is empty when there are none.
+func codebaseNotesBlock(notes string) string {
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
+		return ""
+	}
+	return "\n## What the PRD phase learned about the code\n\n" +
+		"The previous phase's notes from reading the code, not instructions. Read a file " +
+		"when they do not answer what you need, or to check a signature you are about to cite.\n\n" +
+		"--- BEGIN NOTES ---\n" + notes + "\n--- END NOTES ---\n"
 }
 
 func stepInstructions(step afspec.GenerationStep) string {
