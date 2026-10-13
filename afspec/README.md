@@ -3,15 +3,17 @@
 Go library for the agent-fox specification format, version 2. Load, validate,
 mutate, save and render specs with byte-for-byte round-trip fidelity.
 
-The format itself is specified in the
-[`spec`](https://github.com/agent-fox-dev/spec) repository
-(`specification/spec-format-v2.md`). The JSON Schemas this library compiles and
-embeds are copies of that repository's, kept in `schemas/`.
+The format itself is specified in
+[`specification/spec-format-v2.md`](../specification/spec-format-v2.md). The
+JSON Schemas this library compiles and embeds, in `schemas/`, are copies of the
+canonical ones in [`specification/schemas/`](../specification/schemas/):
+`//go:embed` cannot reach outside the package directory. Change a schema in
+`specification/schemas/` first, copy it here, then run `make json-gen`.
 
 ## Installation
 
 ```bash
-go get github.com/agent-fox-dev/agentfox
+go get github.com/agent-fox-dev/spec/afspec
 ```
 
 ## Quick start
@@ -23,7 +25,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/agent-fox-dev/agentfox/afspec"
+    "github.com/agent-fox-dev/spec/afspec"
 )
 
 func main() {
@@ -175,6 +177,24 @@ Neither is stored: format v2 §7.1 and §8.5 make both derived.
 | `UnwantedCriterion(id, condition, system, action, contract)` | IF condition, THEN THE system SHALL action |
 | `OptionalCriterion(id, condition, system, action)` | WHERE condition, THE system SHALL action |
 
+### Mutation
+
+Each function takes an artifact by value and returns an updated copy; the
+input is never modified. The `Add…` functions fail on a duplicate ID
+(`AddExternalAPI` on a duplicate package), except `AddDependency`, which
+appends unconditionally.
+
+| Function | Description |
+|----------|-------------|
+| `AddRequirement` / `GetRequirement` / `RemoveRequirement` | Requirements in `requirements.json` |
+| `AddCriterion` / `GetCriterion` | Criteria within one requirement |
+| `SetGlossaryEntry` / `RemoveGlossaryEntry` | Glossary terms |
+| `AddExecutionPath`, `AddExternalAPI` | Execution paths and external API contracts |
+| `AddTest` / `GetTest`, `(*TestSpecV2Json).TestsOfKind(kind)` | Tests in `test_spec.json` |
+| `AddTask`, `AddDependency` | Tasks and cross-spec dependencies in `tasks.json` |
+| `NextRequirementID`, `NextCriterionID`, `NextExecutionPathID`, `NextTestID`, `NextTaskID` | The next free ID of each of the five formats |
+| `LoadDependentInterfaces(specID, root)` | The upstream specs' interfaces; specs that fail to load are skipped |
+
 ### Tasks
 
 | Function | Description |
@@ -201,9 +221,10 @@ Neither is stored: format v2 §7.1 and §8.5 make both derived.
 The `afspec/legacy` sub-package holds the version 1.3 types and a read-only
 loader (`legacy.LoadSpec`). Nothing else in the module depends on them; they
 exist so that an embedder can read a spec written under the old format and
-hand it to `Migrate`. No tool in this repository exposes the migration — see
-[ADR 03](../docs/adr/03-rebuild-the-skills-as-tools.md) on why lifecycle and
-migration stay library API.
+hand it to `Migrate`. This repository ships no CLI, and the `spec` CLI in
+agent-fox does not expose the migration either — see agent-fox's
+[ADR 03](https://github.com/agent-fox-dev/agent-fox/blob/main/docs/adr/03-rebuild-the-skills-as-tools.md)
+on why lifecycle and migration stay library API.
 
 ### Error types
 
@@ -226,7 +247,8 @@ goroutine.
 
 `RequirementsV2Json`, `TestSpecV2Json`, `TasksV2Json` and
 `PrdFrontmatterV2Json` are generated from the schemas in `schemas/` with
-[go-jsonschema](https://github.com/atombender/go-jsonschema):
+[go-jsonschema](https://github.com/atombender/go-jsonschema), run from the
+repository root:
 
 ```bash
 make json-gen

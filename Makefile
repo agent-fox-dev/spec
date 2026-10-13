@@ -36,8 +36,8 @@ coverage:
 	go tool cover -func=coverage.txt
 
 # Regenerate the Go artifact types from the bundled JSON Schemas.
-# The canonical schemas live in the agent-fox-dev/spec repository; the copies
-# under afspec/schemas/ are what the library compiles and embeds.
+# The canonical schemas live in specification/schemas/; the copies under
+# afspec/schemas/ are what the library compiles and embeds.
 # --only-models: structural checking belongs to Validate(), which runs the
 # compiled schemas. Generated UnmarshalJSON methods would duplicate it and
 # would also reject a scaffold that `spec new` must be able to write and read.

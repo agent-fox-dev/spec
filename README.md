@@ -52,11 +52,18 @@ validation or code generation.
 
 ## Implementations
 
-This repository is the home of the **format** only — it contains no
-implementation code. The reference implementation — the `afspec` Go library,
-the `specgen` generation pipeline and the `spec` CLI — lives in
-[agent-fox](https://github.com/agent-fox-dev/agent-fox); it bundles a copy of
-the schemas above.
+This repository holds the format and its reference library:
+
+| Path | What it is |
+| --- | --- |
+| `specification/` | The format: the reference documents and the canonical JSON Schemas |
+| [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save, render and migrate spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
+| `afspec/legacy/` | The version 1.3 types and a read-only loader, used only as input to `afspec.Migrate` |
+
+The `specgen` generation pipeline and the `spec` CLI live in
+[agent-fox](https://github.com/agent-fox-dev/agent-fox) and use `afspec` as a
+library. See [docs/architecture.md](docs/architecture.md) for how the pieces
+fit together.
 
 ## Generating a Spec Package
 
@@ -97,7 +104,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 
 Lifecycle management for an existing package — activating, sealing,
 archiving, superseding, validating, rendering — has no CLI surface; it's
-library API in `afspec` for an embedder to call.
+library API in [`afspec`](afspec/README.md) for an embedder to call.
 
 ## Installation
 
@@ -110,10 +117,26 @@ curl -fsSL https://raw.githubusercontent.com/agent-fox-dev/agent-fox/refs/heads/
 ### Go library
 
 ```bash
-go get github.com/agent-fox-dev/agentfox
+go get github.com/agent-fox-dev/spec/afspec
 ```
+
+## Development
+
+The library needs Go 1.27 or later.
+
+| Command | What it does |
+| --- | --- |
+| `make check` | `make lint` then `make test` |
+| `make test` | `go test ./... -count=1` |
+| `make test-fast` | The tests with `-short` |
+| `make lint` | `gofmt -l` must report nothing, then `go vet ./...` |
+| `make format` | `gofmt -w .` |
+| `make coverage` | Test coverage per function |
+| `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
 
 ## Documentation
 
 - [Spec Format Reference v2](specification/spec-format-v2.md) — field-level schemas, EARS patterns, validation rules, and rendering
 - [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
+- [afspec](afspec/README.md) — the Go library's API
+- [Architecture](docs/architecture.md) — repository layout, the schema copies, and how agent-fox consumes the library
