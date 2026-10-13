@@ -212,19 +212,13 @@ appends unconditionally.
 | `DiscoverLintSpecs(specsDir, filterSpec)` | The specs a lint run would look at |
 | `SortFindings(findings)` / `ComputeExitCode(findings)` | Order findings by severity, and the exit status they imply |
 
-### Migration
+### Version 1.3 specs
 
-| Function | Description |
-|----------|-------------|
-| `Migrate(src, specID, specName)` | Convert version 1.3 artifacts to version 2, with a report |
-
-The `afspec/legacy` sub-package holds the version 1.3 types and a read-only
-loader (`legacy.LoadSpec`). Nothing else in the module depends on them; they
-exist so that an embedder can read a spec written under the old format and
-hand it to `Migrate`. This repository ships no CLI, and the `spec` CLI in
-agent-fox does not expose the migration either — see agent-fox's
-[ADR 03](https://github.com/agent-fox-dev/agent-fox/blob/main/docs/adr/03-rebuild-the-skills-as-tools.md)
-on why lifecycle and migration stay library API.
+The library reads version 2 only. A spec that declares an older
+`schema_version` fails validation with a single `schema_version` error rather
+than one schema error per difference. Section 13 of the
+[format reference](../specification/spec-format-v2.md) maps each version 1.3
+construct to its version 2 form.
 
 ### Error types
 

@@ -57,8 +57,7 @@ This repository holds the format and its reference library:
 | Path | What it is |
 | --- | --- |
 | `specification/` | The format: the reference documents and the canonical JSON Schemas |
-| [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save, render and migrate spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
-| `afspec/legacy/` | The version 1.3 types and a read-only loader, used only as input to `afspec.Migrate` |
+| [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save and render spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
 
 The `specgen` generation pipeline and the `spec` CLI live in
 [agent-fox](https://github.com/agent-fox-dev/agent-fox) and use `afspec` as a

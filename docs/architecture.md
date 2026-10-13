@@ -13,7 +13,6 @@ specification/              # The format (no code)
   schemas/                  #   Canonical JSON Schemas, v1 and v2
 afspec/                     # The reference library, package afspec
   schemas/                  #   Embedded copies of the v2 schemas
-  legacy/                   #   Version 1.3 types and a read-only loader
   testdata/                 #   Spec package fixtures for the tests
 docs/                       # Repository documentation
 .specs/                     # Spec packages for work on this repository
@@ -40,8 +39,7 @@ byte-identical. To change a schema:
 3. Run `make json-gen` to regenerate `requirements.v2.go`, `test_spec.v2.go`,
    `tasks.v2.go` and `prd-frontmatter.v2.go`.
 
-The v1 schemas have no copy in `afspec/`: the `legacy` package's types were
-generated from them once and are not regenerated.
+The v1 schemas have no copy in `afspec/`: the library reads version 2 only.
 
 ### What the library does
 
@@ -56,7 +54,6 @@ generated from them once and are not regenerated.
 | Derived coverage and traceability | `coverage.go` |
 | Markdown rendering, with a token budget | `render.go`, `render_budget.go`, `estimate_tokens.go`, `ears.go` |
 | Stepwise validation for a generation pipeline | `generation.go` |
-| Migration from version 1.3 | `migrate.go`, `legacy/` |
 
 The full API is listed in [afspec/README.md](../afspec/README.md).
 
@@ -64,5 +61,5 @@ The full API is listed in [afspec/README.md](../afspec/README.md).
 
 The `spec` CLI and the `specgen` generation pipeline live in
 [agent-fox](https://github.com/agent-fox-dev/agent-fox) and import `afspec` as
-a library. This repository ships no binary. Lifecycle management and migration
-have no CLI surface anywhere; they are library API for an embedder to call.
+a library. This repository ships no binary. Lifecycle management has no CLI
+surface anywhere; it is library API for an embedder to call.

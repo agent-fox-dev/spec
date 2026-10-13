@@ -452,7 +452,7 @@ func messages(result ValidationResult) []string {
 
 // TestLegacySpecIsReportedAsAVersionMismatch guards the operator experience of
 // the migration this format change requires: a version 1 spec produces one
-// sentence naming the version and the function that converts it, not a schema
+// sentence naming the version and where the conversion is described, not a schema
 // error per artifact plus every shape difference underneath.
 func TestLegacySpecIsReportedAsAVersionMismatch(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
@@ -468,8 +468,8 @@ func TestLegacySpecIsReportedAsAVersionMismatch(t *testing.T) {
 	if result.Errors[0].Check != "schema_version" {
 		t.Errorf("check = %q; want schema_version", result.Errors[0].Check)
 	}
-	if !strings.Contains(result.Errors[0].Message, "afspec.Migrate") {
-		t.Errorf("the message does not name the function that converts it: %q", result.Errors[0].Message)
+	if !strings.Contains(result.Errors[0].Message, "§13") {
+		t.Errorf("the message does not say where the conversion is described: %q", result.Errors[0].Message)
 	}
 }
 
