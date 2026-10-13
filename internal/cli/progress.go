@@ -25,6 +25,18 @@ type Progress struct {
 	quiet    bool
 	showText bool
 	spin     *spinner
+	// spinOwner is the step whose line the spinner sits on.
+	spinOwner *begun
+}
+
+// begun is one step Begin started. inline is true while its done line can
+// still finish the line Begin started; anything printed in between ends that
+// line, and done then prints a whole line of its own. Steps of a split's
+// scopes overlap, so a step can never assume the terminal's last line is its
+// own.
+type begun struct {
+	label  string
+	inline bool
 }
 
 // Progress is the phase runner's observer.
@@ -75,39 +87,45 @@ func (p *Progress) Raw(s string) {
 }
 
 // Begin starts a step that will take a while, returning the function that
-// ends it. On a terminal, without --verbose, a spinner runs so an operator
-// can tell a ten-minute model call from a hang.
+// ends it. On a terminal, without --verbose, a spinner runs so an operator can
+// tell a ten-minute model call from a hang; only one step owns the spinner at
+// a time.
 func (p *Progress) Begin(format string, args ...any) func(summary string) {
 	if p == nil || p.quiet {
 		return func(string) {}
 	}
-	label := strings.TrimSpace(fmt.Sprintf(format, args...))
+	b := &begun{label: strings.TrimSpace(fmt.Sprintf(format, args...))}
 	start := time.Now()
 
 	p.mu.Lock()
 	p.stopSpinnerLocked()
-	fmt.Fprintf(p.w, "[%s] %s ", p.tool, label)
 	if !p.verbose && !p.showText && isTerminal(p.w) {
-		p.spin = startSpinner(p.w, &p.mu)
+		fmt.Fprintf(p.w, "[%s] %s ", p.tool, b.label)
+		b.inline = true
+		p.spin, p.spinOwner = startSpinner(p.w, &p.mu), b
 	} else {
-		fmt.Fprintln(p.w)
+		fmt.Fprintf(p.w, "[%s] %s\n", p.tool, b.label)
 	}
 	p.mu.Unlock()
 
 	return func(summary string) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		hadSpinner := p.spin != nil
-		p.stopSpinnerLocked()
 		line := fmt.Sprintf("(%s)", FormatDuration(time.Since(start)))
 		if summary != "" {
 			line += " " + summary
 		}
-		if hadSpinner {
+		if p.spinOwner == b {
+			p.spin.stopLocked()
+			p.spin, p.spinOwner = nil, nil
+		} else {
+			p.stopSpinnerLocked()
+		}
+		if b.inline {
 			fmt.Fprintf(p.w, "%s\n", line)
 			return
 		}
-		fmt.Fprintf(p.w, "[%s] %s done %s\n", p.tool, label, line)
+		fmt.Fprintf(p.w, "[%s] %s done %s\n", p.tool, b.label, line)
 	}
 }
 
@@ -127,10 +145,18 @@ func (p *Progress) Turn(phase string, turn int, costUSD float64) {
 	p.Detail("%s: turn %d, $%.2f so far", phase, turn, costUSD)
 }
 
+// stopSpinnerLocked stops the spinner, ends the line it sat on, and tells
+// its owner that its done line must be a whole line.
 func (p *Progress) stopSpinnerLocked() {
-	if p.spin != nil {
-		p.spin.stopLocked()
-		p.spin = nil
+	if p.spin == nil {
+		return
+	}
+	p.spin.stopLocked()
+	p.spin = nil
+	if p.spinOwner != nil {
+		p.spinOwner.inline = false
+		p.spinOwner = nil
+		fmt.Fprintln(p.w)
 	}
 }
 

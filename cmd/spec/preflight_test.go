@@ -19,7 +19,7 @@ import (
 //
 // Verifies: 11-REQ-2.4
 func TestTS11_10_SpecOptionsIsOneFunctionForBothClosures(t *testing.T) {
-	f := &specFlags{specsDir: "specs", name: "my_spec", architecture: true, noActivate: true, comment: true}
+	f := &specFlags{specsDir: "specs", name: "my_spec", architecture: true, noActivate: true, comment: true, maxParallel: 2}
 	d := cli.Deps{
 		Common: &cli.Common{DryRun: true, TotalBudgetUSD: 9},
 		Input:  cli.Input{Kind: cli.KindText, Origin: "argument", Body: "an idea"},
@@ -30,7 +30,8 @@ func TestTS11_10_SpecOptionsIsOneFunctionForBothClosures(t *testing.T) {
 		t.Errorf("two builds differ:\n%+v\n%+v", optsA, optsB)
 	}
 	if optsA.SpecsDir != "specs" || optsA.Name != "my_spec" || !optsA.Architecture || optsA.Activate ||
-		!optsA.Comment || !optsA.DryRun || optsA.TotalBudgetUSD != 9 || optsA.Input.Body != "an idea" {
+		!optsA.Comment || !optsA.DryRun || optsA.TotalBudgetUSD != 9 || optsA.Input.Body != "an idea" ||
+		optsA.MaxParallel != 2 {
 		t.Errorf("flags did not reach the options: %+v", optsA)
 	}
 

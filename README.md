@@ -104,6 +104,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--phase-model` | Run one phase on another model and effort, e.g. `tasks=claude-haiku-4-5:medium`; a tier already runs the later phases lower |
 | `--budget`, `--max-turns`, `--total-budget` | Per-phase and whole-run ceilings |
 | `--preflight` | Run every check that would refuse the run, then stop before any model call |
+| `--max-parallel` | How many packages of a split are generated at once (default 3) |
 
 The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
 Bedrock. Every flag, the envelope, the error categories and the warning codes

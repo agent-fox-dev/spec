@@ -95,8 +95,19 @@ table does not know (`./scripts/ci.sh`) is left alone.
 
 A spec is one cohesive feature. When the input is more, the PRD phase writes
 the PRD for the first scope and reports the full split; `spec` then writes
-**every** scope, one package per scope, in order, each later scope getting its
-own PRD phase that is shown the packages before it.
+**every** scope, one package per scope, each later scope getting its own PRD
+phase.
+
+The scopes are **pipelined**. Their PRD phases run one after another, each
+shown the Intent, Goals and Non-goals of the scopes before it — from `prd.md`
+for a package on disk, and from the PRD this run just wrote for one still
+being generated. A scope's package (its three generation phases, the write,
+the validation) starts as soon as its PRD exists, beside the next scope's PRD
+phase, with at most `--max-parallel` packages (default 3) in flight. Package
+numbers are reserved in scope order, and the result reports the packages in
+plan order, whichever finishes first. `--max-parallel 1` writes the scopes one
+after another, each scope's PRD waiting for the package before it. Progress
+lines of a scope carry its label (`scope 2 of 4 (issuex_github): …`).
 
 The split is recorded in the spec root as `<first_scope>.split.json` while it
 is unfinished. A run that stops early leaves the plan and the packages it
@@ -110,7 +121,13 @@ A package's number is reserved when it is allocated, by creating its directory
 under a short lock (`.spec-number.lock` in the spec root), so a concurrent run
 cannot take the same number. A package that does not validate stops nothing:
 it is on disk, its errors name the rules, the later scopes are written, and
-the run exits 1 with `category: "invalid_spec"`.
+the run exits 1 with `category: "invalid_spec"`. Any other failure — a PRD or
+generation phase, a `--total-budget` stop before a scope's PRD phase — stops
+the run starting anything new; the packages already being generated finish
+and are recorded in the plan. The failed scopes are marked `failed` in
+`result.split`, the error names the first of them, and the next run on the
+same input writes the scopes still without a package. `--total-budget` counts
+the phases that have finished, so packages in flight can take a run past it.
 
 ## Flags
 
@@ -123,6 +140,7 @@ the run exits 1 with `category: "invalid_spec"`.
 | `--architecture` | off | also write the optional `architecture.md` |
 | `--no-activate` | off | leave a valid package in `draft` |
 | `--comment` | off | post the finished PRD back to the issue the input came from; needs an issue input and a forge token (`GITHUB_TOKEN`/`GH_TOKEN` or `GITLAB_TOKEN`). An invalid package's PRD is not posted |
+| `--max-parallel` | 3 | how many packages of a split are generated at once, beside the next scope's PRD phase; `1` writes the scopes one after another; less is a usage error |
 
 ### The model and the ceilings
 
