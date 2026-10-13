@@ -111,9 +111,10 @@ func (p *Progress) Begin(format string, args ...any) func(summary string) {
 	}
 }
 
-// PhaseStart traces the ceilings a phase runs under, under --verbose.
-func (p *Progress) PhaseStart(phase string, maxTurns int, budgetUSD float64) {
-	p.Detail("%s: at most %d turns, $%.2f", phase, maxTurns, budgetUSD)
+// PhaseStart traces the model and the ceilings a phase runs under, under
+// --verbose.
+func (p *Progress) PhaseStart(phase, model string, maxTurns int, budgetUSD float64) {
+	p.Detail("%s: %s, at most %d turns, $%.2f", phase, model, maxTurns, budgetUSD)
 }
 
 // PhaseEnd traces how a phase ended, under --verbose.

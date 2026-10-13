@@ -64,6 +64,8 @@ type Common struct {
 	// Preflight runs every check that would refuse the run, then stops
 	// before any model phase.
 	Preflight bool
+	// PhaseModels are the --phase-model values, in the order given.
+	PhaseModels []agentrun.PhaseChoice
 }
 
 type contextFlag []string
@@ -77,6 +79,30 @@ func (f *contextFlag) String() string {
 
 func (f *contextFlag) Set(val string) error {
 	*f = append(*f, val)
+	return nil
+}
+
+// phaseModelFlag collects --phase-model values, each checked as it is
+// parsed so a bad one is a usage error before anything runs.
+type phaseModelFlag struct{ val *[]agentrun.PhaseChoice }
+
+func (f *phaseModelFlag) String() string {
+	if f.val == nil {
+		return ""
+	}
+	parts := make([]string, len(*f.val))
+	for i, c := range *f.val {
+		parts[i] = c.Phase + "=" + c.Model
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (f *phaseModelFlag) Set(raw string) error {
+	c, err := agentrun.ParsePhaseChoice(raw)
+	if err != nil {
+		return err
+	}
+	*f.val = append(*f.val, c)
 	return nil
 }
 
@@ -103,6 +129,7 @@ func (c *Common) Register(fs *flag.FlagSet) {
 	fs.StringVar(&c.Dir, "dir", ".", "the repository to work in; the file tools cannot reach outside it")
 	fs.StringVar(&c.Model, "model", "", "model tier (SIMPLE, STANDARD, ADVANCED) or catalog model id; default $"+ModelEnv+", else "+DefaultModel)
 	fs.Var(&effortFlag{val: &c.Effort}, "effort", "reasoning effort: "+strings.Join(agentrun.EffortValues(), ", ")+"; default $"+EffortEnv+", else the tier's own effort")
+	fs.Var(&phaseModelFlag{val: &c.PhaseModels}, "phase-model", "PHASE=MODEL[:EFFORT]: run one phase ("+strings.Join(agentrun.Phases, ", ")+") on another model (a tier or a catalog id) and effort; repeatable")
 	fs.IntVar(&c.MaxTurns, "max-turns", 0, "per-phase turn ceiling, also the repair budget")
 	fs.Float64Var(&c.Budget, "budget", 0, "per-phase spend ceiling, in dollars")
 	fs.DurationVar(&c.Timeout, "phase-timeout", 0, "wall-clock ceiling on one phase")
@@ -239,10 +266,12 @@ func (c *Common) ModelSpec() string {
 	return DefaultModel
 }
 
-// ResolveModel resolves the model and its effort: --effort, then
-// $AF_MODEL_EFFORT, then the tier's own effort. An invalid environment value
-// is a usage error, like an invalid flag value.
-func (c *Common) ResolveModel() (agentrun.Model, error) {
+// ResolveModels resolves the model and effort of every phase: --model (or
+// its environment) for all of them, --effort (then $AF_MODEL_EFFORT, then each
+// phase's tier effort) for all of them, and each --phase-model for its own
+// phase. An invalid environment value is a usage error, like an invalid flag
+// value.
+func (c *Common) ResolveModels() (agentrun.Plan, error) {
 	raw, from := c.Effort, "--effort"
 	if raw == "" {
 		raw, from = os.Getenv(EffortEnv), "$"+EffortEnv
@@ -252,11 +281,11 @@ func (c *Common) ResolveModel() (agentrun.Model, error) {
 	if explicit {
 		e, err := agentrun.ParseEffort(raw)
 		if err != nil {
-			return agentrun.Model{}, Usagef("%s: %v", from, err)
+			return agentrun.Plan{}, Usagef("%s: %v", from, err)
 		}
 		effort = e
 	}
-	return agentrun.ResolveModel(c.ModelSpec(), effort, explicit)
+	return agentrun.ResolvePlan(c.ModelSpec(), effort, explicit, c.PhaseModels)
 }
 
 // SplitArgs separates the one positional argument from the flags, allowing

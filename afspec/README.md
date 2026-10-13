@@ -122,6 +122,7 @@ The cross-file rules, all errors:
 | `GenerationSteps` | The mandatory order: requirements, test_spec, tasks |
 | `DecodeArtifact(step, content)` | Decode a model's tool input into the typed artifact |
 | `ValidateGenerationStep(step, partial)` | The artifact's schema plus every rule decidable at that step |
+| `ValidateGenerationStepComplete(step, partial)` | The same, without stopping at a schema failure: every rule runs, so a repair loop hears of every problem at once |
 | `FormatValidationEntries(entries) string` | Render violations as repair feedback |
 
 ### Lifecycle

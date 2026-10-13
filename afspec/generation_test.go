@@ -233,3 +233,66 @@ func TestFormatValidationEntries(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateGenerationStepCompleteReportsEveryProblemInOnePass: a tasks
+// artifact that breaks the schema AND orphans tests is told about both at
+// once, schema errors first, instead of learning of the orphans only after
+// regenerating the whole file to fix the schema.
+func TestValidateGenerationStepCompleteReportsEveryProblemInOnePass(t *testing.T) {
+	partial := partialFrom(t, StepRequirements, StepTestSpec, StepTasks)
+	tasks := *partial.Tasks
+	tasks.Tasks = append([]Task{}, tasks.Tasks...)
+	tasks.Tasks[0].Title = ""                  // violates minLength
+	tasks.Tasks[0].Tests = []string{"TS-01-1"} // orphans the others
+	partial.Tasks = &tasks
+
+	short := ValidateGenerationStep(StepTasks, partial)
+	if hasCheck(short, "C7") {
+		t.Fatalf("ValidateGenerationStep should still stop at the schema: %v", errorChecks(short))
+	}
+
+	result := ValidateGenerationStepComplete(StepTasks, partial)
+	if result.Valid {
+		t.Fatal("an invalid plan was accepted")
+	}
+	if !hasCheck(result, "C7") || !hasCheck(result, "json_schema") {
+		t.Fatalf("checks = %v; want the schema error and C7", errorChecks(result))
+	}
+	if result.Errors[0].Category != "schema" {
+		t.Errorf("the schema errors should come first: %+v", result.Errors[0])
+	}
+}
+
+// TestValidateGenerationStepCompleteMatchesOnAValidStep: with nothing wrong,
+// the two functions agree.
+func TestValidateGenerationStepCompleteMatchesOnAValidStep(t *testing.T) {
+	for _, step := range GenerationSteps {
+		var produced []GenerationStep
+		for _, s := range GenerationSteps {
+			produced = append(produced, s)
+			if s == step {
+				break
+			}
+		}
+		if r := ValidateGenerationStepComplete(step, partialFrom(t, produced...)); !r.Valid {
+			t.Errorf("%s: %v", step, errorChecks(r))
+		}
+	}
+}
+
+// TestValidateGenerationStepCompleteSurvivesAStrippedArtifact: the reference
+// rules run on whatever decoded, so an artifact missing most of what the
+// schema requires must not panic them.
+func TestValidateGenerationStepCompleteSurvivesAStrippedArtifact(t *testing.T) {
+	partial := partialFrom(t, StepRequirements, StepTestSpec)
+	partial.Tasks = &TasksV2Json{Tasks: []Task{{}, {Tests: []string{"TS-99-1"}, DependsOn: []int{7}}}}
+	reqs := *partial.Requirements
+	reqs.Requirements = append([]Requirement{{}}, reqs.Requirements...)
+	partial.Requirements = &reqs
+
+	for _, step := range GenerationSteps {
+		if r := ValidateGenerationStepComplete(step, partial); r.Valid {
+			t.Errorf("%s: a stripped artifact was accepted", step)
+		}
+	}
+}

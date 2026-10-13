@@ -75,7 +75,8 @@ func TestSpecWritesAValidPackageEndToEnd(t *testing.T) {
 
 	dir := goRepo(t)
 	var stdout, stderr bytes.Buffer
-	code := newApp().Main(context.Background(), []string{"--dir", dir, "--repo-map-tokens", "0", "--detail", "full", "build the test feature"},
+	code := newApp().Main(context.Background(), []string{"--dir", dir, "--repo-map-tokens", "0", "--detail", "full",
+		"--phase-model", "test_spec=claude-haiku-4-5:low", "build the test feature"},
 		strings.NewReader(""), &stdout, &stderr)
 	var env struct {
 		OK        bool   `json:"ok"`
@@ -91,8 +92,10 @@ func TestSpecWritesAValidPackageEndToEnd(t *testing.T) {
 		Usage struct {
 			Turns  int `json:"turns"`
 			Phases []struct {
-				Name  string `json:"name"`
-				Scope string `json:"scope"`
+				Name   string `json:"name"`
+				Scope  string `json:"scope"`
+				Model  string `json:"model"`
+				Effort string `json:"effort"`
 			} `json:"phases"`
 		} `json:"usage"`
 		Result struct {
@@ -136,6 +139,15 @@ func TestSpecWritesAValidPackageEndToEnd(t *testing.T) {
 	}
 	if strings.Join(phases, ",") != "prd,generate:requirements,generate:test_spec,generate:tasks" {
 		t.Errorf("phases = %v", phases)
+	}
+	// STANDARD runs the PRD and the requirements at high effort and the rest
+	// at medium; --phase-model moved the test spec to another model.
+	var models []string
+	for _, p := range env.Usage.Phases {
+		models = append(models, p.Model+"/"+p.Effort)
+	}
+	if got := strings.Join(models, ","); got != "claude-sonnet-5-5/high,claude-sonnet-5-5/high,claude-haiku-4-5/low,claude-sonnet-5-5/medium" {
+		t.Errorf("phase models = %s", got)
 	}
 	if env.Usage.Turns != len(turns) {
 		t.Errorf("turns = %d, want %d", env.Usage.Turns, len(turns))

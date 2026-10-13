@@ -101,6 +101,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--comment` | Post the finished PRD back to the source issue |
 | `--dry-run` | Write nothing to disk or to the forge; report what would be written |
 | `--model`, `--effort` | A tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or Claude model id, and its reasoning effort |
+| `--phase-model` | Run one phase on another model and effort, e.g. `tasks=claude-haiku-4-5:medium`; a tier already runs the later phases lower |
 | `--budget`, `--max-turns`, `--total-budget` | Per-phase and whole-run ceilings |
 | `--preflight` | Run every check that would refuse the run, then stop before any model call |
 

@@ -70,9 +70,12 @@ conversation that sees the PRD and the artifacts before it:
 
 Each artifact is submitted through a tool whose schema is the format's own JSON
 Schema, and whose handler runs every cross-file rule decidable at that point
-(`afspec.ValidateGenerationStep`). A violation comes back to the model naming
-the rule, and it corrects itself: the repair loop is the agent loop, and the
-turn ceiling is the repair budget. With `--architecture` a fifth phase writes
+(`afspec.ValidateGenerationStepComplete`). A violation comes back to the model
+naming the rule, and it corrects itself: the repair loop is the agent loop, and
+the turn ceiling is the repair budget. Every repair is a full regeneration of
+the artifact, so one rejection names every problem at once: the schema errors
+first, then the cross-file rules that fail as well (run even when the schema
+does not pass), then the project audit below. With `--architecture` a fifth phase writes
 `architecture.md`; a failure there is a `architecture_not_written` warning,
 not a failed run.
 
@@ -127,7 +130,8 @@ the run exits 1 with `category: "invalid_spec"`.
 |---|---|---|
 | `--dir` | `.` | the repository to work in; the file tools cannot reach outside it |
 | `--model` | `$AF_MODEL`, else `$AGENTKIT_MODEL`, else `STANDARD` | a tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or a model id from AgentKit's catalog (an `anthropic/` prefix is accepted). An id the catalog does not list is refused, since it would have no price and no budget could stop it |
-| `--effort` | `$AF_MODEL_EFFORT`, else the tier's own | `off`, `low`, `medium`, `high`, `xhigh`, `max`. An effort the model does not take is lowered to the highest it does, with an `effort_clamped` warning |
+| `--effort` | `$AF_MODEL_EFFORT`, else each phase's tier effort | `off`, `low`, `medium`, `high`, `xhigh`, `max`, for every phase. An effort a phase's model does not take is lowered to the highest it does, with an `effort_clamped` warning naming the phases |
+| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `requirements`, `test_spec`, `tasks` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
 | `--max-turns` | 60 | per-phase turn ceiling, also the repair budget |
 | `--budget` | 5.00 | per-phase spend ceiling, in dollars |
 | `--phase-timeout` | none | wall-clock ceiling on one phase |
@@ -136,11 +140,26 @@ the run exits 1 with `category: "invalid_spec"`.
 | `--trust-project` | off | admit the repository's `AGENTS.md` and `CLAUDE.md` into every phase's system prompt. `.specs/steering.md` is always given to the phases |
 | `--context` | none | additional context, repeatable; each value is one paragraph of a labelled block shown beside the input |
 
-| Tier | Model | Effort |
-|---|---|---|
-| `SIMPLE` | `claude-sonnet-5-5` | `medium` |
-| `STANDARD` | `claude-sonnet-5-5` | `high` |
-| `ADVANCED` | `claude-opus-5-5` | `xhigh` |
+A tier chooses a model and an effort per phase. The PRD and the requirements
+are where a spec's judgment is made; the test spec, the tasks and the
+architecture turn them into structure the validator checks, and every turn of
+a phase pays for its effort, the turns that only read a file included. So the
+later phases run lower:
+
+| Tier | `prd` | `requirements` | `test_spec`, `tasks`, `architecture` |
+|---|---|---|---|
+| `SIMPLE` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `low` |
+| `STANDARD` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `medium` |
+| `ADVANCED` | `claude-opus-5-5` `xhigh` | `claude-opus-5-5` `high` | `claude-sonnet-5-5` `high` |
+
+A model id given to `--model` runs every phase, at `--effort` or none. To run
+everything at one effort, give `--effort`; to change one phase, give
+`--phase-model`:
+
+```sh
+spec ./idea.md --model ADVANCED --phase-model tasks=claude-haiku-4-5:medium
+spec ./idea.md --phase-model prd=ADVANCED      # STANDARD, with the PRD on ADVANCED's
+```
 
 ### The run
 
@@ -168,7 +187,10 @@ and any split plan to resume — reports them, and stops. A run that would be
 refused is refused identically, with the same stage, category, message and
 exit code. One whose checks pass exits 0 with `result.stage` `preflight`,
 `result.preflight` (one `{check, ok, detail}` per check, including the
-informational `symbol_backend` and `code_search_index`) and `result.estimate`:
+informational `symbol_backend`, `code_search_index` and `phase_models` — the
+model and effort each phase will run on, e.g.
+`prd claude-opus-5-5/xhigh; requirements claude-opus-5-5/high; …`) and
+`result.estimate`:
 
 ```json
 "estimate": {
@@ -200,10 +222,13 @@ for is the model's decision, so the figure is a lower bound.
   "side_effects": [ { "action": "comment", "kind": "prd", "target": "acme/widgets#42", "url": "…", "ok": true } ],
   "next": [ { "tool": "impl", "input": ".specs/07_widget_cache", "flags": [], "why": "the package validates and is ready to implement" } ],
   "input": { "kind": "issue", "origin": "https://github.com/acme/widgets/issues/42", "bytes": 3184 },
-  "model": { "spec": "STANDARD", "id": "claude-sonnet-5-5", "effort": "high" },
+  "model": { "spec": "STANDARD", "id": "claude-sonnet-5-5", "effort": "high",
+             "phases": { "prd": { "id": "claude-sonnet-5-5", "effort": "high" },
+                         "tasks": { "id": "claude-sonnet-5-5", "effort": "medium" }, … } },
   "usage": { "input_tokens": 48211, "output_tokens": 31004, "cache_read_tokens": 212000,
              "cache_creation_tokens": 18400, "cost_usd": 1.19, "turns": 23,
-             "phases": [ { "name": "prd", "scope": "widget_cache", "turns": 9, "stop_reason": "tool_terminate", … } ] },
+             "phases": [ { "name": "prd", "scope": "widget_cache", "model": "claude-sonnet-5-5", "effort": "high",
+                           "turns": 9, "stop_reason": "tool_terminate", … } ] },
   "duration_ms": 214003,
   "started_at": "2026-10-13T13:20:30Z"
 }
@@ -216,8 +241,9 @@ clause counting high-severity warnings on a success.
 
 `usage.input_tokens` is net of the prompt cache; the cache figures are what
 make it agree with `cost_usd`. Each phase in `usage.phases[]` carries the same
-figures, its `scope` (the spec it worked on), `tool_calls` and `tool_errors`
-by tool. Five or more failed tool calls in one phase raise a `tool_errors`
+figures, its `scope` (the spec it worked on), the `model` and `effort` it ran
+on, `tool_calls` and `tool_errors` by tool. `model.id` and `model.effort` are
+what `--model` resolved to; `model.phases` is what each phase was given. Five or more failed tool calls in one phase raise a `tool_errors`
 warning.
 
 `artifacts` lists one `spec_package` per package written (and a `comment` per

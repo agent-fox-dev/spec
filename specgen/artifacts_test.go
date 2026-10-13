@@ -382,3 +382,53 @@ func TestRejectionDetailNamesTheCountAndTheLastFailure(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// One rejection names every problem: a tasks artifact that breaks the
+// schema, orphans tests AND names another ecosystem's runner hears of all
+// three at once, instead of one per regenerated artifact.
+func TestARejectionNamesEveryProblemInOnePass(t *testing.T) {
+	ws := goWorkspace(t)
+	artifacts, _ := loadFixture(t, "01", "test_feature")
+	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
+	for _, step := range []afspec.GenerationStep{afspec.StepRequirements, afspec.StepTestSpec} {
+		if err := validateArtifactContent(artifacts[step], step, &partial); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audit := project.DetectProfile(ws.Root).AuditTasks
+
+	bad := deepCopy(t, artifacts[afspec.StepTasks])
+	bad["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
+	tasks := bad["tasks"].([]any)
+	first := tasks[0].(map[string]any)
+	first["title"] = ""
+	first["tests"] = []any{"TS-01-1"}
+
+	before := partial
+	code, err := checkArtifact(bad, afspec.StepTasks, &partial, audit)
+	if err == nil {
+		t.Fatal("a broken plan was accepted")
+	}
+	if code != "validation_failed" {
+		t.Errorf("code = %q", code)
+	}
+	msg := err.Error()
+	for _, want := range []string{"[json_schema]", "[C7]", "pytest", "go test ./... -count=1", "Cross-file rules"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the rejection lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Index(msg, "[json_schema]") > strings.Index(msg, "[C7]") {
+		t.Errorf("schema errors should come first:\n%s", msg)
+	}
+	if partial.Tasks != before.Tasks {
+		t.Error("a rejected artifact was recorded")
+	}
+
+	// The audit alone is a project_mismatch.
+	pythonic := deepCopy(t, artifacts[afspec.StepTasks])
+	pythonic["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
+	if code, err := checkArtifact(pythonic, afspec.StepTasks, &partial, audit); err == nil || code != "project_mismatch" {
+		t.Errorf("audit only: code = %q, err = %v", code, err)
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/agent-fox-dev/agentkit-go/core"
@@ -379,6 +381,45 @@ func TestTS16_25_PreflightReportsCodeSearchIndexUnavailable(t *testing.T) {
 		}
 		if !c.OK || c.Detail != tc.want {
 			t.Errorf("code_search_index = %+v, want OK with detail %q", c, tc.want)
+		}
+	}
+}
+
+// --preflight names the model and effort each phase will run on, so a caller
+// sees what a per-phase choice resolved to before paying for it.
+func TestPreflightReportsEachPhasesModel(t *testing.T) {
+	o := preflightOptions(t)
+	plan, err := agentrun.ResolvePlan("ADVANCED", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := agentrun.NewRunner(agentrun.Config{Model: plan.Default, PhaseModels: plan.Phases, Provider: faux.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Runner = r
+	got, err := RunPreflight(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := findCheck(got.Preflight, "phase_models")
+	want := "prd claude-opus-5-5/xhigh; requirements claude-opus-5-5/high; test_spec claude-sonnet-5-5/high; tasks claude-sonnet-5-5/high"
+	if !ok || !c.OK || c.Detail != want {
+		t.Errorf("phase_models = %+v, want %q", c, want)
+	}
+	o.Architecture = true
+	got, _ = RunPreflight(context.Background(), o)
+	if c, _ := findCheck(got.Preflight, "phase_models"); !strings.HasSuffix(c.Detail, "; architecture claude-sonnet-5-5/high") {
+		t.Errorf("with --architecture: %q", c.Detail)
+	}
+}
+
+// The generation steps are phases a model can be chosen for, by the same
+// names, so a --phase-model choice reaches its generation phase.
+func TestEveryGenerationStepIsAPhase(t *testing.T) {
+	for _, step := range afspec.GenerationSteps {
+		if !slices.Contains(agentrun.Phases, string(step)) {
+			t.Errorf("%s is not in agentrun.Phases", step)
 		}
 	}
 }

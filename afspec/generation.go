@@ -109,7 +109,23 @@ func DecodeArtifact(step GenerationStep, content map[string]any) (any, error) {
 //
 // A pipeline sends the returned errors back to the model for repair and does
 // not write an artifact that still fails. Warnings are advisory.
+//
+// When the schema fails, only C10 and C11 run beside it: the reference rules
+// would mostly report consequences of the same defect.
 func ValidateGenerationStep(step GenerationStep, partial PartialSpec) ValidationResult {
+	return validateGenerationStep(step, partial, false)
+}
+
+// ValidateGenerationStepComplete is ValidateGenerationStep without that
+// short-circuit: the cross-file rules run even when the schema fails, so a
+// repair loop learns of every problem in one pass instead of one class per
+// regenerated artifact. The schema errors come first, each with Category
+// "schema"; a rule error may restate a consequence of one of them.
+func ValidateGenerationStepComplete(step GenerationStep, partial PartialSpec) ValidationResult {
+	return validateGenerationStep(step, partial, true)
+}
+
+func validateGenerationStep(step GenerationStep, partial PartialSpec, complete bool) ValidationResult {
 	spec := &Spec{
 		SpecID:       partial.SpecID,
 		SpecName:     partial.SpecName,
@@ -141,7 +157,7 @@ func ValidateGenerationStep(step GenerationStep, partial PartialSpec) Validation
 	// running anyway, because the schema expresses them as conditionals whose
 	// failure message ("'not' failed", "missing property") does not say which
 	// rule was broken, and a repair loop needs to be told.
-	if len(errors) > 0 {
+	if len(errors) > 0 && !complete {
 		errors = append(errors, spec.checkC10()...)
 		errors = append(errors, spec.checkC11()...)
 		return ValidationResult{Valid: false, Errors: errors}

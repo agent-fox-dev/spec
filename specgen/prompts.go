@@ -1,7 +1,9 @@
 package specgen
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -140,12 +142,12 @@ func priorArtifactsBlock(partial afspec.PartialSpec, step afspec.GenerationStep)
 		if v == nil {
 			return
 		}
-		raw, err := afspec.MarshalJSON(v)
+		raw, err := compactJSON(v)
 		if err != nil {
 			return
 		}
 		fmt.Fprintf(&b, "\n## %s (already generated — use these IDs, do not invent one)\n\n```json\n%s\n```\n",
-			title, strings.TrimSpace(string(raw)))
+			title, raw)
 	}
 	if step == afspec.StepRequirements {
 		return ""
@@ -157,6 +159,21 @@ func priorArtifactsBlock(partial afspec.PartialSpec, step afspec.GenerationStep)
 		render("test_spec.json", partial.TestSpec)
 	}
 	return b.String()
+}
+
+// compactJSON is v as afspec writes it, without the indentation. A later
+// phase reads the artifacts before it in full, and indented JSON spends about
+// a third more tokens on whitespace than the content it carries.
+func compactJSON(v any) (string, error) {
+	raw, err := afspec.MarshalJSON(v)
+	if err != nil {
+		return "", err
+	}
+	var b bytes.Buffer
+	if err := json.Compact(&b, raw); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
 // relevantFilesBlock renders the relevant-files block for generation and

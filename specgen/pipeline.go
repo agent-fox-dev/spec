@@ -445,6 +445,9 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 		add("symbol_backend", true, backend)
 	}
 	add("code_search_index", true, indexDetail(o.Index, o.IndexUnavailable))
+	if o.Runner != nil {
+		add("phase_models", true, phaseModels(o.Runner, o.Architecture))
+	}
 	result.Preflight = list
 
 	// The phases the plan on disk already decides: one PRD phase and one per
@@ -1255,6 +1258,20 @@ func recordPhase(run *cli.Run, res agentrun.Result, scope string) {
 		return
 	}
 	run.AddPhase(cli.PhaseFromResult(res, scope))
+}
+
+// phaseModels is the detail of the informational phase_models preflight
+// check: the model and effort each phase the run will start runs on, in the
+// order a package is built.
+func phaseModels(r *agentrun.Runner, architecture bool) string {
+	var parts []string
+	for _, phase := range agentrun.Phases {
+		if phase == agentrun.PhaseArchitecture && !architecture {
+			continue
+		}
+		parts = append(parts, phase+" "+r.ModelFor(phase).String())
+	}
+	return strings.Join(parts, "; ")
 }
 
 // runIndex is the index the run's phases read: the one Options carries, or,
