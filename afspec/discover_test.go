@@ -65,7 +65,7 @@ func TestParseSpecDirName(t *testing.T) {
 func TestDiscoverSpecs(t *testing.T) {
 	root := specRoot(t, map[string]string{
 		"01_test_feature":  fixtureValidSpec,
-		"02_draft_feature": "../testdata/draft_spec",
+		"02_draft_feature": "testdata/draft_spec",
 		"not_a_spec_dir":   fixtureValidSpec,
 	})
 
@@ -87,7 +87,7 @@ func TestDiscoverSpecs(t *testing.T) {
 func TestBuildDependencyGraph(t *testing.T) {
 	root := specRoot(t, map[string]string{
 		"01_test_feature":  fixtureValidSpec,
-		"02_draft_feature": "../testdata/draft_spec",
+		"02_draft_feature": "testdata/draft_spec",
 	})
 
 	metas, err := DiscoverSpecs(root)
@@ -126,7 +126,7 @@ func TestBuildDependencyGraph(t *testing.T) {
 }
 
 func TestBuildDependencyGraphReportsUnknownSpecs(t *testing.T) {
-	root := specRoot(t, map[string]string{"02_draft_feature": "../testdata/draft_spec"})
+	root := specRoot(t, map[string]string{"02_draft_feature": "testdata/draft_spec"})
 	metas, err := DiscoverSpecs(root)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestTopologicalSortDetectsCycles(t *testing.T) {
 func TestLoadDependentInterfaces(t *testing.T) {
 	root := specRoot(t, map[string]string{
 		"01_test_feature":  fixtureValidSpec,
-		"02_draft_feature": "../testdata/draft_spec",
+		"02_draft_feature": "testdata/draft_spec",
 	})
 
 	summaries := LoadDependentInterfaces("02", root)
@@ -178,7 +178,7 @@ func TestLoadDependentInterfaces(t *testing.T) {
 func TestValidateCrossSpec(t *testing.T) {
 	root := specRoot(t, map[string]string{
 		"01_test_feature":  fixtureValidSpec,
-		"02_draft_feature": "../testdata/draft_spec",
+		"02_draft_feature": "testdata/draft_spec",
 	})
 	metas, err := DiscoverSpecs(root)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestValidateCrossSpec(t *testing.T) {
 }
 
 func TestValidateCrossSpecRejectsAnUnknownDependency(t *testing.T) {
-	spec := loadFixture(t, "../testdata/draft_spec")
+	spec := loadFixture(t, "testdata/draft_spec")
 	result := ValidateCrossSpec([]*Spec{spec}, &DependencyGraph{})
 	if result.Valid {
 		t.Fatal("a dependency on a spec outside the root was accepted")
@@ -226,7 +226,7 @@ func TestValidateCrossSpecWarnsOnGlossaryConflicts(t *testing.T) {
 
 func TestValidateCrossSpecRequiresASharedActor(t *testing.T) {
 	upstream := loadFixture(t, fixtureValidSpec)
-	downstream := loadFixture(t, "../testdata/draft_spec")
+	downstream := loadFixture(t, "testdata/draft_spec")
 	// Rename every actor so that the two specs share none.
 	for i := range downstream.Requirements.ExecutionPaths {
 		for j := range downstream.Requirements.ExecutionPaths[i].Steps {

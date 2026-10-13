@@ -104,7 +104,7 @@ func TestRenderTasksShowsThePlan(t *testing.T) {
 }
 
 func TestRenderCombinedSectionOrder(t *testing.T) {
-	spec := loadFixture(t, "../testdata/valid_spec_with_arch")
+	spec := loadFixture(t, "testdata/valid_spec_with_arch")
 	out := spec.RenderCombined()
 
 	sections := []string{"# PRD", "# Architecture", "# Requirements", "# Test Specification", "# Tasks"}
@@ -133,7 +133,7 @@ func TestRenderIndividualKeys(t *testing.T) {
 		t.Error("the architecture key is present for a spec with no architecture.md")
 	}
 
-	withArch := loadFixture(t, "../testdata/valid_spec_with_arch").RenderIndividual()
+	withArch := loadFixture(t, "testdata/valid_spec_with_arch").RenderIndividual()
 	if withArch["architecture"] == "" {
 		t.Error("the architecture key is missing for a spec that has one")
 	}
@@ -209,7 +209,7 @@ func TestRenderIndividualScopedFallsBackForAnUnknownTask(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRenderCombinedDropsArchitectureFirst(t *testing.T) {
-	spec := loadFixture(t, "../testdata/valid_spec_with_arch")
+	spec := loadFixture(t, "testdata/valid_spec_with_arch")
 	full := spec.RenderCombined()
 
 	budget := EstimateTokens(full) - 1
@@ -252,7 +252,7 @@ func TestSlimTestRenderKeepsVerifiesAndThen(t *testing.T) {
 }
 
 func TestRenderIndividualAppliesTheBudget(t *testing.T) {
-	spec := loadFixture(t, "../testdata/valid_spec_with_arch")
+	spec := loadFixture(t, "testdata/valid_spec_with_arch")
 	full := spec.RenderIndividual()
 
 	out := spec.RenderIndividual(WithMaxTokens(sumMapTokens(full) - 1))
@@ -267,7 +267,7 @@ func TestRenderIndividualAppliesTheBudget(t *testing.T) {
 }
 
 func TestZeroBudgetMeansUnlimited(t *testing.T) {
-	spec := loadFixture(t, "../testdata/valid_spec_with_arch")
+	spec := loadFixture(t, "testdata/valid_spec_with_arch")
 	if spec.RenderCombined(WithMaxTokens(0)) != spec.RenderCombined() {
 		t.Error("WithMaxTokens(0) changed the output; it should disable the budget")
 	}

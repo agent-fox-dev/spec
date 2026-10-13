@@ -50,7 +50,7 @@ func TestHasIntentAgreesWithTheIntentHash(t *testing.T) {
 // Issue #223 (3): a key the schema does not allow is refused when the model
 // submits it, by its path, rather than silently dropped.
 func TestDecodeArtifactRefusesUnknownKeys(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "testdata", "valid_spec", "tasks.json"))
+	raw, err := os.ReadFile(filepath.Join("testdata", "valid_spec", "tasks.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestDecodeArtifactRefusesUnknownKeys(t *testing.T) {
 // Issue #223 (3): a package on disk with a key the schema does not allow
 // still loads, and validation reports the key as a schema error.
 func TestValidationReportsUnknownKeysOnDisk(t *testing.T) {
-	dir := copyFixture(t, filepath.Join("..", "testdata", "valid_spec"))
+	dir := copyFixture(t, filepath.Join("testdata", "valid_spec"))
 	clean := loadFixture(t, dir).Validate()
 	if slices.Contains(errorChecks(clean), "unknown_field") {
 		t.Fatalf("the clean fixture reports an unknown field: %+v", clean.Errors)
@@ -112,7 +112,7 @@ func TestValidationReportsUnknownKeysOnDisk(t *testing.T) {
 // Issue #223 (smaller): C5 asks for a smoke test on every execution path, so
 // a path verified only by another kind of test is not covered.
 func TestAPathIsCoveredOnlyByASmokeTest(t *testing.T) {
-	spec := loadFixture(t, copyFixture(t, filepath.Join("..", "testdata", "valid_spec")))
+	spec := loadFixture(t, copyFixture(t, filepath.Join("testdata", "valid_spec")))
 	covered := func() bool {
 		for _, l := range spec.ComputeTraceability().Links {
 			if l.Kind == "path" && l.ID == "01-PATH-1" {

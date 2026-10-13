@@ -11,9 +11,9 @@ func TestValidFixturesPassEveryRule(t *testing.T) {
 	for _, fixture := range []string{
 		fixtureValidSpec,
 		fixtureV2Example,
-		"../testdata/draft_spec",
-		"../testdata/alpha_prefix_spec",
-		"../testdata/valid_spec_with_arch",
+		"testdata/draft_spec",
+		"testdata/alpha_prefix_spec",
+		"testdata/valid_spec_with_arch",
 	} {
 		t.Run(fixture, func(t *testing.T) {
 			spec := loadFixture(t, fixture)

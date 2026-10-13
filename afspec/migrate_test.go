@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/agentfox/afspec/legacy"
+	"github.com/agent-fox-dev/spec/afspec/legacy"
 )
 
-const fixtureV1Spec = "../testdata/v1_spec"
+const fixtureV1Spec = "testdata/v1_spec"
 
 func migrateFixture(t *testing.T) (*RequirementsV2Json, *TestSpecV2Json, *TasksV2Json, *MigrationReport) {
 	t.Helper()
@@ -224,7 +224,7 @@ func TestLegacyLoadSpecRejectsANonV1Directory(t *testing.T) {
 	if _, err := legacy.LoadSpec(fixtureValidSpec); err == nil {
 		t.Error("legacy.LoadSpec accepted a version 2 spec")
 	}
-	if _, err := legacy.LoadSpec("../testdata/does_not_exist"); err == nil {
+	if _, err := legacy.LoadSpec("testdata/does_not_exist"); err == nil {
 		t.Error("legacy.LoadSpec accepted a directory that does not exist")
 	}
 }

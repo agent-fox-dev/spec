@@ -10,10 +10,10 @@ import (
 
 // fixtureValidSpec is the canonical positive fixture: spec 01, a complete v2
 // package that satisfies every rule of §10.2.
-const fixtureValidSpec = "../testdata/valid_spec"
+const fixtureValidSpec = "testdata/valid_spec"
 
 // fixtureV2Example is the worked example from the format specification.
-const fixtureV2Example = "../testdata/v2_example"
+const fixtureV2Example = "testdata/v2_example"
 
 // loadFixture loads a spec fixture or fails the test.
 func loadFixture(t *testing.T, dir string) *Spec {
