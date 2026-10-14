@@ -6,9 +6,10 @@ DOC_DIR     ?= build/docs
 # Run lint + all tests
 check: lint test
 
-# Build the spec command into build/spec
+# Build the spec and specr commands into build/
 build:
 	go build -o build/spec ./cmd/spec
+	go build -o build/specr ./cmd/specr
 
 # Run all tests
 test:

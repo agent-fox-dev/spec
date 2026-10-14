@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 )
 
+// WriteAtomic writes data to path the way --output is written: a reader
+// sees nothing or the whole document. See writeAtomic.
+func WriteAtomic(path string, data []byte) error { return writeAtomic(path, data) }
+
 // writeAtomic writes data to path so that a reader polling path sees either
 // nothing yet or the complete document, never a partial one: the parent
 // directory is created when missing, a temp file is created in that same

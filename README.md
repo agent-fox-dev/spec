@@ -52,14 +52,15 @@ validation or code generation.
 
 ## Implementations
 
-This repository holds the format, its reference library and the command that
-writes packages of it:
+This repository holds the format, its reference library, the command that
+writes packages of it and the command that renders them:
 
 | Path | What it is |
 | --- | --- |
 | `specification/` | The format: the reference documents and the canonical JSON Schemas |
 | [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save and render spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
 | `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline, built on `afspec` and [agentkit-go](https://github.com/agent-fox-dev/agentkit-go) |
+| `cmd/specr/` | The `specr` command: a package rendered as Markdown, whole or scoped to one task |
 
 See [docs/architecture.md](docs/architecture.md) for how the pieces fit
 together.
@@ -112,19 +113,44 @@ are in [docs/cli.md](docs/cli.md); the environment variables in
 [docs/configuration.md](docs/configuration.md).
 
 Lifecycle management for an existing package — activating, sealing,
-archiving, superseding, validating, rendering — has no CLI surface; it's
-library API in [`afspec`](afspec/README.md) for an embedder to call.
+archiving, superseding, validating — has no CLI surface; it's library API in
+[`afspec`](afspec/README.md) for an embedder to call. Rendering has one,
+below.
+
+## Rendering a Spec Package
+
+The `specr` CLI renders an existing package as Markdown with `afspec`'s render
+functions, for an agent to read — called from a prompt, or from a skill's
+instructions such as agent-fox's `af-impl`. It takes one reference to a
+package (its directory, a file in it, or its number or name under the spec
+root) and changes nothing:
+
+```bash
+specr .specs/16_indexed_code_search    # the whole package
+specr 16 --task 3                      # scoped to task 3: what it owns in full, the rest by id
+specr 16 --section tasks               # only the named sections
+specr 16 --max-tokens 8000             # drop detail until it fits
+specr --schema                         # the flags and the output, as JSON Schema
+```
+
+Like `spec`, it writes one JSON object to stdout: the Markdown is
+`result.markdown`, beside the spec's identity, the sections rendered, what a
+budget dropped, and the plan's tasks with their states; `next` names the next
+task not done. `--markdown-file` also writes the Markdown to a file. Exit
+codes: `0` rendered, `1` the package could not be read, `2` a usage error.
+Everything is in [docs/specr.md](docs/specr.md); the decision is
+[ADR 05](docs/adr/05-render-a-package-with-its-own-command.md).
 
 ## Installation
 
-Build the `spec` command from a checkout:
+Build the `spec` and `specr` commands from a checkout:
 
 ```bash
 git clone https://github.com/agent-fox-dev/spec && cd spec
-make build          # writes build/spec
+make build          # writes build/spec and build/specr
 ```
 
-`go install …/cmd/spec@version` does not work yet: the module carries a
+`go install …/cmd/spec@version` (or `…/cmd/specr@version`) does not work yet: the module carries a
 `replace` for agentkit-go until that module is tagged (see
 [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md)).
 
@@ -142,7 +168,7 @@ and no API key: the command's tests run against a scripted model.
 | Command | What it does |
 | --- | --- |
 | `make check` | `make lint` then `make test` |
-| `make build` | Build the `spec` command into `build/spec` |
+| `make build` | Build the `spec` and `specr` commands into `build/` |
 | `make test` | `go test ./... -count=1` |
 | `make test-fast` | The tests with `-short` |
 | `make lint` | `gofmt -l` must report nothing, then `go vet ./...` |
@@ -157,6 +183,7 @@ and no API key: the command's tests run against a scripted model.
 - [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
 - [afspec](afspec/README.md) — the Go library's API
 - [The spec command](docs/cli.md) — input, flags, the output envelope, errors and warnings
+- [The specr command](docs/specr.md) — the forms of a render, the reference it takes, the output and `--schema`
 - [Configuration](docs/configuration.md) — environment variables and limits
 - [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
 - [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver

@@ -1,8 +1,9 @@
 # Architecture
 
 This repository holds the agent-fox specification format, its reference
-implementation (the `afspec` Go library) and the `spec` command, which turns a
-product idea into a package of that format. It is one Go module,
+implementation (the `afspec` Go library), the `spec` command, which turns a
+product idea into a package of that format, and the `specr` command, which
+renders a package as Markdown. It is one Go module,
 `github.com/agent-fox-dev/spec`.
 
 ## Layout
@@ -16,6 +17,7 @@ afspec/                     # The reference library, package afspec
   schemas/                  #   Embedded copies of the v2 schemas
   testdata/                 #   Spec package fixtures for the tests
 cmd/spec/                   # The spec command: flags, help, the entry point
+cmd/specr/                  # The specr command: a package rendered as Markdown
 specgen/                    # The generation pipeline: phases, prompts, split
   templates/                #   The prompts, as Markdown, embedded
 internal/
@@ -167,6 +169,26 @@ a list of entries.
 The driver's event stream feeds the progress lines and the per-phase counts
 (`tool_calls`, `tool_errors`); its `RunResult` is the phase's usage and stop
 reason, which `agentrun` maps onto the envelope's error categories.
+
+## The specr command
+
+`specr` is documented for callers in [specr.md](specr.md); the decision is
+[ADR 05](adr/05-render-a-package-with-its-own-command.md).
+
+```
+cmd/specr ──> afspec
+    └──────> internal/cli   (the envelope, SplitArgs, WriteAtomic, the --schema generator)
+```
+
+It does not use `cli.App`, which resolves a model, a forge and a code-search
+index before it hands over: `specr` has none of those. `cmd/specr` parses its
+own flags with `cli.SplitArgs`, resolves the reference (`locate.go`), loads the
+package with `afspec.LoadSpec`, validates it for a warning, renders it with
+`RenderCombined`, `RenderIndividual` or `RenderIndividualScoped`
+(`render.go`), and emits a `cli.Envelope`. `--schema` is built by
+`cli.FlagsDocument` and `cli.EnvelopeDocument` (`internal/cli/schemadoc.go`),
+which describe a flag set and a Go type by reflection, reading each field's
+`description` tag.
 
 ## Consumers
 
