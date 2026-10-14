@@ -1,0 +1,436 @@
+{
+  "tool": "specr",
+  "description": "Renders a specification package as Markdown: the whole package, or the package scoped to one task, with what the task owns in full and everything else by id.",
+  "input": {
+    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search).",
+    "examples": [
+      ".specs/16_indexed_code_search",
+      "16",
+      "indexed_code_search",
+      ".specs/16_indexed_code_search/tasks.json"
+    ]
+  },
+  "flags": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "dir": {
+        "type": "string",
+        "default": ".",
+        "description": "the repository the spec root and a relative reference are resolved against"
+      },
+      "markdown-file": {
+        "type": "string",
+        "default": "",
+        "description": "also write the Markdown to this file, atomically; relative to the working directory"
+      },
+      "max-tokens": {
+        "type": "integer",
+        "default": 0,
+        "description": "drop detail until the render's estimated tokens fit: first the architecture, then each test's given, when, real components and pseudocode; 0 means no budget"
+      },
+      "section": {
+        "type": "string",
+        "default": "",
+        "description": "render only these sections, in the package's order: prd, architecture, requirements, test_spec, tasks; comma-separated or repeated (default: every section)"
+      },
+      "specs-dir": {
+        "type": "string",
+        "default": "",
+        "description": "where NN_name packages live; default <dir>/.specs or $AF_SPEC_DIR"
+      },
+      "task": {
+        "type": "integer",
+        "default": 0,
+        "description": "render the package scoped to this task id: what the task owns in full, every other requirement, test and task by id and title; 0 renders the whole package"
+      }
+    }
+  },
+  "result": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "tool": {
+        "type": "string",
+        "description": "the command that wrote this envelope"
+      },
+      "version": {
+        "type": "string",
+        "description": "the command's build identity"
+      },
+      "ok": {
+        "type": "boolean",
+        "description": "true only when the command did the whole job it was asked to do; never true beside a non-zero exit_code or an error"
+      },
+      "status": {
+        "type": "string",
+        "description": "the outcome in words, derived from exit_code: done (0), failed (1) or usage (2)"
+      },
+      "exit_code": {
+        "type": "integer",
+        "description": "the process exit code: 0 done, 1 failed, 2 usage error"
+      },
+      "summary": {
+        "type": "string",
+        "description": "one sentence on the outcome, at most 200 characters"
+      },
+      "error": {
+        "type": "object",
+        "description": "what failed and where; present exactly when ok is false",
+        "properties": {
+          "stage": {
+            "type": "string",
+            "description": "the step that failed"
+          },
+          "category": {
+            "type": "string",
+            "description": "the kind of failure, which says whether re-running could help; an open set"
+          },
+          "message": {
+            "type": "string",
+            "description": "what failed, in words"
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "whether re-running the identical command could succeed"
+          },
+          "resumable": {
+            "type": "boolean",
+            "description": "whether re-running the same input continues the work rather than starting it over"
+          },
+          "fix_hint": {
+            "type": "object",
+            "description": "a mechanical remedy, where one is known",
+            "properties": {
+              "flag": {
+                "type": "string",
+                "description": "the flag to change"
+              },
+              "env": {
+                "type": "array",
+                "description": "the environment variables, one of which supplies what is missing",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "valid": {
+                "type": "array",
+                "description": "the values the flag accepts here",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "current": {
+                "type": "number",
+                "description": "the flag's value on this run"
+              },
+              "suggest": {
+                "type": "number",
+                "description": "a value to try instead"
+              }
+            },
+            "required": []
+          }
+        },
+        "required": [
+          "stage",
+          "category",
+          "message",
+          "retryable",
+          "resumable"
+        ]
+      },
+      "warnings": {
+        "type": "array",
+        "description": "what went differently than intended without stopping the run",
+        "items": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "a stable code naming the cause; an open set"
+            },
+            "severity": {
+              "type": "string",
+              "description": "high when the result is not quite what it appears to be, low when informational"
+            },
+            "stage": {
+              "type": "string",
+              "description": "the step that raised it"
+            },
+            "message": {
+              "type": "string",
+              "description": "what happened, in words"
+            }
+          },
+          "required": [
+            "code",
+            "severity",
+            "stage",
+            "message"
+          ]
+        }
+      },
+      "result": {
+        "type": "object",
+        "description": "the command's own result",
+        "properties": {
+          "spec_dir": {
+            "type": "string",
+            "description": "the package directory, relative to --dir when inside it; runnable as specr's input"
+          },
+          "spec_id": {
+            "type": "string",
+            "description": "the spec id, from the PRD frontmatter"
+          },
+          "spec_name": {
+            "type": "string",
+            "description": "the spec name, from the PRD frontmatter"
+          },
+          "title": {
+            "type": "string",
+            "description": "the spec title, from the PRD frontmatter"
+          },
+          "status": {
+            "type": "string",
+            "description": "the package's lifecycle status: draft, active, sealed, superseded or archived"
+          },
+          "valid": {
+            "type": "boolean",
+            "description": "whether the package passes the format's validation; an invalid package still renders in full, and a spec_invalid warning names the failing rules"
+          },
+          "scope": {
+            "type": "string",
+            "description": "what was rendered: spec (the whole package) or task (the package scoped to one task)"
+          },
+          "task": {
+            "type": "object",
+            "description": "the task the render is scoped to; present exactly when scope is task",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "description": "the task id, as --task takes it"
+              },
+              "title": {
+                "type": "string",
+                "description": "the task title"
+              },
+              "kind": {
+                "type": "string",
+                "description": "implement, or integration for the plan's last task"
+              },
+              "state": {
+                "type": "string",
+                "description": "pending, in_progress, done or dropped"
+              },
+              "optional": {
+                "type": "boolean",
+                "description": "true when the task may be skipped"
+              },
+              "depends_on": {
+                "type": "array",
+                "description": "the tasks that must be done first",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "state"
+            ]
+          },
+          "sections": {
+            "type": "array",
+            "description": "the sections the Markdown holds, in order; a subset of prd, architecture, requirements, test_spec, tasks",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_tokens": {
+            "type": "integer",
+            "description": "the --max-tokens budget the render was held to; absent when there was none"
+          },
+          "reduced": {
+            "type": "array",
+            "description": "the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), test_detail (each test's given, when, real components and pseudocode); absent when nothing was dropped",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tokens": {
+            "type": "integer",
+            "description": "the estimated token count of markdown (bytes / 4)"
+          },
+          "tasks": {
+            "type": "array",
+            "description": "every task of the plan, in order: the ids --task takes",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "description": "the task id, as --task takes it"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "the task title"
+                },
+                "kind": {
+                  "type": "string",
+                  "description": "implement, or integration for the plan's last task"
+                },
+                "state": {
+                  "type": "string",
+                  "description": "pending, in_progress, done or dropped"
+                },
+                "optional": {
+                  "type": "boolean",
+                  "description": "true when the task may be skipped"
+                },
+                "depends_on": {
+                  "type": "array",
+                  "description": "the tasks that must be done first",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "kind",
+                "state"
+              ]
+            }
+          },
+          "markdown_file": {
+            "type": "string",
+            "description": "the absolute path --markdown-file wrote the Markdown to"
+          },
+          "markdown": {
+            "type": "string",
+            "description": "the rendered Markdown"
+          }
+        },
+        "required": [
+          "spec_dir",
+          "spec_id",
+          "spec_name",
+          "title",
+          "status",
+          "valid",
+          "scope",
+          "sections",
+          "tokens",
+          "tasks",
+          "markdown"
+        ]
+      },
+      "artifacts": {
+        "type": "array",
+        "description": "what the run produced, read off facts the command holds",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "what the entry is; its other fields are the ones of its kind",
+              "enum": [
+                "spec_package",
+                "comment",
+                "markdown_file"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "description": "spec_package, markdown_file: the path written"
+            },
+            "id": {
+              "type": "string",
+              "description": "spec_package: the spec id"
+            },
+            "valid": {
+              "type": "boolean",
+              "description": "spec_package: whether the package validates"
+            },
+            "url": {
+              "type": "string",
+              "description": "comment: the comment's URL"
+            },
+            "role": {
+              "type": "string",
+              "description": "comment: which comment it is"
+            },
+            "dry_run": {
+              "type": "boolean",
+              "description": "true when it would have been written but for --dry-run"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      },
+      "next": {
+        "type": "array",
+        "description": "the invocations a caller would plausibly make next",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tool": {
+              "type": "string",
+              "description": "the command to run"
+            },
+            "input": {
+              "type": "string",
+              "description": "its one positional input"
+            },
+            "flags": {
+              "type": "array",
+              "description": "the flags to add, each value its own element",
+              "items": {
+                "type": "string"
+              }
+            },
+            "why": {
+              "type": "string",
+              "description": "why a caller would run it"
+            }
+          },
+          "required": [
+            "tool",
+            "input",
+            "flags",
+            "why"
+          ]
+        }
+      },
+      "duration_ms": {
+        "type": "integer",
+        "description": "wall-clock time of the run, in milliseconds"
+      },
+      "started_at": {
+        "type": "string",
+        "description": "when the run started, RFC 3339 in UTC"
+      }
+    },
+    "required": [
+      "tool",
+      "version",
+      "ok",
+      "status",
+      "exit_code",
+      "summary",
+      "duration_ms",
+      "started_at"
+    ]
+  },
+  "exit_codes": {
+    "0": "rendered",
+    "1": "failed: the package could not be read, or --markdown-file could not be written; the stage is named in error",
+    "2": "usage error: the reference names no package or two, an unknown task, or a flag that cannot hold; nothing was read"
+  }
+}

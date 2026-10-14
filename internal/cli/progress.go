@@ -252,6 +252,10 @@ func (s *spinner) stopLocked() {
 	_, _ = s.w.Write([]byte{'\b', ' ', '\b'})
 }
 
+// IsTerminal reports whether w is a terminal: a person is reading it, not a
+// program.
+func IsTerminal(w io.Writer) bool { return isTerminal(w) }
+
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {

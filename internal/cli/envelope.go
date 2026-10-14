@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,17 +89,18 @@ type NextProvider interface {
 // ArtifactKind is the closed set of shapes an Artifact can take.
 type ArtifactKind string
 
-// The artifact kinds spec produces.
+// The artifact kinds the commands produce.
 const (
-	ArtifactSpecPackage ArtifactKind = "spec_package"
-	ArtifactComment     ArtifactKind = "comment"
+	ArtifactSpecPackage  ArtifactKind = "spec_package"
+	ArtifactComment      ArtifactKind = "comment"
+	ArtifactMarkdownFile ArtifactKind = "markdown_file"
 )
 
 // Artifact is one thing a run produced. MarshalJSON emits only the fields of
 // its own Kind, so a caller never has to know which fields to ignore.
 type Artifact struct {
 	Kind ArtifactKind
-	// spec_package
+	// spec_package, markdown_file
 	Path  string
 	ID    string
 	Valid bool
@@ -123,11 +125,36 @@ func (a Artifact) MarshalJSON() ([]byte, error) {
 		if a.Role != "" {
 			m["role"] = a.Role
 		}
+	case ArtifactMarkdownFile:
+		m["path"] = a.Path
 	}
 	if a.DryRun {
 		m["dry_run"] = true
 	}
-	return json.Marshal(m)
+	return compactJSON(m)
+}
+
+// JSONSchema describes what MarshalJSON writes: the fields of the entry's
+// own kind.
+func (Artifact) JSONSchema() SchemaObject {
+	prop := func(typ, desc string) SchemaObject {
+		return SchemaObject{{Key: "type", Value: typ}, {Key: "description", Value: desc}}
+	}
+	kind := prop("string", "what the entry is; its other fields are the ones of its kind")
+	kind.Set("enum", []string{string(ArtifactSpecPackage), string(ArtifactComment), string(ArtifactMarkdownFile)})
+	return SchemaObject{
+		{Key: "type", Value: "object"},
+		{Key: "properties", Value: SchemaObject{
+			{Key: "kind", Value: kind},
+			{Key: "path", Value: prop("string", "spec_package, markdown_file: the path written")},
+			{Key: "id", Value: prop("string", "spec_package: the spec id")},
+			{Key: "valid", Value: prop("boolean", "spec_package: whether the package validates")},
+			{Key: "url", Value: prop("string", "comment: the comment's URL")},
+			{Key: "role", Value: prop("string", "comment: which comment it is")},
+			{Key: "dry_run", Value: prop("boolean", "true when it would have been written but for --dry-run")},
+		}},
+		{Key: "required", Value: []string{"kind"}},
+	}
 }
 
 // SideEffect is one write a run made to a forge, in the order it happened.
@@ -147,10 +174,10 @@ const SameInputPlaceholder = "<same input>"
 // Next is one suggested follow-up invocation: the tool, its single input, the
 // flags to add, and why.
 type Next struct {
-	Tool  string   `json:"tool"`
-	Input string   `json:"input"`
-	Flags []string `json:"flags"`
-	Why   string   `json:"why"`
+	Tool  string   `json:"tool" description:"the command to run"`
+	Input string   `json:"input" description:"its one positional input"`
+	Flags []string `json:"flags" description:"the flags to add, each value its own element"`
+	Why   string   `json:"why" description:"why a caller would run it"`
 }
 
 // ResumePlaceholder is how a next[] entry names in to re-run it: the literal
@@ -169,10 +196,10 @@ func ResumePlaceholder(in Input) string {
 // Warning is one thing that went differently than intended but did not stop
 // the run. Code is stable; Stage is looked up from the code.
 type Warning struct {
-	Code     WarnCode `json:"code"`
-	Severity string   `json:"severity"`
-	Stage    string   `json:"stage"`
-	Message  string   `json:"message"`
+	Code     WarnCode `json:"code" description:"a stable code naming the cause; an open set"`
+	Severity string   `json:"severity" description:"high when the result is not quite what it appears to be, low when informational"`
+	Stage    string   `json:"stage" description:"the step that raised it"`
+	Message  string   `json:"message" description:"what happened, in words"`
 }
 
 // PreflightCheck is one check --preflight performed and its outcome. A check
@@ -196,26 +223,26 @@ type Estimate struct {
 // program-driven path including the failing ones: a caller that is a program
 // should not have to parse two formats and guess which one it got.
 type Envelope struct {
-	Tool     string `json:"tool"`
-	Version  string `json:"version"`
-	OK       bool   `json:"ok"`
-	Status   string `json:"status"`
-	ExitCode int    `json:"exit_code"`
-	Summary  string `json:"summary"`
+	Tool     string `json:"tool" description:"the command that wrote this envelope"`
+	Version  string `json:"version" description:"the command's build identity"`
+	OK       bool   `json:"ok" description:"true only when the command did the whole job it was asked to do; never true beside a non-zero exit_code or an error"`
+	Status   string `json:"status" description:"the outcome in words, derived from exit_code: done (0), failed (1) or usage (2)"`
+	ExitCode int    `json:"exit_code" description:"the process exit code: 0 done, 1 failed, 2 usage error"`
+	Summary  string `json:"summary" description:"one sentence on the outcome, at most 200 characters"`
 
-	Error       *ErrorInfo   `json:"error,omitempty"`
-	Warnings    []Warning    `json:"warnings,omitempty"`
-	Result      any          `json:"result,omitempty"`
-	Artifacts   []Artifact   `json:"artifacts,omitempty"`
-	SideEffects []SideEffect `json:"side_effects,omitempty"`
-	Next        []Next       `json:"next,omitempty"`
+	Error       *ErrorInfo   `json:"error,omitempty" description:"what failed and where; present exactly when ok is false"`
+	Warnings    []Warning    `json:"warnings,omitempty" description:"what went differently than intended without stopping the run"`
+	Result      any          `json:"result,omitempty" description:"the command's own result"`
+	Artifacts   []Artifact   `json:"artifacts,omitempty" description:"what the run produced, read off facts the command holds"`
+	SideEffects []SideEffect `json:"side_effects,omitempty" description:"every write to a forge, in the order it happened"`
+	Next        []Next       `json:"next,omitempty" description:"the invocations a caller would plausibly make next"`
 
-	Input *InputInfo `json:"input,omitempty"`
-	Model *ModelInfo `json:"model,omitempty"`
-	Usage *UsageInfo `json:"usage,omitempty"`
+	Input *InputInfo `json:"input,omitempty" description:"what the one positional argument turned out to be"`
+	Model *ModelInfo `json:"model,omitempty" description:"the models the run used"`
+	Usage *UsageInfo `json:"usage,omitempty" description:"the run's model cost, summed over every phase"`
 
-	DurationMS int64  `json:"duration_ms"`
-	StartedAt  string `json:"started_at"`
+	DurationMS int64  `json:"duration_ms" description:"wall-clock time of the run, in milliseconds"`
+	StartedAt  string `json:"started_at" description:"when the run started, RFC 3339 in UTC"`
 }
 
 // InputInfo records what the single argument turned out to be.
@@ -307,11 +334,11 @@ func PhaseSummary(res agentrun.Result) string {
 
 // FixHint is a machine-usable remedy for a failure.
 type FixHint struct {
-	Flag    string   `json:"flag,omitempty"`
-	Env     []string `json:"env,omitempty"`
-	Valid   []string `json:"valid,omitempty"`
-	Current float64  `json:"current,omitempty"`
-	Suggest float64  `json:"suggest,omitempty"`
+	Flag    string   `json:"flag,omitempty" description:"the flag to change"`
+	Env     []string `json:"env,omitempty" description:"the environment variables, one of which supplies what is missing"`
+	Valid   []string `json:"valid,omitempty" description:"the values the flag accepts here"`
+	Current float64  `json:"current,omitempty" description:"the flag's value on this run"`
+	Suggest float64  `json:"suggest,omitempty" description:"a value to try instead"`
 }
 
 // ErrorInfo says what failed and where. It is present exactly when ok is
@@ -319,13 +346,13 @@ type FixHint struct {
 type ErrorInfo struct {
 	// Stage is the pipeline step that failed: usage, input, preflight, prd,
 	// requirements, test_spec, tasks, plan, scaffold, write, validate, budget.
-	Stage string `json:"stage"`
+	Stage string `json:"stage" description:"the step that failed"`
 	// Category says whether re-running could help.
-	Category  string   `json:"category"`
-	Message   string   `json:"message"`
-	Retryable bool     `json:"retryable"`
-	Resumable bool     `json:"resumable"`
-	FixHint   *FixHint `json:"fix_hint,omitempty"`
+	Category  string   `json:"category" description:"the kind of failure, which says whether re-running could help; an open set"`
+	Message   string   `json:"message" description:"what failed, in words"`
+	Retryable bool     `json:"retryable" description:"whether re-running the identical command could succeed"`
+	Resumable bool     `json:"resumable" description:"whether re-running the same input continues the work rather than starting it over"`
+	FixHint   *FixHint `json:"fix_hint,omitempty" description:"a mechanical remedy, where one is known"`
 	err       error
 }
 
@@ -674,17 +701,44 @@ func Emit(w io.Writer, env Envelope) int {
 // code, so a result that cannot be encoded falls back to an envelope that
 // can, carrying the failure, and ExitFailed.
 func marshalEnvelope(env Envelope) ([]byte, int) {
-	b, err := json.MarshalIndent(env, "", "  ")
+	b, err := EncodeJSON(env)
 	if err != nil {
 		msg := "the result could not be encoded as JSON: " + err.Error()
-		fallback, _ := json.MarshalIndent(Envelope{
+		fallback, _ := EncodeJSON(Envelope{
 			Tool: env.Tool, Version: env.Version, OK: false, Status: StatusFor(ExitFailed), ExitCode: ExitFailed,
 			Summary: msg,
 			Error:   &ErrorInfo{Stage: "emit", Category: agentrun.CategoryInternal, Message: msg},
-		}, "", "  ")
-		return append(fallback, '\n'), ExitFailed
+		})
+		return fallback, ExitFailed
 	}
-	return append(b, '\n'), env.ExitCode
+	return b, env.ExitCode
+}
+
+// EncodeJSON renders v as indented JSON and a trailing newline, the way
+// every document on stdout is written. It does not escape <, > and & the way
+// encoding/json does by default: the output is read by programs and models,
+// never embedded in HTML, and Markdown in a string is full of them.
+func EncodeJSON(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+// compactJSON is EncodeJSON on one line and without the newline, for a
+// MarshalJSON method.
+func compactJSON(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'}), nil
 }
 
 // presentOrNil drops a typed nil pointer, so a pipeline that failed before

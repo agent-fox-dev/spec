@@ -13,8 +13,9 @@ Before making any changes, orient yourself:
 3. **Read ADRs and errata** in `docs/` for architectural context.
 4. **Explore the codebase:** `afspec/` is the library, with its tests
    alongside as `*_test.go` and their fixtures in `afspec/testdata/`.
-   `cmd/spec/` is the `spec` command, `specgen/` its generation pipeline and
-   `internal/` the packages they run on; their tests sit beside them too.
+   `cmd/spec/` is the `spec` command, `specgen/` its generation pipeline,
+   `cmd/specr/` the `specr` render command and `internal/` the packages they
+   run on; their tests sit beside them too.
    `specification/` holds the format reference and the canonical JSON Schemas.
 5. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
 
@@ -34,6 +35,7 @@ afspec/schemas/         # Embedded copies of specification/schemas/*.v2.json
 afspec/testdata/        # Test fixtures
 cmd/spec/               # The spec command
 specgen/                # The generation pipeline behind it
+cmd/specr/              # The specr command: render a package as Markdown
 internal/               # agentrun, cli, issuex, project, repomap
 docs/                   # Documentation
 build/docs/             # golang docs
@@ -60,7 +62,7 @@ libraries — API signatures in specs may be unverified assumptions.
 | Command | What it does |
 |---------|-------------|
 | `make check` | Run lint + all tests (use before committing) |
-| `make build` | Build the `spec` command into `build/spec` |
+| `make build` | Build the `spec` and `specr` commands into `build/` |
 | `make test` | Run all tests (`go test ./... -count=1`) |
 | `make lint` | Formatting and static checks (`gofmt -l`, `go vet ./...`) |
 | `make doc` | Refresh the Go package docs in `build/docs/` |

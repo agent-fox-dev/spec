@@ -31,6 +31,10 @@ const (
 	WarnActivationFailed         WarnCode = "activation_failed"
 	WarnCommentNotPosted         WarnCode = "comment_not_posted"
 	WarnOutputNotWritten         WarnCode = "output_not_written"
+	// specr's codes.
+	WarnSpecInvalid   WarnCode = "spec_invalid"
+	WarnSectionAbsent WarnCode = "section_absent"
+	WarnOverBudget    WarnCode = "over_budget"
 )
 
 // warnStages is the one place a code's stage is decided.
@@ -58,6 +62,9 @@ var warnStages = map[WarnCode]string{
 	WarnActivationFailed:         "activate",
 	WarnCommentNotPosted:         "report",
 	WarnOutputNotWritten:         "emit",
+	WarnSpecInvalid:              "validate",
+	WarnSectionAbsent:            "render",
+	WarnOverBudget:               "render",
 }
 
 // WarnStage returns the stage a code is recorded against, and whether the

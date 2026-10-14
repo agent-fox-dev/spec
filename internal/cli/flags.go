@@ -323,7 +323,7 @@ func SplitArgs(fs *flag.FlagSet, argv []string) (positional string, err error) {
 	case 1:
 		return positionals[0], nil
 	default:
-		return "", fmt.Errorf("expected one input, got %d: %s — quote a multi-word idea",
+		return "", fmt.Errorf("expected one input, got %d: %s — quote an input that has spaces in it",
 			len(positionals), strings.Join(positionals, " "))
 	}
 }
