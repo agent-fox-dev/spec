@@ -150,6 +150,10 @@ git clone https://github.com/agent-fox-dev/spec && cd spec
 make build          # writes build/spec and build/specr
 ```
 
+`make build` stamps both commands with `git describe`, the commit and the
+build time (the variables in [version.go](version.go)), which `--version`
+prints, e.g. `spec v1.4.1 (commit 94f3890, built 2026-10-14T06:33:13Z)`.
+
 `go install …/cmd/spec@version` (or `…/cmd/specr@version`) does not work yet: the module carries a
 `replace` for agentkit-go until that module is tagged (see
 [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md)).

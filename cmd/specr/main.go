@@ -17,27 +17,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 
+	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
-
-// version is the build identity. A release build sets it with
-// -ldflags "-X main.version=..."; otherwise it is the module version go
-// install recorded, or "dev".
-var version = ""
-
-func buildVersion() string {
-	if version != "" {
-		return version
-	}
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
-	return "dev"
-}
 
 const tool = "specr"
 
@@ -173,7 +158,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 	o.register(fs)
-	run := cli.NewRun(tool, buildVersion())
+	run := cli.NewRun(tool, spec.Identity())
 
 	var parseOut bytes.Buffer
 	fs.SetOutput(&parseOut)
@@ -188,7 +173,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return emit(stdout, run, cli.ExitUsage, nil, usageInfo(err, nil))
 	}
 	if o.version {
-		fmt.Fprintf(stdout, "%s %s\n", tool, buildVersion())
+		fmt.Fprintf(stdout, "%s %s\n", tool, spec.Identity())
 		return cli.ExitOK
 	}
 	if o.schema {
