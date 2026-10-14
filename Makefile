@@ -17,9 +17,8 @@ check: lint test
 
 # Build the spec and specr commands into build/
 build:
-	go build $(LDFLAGS) -o build/spec ./cmd/spec
-	go build $(LDFLAGS) -o build/specr ./cmd/specr
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
+	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/specr
 
 # Run all tests
 test:
