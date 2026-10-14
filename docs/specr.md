@@ -25,7 +25,8 @@ specr --schema                                   # the interface, as JSON Schema
 ```
 
 Two paths are for a person and print text instead: `--version` prints the
-build identity, and `-h`/`--help` or a bare invocation prints the help to
+build identity (the version, then the commit and build time when the build
+set them, from the variables in `version.go`), and `-h`/`--help` or a bare invocation prints the help to
 stderr. `--help` exits 0 and writes nothing to stdout. A bare invocation exits
 2; when stdout is not a terminal it also writes a usage envelope, so a program
 still gets one object to parse.

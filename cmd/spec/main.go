@@ -11,27 +11,12 @@ import (
 	"context"
 	"flag"
 	"os"
-	"runtime/debug"
 
+	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/specgen"
 )
-
-// version is the build identity. A release build sets it with
-// -ldflags "-X main.version=..."; otherwise it is the module version go
-// install recorded, or "dev".
-var version = ""
-
-func buildVersion() string {
-	if version != "" {
-		return version
-	}
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
-	return "dev"
-}
 
 const usage = `spec — turn a product idea into a validated specification package
 
@@ -139,7 +124,7 @@ func newApp() cli.App {
 
 	return cli.App{
 		Name:    "spec",
-		Version: buildVersion(),
+		Version: spec.Identity(),
 		Usage:   usage,
 		Flags: func(fs *flag.FlagSet) {
 			fs.StringVar(&f.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+specgen.DefaultSpecDirName+" or $"+specgen.SpecDirEnv)
