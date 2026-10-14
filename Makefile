@@ -3,6 +3,15 @@
 SCHEMAS_DIR := $(CURDIR)/afspec/schemas
 DOC_DIR     ?= build/docs
 
+VERSION    := $(shell git describe --tags 2>/dev/null || echo "0.1.0")
+COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+LDFLAGS := -ldflags "\
+  -X github.com/agent-fox-dev/spec.Version=$(VERSION) \
+  -X github.com/agent-fox-dev/spec.Commit=$(COMMIT) \
+  -X github.com/agent-fox-dev/spec.BuildTime=$(BUILD_TIME)"
+
 # Run lint + all tests
 check: lint test
 
@@ -10,6 +19,7 @@ check: lint test
 build:
 	go build -o build/spec ./cmd/spec
 	go build -o build/specr ./cmd/specr
+	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
 
 # Run all tests
 test:
