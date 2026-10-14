@@ -166,8 +166,11 @@ func TestRenderIndividualScopedUsesTheTaskItself(t *testing.T) {
 	if !strings.Contains(tests, "TS-01-4") {
 		t.Error("the task's own test is missing")
 	}
-	if strings.Contains(tests, "TS-01-1") {
-		t.Error("a test belonging to another task was rendered")
+	if strings.Contains(tests, "### TS-01-1 ") {
+		t.Error("a test belonging to another task was rendered in full")
+	}
+	if !strings.Contains(tests, "## Other tests") || !strings.Contains(tests, "- **TS-01-1** (") {
+		t.Error("a test belonging to another task is not listed by id")
 	}
 
 	tasks := out["tasks"]

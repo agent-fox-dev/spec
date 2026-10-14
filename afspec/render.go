@@ -11,6 +11,15 @@ import (
 // Two v1 rendering bugs are fixed by construction here: every criterion
 // renders its contract, and every test renders all of its fields whatever its
 // kind. A test rendered as a title alone was a v1 bug, not a feature.
+//
+// More generally, an unbudgeted render drops nothing from the package: the
+// PRD frontmatter, every field of every artifact, the test commands and the
+// cross-spec dependencies all reach the Markdown. A coder reads the render
+// instead of the files, so a field it leaves out is a field the coder never
+// sees. The exceptions are the artifacts' $schema URIs and their copies of
+// the spec's identity, which say nothing the metadata does not. A scoped
+// render shows what the task does not own by id and title; a budget
+// (WithMaxTokens) is the caller's request to drop detail.
 
 // RenderCombined renders the whole spec as one Markdown document in the order
 // of §11.1: PRD body, architecture if present, requirements, tests, tasks.
@@ -41,7 +50,7 @@ func (s *Spec) renderCombinedFull() string {
 	var sb strings.Builder
 
 	sb.WriteString("# PRD\n\n")
-	sb.WriteString(s.PRDBody)
+	sb.WriteString(s.prdSection())
 	sb.WriteString("\n")
 
 	if s.Architecture != "" {
@@ -78,7 +87,7 @@ func (s *Spec) RenderIndividual(opts ...RenderOption) map[string]string {
 	cfg := resolveOpts(opts)
 
 	result := map[string]string{
-		"prd":          s.PRDBody,
+		"prd":          s.prdSection(),
 		"requirements": "",
 		"test_spec":    "",
 		"tasks":        "",
@@ -165,7 +174,7 @@ func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[stri
 		}
 	}
 
-	result := map[string]string{"prd": s.PRDBody}
+	result := map[string]string{"prd": s.prdSection()}
 	if s.Architecture != "" {
 		result["architecture"] = s.Architecture
 	}
@@ -177,7 +186,7 @@ func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[stri
 	}
 
 	if s.TestSpec != nil {
-		result["test_spec"] = renderTestsScoped(s.TestSpec, testRefs, false)
+		result["test_spec"] = renderTestsScoped(s.TestSpec, testRefs, false) + renderOtherTests(s.TestSpec, testRefs)
 	} else {
 		result["test_spec"] = ""
 	}
@@ -200,9 +209,52 @@ func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[stri
 	}
 
 	if s.TestSpec != nil {
-		result["test_spec"] = renderTestsScoped(s.TestSpec, testRefs, true)
+		result["test_spec"] = renderTestsScoped(s.TestSpec, testRefs, true) + renderOtherTests(s.TestSpec, testRefs)
 	}
 	return result
+}
+
+// prdSection is the PRD as a render shows it: the frontmatter, then the body.
+func (s *Spec) prdSection() string {
+	meta := s.renderMetadata()
+	if meta == "" {
+		return s.PRDBody
+	}
+	return meta + "\n" + s.PRDBody
+}
+
+// renderMetadata renders the PRD frontmatter as a list, one field per line.
+// A field the frontmatter does not set is left out; a spec built in memory
+// without frontmatter renders none.
+func (s *Spec) renderMetadata() string {
+	var sb strings.Builder
+	field := func(name, value string) {
+		if value != "" {
+			sb.WriteString(fmt.Sprintf("- **%s:** %s\n", name, value))
+		}
+	}
+	if s.SpecID != "" || s.SpecName != "" {
+		field("Spec", fmt.Sprintf("%s (id %s, name %s)", code(s.SpecID+"_"+s.SpecName), code(s.SpecID), code(s.SpecName)))
+	}
+	field("Title", s.Title)
+	field("Status", s.Status)
+	if s.SchemaVersion != 0 {
+		field("Schema version", fmt.Sprint(s.SchemaVersion))
+	}
+	field("Created", s.CreatedAt)
+	field("Updated", s.UpdatedAt)
+	field("Owner", s.Owner)
+	field("Source", s.Source)
+	field("Supersedes", codeList(s.Supersedes))
+	field("Tags", codeList(s.Tags))
+	if sb.Len() > 0 {
+		hash := "none (the spec has not been activated)"
+		if s.IntentHash != nil && *s.IntentHash != "" {
+			hash = code(*s.IntentHash)
+		}
+		field("Intent hash", hash)
+	}
+	return sb.String()
 }
 
 // isRequirementInScope reports whether a requirement is claimed by the task,
@@ -235,6 +287,17 @@ func (s *Spec) renderScopedRequirements(criteriaRefs, requirementRefs, pathRefs 
 		sb.WriteString(fmt.Sprintf("- **%s:** %s%s\n", req.Id, req.Title, suffix))
 	}
 	sb.WriteString("\n")
+	if len(s.Requirements.ExecutionPaths) > 0 {
+		sb.WriteString("Execution paths (full detail shown only for the paths the active task's tests verify):\n\n")
+		for _, p := range s.Requirements.ExecutionPaths {
+			suffix := " (verified by another task's tests)"
+			if pathRefs[p.Id] {
+				suffix = " (included below)"
+			}
+			sb.WriteString(fmt.Sprintf("- **%s:** %s%s\n", p.Id, p.Title, suffix))
+		}
+		sb.WriteString("\n")
+	}
 
 	sb.WriteString("## Introduction\n\n")
 	sb.WriteString(s.Requirements.Introduction)
@@ -256,6 +319,9 @@ func (s *Spec) renderScopedRequirements(criteriaRefs, requirementRefs, pathRefs 
 		}
 	}
 	renderExecutionPaths(&sb, scopedPaths)
+	// The external APIs belong to the whole spec, and which of them a task
+	// calls is not recorded, so every scoped render carries them all.
+	renderExternalAPIs(&sb, s.Requirements.ExternalApis)
 
 	return sb.String()
 }
@@ -264,6 +330,7 @@ func (s *Spec) renderScopedRequirements(criteriaRefs, requirementRefs, pathRefs 
 // one-line summary.
 func (s *Spec) renderScopedTasks(taskID int) string {
 	var sb strings.Builder
+	renderPlanContext(&sb, s.Tasks)
 	sb.WriteString("## Tasks\n\n")
 	for _, t := range s.Tasks.Tasks {
 		if t.Id == taskID {
@@ -296,29 +363,37 @@ func (r *RequirementsV2Json) Render() string {
 
 	renderExecutionPaths(&sb, r.ExecutionPaths)
 
-	if len(r.ExternalApis) > 0 {
-		sb.WriteString("## External APIs\n\n")
-		for _, api := range r.ExternalApis {
-			status := "verified"
-			if !api.Verified {
-				status = "UNVERIFIED — confirm these signatures before use"
-			}
-			sb.WriteString(fmt.Sprintf("### `%s` (%s) — %s\n\n", api.Package, api.Version, status))
-			sb.WriteString("| Symbol | Import Path | Signature | Notes |\n")
-			sb.WriteString("|--------|-------------|-----------|-------|\n")
-			for _, sym := range api.Symbols {
-				notes := ""
-				if sym.Notes != nil {
-					notes = *sym.Notes
-				}
-				sb.WriteString(fmt.Sprintf("| `%s` | `%s` | `%s` | %s |\n",
-					sym.Name, sym.ImportPath, sym.Signature, notes))
-			}
-			sb.WriteString("\n")
-		}
-	}
+	renderExternalAPIs(&sb, r.ExternalApis)
 
 	return sb.String()
+}
+
+// renderExternalAPIs renders every external package the spec depends on,
+// with each symbol's import path, signature and notes, and flags the
+// packages whose signatures were not read from their source.
+func renderExternalAPIs(sb *strings.Builder, apis []ExternalApi) {
+	if len(apis) == 0 {
+		return
+	}
+	sb.WriteString("## External APIs\n\n")
+	for _, api := range apis {
+		status := "verified"
+		if !api.Verified {
+			status = "UNVERIFIED — confirm these signatures before use"
+		}
+		sb.WriteString(fmt.Sprintf("### %s (%s) — %s\n\n", code(api.Package), api.Version, status))
+		sb.WriteString("| Symbol | Import Path | Signature | Notes |\n")
+		sb.WriteString("|--------|-------------|-----------|-------|\n")
+		for _, sym := range api.Symbols {
+			notes := ""
+			if sym.Notes != nil {
+				notes = *sym.Notes
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				cell(code(sym.Name)), cell(code(sym.ImportPath)), cell(code(sym.Signature)), cell(notes)))
+		}
+		sb.WriteString("\n")
+	}
 }
 
 func renderGlossary(sb *strings.Builder, glossary RequirementsV2JsonGlossary) {
@@ -334,7 +409,7 @@ func renderGlossary(sb *strings.Builder, glossary RequirementsV2JsonGlossary) {
 	}
 	sort.Strings(terms)
 	for _, term := range terms {
-		sb.WriteString(fmt.Sprintf("| %s | %s |\n", term, glossary[term]))
+		sb.WriteString(fmt.Sprintf("| %s | %s |\n", cell(term), cell(glossary[term])))
 	}
 	sb.WriteString("\n")
 }
@@ -400,6 +475,25 @@ func renderTestsScoped(ts *TestSpecV2Json, refs map[string]bool, slim bool) stri
 	return sb.String()
 }
 
+// renderOtherTests lists, one line each, the tests a scoped render does not
+// show in full: they belong to other tasks.
+func renderOtherTests(ts *TestSpecV2Json, refs map[string]bool) string {
+	var sb strings.Builder
+	for _, t := range ts.Tests {
+		if refs[t.Id] {
+			continue
+		}
+		if sb.Len() == 0 {
+			sb.WriteString("## Other tests\n\nOwned by other tasks; listed by id only:\n\n")
+		}
+		sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", t.Id, t.Kind, t.Title))
+	}
+	if sb.Len() > 0 {
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 // renderTest renders one test with all of its fields.
 func renderTest(sb *strings.Builder, t Test) {
 	sb.WriteString(fmt.Sprintf("### %s (%s): %s\n\n", t.Id, t.Kind, t.Title))
@@ -439,11 +533,63 @@ func renderTest(sb *strings.Builder, t Test) {
 // Render renders the tasks artifact as Markdown.
 func (t *TasksV2Json) Render() string {
 	var sb strings.Builder
+	renderPlanContext(&sb, t)
 	sb.WriteString("## Tasks\n\n")
 	for _, task := range t.Tasks {
 		renderTaskFull(&sb, task, &t.TestCommands)
 	}
 	return sb.String()
+}
+
+// renderPlanContext renders what the tasks artifact says about the whole
+// plan rather than one task: the project's test commands and the specs this
+// one depends on.
+func renderPlanContext(sb *strings.Builder, t *TasksV2Json) {
+	sb.WriteString("## Test Commands\n\n")
+	sb.WriteString(fmt.Sprintf("- **all_tests:** %s\n", code(t.TestCommands.AllTests)))
+	sb.WriteString(fmt.Sprintf("- **linter:** %s\n", code(t.TestCommands.Linter)))
+	if t.TestCommands.SpecTests != nil && *t.TestCommands.SpecTests != "" {
+		sb.WriteString(fmt.Sprintf("- **spec_tests:** %s\n", code(*t.TestCommands.SpecTests)))
+	}
+	sb.WriteString("\n## Dependencies\n\n")
+	if len(t.Dependencies) == 0 {
+		sb.WriteString("None: this spec depends on no other spec.\n\n")
+		return
+	}
+	for _, d := range t.Dependencies {
+		sb.WriteString(fmt.Sprintf("- %s — %s\n", code(d.Spec), d.Reason))
+	}
+	sb.WriteString("\n")
+}
+
+// code renders s as a Markdown code span, with a fence long enough for the
+// backticks s contains.
+func code(s string) string {
+	fence := "`"
+	for strings.Contains(s, fence) {
+		fence += "`"
+	}
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		return fence + " " + s + " " + fence
+	}
+	return fence + s + fence
+}
+
+// codeList renders each item as a code span, comma-separated.
+func codeList(items []string) string {
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = code(it)
+	}
+	return strings.Join(out, ", ")
+}
+
+// cell makes s safe inside a Markdown table cell: a pipe would end the cell
+// and a newline the row.
+func cell(s string) string {
+	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\n", "<br>")
 }
 
 // renderTaskFull renders a task with its steps, touches, criteria, tests,
