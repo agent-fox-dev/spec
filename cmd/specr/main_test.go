@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,21 +9,9 @@ import (
 	"testing"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
-
-// envelope is the part of the stdout object the tests read.
-type envelope struct {
-	OK        bool              `json:"ok"`
-	Status    string            `json:"status"`
-	ExitCode  int               `json:"exit_code"`
-	Summary   string            `json:"summary"`
-	Error     *cli.ErrorInfo    `json:"error"`
-	Warnings  []cli.Warning     `json:"warnings"`
-	Result    *Result           `json:"result"`
-	Artifacts []json.RawMessage `json:"artifacts"`
-	Next      []cli.Next        `json:"next"`
-}
 
 // newRepo lays out a repository with two packages under .specs: the v2
 // example as 09_agent_mode, and the fixture with an architecture.md as
@@ -57,18 +44,15 @@ func copyDir(t *testing.T, from, to string) {
 	}
 }
 
-// run runs specr and decodes the one JSON object it printed.
-func run(t *testing.T, argv ...string) (envelope, int, string) {
+// run runs specr and decodes the one JSON object it printed with the public
+// decoder, so the tests read the output the way a program would.
+func run(t *testing.T, argv ...string) (envelope.RenderEnvelope, int, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	code := Main(argv, &stdout, &stderr)
-	var env envelope
-	dec := json.NewDecoder(&stdout)
-	if err := dec.Decode(&env); err != nil {
-		t.Fatalf("stdout is not a JSON object (%v):\n%s", err, stdout.String())
-	}
-	if dec.More() {
-		t.Fatalf("stdout holds more than one JSON object")
+	env, err := envelope.DecodeSpecr(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("stdout is not one envelope (%v):\n%s", err, stdout.String())
 	}
 	if code != env.ExitCode {
 		t.Fatalf("exit code %d, envelope says %d", code, env.ExitCode)
@@ -299,8 +283,8 @@ func TestMarkdownFile(t *testing.T) {
 	if err != nil || string(b) != env.Result.Markdown || env.Result.MarkdownFile != path {
 		t.Fatalf("file %q (%v), result %q", path, err, env.Result.MarkdownFile)
 	}
-	if len(env.Artifacts) != 1 || !strings.Contains(string(env.Artifacts[0]), `"markdown_file"`) {
-		t.Errorf("artifacts = %s", env.Artifacts)
+	if len(env.Artifacts) != 1 || env.Artifacts[0].Kind != envelope.ArtifactMarkdownFile || env.Artifacts[0].Path != env.Result.MarkdownFile {
+		t.Errorf("artifacts = %+v", env.Artifacts)
 	}
 
 	blocked := filepath.Join(t.TempDir(), "file")

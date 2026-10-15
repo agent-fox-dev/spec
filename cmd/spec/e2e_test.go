@@ -13,6 +13,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
@@ -78,43 +79,12 @@ func TestSpecWritesAValidPackageEndToEnd(t *testing.T) {
 	code := newApp().Main(context.Background(), []string{"--dir", dir, "--repo-map-tokens", "0", "--detail", "full",
 		"--phase-model", "test_spec=claude-haiku-4-5:low", "build the test feature"},
 		strings.NewReader(""), &stdout, &stderr)
-	var env struct {
-		OK        bool   `json:"ok"`
-		Summary   string `json:"summary"`
-		Artifacts []struct {
-			Kind  string `json:"kind"`
-			Path  string `json:"path"`
-			Valid bool   `json:"valid"`
-		} `json:"artifacts"`
-		Next []struct {
-			Tool, Input string
-		} `json:"next"`
-		Usage struct {
-			Turns  int `json:"turns"`
-			Phases []struct {
-				Name   string `json:"name"`
-				Scope  string `json:"scope"`
-				Model  string `json:"model"`
-				Effort string `json:"effort"`
-			} `json:"phases"`
-		} `json:"usage"`
-		Result struct {
-			SpecDir       string   `json:"spec_dir"`
-			SpecID        string   `json:"spec_id"`
-			Status        string   `json:"status"`
-			Artifacts     []string `json:"artifacts"`
-			Requirements  int      `json:"requirements"`
-			Tests         int      `json:"tests"`
-			OpenQuestions []any    `json:"open_questions"`
-			Validation    struct {
-				Valid bool `json:"valid"`
-			} `json:"validation"`
-		} `json:"result"`
+	// Read the output the way a program would: with the public decoder.
+	env, err := envelope.DecodeSpec(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("stdout is not one envelope: %v\n%s", err, stdout.String())
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		t.Fatalf("stdout is not one JSON object: %v\n%s", err, stdout.String())
-	}
-	if code != cli.ExitOK || !env.OK {
+	if code != cli.ExitOK || !env.OK || env.Result == nil {
 		t.Fatalf("code = %d\n%s\n%s", code, stdout.String(), stderr.String())
 	}
 	r := env.Result
@@ -127,7 +97,7 @@ func TestSpecWritesAValidPackageEndToEnd(t *testing.T) {
 	if r.Requirements == 0 || r.Tests == 0 || len(r.OpenQuestions) != 1 {
 		t.Errorf("counts = %+v", r)
 	}
-	if len(env.Artifacts) != 1 || env.Artifacts[0].Kind != "spec_package" || !env.Artifacts[0].Valid {
+	if len(env.Artifacts) != 1 || env.Artifacts[0].Kind != envelope.ArtifactSpecPackage || !env.Artifacts[0].Valid {
 		t.Errorf("envelope artifacts = %+v", env.Artifacts)
 	}
 	if len(env.Next) != 1 || env.Next[0].Tool != "impl" || env.Next[0].Input != r.SpecDir {

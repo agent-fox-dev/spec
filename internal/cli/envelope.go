@@ -16,31 +16,6 @@ import (
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 )
 
-// Exit codes. Something other than a human reads them.
-const (
-	// ExitOK means the tool did what it was asked.
-	ExitOK = 0
-	// ExitFailed means a step errored. The failing stage is named in the
-	// envelope's error object.
-	ExitFailed = 1
-	// ExitUsage means the invocation was wrong: no input, an undefined flag,
-	// a flag combination that cannot hold. Nothing was fetched and nothing
-	// was written.
-	ExitUsage = 2
-)
-
-// StatusFor maps an exit code to its status string.
-func StatusFor(code int) string {
-	switch code {
-	case ExitOK:
-		return "done"
-	case ExitUsage:
-		return "usage"
-	default:
-		return "failed"
-	}
-}
-
 // ExitCodeFor maps an error category onto the exit table.
 func ExitCodeFor(category string) int {
 	if category == "usage" {
@@ -86,100 +61,6 @@ type NextProvider interface {
 	Next() []Next
 }
 
-// ArtifactKind is the closed set of shapes an Artifact can take.
-type ArtifactKind string
-
-// The artifact kinds the commands produce.
-const (
-	ArtifactSpecPackage  ArtifactKind = "spec_package"
-	ArtifactComment      ArtifactKind = "comment"
-	ArtifactMarkdownFile ArtifactKind = "markdown_file"
-)
-
-// Artifact is one thing a run produced. MarshalJSON emits only the fields of
-// its own Kind, so a caller never has to know which fields to ignore.
-type Artifact struct {
-	Kind ArtifactKind
-	// spec_package, markdown_file
-	Path  string
-	ID    string
-	Valid bool
-	// comment
-	URL  string
-	Role string
-	// DryRun marks an entry as hypothetical: it would have been written but
-	// for --dry-run.
-	DryRun bool
-}
-
-// MarshalJSON emits exactly the fields fixed for a's own Kind.
-func (a Artifact) MarshalJSON() ([]byte, error) {
-	m := map[string]any{"kind": string(a.Kind)}
-	switch a.Kind {
-	case ArtifactSpecPackage:
-		m["path"] = a.Path
-		m["id"] = a.ID
-		m["valid"] = a.Valid
-	case ArtifactComment:
-		m["url"] = a.URL
-		if a.Role != "" {
-			m["role"] = a.Role
-		}
-	case ArtifactMarkdownFile:
-		m["path"] = a.Path
-	}
-	if a.DryRun {
-		m["dry_run"] = true
-	}
-	return compactJSON(m)
-}
-
-// JSONSchema describes what MarshalJSON writes: the fields of the entry's
-// own kind.
-func (Artifact) JSONSchema() SchemaObject {
-	prop := func(typ, desc string) SchemaObject {
-		return SchemaObject{{Key: "type", Value: typ}, {Key: "description", Value: desc}}
-	}
-	kind := prop("string", "what the entry is; its other fields are the ones of its kind")
-	kind.Set("enum", []string{string(ArtifactSpecPackage), string(ArtifactComment), string(ArtifactMarkdownFile)})
-	return SchemaObject{
-		{Key: "type", Value: "object"},
-		{Key: "properties", Value: SchemaObject{
-			{Key: "kind", Value: kind},
-			{Key: "path", Value: prop("string", "spec_package, markdown_file: the path written")},
-			{Key: "id", Value: prop("string", "spec_package: the spec id")},
-			{Key: "valid", Value: prop("boolean", "spec_package: whether the package validates")},
-			{Key: "url", Value: prop("string", "comment: the comment's URL")},
-			{Key: "role", Value: prop("string", "comment: which comment it is")},
-			{Key: "dry_run", Value: prop("boolean", "true when it would have been written but for --dry-run")},
-		}},
-		{Key: "required", Value: []string{"kind"}},
-	}
-}
-
-// SideEffect is one write a run made to a forge, in the order it happened.
-type SideEffect struct {
-	Action  string   `json:"action"`
-	Kind    string   `json:"kind,omitempty"`
-	Target  string   `json:"target"`
-	URL     string   `json:"url,omitempty"`
-	OK      bool     `json:"ok"`
-	Warning WarnCode `json:"warning,omitempty"`
-}
-
-// SameInputPlaceholder stands for the original input in a suggested
-// invocation whose input may be arbitrarily large (raw text, stdin).
-const SameInputPlaceholder = "<same input>"
-
-// Next is one suggested follow-up invocation: the tool, its single input, the
-// flags to add, and why.
-type Next struct {
-	Tool  string   `json:"tool" description:"the command to run"`
-	Input string   `json:"input" description:"its one positional input"`
-	Flags []string `json:"flags" description:"the flags to add, each value its own element"`
-	Why   string   `json:"why" description:"why a caller would run it"`
-}
-
 // ResumePlaceholder is how a next[] entry names in to re-run it: the literal
 // origin (a file path or an issue URL) when the input had a small, stable
 // one, and SameInputPlaceholder when it was raw text or stdin.
@@ -191,113 +72,6 @@ func ResumePlaceholder(in Input) string {
 		}
 	}
 	return SameInputPlaceholder
-}
-
-// Warning is one thing that went differently than intended but did not stop
-// the run. Code is stable; Stage is looked up from the code.
-type Warning struct {
-	Code     WarnCode `json:"code" description:"a stable code naming the cause; an open set"`
-	Severity string   `json:"severity" description:"high when the result is not quite what it appears to be, low when informational"`
-	Stage    string   `json:"stage" description:"the step that raised it"`
-	Message  string   `json:"message" description:"what happened, in words"`
-}
-
-// PreflightCheck is one check --preflight performed and its outcome. A check
-// whose failure refuses the run never produces an entry: the run fails
-// instead, exactly as it would without --preflight.
-type PreflightCheck struct {
-	Check  string `json:"check"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail,omitempty"`
-}
-
-// Estimate bounds what the real run would spend at most.
-type Estimate struct {
-	Phases               int     `json:"phases"`
-	MaxTurnsPerPhase     int     `json:"max_turns_per_phase"`
-	MaxBudgetPerPhaseUSD float64 `json:"max_budget_per_phase_usd"`
-	MaxTotalUSD          float64 `json:"max_total_usd"`
-}
-
-// Envelope is the single JSON object spec writes to stdout, on every
-// program-driven path including the failing ones: a caller that is a program
-// should not have to parse two formats and guess which one it got.
-type Envelope struct {
-	Tool     string `json:"tool" description:"the command that wrote this envelope"`
-	Version  string `json:"version" description:"the command's build identity"`
-	OK       bool   `json:"ok" description:"true only when the command did the whole job it was asked to do; never true beside a non-zero exit_code or an error"`
-	Status   string `json:"status" description:"the outcome in words, derived from exit_code: done (0), failed (1) or usage (2)"`
-	ExitCode int    `json:"exit_code" description:"the process exit code: 0 done, 1 failed, 2 usage error"`
-	Summary  string `json:"summary" description:"one sentence on the outcome, at most 200 characters"`
-
-	Error       *ErrorInfo   `json:"error,omitempty" description:"what failed and where; present exactly when ok is false"`
-	Warnings    []Warning    `json:"warnings,omitempty" description:"what went differently than intended without stopping the run"`
-	Result      any          `json:"result,omitempty" description:"the command's own result"`
-	Artifacts   []Artifact   `json:"artifacts,omitempty" description:"what the run produced, read off facts the command holds"`
-	SideEffects []SideEffect `json:"side_effects,omitempty" description:"every write to a forge, in the order it happened"`
-	Next        []Next       `json:"next,omitempty" description:"the invocations a caller would plausibly make next"`
-
-	Input *InputInfo `json:"input,omitempty" description:"what the one positional argument turned out to be"`
-	Model *ModelInfo `json:"model,omitempty" description:"the models the run used"`
-	Usage *UsageInfo `json:"usage,omitempty" description:"the run's model cost, summed over every phase"`
-
-	DurationMS int64  `json:"duration_ms" description:"wall-clock time of the run, in milliseconds"`
-	StartedAt  string `json:"started_at" description:"when the run started, RFC 3339 in UTC"`
-}
-
-// InputInfo records what the single argument turned out to be.
-type InputInfo struct {
-	Kind              string `json:"kind"`
-	Origin            string `json:"origin"`
-	Bytes             int    `json:"bytes"`
-	Truncated         bool   `json:"truncated,omitempty"`
-	CommentsTruncated bool   `json:"comments_truncated,omitempty"`
-	ContextBytes      int    `json:"context_bytes,omitempty"`
-}
-
-// ModelInfo records which models served the run: what --model resolved to,
-// and the model and effort of every phase.
-type ModelInfo struct {
-	Spec   string                    `json:"spec"`
-	ID     string                    `json:"id"`
-	Effort string                    `json:"effort,omitempty"`
-	Phases map[string]PhaseModelInfo `json:"phases,omitempty"`
-}
-
-// PhaseModelInfo is the model one phase runs on.
-type PhaseModelInfo struct {
-	ID     string `json:"id"`
-	Effort string `json:"effort,omitempty"`
-}
-
-// UsageInfo is the run's cost, summed over every phase.
-type UsageInfo struct {
-	InputTokens         int64       `json:"input_tokens"`
-	OutputTokens        int64       `json:"output_tokens"`
-	CacheReadTokens     int64       `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens int64       `json:"cache_creation_tokens,omitempty"`
-	CostUSD             float64     `json:"cost_usd"`
-	Turns               int         `json:"turns"`
-	Phases              []PhaseInfo `json:"phases,omitempty"`
-}
-
-// PhaseInfo is one model-facing step. InputTokens is net of the prompt
-// cache; the cache figures are what make it agree with the cost.
-type PhaseInfo struct {
-	Name                string         `json:"name"`
-	Scope               string         `json:"scope,omitempty"`
-	Model               string         `json:"model,omitempty"`
-	Effort              string         `json:"effort,omitempty"`
-	Turns               int            `json:"turns"`
-	StopReason          string         `json:"stop_reason"`
-	InputTokens         int64          `json:"input_tokens"`
-	OutputTokens        int64          `json:"output_tokens"`
-	CacheReadTokens     int64          `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens int64          `json:"cache_creation_tokens,omitempty"`
-	CostUSD             float64        `json:"cost_usd"`
-	DurationMS          int64          `json:"duration_ms"`
-	ToolCalls           map[string]int `json:"tool_calls,omitempty"`
-	ToolErrors          map[string]int `json:"tool_errors,omitempty"`
 }
 
 // PhaseFromResult is the envelope's record of one finished phase. scope
@@ -332,60 +106,6 @@ func PhaseSummary(res agentrun.Result) string {
 	return s
 }
 
-// FixHint is a machine-usable remedy for a failure.
-type FixHint struct {
-	Flag    string   `json:"flag,omitempty" description:"the flag to change"`
-	Env     []string `json:"env,omitempty" description:"the environment variables, one of which supplies what is missing"`
-	Valid   []string `json:"valid,omitempty" description:"the values the flag accepts here"`
-	Current float64  `json:"current,omitempty" description:"the flag's value on this run"`
-	Suggest float64  `json:"suggest,omitempty" description:"a value to try instead"`
-}
-
-// ErrorInfo says what failed and where. It is present exactly when ok is
-// false.
-type ErrorInfo struct {
-	// Stage is the pipeline step that failed: usage, input, preflight, prd,
-	// requirements, test_spec, tasks, plan, scaffold, write, validate, budget.
-	Stage string `json:"stage" description:"the step that failed"`
-	// Category says whether re-running could help.
-	Category  string   `json:"category" description:"the kind of failure, which says whether re-running could help; an open set"`
-	Message   string   `json:"message" description:"what failed, in words"`
-	Retryable bool     `json:"retryable" description:"whether re-running the identical command could succeed"`
-	Resumable bool     `json:"resumable" description:"whether re-running the same input continues the work rather than starting it over"`
-	FixHint   *FixHint `json:"fix_hint,omitempty" description:"a mechanical remedy, where one is known"`
-	err       error
-}
-
-func (e *ErrorInfo) Error() string {
-	if e == nil {
-		return ""
-	}
-	return e.Message
-}
-
-func (e *ErrorInfo) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-// TotalBudgetUSD is the --total-budget ceiling a budget stop was checked
-// against, read from the failure it wraps; zero for any other failure.
-func (e *ErrorInfo) TotalBudgetUSD() float64 {
-	var tb interface{ TotalBudgetUSD() float64 }
-	if e == nil || e.err == nil || !errors.As(e.err, &tb) {
-		return 0
-	}
-	return tb.TotalBudgetUSD()
-}
-
-// RetryableFor reports whether an error of the given category can succeed if
-// re-run unchanged. Only "api" and "aborted" are retryable.
-func RetryableFor(category string) bool {
-	return category == "api" || category == "aborted"
-}
-
 // StageError is a pipeline failure carrying a stage and a category.
 type StageError interface {
 	error
@@ -397,7 +117,7 @@ type StageError interface {
 // failure that carries no stage is reported at defaultStage, and one that
 // carries no category as internal, which is the honest default.
 func ErrorFrom(defaultStage string, err error) *ErrorInfo {
-	info := &ErrorInfo{Stage: defaultStage, Message: err.Error(), err: err}
+	info := (&ErrorInfo{Stage: defaultStage, Message: err.Error()}).WithCause(err)
 	var se StageError
 	if errors.As(err, &se) {
 		info.Stage, info.Category = se.StageName(), se.CategoryName()
@@ -509,9 +229,9 @@ func (r *Run) AddPhase(p PhaseInfo) {
 	r.mu.Lock()
 	r.phases = append(r.phases, p)
 	r.mu.Unlock()
-	if n := p.toolErrorTotal(); n >= ToolErrorWarnThreshold {
+	if n := toolErrorTotal(p); n >= ToolErrorWarnThreshold {
 		r.Warn(WarnToolErrors, "low", "the %s phase made %d tool calls that failed (%s); each cost a turn",
-			p.Name, n, p.toolErrorSummary())
+			p.Name, n, toolErrorSummary(p))
 	}
 }
 
@@ -519,7 +239,7 @@ func (r *Run) AddPhase(p PhaseInfo) {
 // run say so.
 const ToolErrorWarnThreshold = 5
 
-func (p PhaseInfo) toolErrorTotal() int {
+func toolErrorTotal(p PhaseInfo) int {
 	n := 0
 	for _, v := range p.ToolErrors {
 		n += v
@@ -527,7 +247,7 @@ func (p PhaseInfo) toolErrorTotal() int {
 	return n
 }
 
-func (p PhaseInfo) toolErrorSummary() string {
+func toolErrorSummary(p PhaseInfo) string {
 	keys := make([]string, 0, len(p.ToolErrors))
 	for k := range p.ToolErrors {
 		keys = append(keys, k)
@@ -643,8 +363,8 @@ func (r *Run) Envelope(code int, result any, failure *ErrorInfo) Envelope {
 		}
 		if e.FixHint == nil {
 			var cause error = &e
-			if e.err != nil {
-				cause = e.err
+			if c := e.Unwrap(); c != nil {
+				cause = c
 			}
 			e.FixHint = FixHintFor(e.Category, e.Stage, bounds, cause)
 		}

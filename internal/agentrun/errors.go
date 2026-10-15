@@ -4,34 +4,24 @@ import (
 	"fmt"
 
 	"github.com/agent-fox-dev/agentkit-go/core"
+
+	"github.com/agent-fox-dev/spec/envelope"
 )
 
 // Error categories. They are the vocabulary the CLI's JSON envelope reports,
 // and they exist so a caller can decide whether re-running could help without
-// pattern-matching a message.
+// pattern-matching a message. They are defined in package envelope, which
+// documents each one.
 const (
-	// CategoryAuth is a missing or rejected credential. Re-running changes
-	// nothing until the environment does.
-	CategoryAuth = "auth"
-	// CategoryModel is a model that could not be resolved or served.
-	CategoryModel = "model"
-	// CategoryBudget is the per-phase spend ceiling. Raising it may help.
-	CategoryBudget = "budget"
-	// CategoryMaxTurns is the per-phase turn ceiling. It usually means the
-	// model kept failing validation rather than that the work was large.
-	CategoryMaxTurns = "max_turns"
-	// CategoryAPI is a provider or transport failure.
-	CategoryAPI = "api"
-	// CategoryAborted is a cancelled run, or one that outlived its timeout.
-	CategoryAborted = "aborted"
-	// CategoryRefusal is a model that declined the request. Re-running the
-	// same input is unlikely to help.
-	CategoryRefusal = "refusal"
-	// CategoryNoResult is a run that ended without calling its terminating
-	// tool: the model answered in prose, or stopped at a ceiling.
-	CategoryNoResult = "no_result"
-	// CategoryInternal is a bug in this program.
-	CategoryInternal = "internal"
+	CategoryAuth     = envelope.CategoryAuth
+	CategoryModel    = envelope.CategoryModel
+	CategoryBudget   = envelope.CategoryBudget
+	CategoryMaxTurns = envelope.CategoryMaxTurns
+	CategoryAPI      = envelope.CategoryAPI
+	CategoryAborted  = envelope.CategoryAborted
+	CategoryRefusal  = envelope.CategoryRefusal
+	CategoryNoResult = envelope.CategoryNoResult
+	CategoryInternal = envelope.CategoryInternal
 )
 
 // Error is one failure with a category attached.

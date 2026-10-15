@@ -21,6 +21,7 @@ import (
 
 	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
@@ -226,14 +227,14 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 			Message: fmt.Sprintf("the package %s could not be read: %v", dir, err)}
 	}
 
-	res := &Result{
+	res := &Result{RenderResult: envelope.RenderResult{
 		SpecDir:  displayPath(dir, root),
 		SpecID:   spec.SpecID,
 		SpecName: spec.SpecName,
 		Title:    spec.Title,
 		Status:   spec.Status,
 		Tasks:    taskInfos(spec),
-	}
+	}}
 	if o.task > 0 {
 		t, ok := findTask(spec, o.task)
 		if !ok {

@@ -293,6 +293,30 @@ account. `side_effects` lists every write to a forge. `next` suggests `impl`
 order, and `spec` again on the same input while a split is unfinished; an
 input that was raw text or stdin is named `<same input>`.
 
+### Reading it from Go
+
+The shape of this object is a public Go package,
+[`envelope`](api.md#envelope), which depends on the standard library only.
+`envelope.DecodeSpec` reads what `spec` wrote into `envelope.SpecEnvelope`,
+and the command builds its output from the same types, so a program that
+decodes with them cannot drift from it:
+
+```go
+env, err := envelope.DecodeSpec(stdout)
+if err != nil {
+    return err // not an envelope
+}
+if !env.OK {
+    return env.Error // an *envelope.ErrorInfo; it is an error
+}
+for _, p := range append([]envelope.Package{env.Result.Package}, env.Result.FollowOnSpecs...) {
+    fmt.Println(p.SpecDir, p.Validation.Valid, len(p.OpenQuestions))
+}
+```
+
+The result of `--detail summary` decodes into the same `envelope.SpecResult`,
+with the fields the summary leaves out zero; `Detail` says which view it was.
+
 ### `error`
 
 Present exactly when `ok` is false:

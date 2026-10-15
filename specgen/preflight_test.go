@@ -15,6 +15,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/tools"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/agentrun/indextest"
 	"github.com/agent-fox-dev/spec/internal/cli"
@@ -64,12 +65,13 @@ func dirNames(t *testing.T, dir string) []string {
 	return out
 }
 
-// TS-11-19 (unit): specgen.Result carries Preflight and Estimate fields
+// TS-11-19 (unit): the spec result carries Preflight and Estimate fields
 // immediately after DryRun.
 //
 // Verifies: 11-REQ-3.4
 func TestTS11_19_ResultCarriesPreflightAndEstimateAfterDryRun(t *testing.T) {
-	typ := reflect.TypeOf(Result{})
+	// The field lives in the envelope package's SpecResult, which Result embeds.
+	typ := reflect.TypeOf(envelope.SpecResult{})
 	idx := -1
 	for i := 0; i < typ.NumField(); i++ {
 		if typ.Field(i).Name == "DryRun" {

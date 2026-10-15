@@ -177,7 +177,7 @@ func (a App) Main(ctx context.Context, argv []string, stdin io.Reader, stdout, s
 }
 
 func usageInfo(err error) *ErrorInfo {
-	return &ErrorInfo{Stage: "usage", Category: "usage", Message: err.Error(), err: err}
+	return (&ErrorInfo{Stage: "usage", Category: "usage", Message: err.Error()}).WithCause(err)
 }
 
 // emit builds the envelope from the full result, swaps in the --detail view,
@@ -228,7 +228,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 
 	forge, ferr := pickForge(argument, c.InputKind, ws.Root, a.Name+"/"+a.Version)
 	if ferr != nil {
-		return ExitFailed, nil, &ErrorInfo{Stage: "input", Category: "input", Message: ferr.Error(), err: ferr}
+		return ExitFailed, nil, (&ErrorInfo{Stage: "input", Category: "input", Message: ferr.Error()}).WithCause(ferr)
 	}
 	defer func() { _ = forge.Close() }()
 
@@ -246,7 +246,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 		case errors.As(err, &ue):
 			return usage(err)
 		}
-		return ExitFailed, nil, &ErrorInfo{Stage: "input", Category: "input", Message: err.Error(), err: err}
+		return ExitFailed, nil, (&ErrorInfo{Stage: "input", Category: "input", Message: err.Error()}).WithCause(err)
 	}
 	if len(contextBlock) > 0 && (in.Truncated || len(in.Body)+len(contextBlock) > MaxInputBytes) {
 		return usage(fmt.Errorf("input and context together exceed %d bytes (%d bytes)",
@@ -277,7 +277,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 		if errors.As(err, &ue) {
 			return usage(err)
 		}
-		return ExitFailed, nil, &ErrorInfo{Stage: "preflight", Category: agentrun.CategoryOf(err), Message: err.Error(), err: err}
+		return ExitFailed, nil, (&ErrorInfo{Stage: "preflight", Category: agentrun.CategoryOf(err), Message: err.Error()}).WithCause(err)
 	}
 	warnClamped(run, plan)
 	run.SetModels(plan)
@@ -298,7 +298,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 	if cfg.Provider == nil {
 		client, cerr := resolveClient()
 		if cerr != nil {
-			return ExitFailed, nil, &ErrorInfo{Stage: "preflight", Category: agentrun.CategoryAuth, Message: cerr.Error(), err: cerr}
+			return ExitFailed, nil, (&ErrorInfo{Stage: "preflight", Category: agentrun.CategoryAuth, Message: cerr.Error()}).WithCause(cerr)
 		}
 		cfg.Client = client
 	}
@@ -314,7 +314,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 
 	runner, err := agentrun.NewRunner(cfg)
 	if err != nil {
-		return ExitFailed, nil, &ErrorInfo{Stage: "preflight", Category: agentrun.CategoryOf(err), Message: err.Error(), err: err}
+		return ExitFailed, nil, (&ErrorInfo{Stage: "preflight", Category: agentrun.CategoryOf(err), Message: err.Error()}).WithCause(err)
 	}
 	deps := Deps{
 		Common:           c,
@@ -331,7 +331,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 	if c.Preflight {
 		if a.PreflightExec == nil {
 			err := fmt.Errorf("%s does not support --preflight", a.Name)
-			return ExitFailed, nil, &ErrorInfo{Stage: "preflight", Category: agentrun.CategoryInternal, Message: err.Error(), err: err}
+			return ExitFailed, nil, (&ErrorInfo{Stage: "preflight", Category: agentrun.CategoryInternal, Message: err.Error()}).WithCause(err)
 		}
 		return a.PreflightExec(ctx, deps)
 	}

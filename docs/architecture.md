@@ -16,6 +16,7 @@ specification/              # The format (no code)
 afspec/                     # The reference library, package afspec
   schemas/                  #   Embedded copies of the v2 schemas
   testdata/                 #   Spec package fixtures for the tests
+envelope/                   # The commands' JSON output as Go types (stdlib only)
 cmd/spec/                   # The spec command: flags, help, the entry point
 cmd/specr/                  # The specr command: a package rendered as Markdown
 specgen/                    # The generation pipeline: phases, prompts, split
@@ -68,6 +69,24 @@ The v1 schemas have no copy in `afspec/`: the library reads version 2 only.
 | Stepwise validation for a generation pipeline | `generation.go` |
 
 The full API is listed in [afspec/README.md](../afspec/README.md).
+
+## The output contract
+
+Both commands write one JSON object to stdout. Its Go types are the public
+package `envelope`, which imports the standard library only: the envelope, the
+error and warning vocabulary, `spec`'s result (`SpecResult`) and `specr`'s
+(`RenderResult`). A program that reads the output imports it and calls
+`envelope.DecodeSpec` or `DecodeSpecr`; it pulls in neither the model SDK nor
+the `replace` that `go.mod` carries for agentkit-go.
+
+The commands do not keep a second definition. `internal/cli` names the types
+as aliases (`cli.Envelope` is `envelope.Envelope[any]`, since the shell does
+not know which result it carries) and adds what only a producer needs: the
+`Run` that accumulates warnings and cost, the `warnStages` table, the schema
+generator behind `specr --schema`. `specgen.Result` embeds `envelope.SpecResult`
+and `cmd/specr`'s `Result` embeds `envelope.RenderResult`, adding the methods
+the shell asks of a result (`Summary`, `Next`, `Artifacts`). Nothing under
+`envelope/` imports another package of this module.
 
 ## The spec command
 
@@ -177,7 +196,8 @@ reason, which `agentrun` maps onto the envelope's error categories.
 
 ```
 cmd/specr ──> afspec
-    └──────> internal/cli   (the envelope, SplitArgs, WriteAtomic, the --schema generator)
+    ├──────> envelope       (its result: RenderResult)
+    └──────> internal/cli   (the Run, SplitArgs, WriteAtomic, the --schema generator)
 ```
 
 It does not use `cli.App`, which resolves a model, a forge and a code-search

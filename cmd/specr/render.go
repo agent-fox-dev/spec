@@ -5,12 +5,13 @@ import (
 	"strings"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
 // Sections is the closed set of parts a render is made of, in the order the
 // format renders them (§11.1). --section takes these names.
-var Sections = []string{"prd", "architecture", "requirements", "test_spec", "tasks"}
+var Sections = envelope.Sections()
 
 // sectionHeading is each section's top-level heading, the one
 // afspec.RenderCombined gives it, so every form of the render reads alike.
@@ -24,39 +25,18 @@ var sectionHeading = map[string]string{
 
 // What --max-tokens can drop, in the order it drops it.
 const (
-	ReducedArchitecture = "architecture"
-	ReducedTestDetail   = "test_detail"
+	ReducedArchitecture = envelope.ReducedArchitecture
+	ReducedTestDetail   = envelope.ReducedTestDetail
 )
 
-// Result is specr's result: what was rendered, the plan's tasks, and the
-// Markdown itself, last, so a reader meets what it is before what it says.
-type Result struct {
-	SpecDir   string     `json:"spec_dir" description:"the package directory, relative to --dir when inside it; runnable as specr's input"`
-	SpecID    string     `json:"spec_id" description:"the spec id, from the PRD frontmatter"`
-	SpecName  string     `json:"spec_name" description:"the spec name, from the PRD frontmatter"`
-	Title     string     `json:"title" description:"the spec title, from the PRD frontmatter"`
-	Status    string     `json:"status" description:"the package's lifecycle status: draft, active, sealed, superseded or archived"`
-	Valid     bool       `json:"valid" description:"whether the package passes the format's validation; an invalid package still renders in full, and a spec_invalid warning names the failing rules"`
-	Scope     string     `json:"scope" description:"what was rendered: spec (the whole package) or task (the package scoped to one task)"`
-	Task      *TaskInfo  `json:"task,omitempty" description:"the task the render is scoped to; present exactly when scope is task"`
-	Sections  []string   `json:"sections" description:"the sections the Markdown holds, in order; a subset of prd, architecture, requirements, test_spec, tasks"`
-	MaxTokens int        `json:"max_tokens,omitempty" description:"the --max-tokens budget the render was held to; absent when there was none"`
-	Reduced   []string   `json:"reduced,omitempty" description:"the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), test_detail (each test's given, when, real components and pseudocode); absent when nothing was dropped"`
-	Tokens    int        `json:"tokens" description:"the estimated token count of markdown (bytes / 4)"`
-	Tasks     []TaskInfo `json:"tasks" description:"every task of the plan, in order: the ids --task takes"`
-	// MarkdownFile is where --markdown-file wrote the Markdown.
-	MarkdownFile string `json:"markdown_file,omitempty" description:"the absolute path --markdown-file wrote the Markdown to"`
-	Markdown     string `json:"markdown" description:"the rendered Markdown"`
-}
-
 // TaskInfo is one task of the plan, by id, without its body.
-type TaskInfo struct {
-	ID        int    `json:"id" description:"the task id, as --task takes it"`
-	Title     string `json:"title" description:"the task title"`
-	Kind      string `json:"kind" description:"implement, or integration for the plan's last task"`
-	State     string `json:"state" description:"pending, in_progress, done or dropped"`
-	Optional  bool   `json:"optional,omitempty" description:"true when the task may be skipped"`
-	DependsOn []int  `json:"depends_on,omitempty" description:"the tasks that must be done first"`
+type TaskInfo = envelope.TaskInfo
+
+// Result is specr's result. Its fields are the envelope package's
+// RenderResult, which a program reading the output decodes into; the methods
+// are what the shell asks of a result.
+type Result struct {
+	envelope.RenderResult
 }
 
 // Summary is the envelope's one sentence.
@@ -134,16 +114,16 @@ func render(spec *afspec.Spec, opts renderOptions, res *Result, run *cli.Run) {
 	var parts map[string]string
 	switch {
 	case opts.task > 0:
-		res.Scope = "task"
+		res.Scope = envelope.ScopeTask
 		parts = spec.RenderIndividualScoped(opts.task, budget...)
 		full := spec.RenderIndividualScoped(opts.task)
 		res.Reduced = reducedParts(spec, parts, full)
 	case opts.sections != nil:
-		res.Scope = "spec"
+		res.Scope = envelope.ScopeSpec
 		parts = spec.RenderIndividual()
 	default:
 		// The whole package is the library's combined render, byte for byte.
-		res.Scope = "spec"
+		res.Scope = envelope.ScopeSpec
 		res.Markdown = spec.RenderCombined(budget...)
 		res.Reduced = reducedCombined(spec, res.Markdown)
 		for _, key := range Sections {
