@@ -59,6 +59,7 @@ writes packages of it and the command that renders them:
 | --- | --- |
 | `specification/` | The format: the reference documents and the canonical JSON Schemas |
 | [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save and render spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
+| [`envelope/`](docs/api.md#envelope) | The JSON `spec` and `specr` write to stdout, as Go types for a program to decode it into; standard library only |
 | `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline, built on `afspec` and [agentkit-go](https://github.com/agent-fox-dev/agentkit-go) |
 | `cmd/specr/` | The `specr` command: a package rendered as Markdown, whole or scoped to one task |
 
@@ -111,6 +112,10 @@ The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
 Bedrock. Every flag, the envelope, the error categories and the warning codes
 are in [docs/cli.md](docs/cli.md); the environment variables in
 [docs/configuration.md](docs/configuration.md).
+
+A Go program that calls either command decodes its output with the
+[`envelope`](docs/api.md#envelope) package (`envelope.DecodeSpec`,
+`envelope.DecodeSpecr`) instead of writing structs of its own.
 
 Lifecycle management for an existing package — activating, sealing,
 archiving, superseding, validating — has no CLI surface; it's library API in

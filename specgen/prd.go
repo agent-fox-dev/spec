@@ -14,6 +14,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/tools"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 )
 
 // ToolSubmitPRD is the terminating tool of the PRD phase.
@@ -27,11 +28,9 @@ const ToolSubmitPRD = "submit_prd"
 func validName(s string) bool { return afspec.IsSpecName(s) }
 
 // RelevantFile is one file the PRD phase identified as important for later
-// generation phases.
-type RelevantFile struct {
-	Path string `json:"path"`
-	Why  string `json:"why"`
-}
+// generation phases. It is defined in package envelope, because the result
+// reports it.
+type RelevantFile = envelope.RelevantFile
 
 // PRD is the first phase's result.
 type PRD struct {
@@ -62,18 +61,9 @@ type PRD struct {
 // the reads they save.
 const maxCodebaseNotes = 12000
 
-// OpenQuestion is one decision made under uncertainty.
-//
-// It is the shape the "self-resolve, flag low confidence" contract takes: the
-// question was answered, the answer is in the PRD, and this records that a
-// different answer would have produced different work. A caller that wants a
-// human in the loop reads this array; a caller that does not still gets a
-// finished spec.
-type OpenQuestion struct {
-	Question string `json:"question"`
-	Decision string `json:"decision"`
-	Why      string `json:"why_unsure"`
-}
+// OpenQuestion is one decision made under uncertainty. It is defined in
+// package envelope, because the result reports it.
+type OpenQuestion = envelope.OpenQuestion
 
 // SplitScope is one spec's worth of the work, when the input held several.
 type SplitScope struct {

@@ -96,13 +96,14 @@ var (
 	schemaProviderType = reflect.TypeOf((*SchemaProvider)(nil)).Elem()
 	marshalerType      = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 	durationType       = reflect.TypeOf(time.Duration(0))
+	artifactType       = reflect.TypeOf(Artifact{})
 )
 
 // SchemaFor describes a Go type as a JSON Schema node, reading it the way
 // encoding/json does: a struct's properties in declaration order, named by
-// their json tags, required unless omitempty; a slice as an array of its
-// element; a pointer as its pointee; a map as an object of its values. Each
-// property's description is read from its description tag.
+// their json tags, required unless omitempty or omitzero; a slice as an array
+// of its element; a pointer as its pointee; a map as an object of its values.
+// Each property's description is read from its description tag.
 func SchemaFor(t reflect.Type) SchemaObject {
 	return schemaFor(t, nil)
 }
@@ -110,6 +111,9 @@ func SchemaFor(t reflect.Type) SchemaObject {
 func schemaFor(t reflect.Type, stack []reflect.Type) SchemaObject {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
+	}
+	if t == artifactType {
+		return artifactSchema()
 	}
 	if t.Implements(schemaProviderType) {
 		return reflect.Zero(t).Interface().(SchemaProvider).JSONSchema()
@@ -160,7 +164,7 @@ func structSchema(t reflect.Type, stack []reflect.Type) SchemaObject {
 		}
 		node := withDescription(schemaFor(f.Type, stack), f.Tag.Get(DescriptionTag))
 		props = append(props, SchemaField{Key: name, Value: node})
-		if !strings.Contains(","+opts+",", ",omitempty,") {
+		if !strings.Contains(","+opts+",", ",omitempty,") && !strings.Contains(","+opts+",", ",omitzero,") {
 			required = append(required, name)
 		}
 	}
@@ -282,4 +286,28 @@ func flagType(f *flag.Flag) (typ, format string, def any) {
 		}
 	}
 	return "string", "", f.DefValue
+}
+
+// artifactSchema describes what Artifact's MarshalJSON writes: the fields of
+// the entry's own kind. Artifact lives in package envelope, which does not
+// know this package's schema types, so the description is made here.
+func artifactSchema() SchemaObject {
+	prop := func(typ, desc string) SchemaObject {
+		return SchemaObject{{Key: "type", Value: typ}, {Key: "description", Value: desc}}
+	}
+	kind := prop("string", "what the entry is; its other fields are the ones of its kind")
+	kind.Set("enum", []string{string(ArtifactSpecPackage), string(ArtifactComment), string(ArtifactMarkdownFile)})
+	return SchemaObject{
+		{Key: "type", Value: "object"},
+		{Key: "properties", Value: SchemaObject{
+			{Key: "kind", Value: kind},
+			{Key: "path", Value: prop("string", "spec_package, markdown_file: the path written")},
+			{Key: "id", Value: prop("string", "spec_package: the spec id")},
+			{Key: "valid", Value: prop("boolean", "spec_package: whether the package validates")},
+			{Key: "url", Value: prop("string", "comment: the comment's URL")},
+			{Key: "role", Value: prop("string", "comment: which comment it is")},
+			{Key: "dry_run", Value: prop("boolean", "true when it would have been written but for --dry-run")},
+		}},
+		{Key: "required", Value: []string{"kind"}},
+	}
 }

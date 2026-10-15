@@ -10,6 +10,7 @@ write `go doc -all` output for every public package to `docs/generated/` (commit
 | Package | Purpose |
 |---|---|
 | `afspec` | The reference library for the version 2 specification format: load (`LoadSpec`), create (`CreateSpec`), mutate, validate (`ValidateArtifactSchema`, `ValidateCrossSpec`), lint, render and compute the dependency graph of a spec package. A fuller tour is in [`afspec/README.md`](../afspec/README.md). |
+| `envelope` | The JSON the `spec` and `specr` commands write to stdout, as Go types a program decodes it into. Standard library only. See [below](#envelope). |
 | `specgen` | The generation pipeline behind `spec`: phases, prompts and the split of a large spec. |
 | `cmd/spec`, `cmd/specr` | The commands; see [`cli.md`](cli.md) and [`specr.md`](specr.md). |
 
@@ -19,3 +20,36 @@ canonical JSON Schemas are in `specification/schemas/`.
 
 How the packages fit together is in [`architecture.md`](architecture.md); the
 configuration of the commands is in [`configuration.md`](configuration.md).
+
+## envelope
+
+`github.com/agent-fox-dev/spec/envelope` is the contract of the commands'
+output. Both commands write exactly one JSON object to stdout, an
+`envelope.Envelope[R]`, whose `result` is the command's own result. The
+commands build their output from these types, so decoding with them cannot
+drift from what is written.
+
+| What | Where |
+|---|---|
+| `Envelope[R]`, and `SpecEnvelope` / `RenderEnvelope` for the two commands | the object: `tool`, `version`, `ok`, `status`, `exit_code`, `summary`, `error`, `warnings`, `result`, `artifacts`, `side_effects`, `next`, `input`, `model`, `usage`, `duration_ms`, `started_at` |
+| `DecodeSpec`, `DecodeSpecr`, `Decode[R]` | read one envelope; unknown fields are ignored, anything but exactly one object is an error |
+| `SpecResult`, `Package`, `ScopeReport`, `ValidationReport`, `TraceReport`, `OpenQuestion` | `spec`'s result, see [cli.md](cli.md#result) |
+| `RenderResult`, `TaskInfo` | `specr`'s result, see [specr.md](specr.md#result) |
+| `ErrorInfo`, `FixHint`, the `Category…` constants | the failure; `*ErrorInfo` is an `error` |
+| `Warning`, `WarnCode` and the `Warn…` constants | what went differently without stopping the run |
+| `Artifact`, `SideEffect`, `Next`, `InputInfo`, `ModelInfo`, `UsageInfo`, `PhaseInfo`, `PreflightCheck`, `Estimate` | the rest of the envelope |
+
+```go
+env, err := envelope.DecodeSpec(stdout) // or DecodeSpecr
+if err != nil {
+    return err
+}
+if !env.OK {
+    return env.Error
+}
+fmt.Println(env.Result.SpecDir, env.Result.Validation.Valid)
+```
+
+Fields are added over time and a decoder ignores the ones it does not know; a
+field's name and meaning do not change. Warning codes, error categories and
+stages are open sets: a value with no constant is not an error.

@@ -117,6 +117,23 @@ raw JSON.
 | `markdown_file` | the absolute path `--markdown-file` wrote |
 | `markdown` | the render. It is the last field, so a reader meets what it is before what it says |
 
+### Reading it from Go
+
+`envelope.DecodeSpecr` reads the object into `envelope.RenderEnvelope`, whose
+`Result` is an `*envelope.RenderResult` with the fields above; the package is
+described in [api.md](api.md#envelope).
+
+```go
+env, err := envelope.DecodeSpecr(stdout)
+if err != nil {
+    return err
+}
+if !env.OK {
+    return env.Error
+}
+md := env.Result.Markdown
+```
+
 ### `artifacts` and `next`
 
 `artifacts` holds one `{"kind": "markdown_file", "path"}` when

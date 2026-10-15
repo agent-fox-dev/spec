@@ -1,0 +1,585 @@
+package envelope // import "github.com/agent-fox-dev/spec/envelope"
+
+Package envelope defines the JSON that the spec and specr commands write to
+stdout, as Go types a program can decode it into.
+
+Both commands write exactly one JSON object on every program-driven path,
+including the failing ones: an Envelope. Its result property holds the command's
+own result, and which type that is depends on the command:
+
+    spec   a SpecResult    the package(s) a run wrote
+    specr  a RenderResult  a package rendered as Markdown
+
+Decode a command's output with the function for its result:
+
+    env, err := envelope.DecodeSpecr(stdout)
+    if err != nil {
+    	return err // not an envelope at all
+    }
+    if !env.OK {
+    	return env.Error // an *ErrorInfo: stage, category, message, fix hint
+    }
+    md := env.Result.Markdown
+
+Decode is the same for any other result type, and Envelope[any] reads a result
+of a shape the caller does not know.
+
+The package depends on the standard library only, so importing it pulls in
+neither the commands' machinery nor a model SDK. The commands themselves build
+their output from these types, so the two cannot drift apart: a field added to
+the output is a field added here.
+
+# Compatibility
+
+The types follow the commands' output. Fields are added over time and a decoder
+ignores the ones it does not know; a field's name and meaning do not change.
+Code, category and stage names are open sets: a value this package has no
+constant for is not an error.
+
+CONSTANTS
+
+const (
+	// ExitOK means the tool did what it was asked.
+	ExitOK = 0
+	// ExitFailed means a step errored. The failing stage is named in the
+	// envelope's error object.
+	ExitFailed = 1
+	// ExitUsage means the invocation was wrong: no input, an undefined flag,
+	// a flag combination that cannot hold. Nothing was fetched and nothing
+	// was written.
+	ExitUsage = 2
+)
+    Exit codes. Something other than a human reads them.
+
+const (
+	// SeverityHigh means the result is not quite what it appears to be.
+	SeverityHigh = "high"
+	// SeverityLow means the warning is informational.
+	SeverityLow = "low"
+)
+    Warning severities.
+
+const (
+	// CategoryUsage is an invocation that was wrong. Nothing was read.
+	CategoryUsage = "usage"
+	// CategoryAuth is a missing or rejected credential. Re-running changes
+	// nothing until the environment does.
+	CategoryAuth = "auth"
+	// CategoryModel is a model that could not be resolved or served.
+	CategoryModel = "model"
+	// CategoryBudget is the per-phase spend ceiling. Raising it may help.
+	CategoryBudget = "budget"
+	// CategoryMaxTurns is the per-phase turn ceiling.
+	CategoryMaxTurns = "max_turns"
+	// CategoryAPI is a provider or transport failure. It is retryable.
+	CategoryAPI = "api"
+	// CategoryAborted is a cancelled run, or one that outlived its timeout.
+	// It is retryable.
+	CategoryAborted = "aborted"
+	// CategoryRefusal is a model that declined the request.
+	CategoryRefusal = "refusal"
+	// CategoryNoResult is a run that ended without calling its terminating
+	// tool.
+	CategoryNoResult = "no_result"
+	// CategoryInternal is a bug in the command.
+	CategoryInternal = "internal"
+	// CategoryInput is an input that could not be read.
+	CategoryInput = "input"
+	// CategoryDisk is a filesystem failure.
+	CategoryDisk = "disk"
+	// CategoryInvalidSpec means the package was generated and does not
+	// satisfy the format's cross-file rules. The files are on disk and the
+	// errors name the rules.
+	CategoryInvalidSpec = "invalid_spec"
+)
+    Error categories: the kind of failure, which says whether re-running could
+    help. The set is open; a category with no constant here is still valid.
+
+const (
+	SectionPRD          = "prd"
+	SectionArchitecture = "architecture"
+	SectionRequirements = "requirements"
+	SectionTestSpec     = "test_spec"
+	SectionTasks        = "tasks"
+)
+    The sections a render is made of, in the order the format renders them.
+    specr's --section takes these names, and RenderResult.Sections lists them.
+
+const (
+	ReducedArchitecture = "architecture"
+	ReducedTestDetail   = "test_detail"
+)
+    What --max-tokens can drop, in the order it drops it. They are the values of
+    RenderResult.Reduced.
+
+const (
+	ScopeSpec = "spec"
+	ScopeTask = "task"
+)
+    The scopes of a render, the values of RenderResult.Scope.
+
+const (
+	// ScopeDone means the package exists and validates.
+	ScopeDone = "done"
+	// ScopeInvalid means the package exists and does not validate. It is
+	// not written again; the errors name the rules to fix by hand.
+	ScopeInvalid = "invalid"
+	// ScopeFailed means this run stopped on this scope. The plan is kept,
+	// and running spec on the same input again resumes here.
+	ScopeFailed = "failed"
+	// ScopePending means the scope was not reached.
+	ScopePending = "pending"
+)
+    Scope states, as reported in SpecResult.Split.
+
+const SameInputPlaceholder = "<same input>"
+    SameInputPlaceholder stands for the original input in a suggested invocation
+    whose input may be arbitrarily large (raw text, stdin).
+
+const StagePreflight = "preflight"
+    StagePreflight is the Stage of a --preflight run.
+
+
+FUNCTIONS
+
+func RetryableFor(category string) bool
+    RetryableFor reports whether an error of the given category can succeed if
+    re-run unchanged. Only "api" and "aborted" are retryable.
+
+func Sections() []string
+    Sections is every section name, in the order the format renders them.
+
+func StatusFor(code int) string
+    StatusFor maps an exit code to its status string: done, usage or failed.
+
+
+TYPES
+
+type Artifact struct {
+	Kind ArtifactKind
+	// spec_package, markdown_file
+	Path  string
+	ID    string
+	Valid bool
+	// comment
+	URL  string
+	Role string
+	// DryRun marks an entry as hypothetical: it would have been written but
+	// for --dry-run.
+	DryRun bool
+}
+    Artifact is one thing a run produced. Only the fields of its own Kind are
+    written, and only those are read back, so a caller never has to know which
+    fields to ignore.
+
+func (a Artifact) MarshalJSON() ([]byte, error)
+    MarshalJSON writes exactly the fields fixed for a's own Kind.
+
+func (a *Artifact) UnmarshalJSON(data []byte) error
+    UnmarshalJSON reads what MarshalJSON writes.
+
+type ArtifactKind string
+    ArtifactKind is the closed set of shapes an Artifact can take.
+
+const (
+	ArtifactSpecPackage  ArtifactKind = "spec_package"
+	ArtifactComment      ArtifactKind = "comment"
+	ArtifactMarkdownFile ArtifactKind = "markdown_file"
+)
+    The artifact kinds the commands produce.
+
+type Envelope[R any] struct {
+	Tool     string `json:"tool" description:"the command that wrote this envelope"`
+	Version  string `json:"version" description:"the command's build identity"`
+	OK       bool   `json:"ok" description:"true only when the command did the whole job it was asked to do; never true beside a non-zero exit_code or an error"`
+	Status   string `json:"status" description:"the outcome in words, derived from exit_code: done (0), failed (1) or usage (2)"`
+	ExitCode int    `json:"exit_code" description:"the process exit code: 0 done, 1 failed, 2 usage error"`
+	Summary  string `json:"summary" description:"one sentence on the outcome, at most 200 characters"`
+
+	Error       *ErrorInfo   `json:"error,omitempty" description:"what failed and where; present exactly when ok is false"`
+	Warnings    []Warning    `json:"warnings,omitempty" description:"what went differently than intended without stopping the run"`
+	Result      R            `json:"result,omitzero" description:"the command's own result"`
+	Artifacts   []Artifact   `json:"artifacts,omitempty" description:"what the run produced, read off facts the command holds"`
+	SideEffects []SideEffect `json:"side_effects,omitempty" description:"every write to a forge, in the order it happened"`
+	Next        []Next       `json:"next,omitempty" description:"the invocations a caller would plausibly make next"`
+
+	Input *InputInfo `json:"input,omitempty" description:"what the one positional argument turned out to be"`
+	Model *ModelInfo `json:"model,omitempty" description:"the models the run used"`
+	Usage *UsageInfo `json:"usage,omitempty" description:"the run's model cost, summed over every phase"`
+
+	DurationMS int64  `json:"duration_ms" description:"wall-clock time of the run, in milliseconds"`
+	StartedAt  string `json:"started_at" description:"when the run started, RFC 3339 in UTC"`
+}
+    Envelope is the single JSON object a command writes to stdout. R is the type
+    of the command's own result: SpecResult for spec, RenderResult for specr.
+    Use a pointer type, as SpecEnvelope and RenderEnvelope do, to tell an absent
+    result from an empty one; a failure that happened before there was anything
+    to report has none.
+
+func Decode[R any](data []byte) (Envelope[R], error)
+    Decode reads the envelope a command wrote. It fails when data is not one
+    JSON object, or when a field has the wrong type; unknown fields are ignored.
+    A command writes exactly one object, so data after it is an error too.
+
+type ErrorInfo struct {
+	// Stage is the pipeline step that failed: usage, input, preflight, prd,
+	// requirements, test_spec, tasks, plan, scaffold, write, validate, budget,
+	// load.
+	Stage string `json:"stage" description:"the step that failed"`
+	// Category says whether re-running could help.
+	Category  string   `json:"category" description:"the kind of failure, which says whether re-running could help; an open set"`
+	Message   string   `json:"message" description:"what failed, in words"`
+	Retryable bool     `json:"retryable" description:"whether re-running the identical command could succeed"`
+	Resumable bool     `json:"resumable" description:"whether re-running the same input continues the work rather than starting it over"`
+	FixHint   *FixHint `json:"fix_hint,omitempty" description:"a mechanical remedy, where one is known"`
+	// Has unexported fields.
+}
+    ErrorInfo says what failed and where. It is present exactly when ok is
+    false. It is an error, so a caller can return it as it is.
+
+func (e *ErrorInfo) Error() string
+
+func (e *ErrorInfo) TotalBudgetUSD() float64
+    TotalBudgetUSD is the --total-budget ceiling a budget stop was checked
+    against, read from the failure it wraps; zero for any other failure and for
+    an ErrorInfo decoded from JSON.
+
+func (e *ErrorInfo) Unwrap() error
+    Unwrap returns the failure the command raised this from. It is set only in
+    the process that ran the command; an ErrorInfo decoded from JSON has none.
+
+func (e *ErrorInfo) WithCause(err error) *ErrorInfo
+    WithCause records the failure e reports, for Unwrap, and returns e.
+
+type Estimate struct {
+	Phases               int     `json:"phases"`
+	MaxTurnsPerPhase     int     `json:"max_turns_per_phase"`
+	MaxBudgetPerPhaseUSD float64 `json:"max_budget_per_phase_usd"`
+	MaxTotalUSD          float64 `json:"max_total_usd"`
+}
+    Estimate bounds what the real run would spend at most.
+
+type FixHint struct {
+	Flag    string   `json:"flag,omitempty" description:"the flag to change"`
+	Env     []string `json:"env,omitempty" description:"the environment variables, one of which supplies what is missing"`
+	Valid   []string `json:"valid,omitempty" description:"the values the flag accepts here"`
+	Current float64  `json:"current,omitempty" description:"the flag's value on this run"`
+	Suggest float64  `json:"suggest,omitempty" description:"a value to try instead"`
+}
+    FixHint is a machine-usable remedy for a failure.
+
+type InputInfo struct {
+	Kind              string `json:"kind"`
+	Origin            string `json:"origin"`
+	Bytes             int    `json:"bytes"`
+	Truncated         bool   `json:"truncated,omitempty"`
+	CommentsTruncated bool   `json:"comments_truncated,omitempty"`
+	ContextBytes      int    `json:"context_bytes,omitempty"`
+}
+    InputInfo records what the single argument turned out to be.
+
+type ModelInfo struct {
+	Spec   string                    `json:"spec"`
+	ID     string                    `json:"id"`
+	Effort string                    `json:"effort,omitempty"`
+	Phases map[string]PhaseModelInfo `json:"phases,omitempty"`
+}
+    ModelInfo records which models served the run: what --model resolved to,
+    and the model and effort of every phase.
+
+type Next struct {
+	Tool  string   `json:"tool" description:"the command to run"`
+	Input string   `json:"input" description:"its one positional input"`
+	Flags []string `json:"flags" description:"the flags to add, each value its own element"`
+	Why   string   `json:"why" description:"why a caller would run it"`
+}
+    Next is one suggested follow-up invocation: the tool, its single input,
+    the flags to add, and why.
+
+type OpenQuestion struct {
+	Question string `json:"question"`
+	Decision string `json:"decision"`
+	Why      string `json:"why_unsure"`
+}
+    OpenQuestion is one decision made under uncertainty.
+
+    It is the shape the "self-resolve, flag low confidence" contract takes:
+    the question was answered, the answer is in the PRD, and this records that
+    a different answer would have produced different work. A caller that wants
+    a human in the loop reads this array; a caller that does not still gets a
+    finished spec.
+
+type Package struct {
+	// SpecDir is the created package, relative to the repository root when
+	// it is inside it.
+	SpecDir  string `json:"spec_dir"`
+	SpecID   string `json:"spec_id"`
+	SpecName string `json:"spec_name"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Source   string `json:"source"`
+	// Artifacts are the files written, in the order they were produced.
+	Artifacts []string `json:"artifacts"`
+
+	// Counts summarize the package without reproducing it. A caller that
+	// wants the content reads the files.
+	Requirements   int `json:"requirements"`
+	Criteria       int `json:"criteria"`
+	ExecutionPaths int `json:"execution_paths"`
+	Tests          int `json:"tests"`
+	Tasks          int `json:"tasks"`
+
+	// Validation is the format's own verdict on the package.
+	Validation ValidationReport `json:"validation"`
+	// Traceability is derived from test.verifies and task.tests, never
+	// stored — the format makes both computed, so reporting them here is the
+	// only place they exist.
+	Traceability TraceReport `json:"traceability"`
+
+	// OpenQuestions are the decisions the PRD phase made under uncertainty
+	// and would like a person to check. An empty list means the input and
+	// the codebase settled everything.
+	OpenQuestions []OpenQuestion `json:"open_questions,omitempty"`
+
+	// CommentURL is set when the finished PRD was posted back to the issue.
+	CommentURL string `json:"comment_url,omitempty"`
+
+	// RelevantFiles are the files the PRD phase identified as important for
+	// later generation phases. They live only in the envelope and the
+	// run-time pipeline, never inside the spec package directory.
+	RelevantFiles []RelevantFile `json:"relevant_files,omitempty"`
+
+	// Detail records which view of this result was emitted: "summary" or
+	// "full". It is present on both.
+	Detail string `json:"detail"`
+}
+    Package describes one specification package.
+
+func (p *Package) SetDetail(d string)
+    SetDetail records which view of the result is emitted.
+
+type PhaseInfo struct {
+	Name                string         `json:"name"`
+	Scope               string         `json:"scope,omitempty"`
+	Model               string         `json:"model,omitempty"`
+	Effort              string         `json:"effort,omitempty"`
+	Turns               int            `json:"turns"`
+	StopReason          string         `json:"stop_reason"`
+	InputTokens         int64          `json:"input_tokens"`
+	OutputTokens        int64          `json:"output_tokens"`
+	CacheReadTokens     int64          `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64          `json:"cache_creation_tokens,omitempty"`
+	CostUSD             float64        `json:"cost_usd"`
+	DurationMS          int64          `json:"duration_ms"`
+	ToolCalls           map[string]int `json:"tool_calls,omitempty"`
+	ToolErrors          map[string]int `json:"tool_errors,omitempty"`
+}
+    PhaseInfo is one model-facing step. InputTokens is net of the prompt cache;
+    the cache figures are what make it agree with the cost.
+
+type PhaseModelInfo struct {
+	ID     string `json:"id"`
+	Effort string `json:"effort,omitempty"`
+}
+    PhaseModelInfo is the model one phase runs on.
+
+type PreflightCheck struct {
+	Check  string `json:"check"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+    PreflightCheck is one check --preflight performed and its outcome.
+    A check whose failure refuses the run never produces an entry: the run fails
+    instead, exactly as it would without --preflight.
+
+type RelevantFile struct {
+	Path string `json:"path"`
+	Why  string `json:"why"`
+}
+    RelevantFile is one file the PRD phase identified as important for later
+    generation phases.
+
+type RenderEnvelope = Envelope[*RenderResult]
+    RenderEnvelope is what the specr command writes.
+
+func DecodeSpecr(data []byte) (RenderEnvelope, error)
+    DecodeSpecr reads the envelope the specr command wrote.
+
+type RenderResult struct {
+	SpecDir   string     `json:"spec_dir" description:"the package directory, relative to --dir when inside it; runnable as specr's input"`
+	SpecID    string     `json:"spec_id" description:"the spec id, from the PRD frontmatter"`
+	SpecName  string     `json:"spec_name" description:"the spec name, from the PRD frontmatter"`
+	Title     string     `json:"title" description:"the spec title, from the PRD frontmatter"`
+	Status    string     `json:"status" description:"the package's lifecycle status: draft, active, sealed, superseded or archived"`
+	Valid     bool       `json:"valid" description:"whether the package passes the format's validation; an invalid package still renders in full, and a spec_invalid warning names the failing rules"`
+	Scope     string     `json:"scope" description:"what was rendered: spec (the whole package) or task (the package scoped to one task)"`
+	Task      *TaskInfo  `json:"task,omitempty" description:"the task the render is scoped to; present exactly when scope is task"`
+	Sections  []string   `json:"sections" description:"the sections the Markdown holds, in order; a subset of prd, architecture, requirements, test_spec, tasks"`
+	MaxTokens int        `json:"max_tokens,omitempty" description:"the --max-tokens budget the render was held to; absent when there was none"`
+	Reduced   []string   `json:"reduced,omitempty" description:"the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), test_detail (each test's given, when, real components and pseudocode); absent when nothing was dropped"`
+	Tokens    int        `json:"tokens" description:"the estimated token count of markdown (bytes / 4)"`
+	Tasks     []TaskInfo `json:"tasks" description:"every task of the plan, in order: the ids --task takes"`
+	// MarkdownFile is where --markdown-file wrote the Markdown.
+	MarkdownFile string `json:"markdown_file,omitempty" description:"the absolute path --markdown-file wrote the Markdown to"`
+	Markdown     string `json:"markdown" description:"the rendered Markdown"`
+}
+    RenderResult is specr's result: what was rendered, the plan's tasks, and the
+    Markdown itself, last, so a reader meets what it is before what it says.
+
+type ScopeReport struct {
+	Name    string `json:"name"`
+	Scope   string `json:"scope"`
+	Status  string `json:"status"`
+	SpecID  string `json:"spec_id,omitempty"`
+	SpecDir string `json:"spec_dir,omitempty"`
+	// The package's own state, so the summary view, which describes only the
+	// first package under result, still says whether every other one is
+	// ready. Absent for a scope this run did not write.
+	Valid              *bool `json:"valid,omitempty"`
+	ErrorCount         int   `json:"error_count,omitempty"`
+	OpenQuestionsCount int   `json:"open_questions_count,omitempty"`
+	TraceGaps          int   `json:"trace_gaps,omitempty"`
+}
+    ScopeReport is one scope of a split and where it stands.
+
+type SideEffect struct {
+	Action  string   `json:"action"`
+	Kind    string   `json:"kind,omitempty"`
+	Target  string   `json:"target"`
+	URL     string   `json:"url,omitempty"`
+	OK      bool     `json:"ok"`
+	Warning WarnCode `json:"warning,omitempty"`
+}
+    SideEffect is one write a run made to a forge, in the order it happened.
+
+type SpecEnvelope = Envelope[*SpecResult]
+    SpecEnvelope is what the spec command writes.
+
+func DecodeSpec(data []byte) (SpecEnvelope, error)
+    DecodeSpec reads the envelope the spec command wrote. Under --detail summary
+    the result is a trimmed view, which decodes into the same type with the
+    fields it leaves out zero; SpecResult.Detail says which view it was.
+
+type SpecResult struct {
+	Package
+
+	// FollowOnSpecs are the further packages this run wrote, in order, when
+	// the input was more than one spec's worth of work.
+	FollowOnSpecs []Package `json:"follow_on_specs,omitempty"`
+	// Split is every scope of the split with its state: done, invalid,
+	// failed or pending. Empty when the input was one spec's worth of work.
+	Split []ScopeReport `json:"split,omitempty"`
+	// SplitPlan is the plan file left in the spec root while the split is
+	// unfinished. Running spec on the same input again resumes from it.
+	SplitPlan string `json:"split_plan,omitempty"`
+	// Stage is "preflight" on a --preflight run, which stops before any
+	// model phase; it is absent on an ordinary run.
+	Stage string `json:"stage,omitempty"`
+	// DryRun records that nothing was written.
+	DryRun bool `json:"dry_run,omitempty"`
+	// Preflight and Estimate are set only by a --preflight run whose checks
+	// all passed: the checks that were performed, and what the real run would
+	// spend at most.
+	Preflight []PreflightCheck `json:"preflight,omitempty"`
+	Estimate  *Estimate        `json:"estimate,omitempty"`
+}
+    SpecResult is the result of the spec command: the package a run wrote,
+    and for an input that was more than one spec's worth of work, the further
+    packages and the whole plan.
+
+    The fields of the first package this run wrote sit at the top level,
+    so a run on an input that is one spec's worth of work reports exactly that
+    package. Under --detail summary only some of the fields are written (the
+    ones a caller acts on next); Detail says which view this is.
+
+type TaskInfo struct {
+	ID        int    `json:"id" description:"the task id, as --task takes it"`
+	Title     string `json:"title" description:"the task title"`
+	Kind      string `json:"kind" description:"implement, or integration for the plan's last task"`
+	State     string `json:"state" description:"pending, in_progress, done or dropped"`
+	Optional  bool   `json:"optional,omitempty" description:"true when the task may be skipped"`
+	DependsOn []int  `json:"depends_on,omitempty" description:"the tasks that must be done first"`
+}
+    TaskInfo is one task of the plan, by id, without its body.
+
+type TraceReport struct {
+	CriteriaCovered   int      `json:"criteria_covered"`
+	CriteriaUncovered []string `json:"criteria_uncovered,omitempty"`
+	PathsCovered      int      `json:"paths_covered"`
+	PathsUncovered    []string `json:"paths_uncovered,omitempty"`
+	TestsUnowned      []string `json:"tests_unowned,omitempty"`
+}
+    TraceReport is the derived coverage summary.
+
+type UsageInfo struct {
+	InputTokens         int64       `json:"input_tokens"`
+	OutputTokens        int64       `json:"output_tokens"`
+	CacheReadTokens     int64       `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64       `json:"cache_creation_tokens,omitempty"`
+	CostUSD             float64     `json:"cost_usd"`
+	Turns               int         `json:"turns"`
+	Phases              []PhaseInfo `json:"phases,omitempty"`
+}
+    UsageInfo is the run's cost, summed over every phase.
+
+type ValidationItem struct {
+	Check    string `json:"check"`
+	Artifact string `json:"artifact"`
+	Entity   string `json:"entity,omitempty"`
+	Message  string `json:"message"`
+}
+    ValidationItem is one finding, carrying the rule that produced it.
+
+type ValidationReport struct {
+	Valid        bool             `json:"valid"`
+	ErrorCount   int              `json:"error_count"`
+	WarningCount int              `json:"warning_count"`
+	Errors       []ValidationItem `json:"errors,omitempty"`
+	Warnings     []ValidationItem `json:"warnings,omitempty"`
+}
+    ValidationReport is afspec's verdict, flattened for JSON.
+
+type WarnCode string
+    WarnCode identifies one warning cause. It is an open set: a decoder must
+    accept a code it has no constant for.
+
+const (
+	WarnInputTruncated           WarnCode = "input_truncated"
+	WarnInputLooksLikePath       WarnCode = "input_looks_like_path"
+	WarnCommentsUnreadable       WarnCode = "comments_unreadable"
+	WarnCommentsTruncated        WarnCode = "comments_truncated"
+	WarnEffortClamped            WarnCode = "effort_clamped"
+	WarnCodeSearchUnavailable    WarnCode = "code_search_unavailable"
+	WarnSpecsDirUnreadable       WarnCode = "specs_dir_unreadable"
+	WarnProjectLanguageUnknown   WarnCode = "project_language_unknown"
+	WarnNameFlagIgnored          WarnCode = "name_flag_ignored"
+	WarnRepoMapBuildFailed       WarnCode = "repo_map_build_failed"
+	WarnScopeRenamed             WarnCode = "scope_renamed"
+	WarnScopeCountMismatch       WarnCode = "scope_count_mismatch"
+	WarnRelevantFilesUnavailable WarnCode = "relevant_files_unavailable"
+	WarnToolErrors               WarnCode = "tool_errors"
+	WarnSplitPlanForeign         WarnCode = "split_plan_foreign"
+	WarnSplitPlanUnreadable      WarnCode = "split_plan_unreadable"
+	WarnSplitPlanStale           WarnCode = "split_plan_stale"
+	WarnSplitPlanUpdateFailed    WarnCode = "split_plan_update_failed"
+	WarnSplitPlanNotRemoved      WarnCode = "split_plan_not_removed"
+	WarnArchitectureNotWritten   WarnCode = "architecture_not_written"
+	WarnActivationFailed         WarnCode = "activation_failed"
+	WarnCommentNotPosted         WarnCode = "comment_not_posted"
+	WarnOutputNotWritten         WarnCode = "output_not_written"
+	// specr's codes.
+	WarnSpecInvalid   WarnCode = "spec_invalid"
+	WarnSectionAbsent WarnCode = "section_absent"
+	WarnOverBudget    WarnCode = "over_budget"
+)
+    The warning codes the commands raise.
+
+type Warning struct {
+	Code     WarnCode `json:"code" description:"a stable code naming the cause; an open set"`
+	Severity string   `json:"severity" description:"high when the result is not quite what it appears to be, low when informational"`
+	Stage    string   `json:"stage" description:"the step that raised it"`
+	Message  string   `json:"message" description:"what happened, in words"`
+}
+    Warning is one thing that went differently than intended but did not stop
+    the run. Code is stable; Stage is looked up from the code.
+

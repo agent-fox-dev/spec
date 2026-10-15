@@ -1,40 +1,40 @@
 package cli
 
-// WarnCode identifies one warning cause. Every declared code has exactly one
-// stage in warnStages, so a code cannot be used without a stage, and cannot
-// be recorded against two different stages by accident.
-type WarnCode string
+import "github.com/agent-fox-dev/spec/envelope"
 
-// The declared warning codes. A call site that fits none of them gets a new
-// constant here and in warnStages, never a bare string.
+// The declared warning codes, which are defined in package envelope so that a
+// program reading the output can name them. Every declared code has exactly
+// one stage in warnStages, so a code cannot be used without a stage, and
+// cannot be recorded against two different stages by accident. A call site
+// that fits none of them gets a new constant in package envelope and in
+// warnStages, never a bare string.
 const (
-	WarnInputTruncated           WarnCode = "input_truncated"
-	WarnInputLooksLikePath       WarnCode = "input_looks_like_path"
-	WarnCommentsUnreadable       WarnCode = "comments_unreadable"
-	WarnCommentsTruncated        WarnCode = "comments_truncated"
-	WarnEffortClamped            WarnCode = "effort_clamped"
-	WarnCodeSearchUnavailable    WarnCode = "code_search_unavailable"
-	WarnSpecsDirUnreadable       WarnCode = "specs_dir_unreadable"
-	WarnProjectLanguageUnknown   WarnCode = "project_language_unknown"
-	WarnNameFlagIgnored          WarnCode = "name_flag_ignored"
-	WarnRepoMapBuildFailed       WarnCode = "repo_map_build_failed"
-	WarnScopeRenamed             WarnCode = "scope_renamed"
-	WarnScopeCountMismatch       WarnCode = "scope_count_mismatch"
-	WarnRelevantFilesUnavailable WarnCode = "relevant_files_unavailable"
-	WarnToolErrors               WarnCode = "tool_errors"
-	WarnSplitPlanForeign         WarnCode = "split_plan_foreign"
-	WarnSplitPlanUnreadable      WarnCode = "split_plan_unreadable"
-	WarnSplitPlanStale           WarnCode = "split_plan_stale"
-	WarnSplitPlanUpdateFailed    WarnCode = "split_plan_update_failed"
-	WarnSplitPlanNotRemoved      WarnCode = "split_plan_not_removed"
-	WarnArchitectureNotWritten   WarnCode = "architecture_not_written"
-	WarnActivationFailed         WarnCode = "activation_failed"
-	WarnCommentNotPosted         WarnCode = "comment_not_posted"
-	WarnOutputNotWritten         WarnCode = "output_not_written"
-	// specr's codes.
-	WarnSpecInvalid   WarnCode = "spec_invalid"
-	WarnSectionAbsent WarnCode = "section_absent"
-	WarnOverBudget    WarnCode = "over_budget"
+	WarnInputTruncated           = envelope.WarnInputTruncated
+	WarnInputLooksLikePath       = envelope.WarnInputLooksLikePath
+	WarnCommentsUnreadable       = envelope.WarnCommentsUnreadable
+	WarnCommentsTruncated        = envelope.WarnCommentsTruncated
+	WarnEffortClamped            = envelope.WarnEffortClamped
+	WarnCodeSearchUnavailable    = envelope.WarnCodeSearchUnavailable
+	WarnSpecsDirUnreadable       = envelope.WarnSpecsDirUnreadable
+	WarnProjectLanguageUnknown   = envelope.WarnProjectLanguageUnknown
+	WarnNameFlagIgnored          = envelope.WarnNameFlagIgnored
+	WarnRepoMapBuildFailed       = envelope.WarnRepoMapBuildFailed
+	WarnScopeRenamed             = envelope.WarnScopeRenamed
+	WarnScopeCountMismatch       = envelope.WarnScopeCountMismatch
+	WarnRelevantFilesUnavailable = envelope.WarnRelevantFilesUnavailable
+	WarnToolErrors               = envelope.WarnToolErrors
+	WarnSplitPlanForeign         = envelope.WarnSplitPlanForeign
+	WarnSplitPlanUnreadable      = envelope.WarnSplitPlanUnreadable
+	WarnSplitPlanStale           = envelope.WarnSplitPlanStale
+	WarnSplitPlanUpdateFailed    = envelope.WarnSplitPlanUpdateFailed
+	WarnSplitPlanNotRemoved      = envelope.WarnSplitPlanNotRemoved
+	WarnArchitectureNotWritten   = envelope.WarnArchitectureNotWritten
+	WarnActivationFailed         = envelope.WarnActivationFailed
+	WarnCommentNotPosted         = envelope.WarnCommentNotPosted
+	WarnOutputNotWritten         = envelope.WarnOutputNotWritten
+	WarnSpecInvalid              = envelope.WarnSpecInvalid
+	WarnSectionAbsent            = envelope.WarnSectionAbsent
+	WarnOverBudget               = envelope.WarnOverBudget
 )
 
 // warnStages is the one place a code's stage is decided.
