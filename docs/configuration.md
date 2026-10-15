@@ -38,7 +38,12 @@ with no credential stops at stage `preflight` with category `auth`.
 | `AWS_REGION`, then `AWS_DEFAULT_REGION` | The Bedrock region; default `us-east-1`. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK` | Bedrock credentials; without them, the AWS SDK's own chain. |
 
-Transient provider failures are retried by the Anthropic SDK (two retries).
+A request that fails before its response begins is retried by the Anthropic
+SDK (two retries). A call that fails once its response is streaming — a
+dropped connection, a truncated body, an overloaded or rate-limited API — is
+sent again by `spec` itself, after 2, 8 and 30 seconds; the failed attempts'
+usage is counted. A credential, a refusal or an invalid request is not
+repeated.
 
 ## The forge
 
