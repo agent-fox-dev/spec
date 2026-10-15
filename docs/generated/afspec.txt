@@ -1,0 +1,1116 @@
+package afspec // import "github.com/agent-fox-dev/spec/afspec"
+
+Package afspec is the reference Go library for the agent-fox specification
+format, version 2. It loads, validates, mutates, saves and renders spec
+packages with byte-for-byte round-trip fidelity. The format is specified in
+specification/spec-format-v2.md in this module's repository.
+
+Spec structs are treated as value types — mutation methods such as Transition
+and Supersede return new Spec copies rather than modifying the receiver in
+place.
+
+# Concurrency
+
+This package provides no goroutine-safety guarantees. Spec instances are not
+safe for concurrent use by multiple goroutines. Callers are responsible for
+synchronizing concurrent access to Spec instances externally (e.g. using a
+sync.Mutex or by confining each Spec to a single goroutine).
+
+CONSTANTS
+
+const (
+	PRDFrontmatterSchemaName = "prd-frontmatter.v2.json"
+	RequirementsSchemaName   = "requirements.v2.json"
+	TestSpecSchemaName       = "test_spec.v2.json"
+	TasksSchemaName          = "tasks.v2.json"
+)
+    Schema file names for the four v2 artifacts.
+
+const DefaultSpecDirName = ".specs"
+    DefaultSpecDirName is where spec packages live under the repository root.
+
+const SchemaVersion = 2
+    SchemaVersion is the format version this library reads and writes.
+
+const SpecDirEnv = "AF_SPEC_DIR"
+    SpecDirEnv overrides the spec root. A tool's --specs-dir flag wins over it.
+
+
+VARIABLES
+
+var GenerationSteps = []GenerationStep{StepRequirements, StepTestSpec, StepTasks}
+    GenerationSteps is the mandatory generation order.
+
+
+FUNCTIONS
+
+func ArtifactFileName(step GenerationStep) string
+    ArtifactFileName returns the on-disk file name for a step's artifact.
+
+func ComputeExitCode(findings []LintFinding) int
+    ComputeExitCode returns 1 if any finding has Severity "error", 0 otherwise.
+
+func ComputeIntentHash(body string) (string, error)
+    ComputeIntentHash extracts the ## Intent section from a PRD body string,
+    normalizes it, computes its SHA-256 hash, and returns the hex-encoded hash
+    string. The hash is stable: identical intent text always produces the same
+    hash.
+
+    Returns an IntentError if the body does not contain a ## Intent section or
+    if the body is empty.
+
+func DecodeArtifact(step GenerationStep, content map[string]any) (any, error)
+    DecodeArtifact turns the tool input a model returned — a decoded JSON object
+    — into the typed artifact for the given step.
+
+func EstimateTokens(text string) int
+    EstimateTokens estimates the token count of text using the chars/4
+    heuristic: len(text) / 4 (integer floor division).
+
+func FormatValidationEntries(entries []ValidationEntry) string
+    FormatValidationEntries renders validation entries as the feedback a
+    generation pipeline sends back to the model for repair. Each line names the
+    rule so the model can act on it.
+
+func HasIntent(body string) bool
+    HasIntent reports whether body carries the intent section ComputeIntentHash
+    hashes, by the same rule: a checker that accepted another spelling would
+    pass a PRD that activation then refuses.
+
+func IsSpecDirName(name string) bool
+    IsSpecDirName validates whether a directory name matches the NN_snake_case
+    pattern (two-or-more-digit numeric prefix, underscore, then one or more
+    snake_case segments).
+
+func IsSpecName(s string) bool
+    IsSpecName reports whether s is a valid spec name: exactly the part of
+    a spec directory name after the numeric prefix, so a name that passes it
+    always makes a valid directory.
+
+func LoadDependentInterfaces(specID string, specRoot string) []map[string]any
+    LoadDependentInterfaces loads interface summaries from the upstream specs
+    that specID depends on: glossary entries, external API symbols and criterion
+    contracts, one map per upstream spec.
+
+    It degrades gracefully: any spec that cannot be discovered or loaded is
+    skipped and the remaining ones are still returned. The result is never nil.
+
+func MarshalJSON(v interface{}) ([]byte, error)
+    MarshalJSON serializes a spec artifact struct to deterministic JSON. Struct
+    fields are serialized in JSON Schema property order and all map[string]T
+    keys are sorted alphabetically. The output uses 2-space indentation with a
+    trailing newline, so that a spec on disk round-trips through LoadSpec and
+    Save byte-for-byte.
+
+func MoveToArchive(specDir, root string) error
+    MoveToArchive transitions a spec to the archived state and moves the spec
+    directory to {root}/archive/ using an atomic rename or copy-then-delete.
+
+    Creates the archive directory if it does not exist. Returns a SaveError if
+    the archive directory already contains a directory with the same name.
+
+func NextCriterionID(r Requirement) string
+    NextCriterionID returns the next free criterion ID within a requirement,
+    {requirement_id}.{C}.
+
+func NextExecutionPathID(req RequirementsV2Json) string
+    NextExecutionPathID returns the next free path ID, {spec_id}-PATH-{N}.
+
+func NextRequirementID(req RequirementsV2Json) string
+    NextRequirementID returns the next free requirement ID, {spec_id}-REQ-{N}.
+
+func NextTaskID(t TasksV2Json) int
+    NextTaskID returns the next free task ID. Task IDs are plain integers
+    sequential from 1 (Appendix A).
+
+func NextTestID(ts TestSpecV2Json) string
+    NextTestID returns the next free test ID, TS-{spec_id}-{N}. All four test
+    kinds share one number series (§7.2).
+
+func ParseSpecDirName(name string) (string, string, error)
+    ParseSpecDirName parses a valid NN_snake_case directory name and returns the
+    numeric prefix and the snake_case name portion as separate values.
+
+    Returns an error if the name does not match the NN_snake_case pattern.
+
+func ResolveSpecsDir(flag, root string) string
+    ResolveSpecsDir picks the spec root: the flag, then the environment,
+    then the repository's own .specs. A relative value is taken against root.
+
+func SchemaNameForStep(step GenerationStep) (string, bool)
+    SchemaNameForStep returns the bundled schema that validates the artifact a
+    step produces.
+
+func Schemas() map[string][]byte
+    Schemas returns the bundled JSON Schema files as a map of schema file
+    names to their raw bytes. The schemas are embedded at compile time from
+    the schemas/ directory via //go:embed. The returned map is never nil and is
+    never empty because schema files are embedded at compile time.
+
+func UnknownFields(raw any, target any) []string
+    UnknownFields lists, as JSON pointers (`/tasks/0/done-when`), the keys in
+    raw — a decoded JSON value — that the type of target, a pointer to the Go
+    value it decodes into, has no field for. Nil when there are none.
+
+func ValidTaskTransition(current, target TaskState) bool
+    ValidTaskTransition reports whether current → target is allowed.
+
+func ValidTransition(current, target string) bool
+    ValidTransition checks the transition table and returns true if the
+    transition from current to target state is allowed, false otherwise. This is
+    a pure function with no side effects.
+
+    Allowed transitions:
+      - draft -> active
+      - draft -> archived
+      - active -> sealed
+      - sealed -> superseded
+      - sealed -> archived
+      - superseded -> archived
+
+
+TYPES
+
+type BootstrapError struct {
+	Msg string
+	Err *SpecError
+}
+    BootstrapError is returned when BootstrapSpec.Finalize fails due to missing
+    artifacts or validation errors.
+
+func (e *BootstrapError) Error() string
+
+func (e *BootstrapError) Unwrap() error
+
+type BootstrapSpec struct {
+	SpecID       string
+	SpecName     string
+	Title        string
+	CreatedAt    string
+	UpdatedAt    string
+	Requirements *RequirementsV2Json
+	TestSpec     *TestSpecV2Json
+	Tasks        *TasksV2Json
+	PRDBody      string
+	Architecture string
+}
+    BootstrapSpec supports incremental population of spec artifacts with
+    deferred cross-file validation. Use NewBootstrapSpec to create one,
+    set artifacts on it, then call Finalize to assemble and validate the Spec.
+
+func NewBootstrapSpec(specID, specName string) *BootstrapSpec
+    NewBootstrapSpec creates a BootstrapSpec with the given specID and specName.
+    All artifact fields start as nil/zero values. Title, CreatedAt and UpdatedAt
+    default to values that satisfy the PRD frontmatter schema and should be
+    overwritten with the real ones before Finalize.
+
+func (b *BootstrapSpec) Finalize() (*Spec, []ValidationError)
+    Finalize checks that all required artifacts (Requirements, TestSpec, Tasks,
+    PRDBody) are set, assembles a Spec from them, and runs full schema and
+    cross-file validation. Returns (*Spec, nil) on success.
+
+    If any required artifacts are missing, returns (nil, []ValidationError)
+    where each missing artifact produces a ValidationError with Rule="bootstrap"
+    and Message="Missing artifact: {name}".
+
+    If all artifacts are present but validation fails, returns (nil,
+    []ValidationError) with validation error details.
+
+    The BootstrapSpec is not mutated by Finalize; calling it multiple times
+    produces independent results.
+
+type CoverageReport struct {
+	Covered   []string
+	Uncovered []string
+}
+    CoverageReport lists the criteria and paths that are verified by at least
+    one test (Covered) and those that are not (Uncovered), in artifact order.
+
+    Format v2 §7.1: coverage is computed, never stored. Nothing here is written
+    back to test_spec.json.
+
+type Criterion struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action" yaml:"action" mapstructure:"action"`
+
+	// The WHEN / WHILE / IF / WHERE clause. Absent for ubiquitous.
+	Condition *string `json:"condition,omitempty,omitzero" yaml:"condition,omitempty" mapstructure:"condition,omitempty"`
+
+	// What the caller observes. Required for unwanted.
+	Contract *string `json:"contract,omitempty,omitzero" yaml:"contract,omitempty" mapstructure:"contract,omitempty"`
+
+	// The AND clause. complex_event only.
+	Guard *string `json:"guard,omitempty,omitzero" yaml:"guard,omitempty" mapstructure:"guard,omitempty"`
+
+	// Id corresponds to the JSON schema field "id".
+	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// Pattern corresponds to the JSON schema field "pattern".
+	Pattern CriterionPattern `json:"pattern" yaml:"pattern" mapstructure:"pattern"`
+
+	// The acting component. Defaults to "system" when rendering.
+	System *string `json:"system,omitempty,omitzero" yaml:"system,omitempty" mapstructure:"system,omitempty"`
+}
+    One EARS statement. The rendered sentence is derived from pattern,
+    condition, guard, system and action.
+
+func ComplexEventCriterion(id, condition, guard, system, action string) Criterion
+    ComplexEventCriterion constructs a criterion with the complex_event pattern:
+    "WHEN {condition} AND {guard}, THE {system} SHALL {action}".
+
+func EventDrivenCriterion(id, condition, system, action string) Criterion
+    EventDrivenCriterion constructs a criterion with the event_driven pattern:
+    "WHEN {condition}, THE {system} SHALL {action}".
+
+func GetCriterion(r Requirement, id string) (*Criterion, bool)
+    GetCriterion returns a copy of the criterion with the given ID.
+
+func OptionalCriterion(id, condition, system, action string) Criterion
+    OptionalCriterion constructs a criterion with the optional pattern: "WHERE
+    {condition}, THE {system} SHALL {action}".
+
+func StateDrivenCriterion(id, condition, system, action string) Criterion
+    StateDrivenCriterion constructs a criterion with the state_driven pattern:
+    "WHILE {condition}, THE {system} SHALL {action}".
+
+func UbiquitousCriterion(id, system, action string) Criterion
+    UbiquitousCriterion constructs a criterion with the ubiquitous pattern:
+    "THE {system} SHALL {action}". Correctness properties are written this way,
+    with an action that starts with "for any …".
+
+func UnwantedCriterion(id, condition, system, action, contract string) Criterion
+    UnwantedCriterion constructs a criterion with the unwanted pattern: "IF
+    {condition}, THEN THE {system} SHALL {action}". The contract is mandatory
+    for this pattern (§6.5.2, rule C10).
+
+func (c Criterion) ConditionText() string
+    ConditionText returns the condition clause, or the empty string when absent.
+
+func (c Criterion) ContractText() string
+    ContractText returns the contract, or the empty string when absent.
+
+func (c Criterion) GuardText() string
+    GuardText returns the guard clause, or the empty string when absent.
+
+func (c Criterion) RenderEARS() string
+    RenderEARS renders the criterion as its EARS sentence followed, when a
+    contract is present, by a second line "→ {contract}" (§11.2). A contract the
+    coder cannot see does not exist, so every renderer goes through this.
+
+func (c Criterion) RenderEARSSentence() string
+    RenderEARSSentence renders the criterion as its EARS sentence (§6.2.1):
+
+      - ubiquitous: "THE {system} SHALL {action}"
+      - event_driven: "WHEN {condition}, THE {system} SHALL {action}"
+      - complex_event: "WHEN {condition} AND {guard}, THE {system} SHALL
+        {action}"
+      - state_driven: "WHILE {condition}, THE {system} SHALL {action}"
+      - unwanted: "IF {condition}, THEN THE {system} SHALL {action}"
+      - optional: "WHERE {condition}, THE {system} SHALL {action}"
+
+    The contract is not part of the sentence; renderers append it on a second
+    line as "→ {contract}" (§11.2). Use RenderEARS for both at once.
+
+func (c Criterion) SystemName() string
+    SystemName returns the acting component, defaulting to "system" when the
+    criterion omits it (§6.2.1).
+
+func (c Criterion) WithContract(contract string) Criterion
+    WithContract returns a copy of the criterion carrying the given contract.
+    A contract is required for unwanted criteria and recommended whenever the
+    result is consumed by something else.
+
+type CriterionPattern string
+
+const CriterionPatternComplexEvent CriterionPattern = "complex_event"
+const CriterionPatternEventDriven CriterionPattern = "event_driven"
+const CriterionPatternOptional CriterionPattern = "optional"
+const CriterionPatternStateDriven CriterionPattern = "state_driven"
+const CriterionPatternUbiquitous CriterionPattern = "ubiquitous"
+const CriterionPatternUnwanted CriterionPattern = "unwanted"
+type Dependency struct {
+	// Reason corresponds to the JSON schema field "reason".
+	Reason string `json:"reason" yaml:"reason" mapstructure:"reason"`
+
+	// Spec corresponds to the JSON schema field "spec".
+	Spec string `json:"spec" yaml:"spec" mapstructure:"spec"`
+}
+
+type DependencyEdge struct {
+	FromSpec string
+	ToSpec   string
+	Reason   string
+}
+    DependencyEdge is a directed edge: FromSpec depends on ToSpec.
+
+type DependencyGraph struct {
+	Edges []DependencyEdge
+}
+    DependencyGraph is the inter-spec dependency graph built from the
+    dependencies list of each spec's tasks.json.
+
+func BuildDependencyGraph(metas []SpecMeta, root string) (*DependencyGraph, error)
+    BuildDependencyGraph reads tasks.json for each spec in the provided
+    SpecMeta slice, extracts cross-spec dependency declarations, and returns a
+    DependencyGraph.
+
+    If a tasks.json references a spec ID not present in the provided SpecMeta
+    slice, the dangling reference is recorded as an error and returned alongside
+    the partial graph.
+
+func (g *DependencyGraph) Dependencies(specID string) []DependencyEdge
+    Dependencies returns all edges where the given spec is the dependent (i.e.,
+    edges where FromSpec matches specID — the spec's own dependencies).
+
+func (g *DependencyGraph) Dependents(specID string) []DependencyEdge
+    Dependents returns all edges where other specs depend on the given spec
+    (i.e., edges where ToSpec matches specID).
+
+func (g *DependencyGraph) TopologicalSort() ([]string, error)
+    TopologicalSort returns spec IDs in topological order using Kahn's algorithm
+    such that every spec appears before its dependents. Returns an error if a
+    cycle is detected.
+
+    Nodes are inferred from edges. An empty graph returns an empty slice.
+
+type ExecutionPath struct {
+	// Id corresponds to the JSON schema field "id".
+	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// Steps corresponds to the JSON schema field "steps".
+	Steps []PathStep `json:"steps" yaml:"steps" mapstructure:"steps"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title" yaml:"title" mapstructure:"title"`
+}
+
+type ExternalApi struct {
+	// Package corresponds to the JSON schema field "package".
+	Package string `json:"package" yaml:"package" mapstructure:"package"`
+
+	// Symbols corresponds to the JSON schema field "symbols".
+	Symbols []ExternalApiSymbol `json:"symbols" yaml:"symbols" mapstructure:"symbols"`
+
+	// Verified corresponds to the JSON schema field "verified".
+	Verified bool `json:"verified" yaml:"verified" mapstructure:"verified"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version string `json:"version" yaml:"version" mapstructure:"version"`
+}
+
+type ExternalApiSymbol struct {
+	// ImportPath corresponds to the JSON schema field "import_path".
+	ImportPath string `json:"import_path" yaml:"import_path" mapstructure:"import_path"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name" yaml:"name" mapstructure:"name"`
+
+	// Notes corresponds to the JSON schema field "notes".
+	Notes *string `json:"notes,omitempty,omitzero" yaml:"notes,omitempty" mapstructure:"notes,omitempty"`
+
+	// Signature corresponds to the JSON schema field "signature".
+	Signature string `json:"signature" yaml:"signature" mapstructure:"signature"`
+}
+
+type GenerationStep string
+    GenerationStep names the artifact a generation pipeline has just produced.
+    Format v2 §12.1 fixes the order: requirements, then tests, then tasks.
+
+const (
+	StepRequirements GenerationStep = "requirements"
+	StepTestSpec     GenerationStep = "test_spec"
+	StepTasks        GenerationStep = "tasks"
+)
+type IntentError struct {
+	Msg string
+	Err *SpecError
+}
+    IntentError is returned when ComputeIntentHash cannot find the ## Intent
+    section in a PRD body.
+
+func (e *IntentError) Error() string
+
+func (e *IntentError) Unwrap() error
+
+type LifecycleError struct {
+	Msg string
+	Err *SpecError
+}
+    LifecycleError is returned when an invalid spec or subtask state transition
+    is attempted.
+
+func (e *LifecycleError) Error() string
+
+func (e *LifecycleError) Unwrap() error
+
+type LintFinding struct {
+	SpecName string
+	File     string
+	Rule     string
+	Severity string // one of "error", "warning", "hint"
+	Message  string
+	Line     int // zero means absent
+}
+    LintFinding represents a single lint diagnostic result with severity, rule,
+    message, and location metadata.
+
+func SortFindings(findings []LintFinding) []LintFinding
+    SortFindings returns a new slice sorted primarily by SpecName ascending,
+    then by File ascending, then by Severity in the order error < warning <
+    hint. The input slice is not modified.
+
+type LintResult struct {
+	Findings []LintFinding
+	ExitCode int
+}
+    LintResult is the aggregate output of a lint run, containing all findings
+    and an exit code.
+
+func RunLintSpecs(specsDir string, lintAll bool) (LintResult, error)
+    RunLintSpecs scans specsDir for spec folders, loads and validates each,
+    and returns a LintResult with sorted findings and computed exit code.
+    When lintAll is false, fully-implemented specs (all subtasks in state 'done'
+    or 'dropped') are skipped.
+
+type LintSpecInfo struct {
+	Name     string
+	Prefix   int
+	Path     string
+	HasTasks bool
+	HasPRD   bool
+}
+    LintSpecInfo contains metadata about a discovered spec folder eligible for
+    linting.
+
+func DiscoverLintSpecs(specsDir, filterSpec string) ([]LintSpecInfo, error)
+    DiscoverLintSpecs scans specsDir for subdirectories whose names are valid
+    spec directory names, checks each for the presence of requirements.json,
+    and returns a LintSpecInfo slice for all matching directories.
+
+    When filterSpec is non-empty, only the entry whose Name matches exactly is
+    returned; an error is returned if no match is found.
+
+    HasTasks and HasPRD are set based on the presence of tasks.json and prd.md
+    respectively.
+
+type LoadError struct {
+	Msg  string
+	File string
+	Err  *SpecError
+}
+    LoadError is returned when a spec directory cannot be loaded due to missing
+    required files or malformed content.
+
+func (e *LoadError) Error() string
+
+func (e *LoadError) Unwrap() error
+
+type PartialSpec struct {
+	SpecID       string
+	SpecName     string
+	Requirements *RequirementsV2Json
+	TestSpec     *TestSpecV2Json
+	Tasks        *TasksV2Json
+}
+    PartialSpec holds the artifacts a generation run has produced so far.
+    Any of them may be nil while generation is still in progress.
+
+type PathStep struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action" yaml:"action" mapstructure:"action"`
+
+	// Actor corresponds to the JSON schema field "actor".
+	Actor string `json:"actor" yaml:"actor" mapstructure:"actor"`
+}
+
+type PrdFrontmatterV2Json struct {
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at" yaml:"created_at" mapstructure:"created_at"`
+
+	// IntentHash corresponds to the JSON schema field "intent_hash".
+	IntentHash PrdFrontmatterV2JsonIntentHash `json:"intent_hash" yaml:"intent_hash" mapstructure:"intent_hash"`
+
+	// Owner corresponds to the JSON schema field "owner".
+	Owner *string `json:"owner,omitempty,omitzero" yaml:"owner,omitempty" mapstructure:"owner,omitempty"`
+
+	// SchemaVersion corresponds to the JSON schema field "schema_version".
+	SchemaVersion int `json:"schema_version" yaml:"schema_version" mapstructure:"schema_version"`
+
+	// Source corresponds to the JSON schema field "source".
+	Source *string `json:"source,omitempty,omitzero" yaml:"source,omitempty" mapstructure:"source,omitempty"`
+
+	// SpecId corresponds to the JSON schema field "spec_id".
+	SpecId string `json:"spec_id" yaml:"spec_id" mapstructure:"spec_id"`
+
+	// SpecName corresponds to the JSON schema field "spec_name".
+	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status PrdFrontmatterV2JsonStatus `json:"status" yaml:"status" mapstructure:"status"`
+
+	// Supersedes corresponds to the JSON schema field "supersedes".
+	Supersedes []string `json:"supersedes,omitempty,omitzero" yaml:"supersedes,omitempty" mapstructure:"supersedes,omitempty"`
+
+	// Tags corresponds to the JSON schema field "tags".
+	Tags []string `json:"tags,omitempty,omitzero" yaml:"tags,omitempty" mapstructure:"tags,omitempty"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title" yaml:"title" mapstructure:"title"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at" yaml:"updated_at" mapstructure:"updated_at"`
+}
+    Schema for the YAML frontmatter block in prd.md (format version 2)
+
+type PrdFrontmatterV2JsonIntentHash *string
+
+type PrdFrontmatterV2JsonStatus string
+
+const PrdFrontmatterV2JsonStatusActive PrdFrontmatterV2JsonStatus = "active"
+const PrdFrontmatterV2JsonStatusArchived PrdFrontmatterV2JsonStatus = "archived"
+const PrdFrontmatterV2JsonStatusDraft PrdFrontmatterV2JsonStatus = "draft"
+const PrdFrontmatterV2JsonStatusSealed PrdFrontmatterV2JsonStatus = "sealed"
+const PrdFrontmatterV2JsonStatusSuperseded PrdFrontmatterV2JsonStatus = "superseded"
+type RenderOption func(*renderConfig)
+    RenderOption configures a render call.
+
+func WithMaxTokens(n int) RenderOption
+    WithMaxTokens caps the estimated token count of the rendered output.
+    Values below 1 disable the budget.
+
+type Requirement struct {
+	// Criteria corresponds to the JSON schema field "criteria".
+	Criteria []Criterion `json:"criteria" yaml:"criteria" mapstructure:"criteria"`
+
+	// Id corresponds to the JSON schema field "id".
+	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// Rationale corresponds to the JSON schema field "rationale".
+	Rationale *string `json:"rationale,omitempty,omitzero" yaml:"rationale,omitempty" mapstructure:"rationale,omitempty"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title" yaml:"title" mapstructure:"title"`
+}
+
+func AddCriterion(r Requirement, c Criterion) (Requirement, error)
+    AddCriterion appends a criterion to a requirement. It fails on a duplicate
+    ID within that requirement.
+
+func GetRequirement(req RequirementsV2Json, id string) (*Requirement, bool)
+    GetRequirement returns a copy of the requirement with the given ID.
+
+type RequirementsV2Json struct {
+	// Schema corresponds to the JSON schema field "$schema".
+	Schema string `json:"$schema" yaml:"$schema" mapstructure:"$schema"`
+
+	// ExecutionPaths corresponds to the JSON schema field "execution_paths".
+	ExecutionPaths []ExecutionPath `json:"execution_paths" yaml:"execution_paths" mapstructure:"execution_paths"`
+
+	// ExternalApis corresponds to the JSON schema field "external_apis".
+	ExternalApis []ExternalApi `json:"external_apis,omitempty,omitzero" yaml:"external_apis,omitempty" mapstructure:"external_apis,omitempty"`
+
+	// Glossary corresponds to the JSON schema field "glossary".
+	Glossary RequirementsV2JsonGlossary `json:"glossary,omitempty,omitzero" yaml:"glossary,omitempty" mapstructure:"glossary,omitempty"`
+
+	// Introduction corresponds to the JSON schema field "introduction".
+	Introduction string `json:"introduction" yaml:"introduction" mapstructure:"introduction"`
+
+	// Requirements corresponds to the JSON schema field "requirements".
+	Requirements []Requirement `json:"requirements" yaml:"requirements" mapstructure:"requirements"`
+
+	// SchemaVersion corresponds to the JSON schema field "schema_version".
+	SchemaVersion int `json:"schema_version" yaml:"schema_version" mapstructure:"schema_version"`
+
+	// SpecId corresponds to the JSON schema field "spec_id".
+	SpecId string `json:"spec_id" yaml:"spec_id" mapstructure:"spec_id"`
+
+	// SpecName corresponds to the JSON schema field "spec_name".
+	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
+}
+    Schema for requirements.json spec artifact (format version 2)
+
+func AddExecutionPath(req RequirementsV2Json, p ExecutionPath) (RequirementsV2Json, error)
+    AddExecutionPath appends an execution path. It fails on a duplicate ID.
+
+func AddExternalAPI(req RequirementsV2Json, api ExternalApi) (RequirementsV2Json, error)
+    AddExternalAPI appends an external API package entry.
+
+func AddRequirement(req RequirementsV2Json, r Requirement) (RequirementsV2Json, error)
+    AddRequirement appends a requirement and returns a new artifact. It fails
+    when the ID is already in use.
+
+func RemoveGlossaryEntry(req RequirementsV2Json, term string) (RequirementsV2Json, bool)
+    RemoveGlossaryEntry drops a glossary term and reports whether it was
+    present.
+
+func RemoveRequirement(req RequirementsV2Json, id string) (RequirementsV2Json, bool)
+    RemoveRequirement drops the requirement with the given ID and reports
+    whether it was present.
+
+func SetGlossaryEntry(req RequirementsV2Json, term, definition string) RequirementsV2Json
+    SetGlossaryEntry sets a glossary term, replacing any existing definition.
+
+func (r *RequirementsV2Json) Render() string
+    Render renders the requirements artifact as Markdown.
+
+type RequirementsV2JsonGlossary map[string]string
+
+type SaveError struct {
+	Msg string
+	Err *SpecError
+}
+    SaveError is returned when a spec cannot be written to disk.
+
+func (e *SaveError) Error() string
+
+func (e *SaveError) Unwrap() error
+
+type Spec struct {
+	// PRD frontmatter fields
+	SpecID        string
+	SpecName      string
+	Title         string
+	Status        string
+	CreatedAt     string
+	UpdatedAt     string
+	Owner         string
+	Source        string
+	Supersedes    []string
+	Tags          []string
+	IntentHash    *string
+	SchemaVersion int
+
+	// PRD Markdown body (everything after the closing --- delimiter)
+	PRDBody string
+
+	// Dir is the directory path from which this spec was loaded. It is
+	// set by LoadSpec and used by ValidateCrossFile to check that the
+	// folder name's numeric prefix and snake_case suffix match SpecID
+	// and SpecName. Empty when the spec was not loaded from disk.
+	Dir string
+
+	// JSON artifacts
+	Requirements *RequirementsV2Json
+	TestSpec     *TestSpecV2Json
+	Tasks        *TasksV2Json
+
+	// Optional architecture document
+	Architecture string
+
+	// Has unexported fields.
+}
+    Spec represents a complete specification package with all artifacts. The PRD
+    frontmatter fields are stored directly on the struct, while the PRD Markdown
+    body is stored in PRDBody. The three JSON artifacts are stored as pointers
+    to the auto-generated types.
+
+func CreateSpec(specID, specName string) *Spec
+    CreateSpec creates a new draft Spec whose three artifacts carry a valid
+    $schema, spec_id, spec_name and schema_version so that Save + LoadSpec
+    round-trips. The artifact bodies are empty: a spec with no requirements,
+    no tests and no tasks is *incomplete*, not schema-invalid, and Validate
+    reports it as such (§10, bootstrap mode) until a generation run fills it in.
+
+    Validation of specID and specName is deferred to Spec.Validate.
+
+func LoadSpec(dir string) (*Spec, error)
+    LoadSpec reads all spec artifacts from a directory and returns a populated
+    Spec struct. It reads prd.md, requirements.json, test_spec.json, tasks.json,
+    and optionally architecture.md.
+
+func (s *Spec) ComputeTraceability() TraceabilityMatrix
+    ComputeTraceability derives the traceability matrix from the three
+    artifacts. Nothing is read from disk and nothing is stored, so the matrix
+    cannot drift from the artifacts it describes (§8.5).
+
+    Covered reports whether at least one test verifies the entity — for an
+    execution path, at least one smoke test, which is what C5 asks for,
+    so the matrix never calls covered a path the validator reports uncovered.
+    Owned reports whether at least one of those tests is listed by a task.
+
+func (s *Spec) IsScaffold() bool
+    IsScaffold reports whether the spec is still an empty scaffold:
+    no requirements, no tests and no tasks. A scaffold is incomplete rather than
+    invalid, which is what lets a tool save a spec before a generation run has
+    produced its content.
+
+func (s *Spec) RenderCombined(opts ...RenderOption) string
+    RenderCombined renders the whole spec as one Markdown document in the order
+    of §11.1: PRD body, architecture if present, requirements, tests, tasks.
+
+    With WithMaxTokens(N) it applies progressive truncation:
+      - level 0: full render
+      - level 1: drop the architecture section
+      - level 2: additionally render the tests in slim form
+
+func (s *Spec) RenderIndividual(opts ...RenderOption) map[string]string
+    RenderIndividual renders each artifact separately, keyed by "prd",
+    "requirements", "test_spec", "tasks" and — only when present —
+    "architecture". The same truncation levels as RenderCombined apply.
+
+func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[string]string
+    RenderIndividualScoped renders the spec scoped to one task (§11.1): the
+    PRD body and architecture unfiltered; the requirements that own the task's
+    criteria in full and all others as one line each; the task's tests in full;
+    the paths those tests verify; the task in full and all others as one line.
+
+    Because rules C7 and C8 guarantee that every task lists its own tests and
+    criteria, the v1 inference chain (traceability lookup, then text matching,
+    then a full-spec fallback) is not needed and does not exist here. An unknown
+    task ID falls back to the unscoped render.
+
+func (s *Spec) Save(dir string) error
+    Save atomically writes all spec artifacts to the given directory.
+    Each artifact is written to a temporary file first, then renamed to its
+    final name. Returns a LifecycleError if the spec is sealed, superseded,
+    or archived.
+
+    For active specs with a stored IntentHash, Save recomputes the hash from
+    the current PRD body and returns an IntentError if the ## Intent section has
+    changed since activation (intent drift detection).
+
+func (s *Spec) Supersede(supersedingSpecID, dir string) (*Spec, error)
+    Supersede transitions a sealed spec to the superseded state, prepends a
+    deprecation banner referencing the superseding spec ID to the PRD body,
+    and persists the updated spec to disk. Returns a new Spec copy.
+
+    Returns a LifecycleError if the spec is not in the sealed state.
+
+func (s *Spec) Transition(target, dir string) (*Spec, error)
+    Transition updates the spec's status field to the target state, persists the
+    updated spec to disk, and returns a new Spec copy with the updated status.
+    The receiver is not modified.
+
+    When transitioning from draft to active, ComputeIntentHash is called on the
+    PRD body. If the body lacks a ## Intent section, an IntentError is returned
+    and the spec is not persisted.
+
+    Returns a LifecycleError if the transition is not allowed. Returns an
+    IntentError if transitioning to active and the PRD body has no ## Intent
+    section. Returns a SaveError if disk persistence fails.
+
+func (s *Spec) Validate() ValidationResult
+    Validate runs schema validation followed by the cross-file rules and returns
+    the combined result.
+
+func (s *Spec) ValidateCrossFile() ValidationResult
+    ValidateCrossFile runs the cross-file integrity rules C1 to C11 of
+    §10.2 plus the warnings listed there. All rules are errors unless stated
+    otherwise.
+
+func (s *Spec) ValidateSchema() ValidationResult
+    ValidateSchema validates the PRD frontmatter and the three JSON artifacts
+    against the bundled v2 schemas. The EARS field constraints of §6.2.1 are
+    expressed as conditionals inside requirements.v2.json, so there is no
+    separate EARS check.
+
+func (s *Spec) ValidateStructured() map[string]any
+    ValidateStructured runs full validation and returns a structured map for CLI
+    consumption with "valid", "errors" and, when non-empty, "warnings".
+
+    Schema errors carry "artifact", "message" and optionally "path"; integrity
+    errors carry "check" and "message".
+
+type SpecError struct {
+	Msg string
+}
+    SpecError is the base error type for all afspec library errors. All specific
+    error types wrap SpecError such that errors.As(err, &SpecError{}) returns
+    true for any afspec error.
+
+func (e *SpecError) Error() string
+
+type SpecMeta struct {
+	SpecID   string
+	SpecName string
+	Status   string
+	Dir      string
+}
+    SpecMeta is a lightweight struct containing metadata parsed from a spec's
+    PRD frontmatter, used for discovery and landscape views.
+
+func DiscoverSpecs(root string) ([]SpecMeta, error)
+    DiscoverSpecs scans the root directory for subdirectories matching the
+    NN_snake_case pattern, parses the PRD frontmatter of each, and returns a
+    slice of SpecMeta entries with SpecID, SpecName, Status, and Dir fields
+    populated.
+
+    If a subdirectory matches the pattern but its prd.md is missing or
+    malformed, the entry is skipped and the error is collected. If the root
+    directory does not exist or is not readable, a LoadError is returned.
+
+func LoadSpecLandscape(root string, includeArchive bool, currentSpecID string) ([]SpecMeta, error)
+    LoadSpecLandscape collects metadata for all specs for landscape views.
+    It scans spec directories, optionally including the archive subdirectory,
+    and excludes the currentSpecID entry from results.
+
+    When includeArchive is true, archived specs from {root}/archive/ are
+    included. When false, only non-archived spec directories are returned.
+
+type Task struct {
+	// Criteria corresponds to the JSON schema field "criteria".
+	Criteria []string `json:"criteria,omitempty,omitzero" yaml:"criteria,omitempty" mapstructure:"criteria,omitempty"`
+
+	// DependsOn corresponds to the JSON schema field "depends_on".
+	DependsOn []int `json:"depends_on,omitempty,omitzero" yaml:"depends_on,omitempty" mapstructure:"depends_on,omitempty"`
+
+	// DoneWhen corresponds to the JSON schema field "done_when".
+	DoneWhen []string `json:"done_when,omitempty,omitzero" yaml:"done_when,omitempty" mapstructure:"done_when,omitempty"`
+
+	// Id corresponds to the JSON schema field "id".
+	Id int `json:"id" yaml:"id" mapstructure:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind TaskKind `json:"kind" yaml:"kind" mapstructure:"kind"`
+
+	// Optional corresponds to the JSON schema field "optional".
+	Optional *bool `json:"optional,omitempty,omitzero" yaml:"optional,omitempty" mapstructure:"optional,omitempty"`
+
+	// State corresponds to the JSON schema field "state".
+	State TaskState `json:"state" yaml:"state" mapstructure:"state"`
+
+	// Steps corresponds to the JSON schema field "steps".
+	Steps []string `json:"steps" yaml:"steps" mapstructure:"steps"`
+
+	// Tests corresponds to the JSON schema field "tests".
+	Tests []string `json:"tests" yaml:"tests" mapstructure:"tests"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title" yaml:"title" mapstructure:"title"`
+
+	// Touches corresponds to the JSON schema field "touches".
+	Touches []string `json:"touches,omitempty,omitzero" yaml:"touches,omitempty" mapstructure:"touches,omitempty"`
+}
+
+func (t Task) IsOptional() bool
+    IsOptional reports whether the task is marked optional (default false).
+
+type TaskKind string
+
+const TaskKindImplement TaskKind = "implement"
+const TaskKindIntegration TaskKind = "integration"
+type TaskState string
+
+const TaskStateDone TaskState = "done"
+const TaskStateDropped TaskState = "dropped"
+const TaskStateInProgress TaskState = "in_progress"
+const TaskStatePending TaskState = "pending"
+type TasksV2Json struct {
+	// Schema corresponds to the JSON schema field "$schema".
+	Schema string `json:"$schema" yaml:"$schema" mapstructure:"$schema"`
+
+	// Dependencies corresponds to the JSON schema field "dependencies".
+	Dependencies []Dependency `json:"dependencies" yaml:"dependencies" mapstructure:"dependencies"`
+
+	// SchemaVersion corresponds to the JSON schema field "schema_version".
+	SchemaVersion int `json:"schema_version" yaml:"schema_version" mapstructure:"schema_version"`
+
+	// SpecId corresponds to the JSON schema field "spec_id".
+	SpecId string `json:"spec_id" yaml:"spec_id" mapstructure:"spec_id"`
+
+	// SpecName corresponds to the JSON schema field "spec_name".
+	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
+
+	// Tasks corresponds to the JSON schema field "tasks".
+	Tasks []Task `json:"tasks" yaml:"tasks" mapstructure:"tasks"`
+
+	// TestCommands corresponds to the JSON schema field "test_commands".
+	TestCommands TestCommands `json:"test_commands" yaml:"test_commands" mapstructure:"test_commands"`
+}
+    Schema for tasks.json spec artifact (format version 2)
+
+func AddDependency(t TasksV2Json, d Dependency) TasksV2Json
+    AddDependency appends a cross-spec dependency unconditionally.
+
+func AddTask(t TasksV2Json, task Task) (TasksV2Json, error)
+    AddTask appends a task. It fails on a duplicate ID.
+
+func (t *TasksV2Json) CompleteTaskStates(taskIDs []int) *TasksV2Json
+    CompleteTaskStates sets the named tasks to done, bypassing the state
+    machine. Unknown IDs are skipped. Returns a new copy.
+
+func (t *TasksV2Json) GetTask(id int) (*Task, bool)
+    GetTask returns a pointer to a copy of the task with the given ID.
+
+func (t *TasksV2Json) Render() string
+    Render renders the tasks artifact as Markdown.
+
+func (t *TasksV2Json) ResetTaskStates(taskIDs []int) *TasksV2Json
+    ResetTaskStates sets the named tasks to pending, bypassing the state
+    machine. Unknown IDs are skipped. Returns a new copy.
+
+func (t *TasksV2Json) TransitionTask(taskID int, target string) (*TasksV2Json, error)
+    TransitionTask moves one task to the target state and returns a new Tasks
+    copy; the receiver is not modified. It returns a LifecycleError when the
+    task does not exist or the transition is not allowed by §8.3.1.
+
+type Test struct {
+	// Given corresponds to the JSON schema field "given".
+	Given []string `json:"given" yaml:"given" mapstructure:"given"`
+
+	// Id corresponds to the JSON schema field "id".
+	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind TestKind `json:"kind" yaml:"kind" mapstructure:"kind"`
+
+	// Pseudocode corresponds to the JSON schema field "pseudocode".
+	Pseudocode *string `json:"pseudocode,omitempty,omitzero" yaml:"pseudocode,omitempty" mapstructure:"pseudocode,omitempty"`
+
+	// RealComponents corresponds to the JSON schema field "real_components".
+	RealComponents []string `json:"real_components,omitempty,omitzero" yaml:"real_components,omitempty" mapstructure:"real_components,omitempty"`
+
+	// Then corresponds to the JSON schema field "then".
+	Then []string `json:"then" yaml:"then" mapstructure:"then"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title" yaml:"title" mapstructure:"title"`
+
+	// Verifies corresponds to the JSON schema field "verifies".
+	Verifies []string `json:"verifies" yaml:"verifies" mapstructure:"verifies"`
+
+	// When corresponds to the JSON schema field "when".
+	When string `json:"when" yaml:"when" mapstructure:"when"`
+}
+
+func GetTest(ts TestSpecV2Json, id string) (*Test, bool)
+    GetTest returns a copy of the test with the given ID.
+
+type TestCommands struct {
+	// AllTests corresponds to the JSON schema field "all_tests".
+	AllTests string `json:"all_tests" yaml:"all_tests" mapstructure:"all_tests"`
+
+	// Linter corresponds to the JSON schema field "linter".
+	Linter string `json:"linter" yaml:"linter" mapstructure:"linter"`
+
+	// SpecTests corresponds to the JSON schema field "spec_tests".
+	SpecTests *string `json:"spec_tests,omitempty,omitzero" yaml:"spec_tests,omitempty" mapstructure:"spec_tests,omitempty"`
+}
+
+type TestKind string
+
+const TestKindIntegration TestKind = "integration"
+const TestKindProperty TestKind = "property"
+const TestKindSmoke TestKind = "smoke"
+const TestKindUnit TestKind = "unit"
+type TestSpecV2Json struct {
+	// Schema corresponds to the JSON schema field "$schema".
+	Schema string `json:"$schema" yaml:"$schema" mapstructure:"$schema"`
+
+	// SchemaVersion corresponds to the JSON schema field "schema_version".
+	SchemaVersion int `json:"schema_version" yaml:"schema_version" mapstructure:"schema_version"`
+
+	// SpecId corresponds to the JSON schema field "spec_id".
+	SpecId string `json:"spec_id" yaml:"spec_id" mapstructure:"spec_id"`
+
+	// SpecName corresponds to the JSON schema field "spec_name".
+	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
+
+	// Tests corresponds to the JSON schema field "tests".
+	Tests []Test `json:"tests" yaml:"tests" mapstructure:"tests"`
+}
+    Schema for test_spec.json spec artifact (format version 2)
+
+func AddTest(ts TestSpecV2Json, t Test) (TestSpecV2Json, error)
+    AddTest appends a test to the single flat list. It fails on a duplicate ID.
+
+func (ts *TestSpecV2Json) ComputeCoverage(req *RequirementsV2Json) CoverageReport
+    ComputeCoverage reports which criteria and execution paths of req are
+    verified by at least one test of ts, via each test's `verifies` list.
+
+    A criterion is covered by any test that lists it. A path is covered by any
+    test that lists it; rule C5 additionally requires that test to be a smoke
+    test, which is a validation concern rather than a coverage one.
+
+func (ts *TestSpecV2Json) Render() string
+    Render renders the test spec artifact as Markdown. Every test renders all of
+    its fields, whatever its kind.
+
+func (ts *TestSpecV2Json) TestsOfKind(kind TestKind) []Test
+    TestsOfKind returns every test of the given kind, in artifact order.
+
+type TraceLink struct {
+	Kind    string
+	ID      string
+	Tests   []string
+	Tasks   []int
+	Covered bool
+	Owned   bool
+}
+    TraceLink is one row of the derived traceability matrix (§8.5):
+
+        criterion → tests (from test.verifies) → tasks (from task.tests)
+        path      → smoke tests               → integration task
+
+    Kind is "criterion" or "path".
+
+type TraceabilityMatrix struct {
+	Links []TraceLink
+}
+    TraceabilityMatrix is the full derived matrix, in artifact order.
+
+type ValidationEntry struct {
+	Category string // "schema", "integrity" or "warning"
+	Message  string
+	Artifact string // the artifact file the issue was found in
+	Path     string // JSON path (InstanceLocation) for schema errors
+	Keyword  string // KeywordLocation for schema errors
+	Check    string // rule name: "json_schema", "completeness", "C1".."C11", "scope_limit", "vague_language", …
+	EntityID string // the entity the entry is about
+	Value    string // optional value context
+}
+    ValidationEntry is a single validation error or warning.
+
+func ValidateArtifactSchema(artifact any, schemaName, artifactName string) []ValidationEntry
+    ValidateArtifactSchema validates one already-decoded artifact against the
+    named bundled schema. It is exported so the generation pipeline can check a
+    model's tool input before it is turned into a Spec.
+
+type ValidationError struct {
+	Rule    string
+	Message string
+}
+    ValidationError represents a single validation error from
+    BootstrapSpec.Finalize. Rule identifies the type of check that failed (e.g.
+    "bootstrap" for missing artifacts, or a schema/cross-file rule name).
+    Message describes the failure.
+
+type ValidationResult struct {
+	Valid    bool
+	Errors   []ValidationEntry
+	Warnings []ValidationEntry
+}
+    ValidationResult holds the results of spec validation. Valid is true if and
+    only if Errors is empty; warnings never block.
+
+func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult
+    ValidateCrossSpec checks the rules that span specs: every declared
+    dependency exists, the dependency graph is acyclic, glossary terms shared
+    between specs agree (warning), and each dependency edge is reflected by a
+    shared actor in the two specs' execution paths (error).
+
+    The v1 external-API signature and return-contract comparisons are gone:
+    they compared free text and never fired usefully.
+
+func ValidateGenerationStep(step GenerationStep, partial PartialSpec) ValidationResult
+    ValidateGenerationStep runs, on the artifacts produced so far, the schema
+    of the artifact just produced plus every cross-file rule of §10.2 that is
+    decidable at that point (§12.2):
+
+        after requirements  C1, C2 over requirements, C10
+        after test_spec     the above plus C2 over tests, C3, C4, C5, C11
+        after tasks         the above plus C6, C7, C8, C9
+
+    A pipeline sends the returned errors back to the model for repair and does
+    not write an artifact that still fails. Warnings are advisory.
+
+    When the schema fails, only C10 and C11 run beside it: the reference rules
+    would mostly report consequences of the same defect.
+
+func ValidateGenerationStepComplete(step GenerationStep, partial PartialSpec) ValidationResult
+    ValidateGenerationStepComplete is ValidateGenerationStep without that
+    short-circuit: the cross-file rules run even when the schema fails,
+    so a repair loop learns of every problem in one pass instead of one class
+    per regenerated artifact. The schema errors come first, each with Category
+    "schema"; a rule error may restate a consequence of one of them.
+
