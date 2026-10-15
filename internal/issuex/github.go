@@ -13,15 +13,12 @@ import (
 var _ Client = (*githubClient)(nil)
 
 type githubClient struct {
-	baseURL          string
-	token            string
-	userAgent        string
-	httpClient       *http.Client
-	repo             Repo
-	sleep            func(time.Duration)
-	allowMergeCommit bool
-	allowSquashMerge bool
-	allowRebaseMerge bool
+	baseURL    string
+	token      string
+	userAgent  string
+	httpClient *http.Client
+	repo       Repo
+	sleep      func(time.Duration)
 }
 
 // NewGitHub constructs a GitHub client adapter directly from Options.

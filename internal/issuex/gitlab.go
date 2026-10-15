@@ -17,14 +17,12 @@ import (
 var _ Client = (*gitlabClient)(nil)
 
 type gitlabClient struct {
-	baseURL      string
-	token        string
-	userAgent    string
-	httpClient   *http.Client
-	repo         Repo
-	sleep        func(time.Duration)
-	mergeMethod  string
-	squashOption string
+	baseURL    string
+	token      string
+	userAgent  string
+	httpClient *http.Client
+	repo       Repo
+	sleep      func(time.Duration)
 }
 
 // NewGitLab constructs a GitLab client adapter directly from Options.
@@ -221,25 +219,6 @@ func parseGitLabErrorMessage(body []byte, defaultMsg string) string {
 func projectPath(repo Repo) string {
 	escaped := url.PathEscape(repo.String())
 	return strings.ReplaceAll(escaped, "/", "%2F")
-}
-
-type gitlabProjectPermissions struct {
-	ProjectAccess *gitlabAccessLevel `json:"project_access"`
-	GroupAccess   *gitlabAccessLevel `json:"group_access"`
-}
-
-type gitlabAccessLevel struct {
-	AccessLevel int `json:"access_level"`
-}
-
-type gitlabProjectResponse struct {
-	PathWithNamespace string                    `json:"path_with_namespace"`
-	DefaultBranch     string                    `json:"default_branch"`
-	Visibility        string                    `json:"visibility"`
-	Archived          bool                      `json:"archived"`
-	Permissions       *gitlabProjectPermissions `json:"permissions"`
-	MergeMethod       string                    `json:"merge_method"`
-	SquashOption      string                    `json:"squash_option"`
 }
 
 // dropTokenAcrossHosts is the default GitLab client's redirect policy: Go's

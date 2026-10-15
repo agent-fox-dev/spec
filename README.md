@@ -147,7 +147,7 @@ Build the `spec` and `specr` commands from a checkout:
 
 ```bash
 git clone https://github.com/agent-fox-dev/spec && cd spec
-make build          # writes build/spec and build/specr
+make build          # installs spec and specr into $GOBIN
 ```
 
 `make build` stamps both commands with `git describe`, the commit and the
@@ -171,14 +171,18 @@ and no API key: the command's tests run against a scripted model.
 
 | Command | What it does |
 | --- | --- |
-| `make check` | `make lint` then `make test` |
-| `make build` | Build the `spec` and `specr` commands into `build/` |
+| `make help` | List all targets |
+| `make check` | `make fmt`, `vet`, `lint` and `test` |
+| `make build` | Install the `spec` and `specr` commands, stamped with the version |
 | `make test` | `go test ./... -count=1` |
 | `make test-fast` | The tests with `-short` |
-| `make lint` | `gofmt -l` must report nothing, then `go vet ./...` |
-| `make format` | `gofmt -w .` |
+| `make fmt` | `gofmt -l -w .` |
+| `make vet` | `go vet ./...` |
+| `make lint` | `golangci-lint` if installed (config in `.golangci.yml`) |
 | `make coverage` | Test coverage per function |
 | `make doc` | Write `go doc -all` for each package to `build/docs/` |
+| `make tidy` | `go mod tidy` |
+| `make clean` | Remove `build/` and the coverage profile |
 | `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
 
 ## Documentation
@@ -186,6 +190,8 @@ and no API key: the command's tests run against a scripted model.
 - [Spec Format Reference v2](specification/spec-format-v2.md) — field-level schemas, EARS patterns, validation rules, and rendering
 - [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
 - [afspec](afspec/README.md) — the Go library's API
+- [Public Go API](docs/api.md) — the packages and where their reference lives
+- [Architecture](docs/architecture.md) and [configuration](docs/configuration.md)
 - [The spec command](docs/cli.md) — input, flags, the output envelope, errors and warnings
 - [The specr command](docs/specr.md) — the forms of a render, the reference it takes, the output and `--schema`
 - [Configuration](docs/configuration.md) — environment variables and limits

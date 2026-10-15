@@ -279,7 +279,8 @@ func TestZeroBudgetMeansUnlimited(t *testing.T) {
 func TestRenderIsDeterministic(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	for i := 0; i < 5; i++ {
-		if spec.RenderCombined() != spec.RenderCombined() {
+		first, second := spec.RenderCombined(), spec.RenderCombined()
+		if first != second {
 			t.Fatal("two renders of the same spec differ")
 		}
 	}
