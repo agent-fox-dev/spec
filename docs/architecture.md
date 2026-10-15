@@ -31,8 +31,8 @@ docs/                       # Repository documentation
 ```
 
 Tests sit next to the code they test, as `*_test.go` files.
-`make doc` writes the Go package reference to `build/docs/`, which is not
-committed.
+`make doc` writes the Go package reference of the public packages to
+`docs/generated/`, which is committed so an agent can orient itself with it.
 
 ## The format and the library
 

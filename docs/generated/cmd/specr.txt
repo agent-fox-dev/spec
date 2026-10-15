@@ -1,0 +1,80 @@
+Command specr renders a version 2 specification package as Markdown: the whole
+package, or the package scoped to one of its tasks.
+
+    specr [flags] <spec>
+
+It takes exactly one input, a reference to a spec package, and writes exactly
+one JSON object to stdout, whose result.markdown is the render. It reads the
+package and changes nothing; the one file it can write is --markdown-file.
+
+CONSTANTS
+
+const (
+	ReducedArchitecture = "architecture"
+	ReducedTestDetail   = "test_detail"
+)
+    What --max-tokens can drop, in the order it drops it.
+
+
+VARIABLES
+
+var Sections = []string{"prd", "architecture", "requirements", "test_spec", "tasks"}
+    Sections is the closed set of parts a render is made of, in the order the
+    format renders them (§11.1). --section takes these names.
+
+
+FUNCTIONS
+
+func Main(argv []string, stdout, stderr io.Writer) int
+    Main parses argv, renders, and writes one envelope to stdout. It returns the
+    exit code.
+
+    Two paths are for a person and print text instead: --version, and -h/--help
+    or a bare invocation, which print the help to stderr. A bare invocation also
+    writes a usage envelope when stdout is not a terminal, so a program piping
+    stdout still gets one object to parse.
+
+
+TYPES
+
+type Result struct {
+	SpecDir   string     `json:"spec_dir" description:"the package directory, relative to --dir when inside it; runnable as specr's input"`
+	SpecID    string     `json:"spec_id" description:"the spec id, from the PRD frontmatter"`
+	SpecName  string     `json:"spec_name" description:"the spec name, from the PRD frontmatter"`
+	Title     string     `json:"title" description:"the spec title, from the PRD frontmatter"`
+	Status    string     `json:"status" description:"the package's lifecycle status: draft, active, sealed, superseded or archived"`
+	Valid     bool       `json:"valid" description:"whether the package passes the format's validation; an invalid package still renders in full, and a spec_invalid warning names the failing rules"`
+	Scope     string     `json:"scope" description:"what was rendered: spec (the whole package) or task (the package scoped to one task)"`
+	Task      *TaskInfo  `json:"task,omitempty" description:"the task the render is scoped to; present exactly when scope is task"`
+	Sections  []string   `json:"sections" description:"the sections the Markdown holds, in order; a subset of prd, architecture, requirements, test_spec, tasks"`
+	MaxTokens int        `json:"max_tokens,omitempty" description:"the --max-tokens budget the render was held to; absent when there was none"`
+	Reduced   []string   `json:"reduced,omitempty" description:"the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), test_detail (each test's given, when, real components and pseudocode); absent when nothing was dropped"`
+	Tokens    int        `json:"tokens" description:"the estimated token count of markdown (bytes / 4)"`
+	Tasks     []TaskInfo `json:"tasks" description:"every task of the plan, in order: the ids --task takes"`
+	// MarkdownFile is where --markdown-file wrote the Markdown.
+	MarkdownFile string `json:"markdown_file,omitempty" description:"the absolute path --markdown-file wrote the Markdown to"`
+	Markdown     string `json:"markdown" description:"the rendered Markdown"`
+}
+    Result is specr's result: what was rendered, the plan's tasks, and the
+    Markdown itself, last, so a reader meets what it is before what it says.
+
+func (r *Result) Artifacts() []cli.Artifact
+    Artifacts names the file --markdown-file wrote.
+
+func (r *Result) Next() []cli.Next
+    Next suggests rendering the next task that is not done: after a whole
+    render, the first; after a task, the next one after it.
+
+func (r *Result) Summary() string
+    Summary is the envelope's one sentence.
+
+type TaskInfo struct {
+	ID        int    `json:"id" description:"the task id, as --task takes it"`
+	Title     string `json:"title" description:"the task title"`
+	Kind      string `json:"kind" description:"implement, or integration for the plan's last task"`
+	State     string `json:"state" description:"pending, in_progress, done or dropped"`
+	Optional  bool   `json:"optional,omitempty" description:"true when the task may be skipped"`
+	DependsOn []int  `json:"depends_on,omitempty" description:"the tasks that must be done first"`
+}
+    TaskInfo is one task of the plan, by id, without its body.
+

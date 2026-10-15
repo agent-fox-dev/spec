@@ -4,7 +4,7 @@ This repository has no REST API. Its API is the Go library `afspec` and the
 JSON object the `spec` and `specr` commands write to stdout.
 
 The authoritative reference is the package documentation: run `make doc` to
-write `go doc -all` output for every package to `build/docs/`, or read it with
+write `go doc -all` output for every public package to `docs/generated/` (committed), or read it with
 `go doc -all github.com/agent-fox-dev/spec/afspec`. This file is the map.
 
 | Package | Purpose |
