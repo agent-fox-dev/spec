@@ -7,11 +7,12 @@
 // into the next, and the next phase is meant to start from the first one's
 // conclusion rather than from how it got there.
 //
-// The package is deliberately small. AgentKit owns the loop, the retries (the
-// Anthropic SDK's), the prompt cache breakpoints and the pruning of old tool
-// results; this package owns what is specific to a spec phase: the per-phase
-// ceilings, the tool grant, the project context, the error vocabulary the
-// envelope reports and the progress a person watches.
+// The package is deliberately small. AgentKit owns the loop, the retries of a
+// request that fails before its response starts (the Anthropic SDK's), the
+// prompt cache breakpoints and the pruning of old tool results; this package
+// owns what is specific to a spec phase: the per-phase ceilings, the tool
+// grant, the repeat of a call that fails mid-stream, the project context, the
+// error vocabulary the envelope reports and the progress a person watches.
 package agentrun
 
 import (
@@ -134,6 +135,11 @@ type Config struct {
 	TrustProject bool
 	// Bounds are the per-phase ceilings.
 	Bounds Bounds
+	// RetryDelays are the waits before each repeat of a model call that
+	// failed on the way, once the SDK's own retries are spent or no longer
+	// apply; their number is the number of repeats. Nil means
+	// DefaultRetryDelays, an empty slice no repeats.
+	RetryDelays []time.Duration
 	// Observer receives progress. May be nil.
 	Observer Observer
 	// ShowText streams the model's own prose to the observer.
@@ -334,11 +340,19 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 // tools take a path and a line range, are validated when they arrive, and gain
 // little from the API's guarantee that the first call is valid, so the budget
 // is left to the phase's own tools, which are declared first.
+//
+// Either is wrapped so that a call that fails on the way is sent again (see
+// retrying).
 func (r *Runner) providerFor(model Model, p Phase) core.ProviderClient {
-	if r.cfg.Provider != nil {
-		return r.cfg.Provider
+	delays := r.cfg.RetryDelays
+	if delays == nil {
+		delays = DefaultRetryDelays
 	}
-	return anthropic.Provider(model.Row, anthropic.Options{Client: r.cfg.Client, NonStrictTools: p.BuiltinTools})
+	inner := r.cfg.Provider
+	if inner == nil {
+		inner = anthropic.Provider(model.Row, anthropic.Options{Client: r.cfg.Client, NonStrictTools: p.BuiltinTools})
+	}
+	return &retrying{inner: inner, delays: delays}
 }
 
 // prefixMessages is a phase's Prefix as the driver takes it: one user

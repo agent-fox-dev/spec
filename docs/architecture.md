@@ -150,7 +150,13 @@ schema combinators (`schema`) and the indexed search (`codesearch`).
 - the read-only built-ins and, with an index, `code_search` — never a shell,
   so no guard is needed and `agentkit.New` would refuse one without it;
 - `MaxTurns`, `MaxCostUSD` and `Timeout` from the per-phase bounds, and
-  `Prune` so old tool results leave the request before the window fills.
+  `Prune` so old tool results leave the request before the window fills;
+- a provider that sends a model call again when its stream failed for a
+  transient reason — a dropped or stalled connection, a truncated body, an
+  overloaded or rate-limited API — after 2, 8 and 30 seconds
+  ([ADR 08](adr/08-send-a-call-that-failed-mid-stream-again.md)). The SDK
+  retries only a request whose response has not begun, and the driver ends
+  the run on the first failed turn.
 
 Each phase declares its kind (`prd`, `requirements`, `test_spec`, `tasks`,
 `architecture`), and the runner builds its agent on that kind's model and
