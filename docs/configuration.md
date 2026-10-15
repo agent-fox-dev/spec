@@ -65,6 +65,12 @@ host it does not belong to.
 The spec root's `steering.md`, when it exists and says something, is given to
 every phase as the project's directives.
 
+## The build
+
+| Make variable | Default | Effect |
+|---|---|---|
+| `AGENTKIT_UPDATE` | `1` | the targets that compile (`build`, `test`, `test-fast`, `coverage`, `vet`, `lint`, `doc`) first run `make update-agentkit`, which moves the agentkit-go pin in `go.mod` to the latest `main` ([ADR 06](adr/06-build-against-the-latest-agentkit-go.md)); `0` builds the committed pin, e.g. offline |
+
 ## Limits
 
 | Limit | Value |

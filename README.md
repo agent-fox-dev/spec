@@ -163,6 +163,10 @@ prints, e.g. `spec v1.4.1 (commit 94f3890, built 2026-10-14T06:33:13Z)`.
 `replace` for agentkit-go until that module is tagged (see
 [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md)).
 
+`make build`, `make test` and the other targets that compile first move the
+agentkit-go pin in `go.mod` to the latest `main` ([ADR 06](docs/adr/06-build-against-the-latest-agentkit-go.md));
+`AGENTKIT_UPDATE=0 make build` skips that, e.g. offline.
+
 ### Go library
 
 ```bash
@@ -186,6 +190,7 @@ and no API key: the command's tests run against a scripted model.
 | `make lint` | `golangci-lint` if installed (config in `.golangci.yml`) |
 | `make coverage` | Test coverage per function |
 | `make doc` | Write `go doc -all` for each package to `docs/generated/` (committed) |
+| `make update-agentkit` | Point `go.mod` at the latest agentkit-go `main` (the targets that compile run it first; `AGENTKIT_UPDATE=0` skips it) |
 | `make tidy` | `go mod tidy` |
 | `make clean` | Remove `build/` and the coverage profile |
 | `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
@@ -202,3 +207,4 @@ and no API key: the command's tests run against a scripted model.
 - [Configuration](docs/configuration.md) — environment variables and limits
 - [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
 - [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
+- [ADR 06](docs/adr/06-build-against-the-latest-agentkit-go.md) — why every build moves to the latest agentkit-go
