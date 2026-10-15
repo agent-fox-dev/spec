@@ -171,7 +171,7 @@ func getStructFields(t reflect.Type) []structFieldInfo {
 // isNilValue checks whether a reflect.Value is nil (for pointer, interface, slice, map types).
 func isNilValue(v reflect.Value) bool {
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
+	case reflect.Pointer, reflect.Interface, reflect.Slice, reflect.Map:
 		return v.IsNil()
 	default:
 		return false
@@ -225,7 +225,7 @@ func (w *jsonWriter) writeValue(v reflect.Value) error {
 	}
 
 	// Dereference pointers
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			w.buf.WriteString("null")
 			return nil
