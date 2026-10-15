@@ -179,9 +179,12 @@ and the 6000-token map in it, from the cache; every scope's PRD phase shares
 the input as well. Tool sets differ between steps, and tools come first, so
 the steps of one package do not share a prefix with each other.
 
-Every tool is declared strict while the request stays within the API's strict
-limits (20 tools, 16 union parameters); agentkit-go decides which. The
-artifact schemas are kept strict-expressible: the identity fields the handler
+A phase's own tools (the PRD or artifact submit tool, and for the artifact
+steps the patch tool) are declared strict; its built-in read-only tools are
+not ([ADR 07](adr/07-keep-the-builtin-tools-out-of-strict-mode.md)).
+agentkit-go declares strict the tools it is not told to leave out, in the
+order they are sent, while they fit the API's counted limits (20 tools, 16
+union parameters). The artifact schemas are kept strict-expressible: the identity fields the handler
 writes are not declared, and a dictionary such as the glossary is asked for as
 a list of entries.
 

@@ -8,10 +8,10 @@ github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 h1:bvDV9
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
 github.com/RoaringBitmap/roaring/v2 v2.19.0 h1:zsWtVE+biht4eVl0YDLvykUqGkftR3Qc5UCbeKB4UQ4=
 github.com/RoaringBitmap/roaring/v2 v2.19.0/go.mod h1:SfT3of9nYh3vis1dIbCj4Yw6KQGujTN+f345nrN/0JA=
-github.com/agent-fox-dev/agentkit-go v0.0.0-20261015132527-49b64419c636 h1:s321kVp1zOrDd/lL2g/53RsCX6CxAdpayPRmXE9t3fI=
-github.com/agent-fox-dev/agentkit-go v0.0.0-20261015132527-49b64419c636/go.mod h1:qfa4ihswlbCJQ/ILneO5yEZxiCB53QhG9GGZeQA2ShY=
-github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261015132527-49b64419c636 h1:Gng8DT9+HEUntNd1ar533HonddsYYkapA2Nys5zzDk4=
-github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261015132527-49b64419c636/go.mod h1:N4LHzFF2m+gBGADpGtAecnaFsZgmpkHoE2TjRDYLJLg=
+github.com/agent-fox-dev/agentkit-go v0.0.0-20261015152137-0da59715aa03 h1:3uUKR5AGDCKjof5P+ze001JV299OZgRZqTG52HuzDnE=
+github.com/agent-fox-dev/agentkit-go v0.0.0-20261015152137-0da59715aa03/go.mod h1:qfa4ihswlbCJQ/ILneO5yEZxiCB53QhG9GGZeQA2ShY=
+github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261015152137-0da59715aa03 h1:2vXKNQA27LyhfU0eJby2ixAzvoBdSiPDw1cnqLeFZMk=
+github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261015152137-0da59715aa03/go.mod h1:N4LHzFF2m+gBGADpGtAecnaFsZgmpkHoE2TjRDYLJLg=
 github.com/anthropics/anthropic-sdk-go v1.79.1 h1:R+DGl2fpI8mIg7OGjEEHpr1WN7HOja76sz89Z2DMcqk=
 github.com/anthropics/anthropic-sdk-go v1.79.1/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/aws/aws-sdk-go-v2 v1.38.0 h1:UCRQ5mlqcFk9HJDIqENSLR3wiG1VTWlyUfLDEvY7RxU=

@@ -75,4 +75,6 @@ little room to spare.
 - The fix for the strict limits themselves is in agentkit-go: tools are
   declared strict in the order they are sent, while they fit, and the rest are
   sent without the flag. Until spec depends on an agentkit-go with that fix,
-  a request with the read-only file tools exceeds the limit.
+  a request with the read-only file tools exceeds the limit. The API's
+  grammar-size limit is not counted there; see
+  [ADR 07](07-keep-the-builtin-tools-out-of-strict-mode.md).

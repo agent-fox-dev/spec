@@ -30,6 +30,7 @@ import (
 
 	agentkit "github.com/agent-fox-dev/agentkit-go"
 	"github.com/agent-fox-dev/agentkit-go/core"
+	"github.com/agent-fox-dev/agentkit-go/provider/anthropic"
 	"github.com/agent-fox-dev/agentkit-go/tools"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -303,7 +304,7 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 
 	agent, err := agentkit.New(agentkit.Config{
 		Client:     r.cfg.Client,
-		Provider:   r.cfg.Provider,
+		Provider:   r.providerFor(model, p),
 		Model:      model.ID(),
 		Effort:     model.Effort,
 		System:     system,
@@ -319,6 +320,25 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 		return nil, newError(p.Name, CategoryInternal, err, "building the agent: %v", err)
 	}
 	return agent, nil
+}
+
+// providerFor is the provider a phase sends through: the configured one, or
+// the Anthropic provider the driver would have built over the client, with the
+// phase's built-in tools kept out of strict mode.
+//
+// The API totals its strict-mode limits over a request: the number of strict
+// tools, their union parameters, and a compiled grammar size it does not
+// publish. A request past any is refused whole. A generation phase's artifact
+// tool is the largest schema in the request, and was refused beside four file
+// tools (the PRD, test spec and tasks phases fit, with no margin). The file
+// tools take a path and a line range, are validated when they arrive, and gain
+// little from the API's guarantee that the first call is valid, so the budget
+// is left to the phase's own tools, which are declared first.
+func (r *Runner) providerFor(model Model, p Phase) core.ProviderClient {
+	if r.cfg.Provider != nil {
+		return r.cfg.Provider
+	}
+	return anthropic.Provider(model.Row, anthropic.Options{Client: r.cfg.Client, NonStrictTools: p.BuiltinTools})
 }
 
 // prefixMessages is a phase's Prefix as the driver takes it: one user
