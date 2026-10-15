@@ -361,7 +361,9 @@ func (r Result) Resumable() bool
     SplitPlan is non-empty.
 
 func (r Result) Summary() string
-    Summary returns one sentence describing the outcome in spec's vocabulary.
+    Summary returns one sentence describing the outcome in spec's vocabulary,
+    or none when the run produced no package to describe: the envelope then says
+    what failed instead.
 
 func (r *Result) SummaryView() any
     SummaryView implements cli.Summarizable. It is defined on Result (rather
