@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +17,8 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/schema"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	sdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 const terminator = "submit_answer"
@@ -123,6 +127,70 @@ func TestAPhaseIsOfferedOnlyReadOnlyToolsAndToldThereIsNoShell(t *testing.T) {
 	system := systemText(reqs[0])
 	if !strings.Contains(system, "There is no shell") || !strings.Contains(system, "Your tools are exactly: ") {
 		t.Errorf("system prompt lacks the tools note:\n%s", system)
+	}
+}
+
+// capturingClient is an SDK client whose transport records the body of the
+// request and answers it with an API error, so a phase ends after one request.
+func capturingClient(t *testing.T, body *[]byte) *sdk.Client {
+	t.Helper()
+	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		*body, _ = io.ReadAll(r.Body)
+		return &http.Response{
+			StatusCode: http.StatusBadRequest, Status: "400 Bad Request", Header: http.Header{"Content-Type": {"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"invalid_request_error","message":"stop"}}`)),
+		}, nil
+	})
+	c := sdk.NewClient(option.WithAPIKey("test"), option.WithHTTPClient(&http.Client{Transport: rt}), option.WithMaxRetries(0))
+	return &c
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The API totals its strict-mode limits over a request, including a compiled
+// grammar size it does not publish, and refuses the whole request past them: a
+// generation phase's artifact tool was refused beside four file tools. The
+// strict budget goes to the phase's own tools; the built-in read-only tools,
+// whose arguments are a path and a line range, are sent without the flag.
+func TestOnlyAPhasesOwnToolsAreStrict(t *testing.T) {
+	var body []byte
+	var got string
+	ws, err := tools.NewWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewRunner(Config{Model: listedModel(t), Client: capturingClient(t, &body), Workspace: ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = r.Run(context.Background(), Phase{
+		Name: "answer", System: "Answer.", User: "Go.", Terminator: terminator,
+		Custom: []core.Tool{submitTool(&got)}, BuiltinTools: ReadOnlyFileTools,
+	})
+	var req struct {
+		Tools []struct {
+			Name   string `json:"name"`
+			Strict bool   `json:"strict"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || len(req.Tools) == 0 {
+		t.Fatalf("no request body was captured (%v): %s", err, body)
+	}
+	strict := map[string]bool{}
+	for _, tl := range req.Tools {
+		strict[tl.Name] = tl.Strict
+	}
+	if !strict[terminator] {
+		t.Errorf("%s is not strict: the phase's own tool is the one the budget is for", terminator)
+	}
+	for _, name := range ReadOnlyFileTools {
+		if _, sent := strict[name]; !sent {
+			t.Errorf("%s was not sent", name)
+		} else if strict[name] {
+			t.Errorf("%s is strict, and spends the budget of the phase's own tools", name)
+		}
 	}
 }
 
