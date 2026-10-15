@@ -154,6 +154,30 @@ func TestASplitInputWritesEveryScope(t *testing.T) {
 	}
 }
 
+// A scope whose generation fails before its package is written is reported as
+// failed in the split and has no package in the result: its reservation was
+// removed.
+func TestAScopeThatFailsBeforeItIsWrittenHasNoPackageInTheResult(t *testing.T) {
+	ws := newWorkspace(t)
+	a := splitAuthor(t)
+	a.artifactErr[afspec.StepRequirements] = errors.New("grammar too large")
+
+	got, err := Run(context.Background(), fileOptions(ws, a))
+	if err == nil || got == nil {
+		t.Fatalf("want a result and an error, got %v, %v", got, err)
+	}
+	if got.SpecDir != "" || len(got.FollowOnSpecs) != 0 {
+		t.Errorf("the result names packages that were not written: %q, %+v", got.SpecDir, got.FollowOnSpecs)
+	}
+	if got.Split[0].Status != ScopeFailed || got.Split[0].SpecDir != "" {
+		t.Errorf("scope 1 = %+v, want failed with no directory", got.Split[0])
+	}
+	// Only the plan to resume from is left: no package directory.
+	if dirs := specDirs(t, ws.Root); strings.Join(dirs, ",") != "widget_core"+SplitPlanSuffix {
+		t.Errorf("the spec root holds %v", dirs)
+	}
+}
+
 // A run that stops on a scope leaves the plan behind, and the next run on the
 // same input continues from that scope without re-deciding the split.
 func TestAFailedScopeLeavesAPlanTheNextRunResumesFrom(t *testing.T) {

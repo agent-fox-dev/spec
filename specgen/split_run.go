@@ -154,7 +154,8 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 	var invalid []string
 	wrote := 0
 	for _, b := range builds {
-		if b == nil || b.pkg == nil {
+		// A scope that failed before its package was written has none to report.
+		if b == nil || b.pkg == nil || b.pkg.SpecDir == "" {
 			continue
 		}
 		if wrote == 0 {

@@ -111,7 +111,9 @@ type Result struct {
 	inputRef string
 }
 
-// Summary returns one sentence describing the outcome in spec's vocabulary.
+// Summary returns one sentence describing the outcome in spec's vocabulary,
+// or none when the run produced no package to describe: the envelope then
+// says what failed instead.
 func (r Result) Summary() string {
 	if r.Stage == "preflight" {
 		return fmt.Sprintf("spec: preflight passed (%d checks)", len(r.Preflight))
@@ -128,18 +130,15 @@ func (r Result) Summary() string {
 		}
 		parts = append(parts, fmt.Sprintf("spec: split %d of %d scopes", done, len(r.Split)))
 	} else {
-		pkgName := r.SpecDir
-		if pkgName == "" {
-			pkgName = r.SpecID
+		// A run that failed before it wrote a package has a spec id and
+		// decisions, but no directory, and wrote nothing.
+		if r.SpecDir == "" {
+			return ""
 		}
-		if pkgName != "" {
-			if len(r.FollowOnSpecs) > 0 {
-				parts = append(parts, fmt.Sprintf("spec: wrote %s (+%d follow-on packages)", pkgName, len(r.FollowOnSpecs)))
-			} else {
-				parts = append(parts, fmt.Sprintf("spec: wrote %s", pkgName))
-			}
+		if len(r.FollowOnSpecs) > 0 {
+			parts = append(parts, fmt.Sprintf("spec: wrote %s (+%d follow-on packages)", r.SpecDir, len(r.FollowOnSpecs)))
 		} else {
-			parts = append(parts, "spec: done")
+			parts = append(parts, fmt.Sprintf("spec: wrote %s", r.SpecDir))
 		}
 	}
 
@@ -678,15 +677,25 @@ func prefixed(label string) string {
 	return label + ": "
 }
 
+// unwritten is pkg as a run that failed before writing it reports it: what
+// the PRD phase decided, and nothing that says a package exists. Nothing is
+// written until every phase has finished, and the reservation is removed, so
+// the directory pkg was going to have is gone.
+func unwritten(pkg *Package) *Package {
+	cp := *pkg
+	cp.SpecDir, cp.Status, cp.Artifacts = "", "", []string{}
+	return &cp
+}
+
 // buildPackage turns one PRD into one package in the slot reserved for it:
 // the three generation phases, the optional architecture document, the
 // write, the validation and the activation. label names the scope in progress
 // messages and errors; it is empty for an undivided input. onWritten, when
 // set, is told the package's id and directory the moment it is on disk.
 //
-// The package is returned alongside any error once it has a directory, so a
-// caller can report what exists — an invalid package in particular is on
-// disk and worth naming. Packages of a split are built concurrently, so
+// The package is returned alongside any error, so a caller can report what
+// exists — an invalid package in particular is on disk and worth naming. One
+// that failed before it was written has no SpecDir (see unwritten). Packages of a split are built concurrently, so
 // everything this shares with them goes through e.mu.
 func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slot,
 	onWritten func(specID, dirName string)) (*Package, error) {
@@ -743,7 +752,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		recordPhase(o.Run, stats, prd.SpecName)
 		done(cli.PhaseSummary(stats))
 		if err != nil {
-			return pkg, wrap(fail(string(step), agentrun.CategoryOf(err), err))
+			return unwritten(pkg), wrap(fail(string(step), agentrun.CategoryOf(err), err))
 		}
 		pkg.Artifacts = append(pkg.Artifacts, afspec.ArtifactFileName(step))
 	}

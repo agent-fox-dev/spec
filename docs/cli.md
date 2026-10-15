@@ -334,6 +334,14 @@ stage `preflight`). `fix_hint` names a mechanical remedy where one is known: the
 flag to raise for a ceiling, the environment variables for a missing
 credential, the tiers for an unknown model.
 
+A run that fails while it generates a package (stage `requirements`,
+`test_spec` or `tasks`) has written nothing: the package directory is removed.
+Its `result` keeps what the PRD phase decided (`spec_id`, `spec_name`, `title`,
+`open_questions`) and claims no package: `spec_dir` and `status` are empty,
+`artifacts` is `[]`, there is no `spec_package` entry in the envelope's
+`artifacts`, and `summary` is the error. A failure after the package is
+written, such as `invalid_spec`, still names the package on disk.
+
 | Category | Means | `retryable` |
 |---|---|---|
 | `usage` | the invocation was wrong; nothing was fetched or written | no |

@@ -450,6 +450,44 @@ func TestAFailedGenerationStepWritesNothing(t *testing.T) {
 	}
 }
 
+// A run that fails before the package is written reports what the PRD phase
+// decided and claims no package: the directory was removed, so the result
+// names none, the summary does not say "wrote", and no spec_package artifact
+// points at it. The envelope's summary is then the error.
+func TestAFailedGenerationStepClaimsNoPackage(t *testing.T) {
+	ws := newWorkspace(t)
+	a := newAuthor(t, "01", "test_feature")
+	a.artifactErr[afspec.StepRequirements] = errors.New("anthropic: HTTP 400: grammar too large")
+
+	res, err := Run(context.Background(), newOptions(ws, a))
+	if err == nil || res == nil {
+		t.Fatalf("want a result and an error, got %v, %v", res, err)
+	}
+	if res.SpecDir != "" || res.Status != "" || len(res.Package.Artifacts) != 0 {
+		t.Errorf("the result claims a package: dir %q, status %q, artifacts %v", res.SpecDir, res.Status, res.Package.Artifacts)
+	}
+	if res.Package.Artifacts == nil {
+		t.Error("artifacts is null in the JSON; it is an empty list")
+	}
+	if res.SpecID != "01" || res.SpecName != "test_feature" || res.Title != "Test Feature" || len(res.OpenQuestions) != 1 {
+		t.Errorf("what the PRD phase decided was dropped: %+v", res.Package)
+	}
+	if got := res.Artifacts(); len(got) != 0 {
+		t.Errorf("artifacts = %+v, want none: nothing was written", got)
+	}
+	if got := res.Next(); len(got) != 0 {
+		t.Errorf("next = %+v, want none", got)
+	}
+
+	env := cli.NewRun("spec", "test").Envelope(cli.ExitFailed, res, cli.ErrorFrom("run", err))
+	if env.OK || strings.Contains(env.Summary, "wrote") || !strings.Contains(env.Summary, "grammar too large") {
+		t.Errorf("summary = %q: a failed run says what failed", env.Summary)
+	}
+	if len(env.Artifacts) != 0 {
+		t.Errorf("envelope artifacts = %+v", env.Artifacts)
+	}
+}
+
 // The optional architecture document is optional by the format's own
 // definition, so failing to write it degrades the package rather than failing
 // the run that produced the four required artifacts.
