@@ -1,0 +1,519 @@
+package specgen // import "github.com/agent-fox-dev/spec/specgen"
+
+Package specgen turns a product idea into a complete, validated version 2
+specification package.
+
+It is the `afspec` skill rebuilt as a program. The skill is ~750 lines of
+markdown describing a seven-step workflow across fifteen CLI subcommands,
+with a refinement loop that stops to ask a person questions. This package keeps
+the two things that genuinely need a model — write the PRD, and generate the
+three artifacts — and turns everything else into a mechanism:
+
+  - The workflow is the pipeline, not a numbered list the model may skip.
+  - The refinement loop is gone. Nobody is waiting to answer questions,
+    so the PRD phase resolves every open question itself, records each in a
+    `## Design Decisions` section, and reports the ones it is least sure of
+    as `open_questions` in the result. A caller that wants a human in the loop
+    reads that array; a caller that does not gets a finished spec.
+  - Each artifact is submitted through a tool whose schema is the format's own
+    JSON Schema, and whose handler runs every cross-file rule decidable at that
+    point. A violation is a tool error the loop hands back, so the repair loop
+    IS the loop — there is no second conversation assembled by hand, and the
+    system prompt and tool schemas stay byte-identical across the attempt and
+    its correction so the provider's cache prefix survives.
+  - The "post-generation language audit" the skill asks a human to perform is
+    a check: the project's real test runner and linter are detected in Go,
+    and a tasks artifact that names another ecosystem's runner is refused with
+    the detected commands in the message.
+  - The spec is validated, and activated only if it validates. The traceability
+    matrix in the result is derived, never stored.
+  - An input that is more than one spec's worth of work is written as every
+    spec it divides into, not the first one plus a recommendation. The split is
+    decided once, recorded in the spec root while unfinished, and followed to
+    the last package — by this run, or by the next run on the same input if this
+    one stops early.
+
+The three generation phases are separate agents rather than one conversation,
+because sharing a transcript would carry the requirements phase's reasoning into
+the tests that are supposed to check the requirements.
+
+CONSTANTS
+
+const (
+	// ScopeDone means the package exists and validates.
+	ScopeDone = "done"
+	// ScopeInvalid means the package exists and does not validate. It is
+	// not written again; the errors name the rules to fix by hand.
+	ScopeInvalid = "invalid"
+	// ScopeFailed means this run stopped on this scope. The plan is kept,
+	// and running spec on the same input again resumes here.
+	ScopeFailed = "failed"
+	// ScopePending means the scope was not reached.
+	ScopePending = "pending"
+)
+    Scope states, as reported in Result.Split.
+
+const (
+	// CategoryInvalid means the package was generated and does not satisfy
+	// the format's cross-file rules. The files are on disk and the errors
+	// name the rules, because a spec you can read and fix is worth more than
+	// no spec at all.
+	CategoryInvalid = "invalid_spec"
+	// CategoryDisk is a filesystem failure.
+	CategoryDisk = "disk"
+)
+    Categories this package adds to the shared vocabulary.
+
+const DefaultMaxParallel = 3
+    DefaultMaxParallel is how many packages of a split the command generates at
+    once when --max-parallel is not given.
+
+const DefaultSpecDirName = ".specs"
+    DefaultSpecDirName is where spec packages live under the repository root.
+
+const SpecDirEnv = "AF_SPEC_DIR"
+    SpecDirEnv overrides the spec root. The --specs-dir flag wins over it.
+
+const SplitPlanSuffix = ".split.json"
+    SplitPlanSuffix is the file name suffix of an unfinished split's plan,
+    which lives in the spec root beside the packages it describes.
+
+    The plan is the one piece of state the tool keeps between runs, and it
+    is kept only while the work it describes is unfinished. A run that was
+    cut short after writing two of four packages leaves the plan behind; the
+    next run with the same input finds it and continues with the third scope,
+    and the run that writes the last package removes it. Its presence therefore
+    means exactly one thing — `spec` stopped before it was done — which is why
+    it is a visible file rather than something hidden in a package.
+
+const ToolSubmitArchitecture = "submit_architecture"
+    ToolSubmitArchitecture is the terminating tool of the optional architecture
+    phase.
+
+const ToolSubmitPRD = "submit_prd"
+    ToolSubmitPRD is the terminating tool of the PRD phase.
+
+
+FUNCTIONS
+
+func ArtifactSchema(step afspec.GenerationStep) (*schema.Schema, error)
+    ArtifactSchema returns the tool schema for one generation step, converted
+    from the JSON Schema afspec embeds.
+
+    The schema is not re-authored here. afspec/schemas/*.json is the format's
+    definition and the same bytes validate the artifact after generation;
+    a second, hand-written copy for the tool declaration would be a copy that
+    can disagree with the thing it is supposed to describe.
+
+func ArtifactToolName(step afspec.GenerationStep) string
+    ArtifactToolName is the tool that submits one generation step's artifact.
+
+func HasIntent(body string) bool
+    HasIntent reports whether a PRD body carries the section afspec hashes,
+    by afspec's own rule and on the body as it will be written: a looser check
+    would pass a PRD whose activation then fails (#223).
+
+func PatchToolName(step afspec.GenerationStep) string
+    PatchToolName is the tool that corrects one generation step's last rejected
+    submission in place.
+
+func Preflight(ctx context.Context, o Options) (*Result, *Failure)
+    Preflight validates the run options before spending turns or tokens.
+
+func ToolSchema(raw []byte) (*schema.Schema, []string, error)
+    ToolSchema converts an afspec JSON Schema document into the structured
+    schema value a tool declares (core.Tool.InputSchema).
+
+    It replaces the map[string]any pipeline of InlineRefs + CleanSchema,
+    and the difference is not cosmetic. That pipeline walked every map in the
+    document and deleted keys by name at every depth, which is correct for a
+    schema object and wrong for a `properties` map, whose keys are property
+    NAMES. The v2 test object has properties called `title` and `then`;
+    both were deleted from the tool schema while `required` still listed them
+    and additionalProperties stayed false, so the schema handed to the model for
+    submit_test_spec could not be satisfied by any argument object. This walk
+    knows which position it is in and only drops a keyword where a keyword is
+    what it is reading.
+
+    Decoding goes through decodeOrdered rather than encoding/json because Go
+    marshals map keys in sorted order unconditionally, and property order is
+    model-visible: it is the order the model is shown the fields and, through
+    the request body, part of the provider's cache prefix. schema.Schema carries
+    PropertyOrder for exactly this reason, and a map cannot carry it.
+
+func ValidSpecName(s string) bool
+    ValidSpecName reports whether s is a usable spec name. It is exported so a
+    command can refuse a bad --name before anything is fetched.
+
+
+TYPES
+
+type Failure struct {
+	Stage    string
+	Category string
+	Err      error
+	// TotalBudget is the --total-budget ceiling a budget stop was checked
+	// against, so the envelope's fix_hint can name it. Zero otherwise.
+	TotalBudget float64
+}
+    Failure carries the stage and category of a failed run.
+
+func (f *Failure) CategoryName() string
+
+func (f *Failure) Error() string
+
+func (f *Failure) StageName() string
+
+func (f *Failure) TotalBudgetUSD() float64
+    TotalBudgetUSD is the run-level ceiling behind a stage "budget" failure.
+
+func (f *Failure) Unwrap() error
+
+type OpenQuestion struct {
+	Question string `json:"question"`
+	Decision string `json:"decision"`
+	Why      string `json:"why_unsure"`
+}
+    OpenQuestion is one decision made under uncertainty.
+
+    It is the shape the "self-resolve, flag low confidence" contract takes:
+    the question was answered, the answer is in the PRD, and this records that
+    a different answer would have produced different work. A caller that wants
+    a human in the loop reads this array; a caller that does not still gets a
+    finished spec.
+
+type Options struct {
+	// Input is the classified argument: a product idea, a PRD file, or a
+	// forge issue thread. Required.
+	Input cli.Input
+	// Workspace roots the read-only source access. Required.
+	Workspace *tools.Workspace
+	// SpecsDir is where NN_name directories live. Empty means
+	// <workspace>/.specs, or $AF_SPEC_DIR when that is set.
+	SpecsDir string
+	// Name overrides the spec name the model chooses. It must match
+	// [a-z][a-z0-9]*(_[a-z0-9]+)*.
+	Name string
+	// Architecture runs the optional fifth phase and writes architecture.md.
+	Architecture bool
+	// Activate transitions a valid spec from draft to active, computing its
+	// intent hash. A spec that does not validate is never activated.
+	Activate bool
+	// Comment posts the finished PRD back to the issue the input came from.
+	Comment bool
+	// DryRun writes nothing to disk and nothing to the forge. The generated
+	// artifacts are still produced and reported.
+	DryRun bool
+	// TotalBudgetUSD caps the spend of the whole run. It is checked before
+	// each scope's PRD phase after the first; an input that does not split has no interior boundary and is
+	// bound by the one phase's ceiling alone. Zero means no cap beyond the
+	// per-phase bound.
+	TotalBudgetUSD float64
+
+	// MaxParallel is how many packages of a split are generated at once. The
+	// PRD phases still run one after another, each seeing the PRDs before it;
+	// a scope's package is generated as soon as its PRD exists, beside the
+	// next scope's PRD phase. One or less writes the scopes strictly one after
+	// another, each scope's PRD waiting for the package before it.
+	MaxParallel int
+
+	// RepoMapTokens is the token budget of the repository map in every
+	// phase's user prompt. Zero, the zero value, disables it.
+	RepoMapTokens int
+
+	// Index is the code-search index for this run. Nil means no indexed search.
+	Index tools.Index
+	// IndexUnavailable is why Index is nil: the message of the error the index
+	// builder returned. RunPreflight reports it. Empty when the
+	// index was built or the reason is not known.
+	IndexUnavailable string
+
+	// Runner drives the model phases. Required unless author is injected.
+	Runner *agentrun.Runner
+	// Forge is the forge client, GitHub or GitLab, used only by Comment.
+	Forge issuex.Client
+	// Run records warnings and per-phase cost.
+	Run *cli.Run
+	// Progress reports steps to stderr.
+	Progress *cli.Progress
+
+	// Has unexported fields.
+}
+    Options configure one spec generation run.
+
+type PRD struct {
+	// SpecName is the snake_case half of the directory name.
+	SpecName string `json:"spec_name"`
+	// Title is the human-readable name, which becomes the PRD frontmatter's
+	// title. The schema requires it to be non-empty, and a spec whose title
+	// is blank fails validation — which is why it is asked for here rather
+	// than derived from the directory name.
+	Title string `json:"title"`
+	// Body is the finished PRD in Markdown, without frontmatter.
+	Body string `json:"body"`
+	// OpenQuestions are the decisions the model would most like checked.
+	OpenQuestions []OpenQuestion `json:"open_questions,omitempty"`
+	// RecommendedSplit is set when the input describes more than one spec's
+	// worth of work. The PRD then covers the first scope only.
+	RecommendedSplit []SplitScope `json:"recommended_split,omitempty"`
+	// RelevantFiles lists the files the PRD phase found important for later
+	// generation phases.
+	RelevantFiles []RelevantFile `json:"relevant_files,omitempty"`
+	// CodebaseNotes is what the phase learned reading the code, for the
+	// phases after it. It is bounded by maxCodebaseNotes.
+	CodebaseNotes string `json:"codebase_notes,omitempty"`
+}
+    PRD is the first phase's result.
+
+type Package struct {
+	// SpecDir is the created package, relative to the repository root when
+	// it is inside it.
+	SpecDir  string `json:"spec_dir"`
+	SpecID   string `json:"spec_id"`
+	SpecName string `json:"spec_name"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Source   string `json:"source"`
+	// Artifacts are the files written, in the order they were produced.
+	Artifacts []string `json:"artifacts"`
+
+	// Counts summarize the package without reproducing it. A caller that
+	// wants the content reads the files.
+	Requirements   int `json:"requirements"`
+	Criteria       int `json:"criteria"`
+	ExecutionPaths int `json:"execution_paths"`
+	Tests          int `json:"tests"`
+	Tasks          int `json:"tasks"`
+
+	// Validation is the format's own verdict on the package.
+	Validation ValidationReport `json:"validation"`
+	// Traceability is derived from test.verifies and task.tests, never
+	// stored — the format makes both computed, so reporting them here is the
+	// only place they exist.
+	Traceability TraceReport `json:"traceability"`
+
+	// OpenQuestions are the decisions the PRD phase made under uncertainty
+	// and would like a person to check. An empty list means the input and
+	// the codebase settled everything.
+	OpenQuestions []OpenQuestion `json:"open_questions,omitempty"`
+
+	// CommentURL is set when the finished PRD was posted back to the issue.
+	CommentURL string `json:"comment_url,omitempty"`
+
+	// RelevantFiles are the files the PRD phase identified as important for
+	// later generation phases. They live only in the envelope and the
+	// run-time pipeline, never inside the spec package directory.
+	RelevantFiles []RelevantFile `json:"relevant_files,omitempty"`
+
+	// Detail records which view of this result was emitted: "summary" or
+	// "full". It is present on both. It lives on Package (rather than on
+	// Result, which embeds it) so it is set once for the first package and
+	// carried the same way every other Package field is.
+	Detail string `json:"detail"`
+}
+    Package describes one specification package.
+
+func GeneratePRD(ctx context.Context, o Options) (*Package, string, error)
+    GeneratePRD runs spec generation and returns the primary package and its
+    directory.
+
+func (p *Package) SetDetail(d string)
+    SetDetail implements cli.DetailedResult.
+
+type PlanInput struct {
+	Kind   string `json:"kind"`
+	Origin string `json:"origin"`
+	SHA256 string `json:"sha256"`
+}
+    PlanInput is the identity of the input a plan belongs to.
+
+type PlanScope struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+	// SpecID and Dir are set once the package exists. Dir is the package's
+	// directory name under the spec root.
+	SpecID string `json:"spec_id,omitempty"`
+	Dir    string `json:"dir,omitempty"`
+	// Invalid records a package that was written and does not validate. It
+	// is on disk and is not written again; a person fixes it.
+	Invalid bool `json:"invalid,omitempty"`
+}
+    PlanScope is one spec of the split.
+
+func (s PlanScope) Written() bool
+    Written reports whether the scope's package exists.
+
+type RelevantFile struct {
+	Path string `json:"path"`
+	Why  string `json:"why"`
+}
+    RelevantFile is one file the PRD phase identified as important for later
+    generation phases.
+
+type Result struct {
+	Package
+
+	// FollowOnSpecs are the further packages this run wrote, in order, when
+	// the input was more than one spec's worth of work.
+	FollowOnSpecs []Package `json:"follow_on_specs,omitempty"`
+	// Split is every scope of the split with its state: done, invalid,
+	// failed or pending. Empty when the input was one spec's worth of work.
+	Split []ScopeReport `json:"split,omitempty"`
+	// SplitPlan is the plan file left in the spec root while the split is
+	// unfinished. Running spec on the same input again resumes from it.
+	SplitPlan string `json:"split_plan,omitempty"`
+	// Stage is "preflight" on a --preflight run, which stops before any
+	// model phase; it is absent on an ordinary run.
+	Stage string `json:"stage,omitempty"`
+	// DryRun records that nothing was written.
+	DryRun bool `json:"dry_run,omitempty"`
+	// Preflight and Estimate are set only by a --preflight run whose checks
+	// all passed (RunPreflight): the checks that were performed, and what the
+	// real run would spend at most.
+	Preflight []cli.PreflightCheck `json:"preflight,omitempty"`
+	Estimate  *cli.Estimate        `json:"estimate,omitempty"`
+
+	// Has unexported fields.
+}
+    Result is what the tool reports as JSON.
+
+    The fields of the first package this run wrote sit at the top level,
+    so a run on an input that is one spec's worth of work reports exactly what
+    it always did. An input that was more than that adds the further packages in
+    FollowOnSpecs and the whole plan, scope by scope, in Split.
+
+func Run(ctx context.Context, o Options) (*Result, error)
+    Run produces every specification package the input calls for.
+
+    An input that is one spec's worth of work is one PRD phase and one package.
+    An input the PRD phase reports as more than that is written as a split:
+    the first package from the PRD just written, then one PRD phase and one
+    package per remaining scope, each seeing the packages before it. The split
+    is planned once, recorded in the spec root, and followed until every scope
+    has a package — by this run, or by the next run on the same input if this
+    one stops early.
+
+    Within a package the order is the format's, not a preference: requirements,
+    then tests, then tasks, each phase seeing the complete artifacts before it.
+    A generator that cannot see a test id cannot own it, which is how the
+    previous format produced specs whose edge-case and property tests belonged
+    to no task.
+
+func RunPreflight(ctx context.Context, o Options) (*Result, error)
+    RunPreflight is spec --preflight: every check Run performs before its
+    first model call, reported and then stopped at. It calls the one Preflight
+    function Run calls, and the one findSplitPlan Run calls, never a copy of
+    either, so a run that would refuse refuses here with the identical stage,
+    category and message. A refusal returns no result: a partial checklist of
+    what passed before it would be a second answer to "would this run start".
+
+    Nothing is written: no package, no split plan, no comment, and no phase is
+    run. What the package would be called is the model's to choose, so nothing
+    about it is checked here.
+
+func (r *Result) Artifacts() []cli.Artifact
+    Artifacts implements cli.ArtifactsProvider. One spec_package entry per
+    package this run wrote — the first (embedded as Result.Package) plus
+    every entry of FollowOnSpecs — each with valid read off that package's own
+    Validation.Valid, and a comment entry when its CommentURL is set. Nothing
+    here is read from a field that is the model's account of its own work;
+    SpecDir, Validation and CommentURL are all facts this package established
+    itself, from the format's own validator and from the forge's response to
+    AddComment.
+
+    It lives in this file, not artifacts.go, because that file already defines
+    the unrelated "artifact" the generation phases submit — one step of a spec
+    package (requirements.json, tests_spec.json, ...) — and the two concepts
+    share a name by coincidence, not by relation.
+
+func (r *Result) Next() []cli.Next
+    Next implements cli.NextProvider. It suggests impl on every written package
+    that validates, in split order, and spec again on the same input when
+    the split is unfinished. Every value is a fact the pipeline established
+    — SpecDir, Validation.Valid, SplitPlan and the input's own origin — never
+    anything a model wrote.
+
+func (r Result) Resumable() bool
+    Resumable implements cli.Resumabler. For specgen, this is true whenever
+    SplitPlan is non-empty.
+
+func (r Result) Summary() string
+    Summary returns one sentence describing the outcome in spec's vocabulary.
+
+func (r *Result) SummaryView() any
+    SummaryView implements cli.Summarizable. It is defined on Result (rather
+    than on the embedded Package) because Split lives on Result alone.
+
+type ScopeReport struct {
+	Name    string `json:"name"`
+	Scope   string `json:"scope"`
+	Status  string `json:"status"`
+	SpecID  string `json:"spec_id,omitempty"`
+	SpecDir string `json:"spec_dir,omitempty"`
+	// The package's own state, so the summary view, which describes only the
+	// first package under result, still says whether every other one is
+	// ready. Absent for a scope this run did not write.
+	Valid              *bool `json:"valid,omitempty"`
+	ErrorCount         int   `json:"error_count,omitempty"`
+	OpenQuestionsCount int   `json:"open_questions_count,omitempty"`
+	TraceGaps          int   `json:"trace_gaps,omitempty"`
+}
+    ScopeReport is one scope of a split and where it stands.
+
+type SplitPlan struct {
+	// Input identifies what the split was planned for, so a run with a
+	// different input does not resume someone else's work.
+	Input PlanInput `json:"input"`
+	// CreatedAt is when the split was planned; UpdatedAt when a scope was
+	// last written.
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	// Scopes are the specs, first one first.
+	Scopes []PlanScope `json:"scopes"`
+}
+    SplitPlan is the record of an input that was more than one spec's worth
+    of work: every scope the PRD phase carved it into, in the order they are
+    written, and which of them exist.
+
+func (p *SplitPlan) Done() bool
+    Done reports whether every scope has a package.
+
+func (p *SplitPlan) Path(specsDir string) string
+    Path is where the plan is kept: named after its first scope, in the spec
+    root, where it sorts beside the packages it describes.
+
+func (p *SplitPlan) Pending() int
+    Pending is the number of scopes not yet written.
+
+type SplitScope struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+    SplitScope is one spec's worth of the work, when the input held several.
+
+type TraceReport struct {
+	CriteriaCovered   int      `json:"criteria_covered"`
+	CriteriaUncovered []string `json:"criteria_uncovered,omitempty"`
+	PathsCovered      int      `json:"paths_covered"`
+	PathsUncovered    []string `json:"paths_uncovered,omitempty"`
+	TestsUnowned      []string `json:"tests_unowned,omitempty"`
+}
+    TraceReport is the derived coverage summary.
+
+type ValidationItem struct {
+	Check    string `json:"check"`
+	Artifact string `json:"artifact"`
+	Entity   string `json:"entity,omitempty"`
+	Message  string `json:"message"`
+}
+    ValidationItem is one finding, carrying the rule that produced it.
+
+type ValidationReport struct {
+	Valid        bool             `json:"valid"`
+	ErrorCount   int              `json:"error_count"`
+	WarningCount int              `json:"warning_count"`
+	Errors       []ValidationItem `json:"errors,omitempty"`
+	Warnings     []ValidationItem `json:"warnings,omitempty"`
+}
+    ValidationReport is afspec's verdict, flattened for JSON.
+

@@ -180,7 +180,7 @@ and no API key: the command's tests run against a scripted model.
 | `make vet` | `go vet ./...` |
 | `make lint` | `golangci-lint` if installed (config in `.golangci.yml`) |
 | `make coverage` | Test coverage per function |
-| `make doc` | Write `go doc -all` for each package to `build/docs/` |
+| `make doc` | Write `go doc -all` for each package to `docs/generated/` (committed) |
 | `make tidy` | `go mod tidy` |
 | `make clean` | Remove `build/` and the coverage profile |
 | `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
