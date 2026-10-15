@@ -83,6 +83,7 @@ result and exit codes, on the driver as it now is:
   `replace` from that version to the same pseudo-version. Until agentkit-go
   tags a release that codesearch requires, `go install …/cmd/spec@version`
   refuses the module; the command is built from a checkout (`make build`).
+  The pin follows agentkit-go's `main` ([ADR 06](06-build-against-the-latest-agentkit-go.md)).
 - The envelope is smaller than agent-fox's version 3.1 and carries no
   `schema_version`. A caller that read `report_file`, `session_id`,
   `timings` or the events stream has to stop.

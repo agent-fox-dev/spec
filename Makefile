@@ -2,6 +2,14 @@
 
 DOC_DIR ?= docs/generated
 
+# agentkit-go has no tags, so go.mod pins a pseudo-version of its main branch.
+# Every target that compiles first moves that pin to the latest main, so the
+# repository always builds against the latest agentkit-go (see ADR 06).
+# AGENTKIT_UPDATE=0 skips the update: offline, or to build the pinned version.
+AGENTKIT        := github.com/agent-fox-dev/agentkit-go
+AGENTKIT_UPDATE ?= 1
+AGENTKIT_DEP    := $(if $(filter 1,$(AGENTKIT_UPDATE)),update-agentkit)
+
 VERSION    := $(shell git describe --tags 2>/dev/null || echo "0.1.0")
 COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -16,20 +24,20 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*##"}; {printf "  %-16s %s\n", $$1, $$2}'
 
 .PHONY: build
-build: ## Install the spec and specr commands
+build: $(AGENTKIT_DEP) ## Install the spec and specr commands
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/specr
 
 .PHONY: test
-test: ## Run all Go tests
+test: $(AGENTKIT_DEP) ## Run all Go tests
 	go test ./... -count=1
 
 .PHONY: test-fast
-test-fast: ## Run the fast tests only
+test-fast: $(AGENTKIT_DEP) ## Run the fast tests only
 	go test ./... -short -count=1
 
 .PHONY: coverage
-coverage: ## Run all tests with a coverage report
+coverage: $(AGENTKIT_DEP) ## Run all tests with a coverage report
 	go test ./... -coverprofile=coverage.txt -covermode=atomic
 	go tool cover -func=coverage.txt
 
@@ -38,11 +46,11 @@ fmt: ## gofmt all source files in place
 	gofmt -l -w .
 
 .PHONY: vet
-vet: ## go vet ./...
+vet: $(AGENTKIT_DEP) ## go vet ./...
 	go vet ./...
 
 .PHONY: lint
-lint: ## Run golangci-lint if installed, otherwise skip
+lint: $(AGENTKIT_DEP) ## Run golangci-lint if installed, otherwise skip
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run ./...; \
 	else \
@@ -53,7 +61,7 @@ lint: ## Run golangci-lint if installed, otherwise skip
 check: fmt vet lint test ## Run fmt, vet, lint and test - use before committing
 
 .PHONY: doc
-doc: ## Generate Go package reference (go doc -all) as text files under docs/generated
+doc: $(AGENTKIT_DEP) ## Generate Go package reference (go doc -all) as text files under docs/generated
 	@rm -rf $(DOC_DIR)
 	@mkdir -p $(DOC_DIR)
 	@mod=$$(go list -m); \
@@ -62,6 +70,13 @@ doc: ## Generate Go package reference (go doc -all) as text files under docs/gen
 		mkdir -p "$$(dirname "$$out")" && go doc -all "$$p" > "$$out" || exit 1; \
 	done
 	@echo "package docs written to $(DOC_DIR)"
+
+.PHONY: update-agentkit
+update-agentkit: ## Point go.mod at the latest agentkit-go main (needs network)
+	@rev=$$(go list -m -f '{{.Version}}' $(AGENTKIT)@main) || { \
+		echo "cannot resolve $(AGENTKIT)@main; offline? run make with AGENTKIT_UPDATE=0" >&2; exit 1; }; \
+	go mod edit -replace=$(AGENTKIT)@v0.0.0=$(AGENTKIT)@$$rev -require=$(AGENTKIT)/codesearch@$$rev && \
+	go mod tidy && echo "agentkit-go: $$rev"
 
 .PHONY: tidy
 tidy: ## go mod tidy
