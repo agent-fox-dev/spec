@@ -20,17 +20,18 @@ import (
 // architecture phase.
 const ToolSubmitArchitecture = "submit_architecture"
 
-// Per-phase output caps, clamped to the model's own ceiling by the catalog.
+// maxTokens caps one model response of any phase, clamped to the model's own
+// ceiling by the catalog.
 //
-// They differ by an order of magnitude because the artifacts do: a PRD is a
-// document, and a tasks artifact for a ten-requirement spec is a large JSON
-// object whose truncation is a validation failure rather than a shorter
-// answer.
-const (
-	prdMaxTokens          = 32768
-	generateMaxTokens     = 65536
-	architectureMaxTokens = 32768
-)
+// The cap is spent on the thinking and the reply together, and a phase's reply
+// is one tool call that carries the whole document. At xhigh and max the model
+// thinks most of that document through before it writes it, so a cap sized to
+// the document alone is gone before the call begins; the response then ends
+// with no tool call and the phase with no result. The API advises 64K at those
+// efforts, and a phase can be run at either whatever its tier says
+// (--effort, --phase-model). A truncated artifact is a validation failure
+// rather than a shorter answer, so no phase gets less.
+const maxTokens = 65536
 
 // author is the model-driven half of this package: the four steps where
 // judgment is required and nothing else.
@@ -127,7 +128,7 @@ func (a *agentAuthor) WritePRD(ctx context.Context, req prdRequest) (PRD, agentr
 		Terminator:         ToolSubmitPRD,
 		Custom:             []core.Tool{submitPRDTool(&sink, a.ws)},
 		BuiltinTools:       agentrun.WithCodeSearch(agentrun.ReadOnlyFileTools, a.codeSearch),
-		MaxTokens:          prdMaxTokens,
+		MaxTokens:          maxTokens,
 		LoadProjectContext: true,
 	})
 	if err != nil {
@@ -166,7 +167,7 @@ func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest)
 			patchArtifactTool(req.Step, req.Partial, &sink, audit),
 		},
 		BuiltinTools:       agentrun.WithCodeSearch(agentrun.ReadOnlyFileTools, a.codeSearch),
-		MaxTokens:          generateMaxTokens,
+		MaxTokens:          maxTokens,
 		LoadProjectContext: true,
 	})
 	if err != nil {
@@ -199,7 +200,7 @@ func (a *agentAuthor) WriteArchitecture(ctx context.Context, req architectureReq
 		Terminator:         ToolSubmitArchitecture,
 		Custom:             []core.Tool{submitArchitectureTool(&sink)},
 		BuiltinTools:       agentrun.WithCodeSearch(agentrun.ReadOnlyFileTools, a.codeSearch),
-		MaxTokens:          architectureMaxTokens,
+		MaxTokens:          maxTokens,
 		LoadProjectContext: true,
 	})
 	if err != nil {

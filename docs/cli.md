@@ -210,7 +210,7 @@ spec ./idea.md --phase-model prd=ADVANCED      # STANDARD, with the PRD on ADVAN
 | `--preflight` | off | run every check that would refuse the run, then stop before any model phase (see below) |
 | `--detail` | `summary` | `summary` prints the trimmed `result`, `full` everything computed |
 | `--output` | none | also write the envelope stdout gets to this file, atomically and before stdout; relative to the working directory. `-` and a directory are usage errors; a failed write is an `output_not_written` warning |
-| `--verbose` | off | trace tool calls, turns and phase ceilings on stderr |
+| `--verbose` | off | trace tool calls, turns, phase ceilings and any response cut off at the output token limit on stderr |
 | `--quiet` | off | print nothing on stderr |
 | `--show-text` | off | stream the model's prose to stderr |
 | `--version` | | print the build identity and exit |
@@ -352,7 +352,7 @@ written, such as `invalid_spec`, still names the package on disk.
 | `budget`, `max_turns` | a phase stopped at its ceiling | no |
 | `aborted` | cancelled (Ctrl-C) or past `--phase-timeout` | yes |
 | `refusal` | the model declined the request | no |
-| `no_result` | a phase ended without an accepted submission; the message says why and what to raise | no |
+| `no_result` | a phase ended without an accepted submission; the message says why and what to change: a ceiling to raise, or, when a response hit the output token limit while the model was still thinking, the effort to lower | no |
 | `disk` | the filesystem refused a write | no |
 | `invalid_spec` | the package was written and does not validate | no |
 | `internal` | a bug in spec | no |

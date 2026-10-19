@@ -239,6 +239,53 @@ func TestAProseAnswerEndsWithoutAnErrorAndNoResult(t *testing.T) {
 	}
 }
 
+// A response that reaches max_tokens before its first tool call ends the run
+// as an end_turn, because the loop goes on only while there is a tool call to
+// answer. The model was not done, and neither ceiling was reached, so telling
+// the operator to raise --max-turns or --budget sends them the wrong way: the
+// phase ran out of room in a single response, thinking and reply alike. Only
+// the response's own stop reason says so.
+func TestAPhaseCutOffAtTheOutputLimitSaysSo(t *testing.T) {
+	p := faux.New(
+		call("1", "list_files", `{}`),
+		faux.FauxAssistantMessage(core.StopReasonLength, faux.FauxThinking("Drafting the whole document first…", "sig")),
+	)
+	var got string
+	obs := &details{}
+	r := newRunner(t, p, Config{Observer: obs})
+	phase := answerPhase(&got)
+	phase.BuiltinTools = ReadOnlyFileTools
+	res, err := r.Run(context.Background(), phase)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got != "" || res.StopReason != core.RunStopEndTurn || res.Turns != 2 {
+		t.Fatalf("got %q, stop %s after %d turns; want no answer, end_turn, 2 turns", got, res.StopReason, res.Turns)
+	}
+	if res.LastReason != core.StopReasonLength {
+		t.Errorf("LastReason = %q, want %q", res.LastReason, core.StopReasonLength)
+	}
+
+	nr := NoResultError("answer", terminator, res)
+	msg := nr.Error()
+	if CategoryOf(nr) != CategoryNoResult {
+		t.Errorf("category = %s, want %s", CategoryOf(nr), CategoryNoResult)
+	}
+	for _, want := range []string{terminator, "output token limit", "effort"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the message lacks %q: %s", want, msg)
+		}
+	}
+	for _, bad := range []string{"--max-turns", "--budget"} {
+		if strings.Contains(msg, bad) {
+			t.Errorf("the message sends the operator to %s, a ceiling that was not reached: %s", bad, msg)
+		}
+	}
+	if !strings.Contains(obs.text(), "output token limit") {
+		t.Errorf("--verbose never says a response was cut off:\n%s", obs.text())
+	}
+}
+
 func TestTheTurnCeilingIsMaxTurns(t *testing.T) {
 	p := faux.New(
 		call("1", "list_files", `{}`),

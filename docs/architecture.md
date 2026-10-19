@@ -153,6 +153,15 @@ combinators (`schema`) and the indexed search (`codesearch`).
   so no guard is needed and `agentkit.New` would refuse one without it;
 - `MaxTurns`, `MaxCostUSD` and `Timeout` from the per-phase bounds, and
   `Prune` so old tool results leave the request before the window fills;
+- `MaxTokens`, the cap on one response: 65,536 tokens for every phase
+  (`specgen/phases.go`). The model's thinking is spent from the same cap as
+  its reply, and a phase's reply is one tool call carrying the whole document,
+  so at `xhigh` and `max` a smaller cap is gone before the call begins. The
+  driver goes on only while a response holds a tool call, so such a response
+  ends the run as an `end_turn` with no result; `agentrun.Result.LastReason`
+  keeps the response's own stop reason, which is how the `no_result` error
+  tells that from a model that stopped on its own and names the effort to
+  lower rather than a ceiling that was never reached;
 - a provider that sends a model call again when its stream failed for a
   transient reason — a dropped or stalled connection, a truncated body, an
   overloaded or rate-limited API — after 2, 8 and 30 seconds

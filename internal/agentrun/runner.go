@@ -189,6 +189,11 @@ type Result struct {
 	Model      Model
 	Turns      int
 	StopReason core.RunStopReason
+	// LastReason is why the phase's last model response stopped. The run's
+	// StopReason cannot say a response was cut off at the output limit: the
+	// loop goes on only while a response holds a tool call, so one that ran
+	// out of room while thinking ends the run as an end_turn.
+	LastReason core.StopReason
 	Usage      core.Usage
 	Elapsed    time.Duration
 	// ToolErrors counts the tool calls that came back as errors, keyed "tool"
@@ -288,6 +293,7 @@ func (r *Runner) run(ctx context.Context, p Phase) (Result, error) {
 		Name:       p.Name,
 		Turns:      res.TurnCount,
 		StopReason: res.StopReason,
+		LastReason: res.LastReason,
 		Usage:      res.Usage,
 		Elapsed:    time.Since(start),
 		ToolErrors: tr.errs.snapshot(),
@@ -429,15 +435,19 @@ func (r *Runner) wrap(p Phase, res core.RunResult, err error) error {
 
 // NoResultError is the error a caller reports when a phase finished but its
 // terminator never accepted a submission. It is separated from a transport
-// failure because the remedy is different: raise the bounds, or narrow the
-// task.
+// failure because the remedy is different: raise the bounds, lower the
+// effort, or narrow the task.
 func NoResultError(phase, terminator string, res Result) error {
 	hint := "raise --max-turns or --budget, or narrow the input"
-	switch res.StopReason {
-	case core.RunStopBudgetExceeded:
+	switch {
+	case res.StopReason == core.RunStopBudgetExceeded:
 		hint = "raise --budget, or choose a cheaper model"
-	case core.RunStopMaxTurns:
+	case res.StopReason == core.RunStopMaxTurns:
 		hint = "raise --max-turns; the model was still working"
+	case res.LastReason == core.StopReasonLength:
+		// Neither ceiling was reached, so raising one changes nothing.
+		hint = "its last response hit the output token limit, which thinking shares with the reply; " +
+			"lower the effort (--effort, or --phase-model PHASE=MODEL:EFFORT) or narrow the input"
 	}
 	err := newError(phase, CategoryNoResult, nil,
 		"the phase ended (%s) without calling %s: %s", res.StopReason, terminator, hint)
@@ -463,6 +473,9 @@ func (t *tracer) event(e core.Event) {
 		t.cost += v.Usage.CostUSD
 		if r.cfg.Observer != nil {
 			r.cfg.Observer.Turn(t.phase, t.turn, t.cost)
+		}
+		if v.Message.StopReason == core.StopReasonLength {
+			r.detail("turn %d: the response hit the output token limit after %d tokens", t.turn, v.Usage.OutputTokens)
 		}
 	case core.ToolCallEndEvent:
 		r.detail("→ %s %s", v.Block.Name, firstLine(string(v.Block.Input), 100))
