@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 )
 
 // TS-13-14: submit_prd tool schema includes an optional relevant_files array
@@ -120,10 +120,10 @@ func TestTS_13_17_SinkStoresRelevantFiles(t *testing.T) {
 	}
 }
 
-func testWorkspace(t *testing.T) *tools.Workspace {
+func testWorkspace(t *testing.T) *workspace.Workspace {
 	t.Helper()
 	dir := t.TempDir()
-	ws, err := tools.NewWorkspace(dir)
+	ws, err := workspace.Open(dir, workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestTS_13_18_ValidPathsAccepted(t *testing.T) {
 	ws := testWorkspace(t)
 	// Create two real files.
 	for _, name := range []string{"a.go", "b.go"} {
-		if err := os.WriteFile(filepath.Join(ws.Root, name), []byte("package a\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(ws.Root(), name), []byte("package a\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -173,7 +173,7 @@ func TestTS_13_18_ValidPathsAccepted(t *testing.T) {
 // nonexistent path with error code invalid_relevant_files.
 func TestTS_13_19_NonexistentPathRejected(t *testing.T) {
 	ws := testWorkspace(t)
-	if err := os.WriteFile(filepath.Join(ws.Root, "a.go"), []byte("package a\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ws.Root(), "a.go"), []byte("package a\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var sink prdSink
@@ -202,7 +202,7 @@ func TestTS_13_19_NonexistentPathRejected(t *testing.T) {
 // directory path.
 func TestTS_13_20_DirectoryPathRejected(t *testing.T) {
 	ws := testWorkspace(t)
-	if err := os.MkdirAll(filepath.Join(ws.Root, "subdir"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws.Root(), "subdir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var sink prdSink

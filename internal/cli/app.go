@@ -20,6 +20,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/anthropic"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/issuex"
@@ -44,7 +45,7 @@ func Usagef(format string, args ...any) error {
 type Deps struct {
 	Common    *Common
 	Input     Input
-	Workspace *tools.Workspace
+	Workspace *workspace.Workspace
 	Runner    *agentrun.Runner
 	// Forge is the forge client — GitHub or GitLab, chosen from the input URL
 	// or the origin remote — and is always non-nil. Whether it can write is
@@ -226,7 +227,7 @@ func (a App) execute(ctx context.Context, c *Common, argument string, stdin io.R
 			MaxInputBytes, len(argument)+len(contextBlock)))
 	}
 
-	forge, ferr := pickForge(argument, c.InputKind, ws.Root, a.Name+"/"+a.Version)
+	forge, ferr := pickForge(argument, c.InputKind, ws.Root(), a.Name+"/"+a.Version)
 	if ferr != nil {
 		return ExitFailed, nil, (&ErrorInfo{Stage: "input", Category: "input", Message: ferr.Error()}).WithCause(ferr)
 	}

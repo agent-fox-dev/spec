@@ -11,6 +11,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/outline"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 )
 
 // The two names DetectSymbolBackend reports, which are the Detail of a
@@ -42,11 +43,11 @@ var symbolProbeSource = []byte("def probe():\n    pass\n")
 // It is a variable so a test can simulate a failing detection.
 var DetectSymbolBackend = detectSymbolBackend
 
-func detectSymbolBackend(ws *tools.Workspace) (string, error) {
+func detectSymbolBackend(ws *workspace.Workspace) (string, error) {
 	if ws == nil {
 		return "", errors.New("no workspace configured")
 	}
-	built, err := tools.All(tools.Options{Workspace: ws})
+	built, err := tools.For(ws, tools.Options{})
 	if err != nil {
 		return "", fmt.Errorf("building the file tools: %w", err)
 	}
@@ -55,7 +56,7 @@ func detectSymbolBackend(ws *tools.Workspace) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), symbolProbeTimeout)
 	defer cancel()
-	f, err := outline.Outline(ctx, filepath.Join(ws.Root, "probe.py"), symbolProbeSource, outline.Options{})
+	f, err := outline.Outline(ctx, filepath.Join(ws.Root(), "probe.py"), symbolProbeSource, outline.Options{})
 	if err != nil || f.Backend != outline.BackendTreeSitter {
 		return SymbolBackendGoOnly, nil
 	}

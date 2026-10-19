@@ -216,7 +216,7 @@ func TestTS_13_30_RelevantFilesNotPersistedInSpecDir(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dir := filepath.Join(ws.Root, got.SpecDir)
+	dir := filepath.Join(ws.Root(), got.SpecDir)
 	for _, name := range []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"} {
 		content, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {

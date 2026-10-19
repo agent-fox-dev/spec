@@ -13,7 +13,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/schema"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
@@ -24,7 +24,7 @@ import (
 // schema converted from the format's own JSON Schema, the submit handler and
 // its validation — with a scripted provider in the vendor's place.
 
-func fauxRunner(t *testing.T, ws *tools.Workspace, turns ...faux.Turn) (*agentrun.Runner, *faux.Provider) {
+func fauxRunner(t *testing.T, ws *workspace.Workspace, turns ...faux.Turn) (*agentrun.Runner, *faux.Provider) {
 	t.Helper()
 	p := faux.New(turns...)
 	r, err := agentrun.NewRunner(agentrun.Config{
@@ -50,13 +50,13 @@ func toolCall(id, name string, args any) faux.Turn {
 	}
 }
 
-func goWorkspace(t *testing.T) *tools.Workspace {
+func goWorkspace(t *testing.T) *workspace.Workspace {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := tools.NewWorkspace(dir)
+	ws, err := workspace.Open(dir, workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestARejectedArtifactIsRepairedInTheLoop(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	got, res, err := a.GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepTestSpec, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 	})
 	if err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
@@ -170,8 +170,8 @@ func TestTheTasksStepRefusesAnotherEcosystemsCommands(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	if _, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepTasks, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root, PRD: "## Intent\n\nx\n",
-		Profile: project.DetectProfile(ws.Root), Partial: &partial,
+		Root: ws.Root(), PRD: "## Intent\n\nx\n",
+		Profile: project.DetectProfile(ws.Root()), Partial: &partial,
 	}); err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestTheSubmitHandlerWritesTheArtifactsSchemaField(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	got, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 	})
 	if err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
@@ -323,7 +323,7 @@ func TestTheSubmitHandlerWritesTheSpecIdentityAndSchemaVersion(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	if _, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 	}); err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestARejectionNamesEveryProblemInOnePass(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	audit := project.DetectProfile(ws.Root).AuditTasks
+	audit := project.DetectProfile(ws.Root()).AuditTasks
 
 	bad := deepCopy(t, artifacts[afspec.StepTasks])
 	bad["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
@@ -474,7 +474,7 @@ func TestTheGlossaryIsSubmittedAsEntriesAndStoredAsAnObject(t *testing.T) {
 			a := &agentAuthor{runner: runner}
 			got, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
 				Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-				Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+				Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 			})
 			if err != nil {
 				t.Fatalf("GenerateArtifact: %v", err)

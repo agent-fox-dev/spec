@@ -13,6 +13,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
@@ -201,20 +202,20 @@ func newAuthor(t *testing.T, specID, specName string) *scriptedAuthor {
 	}
 }
 
-func newWorkspace(t *testing.T) *tools.Workspace {
+func newWorkspace(t *testing.T) *workspace.Workspace {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := tools.NewWorkspace(dir)
+	ws, err := workspace.Open(dir, workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return ws
 }
 
-func newOptions(ws *tools.Workspace, a author) Options {
+func newOptions(ws *workspace.Workspace, a author) Options {
 	return Options{
 		Input: cli.Input{
 			Kind: cli.KindText, Origin: "argument",
@@ -265,7 +266,7 @@ func TestPipelineWritesAValidatedPackage(t *testing.T) {
 	}
 
 	// The files are on disk and load back.
-	dir := filepath.Join(ws.Root, got.SpecDir)
+	dir := filepath.Join(ws.Root(), got.SpecDir)
 	for _, name := range []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -390,7 +391,7 @@ func TestAnInvalidPackageIsWrittenAndReported(t *testing.T) {
 	if got.Status == "active" {
 		t.Error("an invalid package must not be activated")
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, got.SpecDir, "tasks.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(ws.Root(), got.SpecDir, "tasks.json")); err != nil {
 		t.Errorf("the package should still be on disk: %v", err)
 	}
 	if got.Validation.ErrorCount == 0 {
@@ -430,7 +431,7 @@ func TestDryRunWritesNothing(t *testing.T) {
 	if got.Status != "draft" {
 		t.Errorf("Status = %q, want draft under --dry-run", got.Status)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, ".specs")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Root(), ".specs")); !os.IsNotExist(err) {
 		t.Error("--dry-run created the spec root")
 	}
 }
@@ -445,7 +446,7 @@ func TestAFailedGenerationStepWritesNothing(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	if entries, _ := os.ReadDir(filepath.Join(ws.Root, ".specs")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(filepath.Join(ws.Root(), ".specs")); len(entries) != 0 {
 		t.Errorf("a half-written package was left behind: %v", entries)
 	}
 }
@@ -521,7 +522,7 @@ func TestArchitectureIsWrittenWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	b, err := os.ReadFile(filepath.Join(ws.Root, got.SpecDir, "architecture.md"))
+	b, err := os.ReadFile(filepath.Join(ws.Root(), got.SpecDir, "architecture.md"))
 	if err != nil {
 		t.Fatalf("architecture.md: %v", err)
 	}
@@ -544,7 +545,7 @@ func TestAnInvalidNameIsRefused(t *testing.T) {
 	if !errors.As(err, &f) || f.Stage != "preflight" || f.Category != "usage" {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, ".specs")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Root(), ".specs")); !os.IsNotExist(err) {
 		t.Error("nothing should have been written")
 	}
 }
@@ -586,7 +587,7 @@ func TestValidationReadsThePackageBackFromDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	dir := filepath.Join(ws.Root, got.SpecDir)
+	dir := filepath.Join(ws.Root(), got.SpecDir)
 
 	// The round trip is the claim: what validated is what LoadSpec returns.
 	loaded, err := afspec.LoadSpec(dir)
@@ -894,7 +895,7 @@ func (f *fakeIndex) Close() error      { f.closed++; return nil }
 
 // indexedRunner is a Runner whose Config carries idx — the Config the shell
 // builds from the same index it hands the tool's Options.
-func indexedRunner(t *testing.T, ws *tools.Workspace, p *faux.Provider, idx tools.Index) *agentrun.Runner {
+func indexedRunner(t *testing.T, ws *workspace.Workspace, p *faux.Provider, idx tools.Index) *agentrun.Runner {
 	t.Helper()
 	r, err := agentrun.NewRunner(agentrun.Config{
 		Model:     agentrun.Model{Spec: "faux", Row: *faux.Model()},

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/cli"
@@ -36,7 +36,7 @@ func splitAuthor(t *testing.T) *scriptedAuthor {
 	return a
 }
 
-func fileOptions(ws *tools.Workspace, a author) Options {
+func fileOptions(ws *workspace.Workspace, a author) Options {
 	o := newOptions(ws, a)
 	o.Input = cli.Input{Kind: cli.KindFile, Origin: "docs/drafts/widgets.md",
 		Body: "widgets: a model, a store, and the switch-over"}
@@ -67,11 +67,11 @@ func TestASplitInputWritesEveryScope(t *testing.T) {
 
 	// Three packages, numbered in the plan's order, each valid and active.
 	want := []string{"01_widget_core", "02_widget_github", "03_widget_adopt"}
-	if dirs := specDirs(t, ws.Root); strings.Join(dirs, ",") != strings.Join(want, ",") {
+	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != strings.Join(want, ",") {
 		t.Fatalf("spec root holds %v, want %v and no plan file", dirs, want)
 	}
 	for _, dir := range want {
-		loaded, err := afspec.LoadSpec(filepath.Join(ws.Root, ".specs", dir))
+		loaded, err := afspec.LoadSpec(filepath.Join(ws.Root(), ".specs", dir))
 		if err != nil {
 			t.Fatalf("%s: %v", dir, err)
 		}
@@ -173,7 +173,7 @@ func TestAScopeThatFailsBeforeItIsWrittenHasNoPackageInTheResult(t *testing.T) {
 		t.Errorf("scope 1 = %+v, want failed with no directory", got.Split[0])
 	}
 	// Only the plan to resume from is left: no package directory.
-	if dirs := specDirs(t, ws.Root); strings.Join(dirs, ",") != "widget_core"+SplitPlanSuffix {
+	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != "widget_core"+SplitPlanSuffix {
 		t.Errorf("the spec root holds %v", dirs)
 	}
 }
@@ -199,7 +199,7 @@ func TestAFailedScopeLeavesAPlanTheNextRunResumesFrom(t *testing.T) {
 	if got == nil || got.SpecID != "01" || !got.Validation.Valid {
 		t.Fatalf("the first package should be reported: %+v", got)
 	}
-	planPath := filepath.Join(ws.Root, ".specs", "widget_core"+SplitPlanSuffix)
+	planPath := filepath.Join(ws.Root(), ".specs", "widget_core"+SplitPlanSuffix)
 	if _, err := os.Stat(planPath); err != nil {
 		t.Fatalf("the plan should remain: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestAFailedScopeLeavesAPlanTheNextRunResumesFrom(t *testing.T) {
 		t.Fatalf("the resumed run should start at scope 2 with the plan; requests: %d", len(b.prdRequests))
 	}
 	want := []string{"01_widget_core", "02_widget_github", "03_widget_adopt"}
-	if dirs := specDirs(t, ws.Root); strings.Join(dirs, ",") != strings.Join(want, ",") {
+	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != strings.Join(want, ",") {
 		t.Fatalf("spec root holds %v, want %v", dirs, want)
 	}
 	if got.SpecID != "02" || len(got.FollowOnSpecs) != 1 || got.FollowOnSpecs[0].SpecID != "03" {
@@ -273,7 +273,7 @@ func TestAResumedSplitThatStopsAgainIsStillResumable(t *testing.T) {
 			if len(resumed.prdRequests) == 0 || resumed.prdRequests[0].Split == nil {
 				t.Fatalf("the second run should resume the plan, not plan again; requests: %d", len(resumed.prdRequests))
 			}
-			if _, statErr := os.Stat(filepath.Join(ws.Root, planPath)); statErr != nil {
+			if _, statErr := os.Stat(filepath.Join(ws.Root(), planPath)); statErr != nil {
 				t.Fatalf("the plan should remain on disk: %v", statErr)
 			}
 			states := []string{got.Split[0].Status, got.Split[1].Status, got.Split[2].Status}
@@ -366,7 +366,7 @@ func TestAnInvalidScopeDoesNotStopTheSplit(t *testing.T) {
 		t.Errorf("the error should name the invalid package: %v", err)
 	}
 	want := []string{"01_widget_core", "02_widget_github", "03_widget_adopt"}
-	if dirs := specDirs(t, ws.Root); strings.Join(dirs, ",") != strings.Join(want, ",") {
+	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != strings.Join(want, ",") {
 		t.Fatalf("spec root holds %v, want %v", dirs, want)
 	}
 	states := []string{got.Split[0].Status, got.Split[1].Status, got.Split[2].Status}
@@ -392,7 +392,7 @@ func TestDryRunOfASplitWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, ".specs")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Root(), ".specs")); !os.IsNotExist(err) {
 		t.Error("--dry-run created the spec root")
 	}
 	ids := []string{got.SpecID, got.FollowOnSpecs[0].SpecID, got.FollowOnSpecs[1].SpecID}
@@ -409,7 +409,7 @@ func TestAPlanForAnotherInputIsLeftAlone(t *testing.T) {
 	ws := newWorkspace(t)
 	other := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "docs/other.md", Body: "other"},
 		[]SplitScope{{Name: "other_core", Scope: "x"}, {Name: "other_rest", Scope: "y"}})
-	if err := other.save(filepath.Join(ws.Root, ".specs")); err != nil {
+	if err := other.save(filepath.Join(ws.Root(), ".specs")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -421,7 +421,7 @@ func TestAPlanForAnotherInputIsLeftAlone(t *testing.T) {
 	if got.SpecID != "01" || len(got.Split) != 0 {
 		t.Errorf("a fresh run was expected: %+v", got)
 	}
-	if _, err := os.Stat(other.Path(filepath.Join(ws.Root, ".specs"))); err != nil {
+	if _, err := os.Stat(other.Path(filepath.Join(ws.Root(), ".specs"))); err != nil {
 		t.Error("the other plan was removed")
 	}
 	if warnings := strings.Join(cli.WarningMessages(o.Run.Warnings()), "\n"); !strings.Contains(warnings, "docs/other.md") {

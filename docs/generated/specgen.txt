@@ -178,7 +178,7 @@ type Options struct {
 	// forge issue thread. Required.
 	Input cli.Input
 	// Workspace roots the read-only source access. Required.
-	Workspace *tools.Workspace
+	Workspace *workspace.Workspace
 	// SpecsDir is where NN_name directories live. Empty means
 	// <workspace>/.specs, or $AF_SPEC_DIR when that is set.
 	SpecsDir string

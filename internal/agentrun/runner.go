@@ -33,6 +33,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/anthropic"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 )
@@ -123,7 +124,7 @@ type Config struct {
 	// Workspace roots the file tools. Every path a tool is handed is
 	// resolved against it, symlinks included, so a path that escapes is
 	// refused by the tool rather than by a paragraph in a prompt.
-	Workspace *tools.Workspace
+	Workspace *workspace.Workspace
 	// Index is the code-search index shared by every phase of the run. When
 	// set, phases that grant ToolCodeSearch get code_search. The caller
 	// closes it.
@@ -303,7 +304,7 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 	}
 	system := p.System
 	if p.LoadProjectContext && r.cfg.TrustProject && r.cfg.Workspace != nil {
-		system += projectContextBlock(r.cfg.Workspace.Root)
+		system += projectContextBlock(r.cfg.Workspace.Root())
 	}
 	system += toolsNote(granted)
 	model := r.ModelFor(p.Kind)
@@ -314,7 +315,7 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 		Model:      model.ID(),
 		Effort:     model.Effort,
 		System:     system,
-		Tools:      granted,
+		Toolset:    agentkit.Toolset{Tools: granted},
 		Prefix:     prefixMessages(p.Prefix),
 		MaxTurns:   r.cfg.Bounds.ResolvedMaxTurns(),
 		MaxCostUSD: r.cfg.Bounds.ResolvedMaxBudget(),
@@ -380,7 +381,7 @@ func (r *Runner) grantedTools(p Phase) ([]core.Tool, error) {
 	if r.cfg.Workspace == nil {
 		return nil, newError(p.Name, CategoryInternal, nil, "phase asks for built-in tools but no workspace is configured")
 	}
-	built, err := tools.All(tools.Options{Workspace: r.cfg.Workspace, Index: r.cfg.Index})
+	built, err := tools.For(r.cfg.Workspace, tools.Options{Index: r.cfg.Index})
 	if err != nil {
 		return nil, newError(p.Name, CategoryInternal, err, "building the file tools: %v", err)
 	}

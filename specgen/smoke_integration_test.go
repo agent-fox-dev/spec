@@ -121,11 +121,11 @@ func TestTS_13_35_SpecRunPassesRelevantFilesFromPRDToGenerationAndEnvelope(t *te
 	ws := newWorkspace(t)
 	// Create real files in the workspace so path validation succeeds.
 	for _, name := range []string{"internal/phase.go", "internal/envelope.go"} {
-		dir := filepath.Join(ws.Root, filepath.Dir(name))
+		dir := filepath.Join(ws.Root(), filepath.Dir(name))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(ws.Root, name), []byte("package internal\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(ws.Root(), name), []byte("package internal\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -267,7 +267,7 @@ func TestTS_13_36_ResumedSplitWarnsAboutUnavailableRelevantFiles(t *testing.T) {
 func TestTS_13_37_SubmitPRDRejectsInvalidPathsAndModelCorrects(t *testing.T) {
 	ws := goWorkspace(t)
 	// Create a real file that the corrected submission will reference.
-	if err := os.WriteFile(filepath.Join(ws.Root, "real.go"), []byte("package main\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ws.Root(), "real.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,7 +304,7 @@ func TestTS_13_37_SubmitPRDRejectsInvalidPathsAndModelCorrects(t *testing.T) {
 
 	a := &agentAuthor{runner: runner, ws: ws}
 	prd, res, err := a.WritePRD(context.Background(), prdRequest{
-		Root:       ws.Root,
+		Root:       ws.Root(),
 		SourceKind: "text",
 		Input:      "test input",
 	})

@@ -52,7 +52,7 @@ func TestTS06_57_SpecStopsBetweenScopesWhenOverTotalBudget(t *testing.T) {
 	if got == nil || got.SpecID != "01" {
 		t.Fatalf("the first package should be reported: %+v", got)
 	}
-	planPath := filepath.Join(ws.Root, ".specs", "widget_core"+SplitPlanSuffix)
+	planPath := filepath.Join(ws.Root(), ".specs", "widget_core"+SplitPlanSuffix)
 	if _, err := os.Stat(planPath); err != nil {
 		t.Fatalf("the plan should remain: %v", err)
 	}

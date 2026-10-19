@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/agent-fox-dev/agentkit-go v0.0.0
-	github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261015152137-0da59715aa03
+	github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261017185156-31b9205a37fb
 	github.com/anthropics/anthropic-sdk-go v1.79.1
 	github.com/goccy/go-yaml v1.19.2
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
@@ -121,4 +121,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/agent-fox-dev/agentkit-go v0.0.0 => github.com/agent-fox-dev/agentkit-go v0.0.0-20261015152137-0da59715aa03
+replace github.com/agent-fox-dev/agentkit-go v0.0.0 => github.com/agent-fox-dev/agentkit-go v0.0.0-20261017185156-31b9205a37fb

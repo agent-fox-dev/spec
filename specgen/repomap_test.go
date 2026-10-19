@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
@@ -69,7 +69,7 @@ func TestTheArchitecturePhaseCarriesTheRunContext(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	partial := afspec.PartialSpec{SpecID: "01", SpecName: "x"}
 	if _, _, err := a.WriteArchitecture(context.Background(), architectureRequest{
-		SpecID: "01", SpecName: "x", Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+		SpecID: "01", SpecName: "x", Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 		RepoMap: sampleMap, Steering: "Always write tests first.", CodebaseNotes: "model.go holds the Widget.",
 	}); err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func TestTS14_28_PipelineBuildsTheMapOnceForASplit(t *testing.T) {
 	o.Input.Body = "widgets: a model in internal/widget/model.go, a store, and the switch-over"
 	var calls, budget int
 	var inputs []string
-	o.buildMap = func(_ context.Context, _ *tools.Workspace, b int, in []string) (string, error) {
+	o.buildMap = func(_ context.Context, _ *workspace.Workspace, b int, in []string) (string, error) {
 		calls++
 		budget, inputs = b, in
 		return sampleMap, nil
@@ -169,7 +169,7 @@ func TestTS14_28_BuildFailureWarnsAndRunsWithoutAMap(t *testing.T) {
 	cap := &mapCapture{inner: newAuthor(t, "01", "test_feature")}
 	o := newOptions(ws, cap)
 	o.RepoMapTokens = 6000
-	o.buildMap = func(context.Context, *tools.Workspace, int, []string) (string, error) {
+	o.buildMap = func(context.Context, *workspace.Workspace, int, []string) (string, error) {
 		return "", errors.New("walk exploded")
 	}
 
@@ -213,7 +213,7 @@ func TestTS14_20_TheMapIsNotInTheSpecEnvelope(t *testing.T) {
 	cap := &mapCapture{inner: newAuthor(t, "01", "test_feature")}
 	o := newOptions(ws, cap)
 	o.RepoMapTokens = 6000
-	o.buildMap = func(context.Context, *tools.Workspace, int, []string) (string, error) {
+	o.buildMap = func(context.Context, *workspace.Workspace, int, []string) (string, error) {
 		return sampleMap, nil
 	}
 

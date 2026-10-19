@@ -12,7 +12,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -96,7 +96,7 @@ func TestTS11_19_ResultCarriesPreflightAndEstimateAfterDryRun(t *testing.T) {
 // Verifies: 11-REQ-5.3
 func TestTS11_28_RunPreflightReportsTheChecklistAndWritesNothing(t *testing.T) {
 	o := preflightOptions(t)
-	specsDir := resolveSpecsDir(o, o.Workspace.Root)
+	specsDir := resolveSpecsDir(o, o.Workspace.Root())
 	before := dirNames(t, specsDir)
 
 	res, err := RunPreflight(context.Background(), o)
@@ -194,7 +194,7 @@ func TestRunPreflightRefusalIsPreflightsFailure(t *testing.T) {
 
 	// An ambiguous split plan refuses the run, not a checklist entry.
 	o = preflightOptions(t)
-	specsDir := resolveSpecsDir(o, o.Workspace.Root)
+	specsDir := resolveSpecsDir(o, o.Workspace.Root())
 	for _, name := range []string{"one", "two"} {
 		plan := newSplitPlan(o.Input, []SplitScope{{Name: name, Scope: "s"}, {Name: name + "_b", Scope: "t"}})
 		if err := plan.save(specsDir); err != nil {
@@ -241,7 +241,7 @@ func TestTS11_32_EstimateCountsPhases(t *testing.T) {
 
 	// A plan with 3 scopes of which 1 is written leaves 2 pending.
 	oC := preflightOptions(t)
-	specsDir := resolveSpecsDir(oC, oC.Workspace.Root)
+	specsDir := resolveSpecsDir(oC, oC.Workspace.Root())
 	plan := newSplitPlan(oC.Input, []SplitScope{{Name: "first", Scope: "a"}, {Name: "second", Scope: "b"}, {Name: "third", Scope: "c"}})
 	plan.Scopes[0].Dir, plan.Scopes[0].SpecID = "01_first", "01"
 	if err := plan.save(specsDir); err != nil {
@@ -323,7 +323,7 @@ func TestTS15_9_PreflightReportsSymbolBackend(t *testing.T) {
 // Verifies: 15-REQ-4.3
 func TestTS15_10_PreflightOmitsSymbolBackendWhenDetectionFails(t *testing.T) {
 	orig := agentrun.DetectSymbolBackend
-	agentrun.DetectSymbolBackend = func(*tools.Workspace) (string, error) {
+	agentrun.DetectSymbolBackend = func(*workspace.Workspace) (string, error) {
 		return "", errors.New("detection failed")
 	}
 	t.Cleanup(func() { agentrun.DetectSymbolBackend = orig })

@@ -17,6 +17,7 @@ import (
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/schema"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -67,7 +68,7 @@ func newRunner(t *testing.T, p *faux.Provider, cfg Config) *Runner {
 	}
 	cfg.Provider = p
 	if cfg.Workspace == nil {
-		ws, err := tools.NewWorkspace(t.TempDir())
+		ws, err := workspace.Open(t.TempDir(), workspace.Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,7 +158,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func TestOnlyAPhasesOwnToolsAreStrict(t *testing.T) {
 	var body []byte
 	var got string
-	ws, err := tools.NewWorkspace(t.TempDir())
+	ws, err := workspace.Open(t.TempDir(), workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +294,7 @@ func TestProjectContextIsAdmittedOnlyUnderTrust(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("Always write tests first."), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := tools.NewWorkspace(dir)
+	ws, err := workspace.Open(dir, workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
