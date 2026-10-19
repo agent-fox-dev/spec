@@ -105,6 +105,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--model`, `--effort` | A tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or Claude model id, and its reasoning effort |
 | `--phase-model` | Run one phase on another model and effort, e.g. `tasks=claude-haiku-4-5:medium`; a tier already runs the later phases lower |
 | `--budget`, `--max-turns`, `--total-budget` | Per-phase and whole-run ceilings |
+| `--max-tokens` | The output token cap of one model response, thinking included (default 65536) |
 | `--preflight` | Run every check that would refuse the run, then stop before any model call |
 | `--max-parallel` | How many packages of a split are generated at once (default 3) |
 

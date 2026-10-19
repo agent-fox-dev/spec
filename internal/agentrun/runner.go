@@ -51,6 +51,12 @@ type Bounds struct {
 	MaxTurns int
 	// MaxBudgetUSD bounds one phase's spend. Zero means DefaultMaxBudgetUSD.
 	MaxBudgetUSD float64
+	// MaxTokens caps one model response of every phase, the thinking and the
+	// reply together, in place of the cap the phase asks for in
+	// Phase.MaxTokens. Zero keeps each phase's own. It is the operator's lever
+	// for a phase whose response ran out of room before it reached its tool
+	// call; the model's own output ceiling still applies.
+	MaxTokens int
 	// Timeout is the wall-clock ceiling on one phase. Zero means no ceiling
 	// beyond the caller's context.
 	Timeout time.Duration
@@ -89,6 +95,16 @@ func (b Bounds) ResolvedMaxBudget() float64 {
 		return b.MaxBudgetUSD
 	}
 	return DefaultMaxBudgetUSD
+}
+
+// ResolvedMaxTokens is the response cap of a phase that asks for phaseCap:
+// the bound when there is one, else the phase's own. Zero, from a phase with
+// none either, leaves AgentKit's default.
+func (b Bounds) ResolvedMaxTokens(phaseCap int) int {
+	if b.MaxTokens > 0 {
+		return b.MaxTokens
+	}
+	return phaseCap
 }
 
 // Observer receives a phase's progress. The CLI's progress writer satisfies
@@ -175,7 +191,8 @@ type Phase struct {
 	// BuiltinTools names the read-only built-in tools to grant: a subset of
 	// ReadOnlyFileTools, plus ToolCodeSearch.
 	BuiltinTools []string
-	// MaxTokens caps one response. Zero leaves AgentKit's default.
+	// MaxTokens caps one response, unless Bounds.MaxTokens replaces it. Zero
+	// leaves AgentKit's default.
 	MaxTokens int
 	// LoadProjectContext admits the project context files under
 	// Config.TrustProject.
@@ -327,7 +344,7 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 		MaxCostUSD: r.cfg.Bounds.ResolvedMaxBudget(),
 		Timeout:    r.cfg.Bounds.Timeout,
 		Prune:      agentkit.PruneOptions{Threshold: pruneThreshold, KeepTurns: pruneKeepTurns},
-		MaxTokens:  p.MaxTokens,
+		MaxTokens:  r.cfg.Bounds.ResolvedMaxTokens(p.MaxTokens),
 	})
 	if err != nil {
 		return nil, newError(p.Name, CategoryInternal, err, "building the agent: %v", err)
@@ -435,8 +452,8 @@ func (r *Runner) wrap(p Phase, res core.RunResult, err error) error {
 
 // NoResultError is the error a caller reports when a phase finished but its
 // terminator never accepted a submission. It is separated from a transport
-// failure because the remedy is different: raise the bounds, lower the
-// effort, or narrow the task.
+// failure because the remedy is different: raise a bound, lower the effort, or
+// narrow the task.
 func NoResultError(phase, terminator string, res Result) error {
 	hint := "raise --max-turns or --budget, or narrow the input"
 	switch {
@@ -447,7 +464,7 @@ func NoResultError(phase, terminator string, res Result) error {
 	case res.LastReason == core.StopReasonLength:
 		// Neither ceiling was reached, so raising one changes nothing.
 		hint = "its last response hit the output token limit, which thinking shares with the reply; " +
-			"lower the effort (--effort, or --phase-model PHASE=MODEL:EFFORT) or narrow the input"
+			"raise --max-tokens, lower the effort (--effort, or --phase-model PHASE=MODEL:EFFORT) or narrow the input"
 	}
 	err := newError(phase, CategoryNoResult, nil,
 		"the phase ended (%s) without calling %s: %s", res.StopReason, terminator, hint)

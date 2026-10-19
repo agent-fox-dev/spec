@@ -84,6 +84,7 @@ every phase as the project's directives.
 | Issue comments read | 5 pages of 100 |
 | Per-phase turns | 60 (`--max-turns`) |
 | Per-phase spend | $5.00 (`--budget`) |
+| Output tokens of one model response, thinking included | 65,536 (`--max-tokens`), and never more than the model's own output ceiling |
 | Repository map | 6000 tokens (`--repo-map-tokens`) |
 | Codebase notes a PRD phase hands on | 12000 bytes, cut at a line boundary |
 | Earlier scopes' notes shown to a later scope's PRD phase | 16000 bytes, nearest scope first |

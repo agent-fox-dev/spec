@@ -271,7 +271,7 @@ func TestAPhaseCutOffAtTheOutputLimitSaysSo(t *testing.T) {
 	if CategoryOf(nr) != CategoryNoResult {
 		t.Errorf("category = %s, want %s", CategoryOf(nr), CategoryNoResult)
 	}
-	for _, want := range []string{terminator, "output token limit", "effort"} {
+	for _, want := range []string{terminator, "output token limit", "--max-tokens", "effort"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the message lacks %q: %s", want, msg)
 		}
@@ -283,6 +283,37 @@ func TestAPhaseCutOffAtTheOutputLimitSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(obs.text(), "output token limit") {
 		t.Errorf("--verbose never says a response was cut off:\n%s", obs.text())
+	}
+}
+
+// The cap on a response is the phase's own until a bound replaces it, which is
+// how an operator gives a phase more room than the tool does, or less.
+func TestTheMaxTokensBoundReplacesThePhasesOwnCap(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		bound, phase int
+		want         int
+	}{
+		{"no bound leaves the phase's own cap", 0, 65536, 65536},
+		{"a lower bound replaces it", 8000, 65536, 8000},
+		{"a higher bound replaces it too", 100000, 65536, 100000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := faux.New()
+			var got string
+			r := newRunner(t, p, Config{Bounds: Bounds{MaxTokens: tc.bound}})
+			phase := answerPhase(&got)
+			phase.MaxTokens = tc.phase
+			_, _ = r.Run(context.Background(), phase)
+
+			reqs := p.Requests()
+			if len(reqs) == 0 {
+				t.Fatal("no request was sent")
+			}
+			if n := reqs[0].MaxTokens; n == nil || *n != tc.want {
+				t.Errorf("max_tokens = %v, want %d", n, tc.want)
+			}
+		})
 	}
 }
 
