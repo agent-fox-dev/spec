@@ -200,6 +200,7 @@ and no API key: the command's tests run against a scripted model.
 - [Spec Format Reference v2](specification/spec-format-v2.md) — field-level schemas, EARS patterns, validation rules, and rendering
 - [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
 - [afspec](afspec/README.md) — the Go library's API
+- [Examples](examples/README.md) — programs that create, validate and work through a spec with `afspec`
 - [Public Go API](docs/api.md) — the packages and where their reference lives
 - [Architecture](docs/architecture.md) and [configuration](docs/configuration.md)
 - [The spec command](docs/cli.md) — input, flags, the output envelope, errors and warnings

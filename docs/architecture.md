@@ -27,6 +27,7 @@ internal/
   issuex/                   #   GitHub and GitLab: read an issue, post a comment
   project/                  #   Language detection, the test-command audit, steering
   repomap/                  #   The token-budgeted repository map
+examples/                   # Programs using afspec: create, validate, work through tasks
 docs/                       # Repository documentation
 .specs/                     # Spec packages for work on this repository
 ```

@@ -48,6 +48,9 @@ func main() {
 }
 ```
 
+Runnable programs that create a spec, validate one and work through its
+tasks are in [`examples/`](../examples/README.md).
+
 ## What version 2 changes
 
 | Area | Version 1.3 | Version 2 |
