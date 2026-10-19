@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-fox-dev/agentkit-go/core"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 )
@@ -233,7 +233,7 @@ func (c *Common) Bounds(defaults agentrun.Bounds, singlePhase bool) agentrun.Bou
 }
 
 // Workspace resolves --dir and roots the file tools at it.
-func (c *Common) Workspace() (*tools.Workspace, error) {
+func (c *Common) Workspace() (*workspace.Workspace, error) {
 	abs, err := filepath.Abs(c.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("resolving --dir %q: %w", c.Dir, err)
@@ -245,7 +245,7 @@ func (c *Common) Workspace() (*tools.Workspace, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("--dir %s is not a directory", abs)
 	}
-	ws, err := tools.NewWorkspace(abs)
+	ws, err := workspace.Open(abs, workspace.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("rooting the file tools at %s: %w", abs, err)
 	}

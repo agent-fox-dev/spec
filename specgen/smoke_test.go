@@ -10,7 +10,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/project"
@@ -19,7 +19,7 @@ import (
 
 // smokeRepo is a real git repository holding Go source files with
 // declarations, so the map has something to show.
-func smokeRepo(t *testing.T) *tools.Workspace {
+func smokeRepo(t *testing.T) *workspace.Workspace {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -47,7 +47,7 @@ func smokeRepo(t *testing.T) *tools.Workspace {
 			t.Fatal(err)
 		}
 	}
-	ws, err := tools.NewWorkspace(dir)
+	ws, err := workspace.Open(dir, workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestTS14_38_BudgetZeroDisablesTheMapAndKeepsPromptsIdentical(t *testing.T) 
 	o.RepoMapTokens = 0
 	var builds int
 	var built string
-	o.buildMap = func(ctx context.Context, w *tools.Workspace, b int, in []string) (string, error) {
+	o.buildMap = func(ctx context.Context, w *workspace.Workspace, b int, in []string) (string, error) {
 		builds++
 		m, err := repomap.Build(ctx, w, b, in)
 		built = m
@@ -175,11 +175,11 @@ func TestTS14_38_BudgetZeroDisablesTheMapAndKeepsPromptsIdentical(t *testing.T) 
 	// The PRD phase's system prompt is the mandate and the run context
 	// without a map, and its task is the template filled the way the
 	// pipeline fills it.
-	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root).LanguageBlock(), "", "")
+	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root()).LanguageBlock(), "", "")
 	if got := blocksText(reqs[0].System); !strings.HasPrefix(got, wantSystem) {
 		t.Errorf("the PRD system prompt does not start with the one built without the map:\n got: %q", got)
 	}
-	if got, want := requestUserText(reqs[0]), prdUserPrompt(ws.Root, "", ""); got != want {
+	if got, want := requestUserText(reqs[0]), prdUserPrompt(ws.Root(), "", ""); got != want {
 		t.Errorf("the PRD task differs from the one built without the map:\n got: %q\nwant: %q", got, want)
 	}
 }
@@ -207,7 +207,7 @@ func TestTS14_40_SpecReusesTheMapAcrossAllScopesOfASplit(t *testing.T) {
 	o.Input.Body = "widgets: a model in internal/widget/model.go, and a gadget"
 	var builds, budget int
 	var built string
-	o.buildMap = func(ctx context.Context, w *tools.Workspace, b int, in []string) (string, error) {
+	o.buildMap = func(ctx context.Context, w *workspace.Workspace, b int, in []string) (string, error) {
 		builds++
 		budget = b
 		m, err := repomap.Build(ctx, w, b, in)

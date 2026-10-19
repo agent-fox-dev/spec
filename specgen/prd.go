@@ -11,7 +11,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/schema"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -143,7 +143,7 @@ func (p *prdSink) get() (PRD, bool) {
 // more phases, an empty title fails the frontmatter schema, and a body with
 // no `## Intent` section cannot be activated at all. Each is repairable on
 // the next turn, so each is an error result rather than a Go error.
-func submitPRDTool(sink *prdSink, ws *tools.Workspace) core.Tool {
+func submitPRDTool(sink *prdSink, ws *workspace.Workspace) core.Tool {
 	return core.Tool{
 		Name: ToolSubmitPRD,
 		Description: "Submit the finished PRD and end this phase. Call this once, after you " +
@@ -265,7 +265,7 @@ func checkSplit(specName string, split []SplitScope) error {
 
 // validateRelevantFiles checks that every path in the list is a regular file
 // in the workspace. It returns the paths that are not.
-func validateRelevantFiles(ws *tools.Workspace, files []RelevantFile) []string {
+func validateRelevantFiles(ws *workspace.Workspace, files []RelevantFile) []string {
 	var bad []string
 	for _, rf := range files {
 		abs, err := ws.Resolve(rf.Path)

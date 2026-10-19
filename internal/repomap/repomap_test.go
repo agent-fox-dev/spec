@@ -14,25 +14,26 @@ import (
 	"testing"
 
 	"github.com/agent-fox-dev/agentkit-go/outline"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-// hermetic pins the ignore engine's global layer to empty for the duration of
-// a test, so a developer's own core.excludesFile cannot hide a fixture file.
-func hermetic(t *testing.T) {
+// openWS opens a workspace at dir with the ignore engine's global layer pinned
+// to empty, so a developer's own core.excludesFile cannot hide a fixture file.
+func openWS(t *testing.T, dir string) *workspace.Workspace {
 	t.Helper()
-	old := ignore
-	ignore = tools.NoGlobalExcludes()
-	t.Cleanup(func() { ignore = old })
+	ws, err := workspace.Open(dir, workspace.Options{Ignore: workspace.NoGlobalExcludes()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ws
 }
 
 // newWS writes files (slash path -> content) under a fresh temp directory and
 // returns a workspace rooted there.
-func newWS(t *testing.T, files map[string]string) *tools.Workspace {
+func newWS(t *testing.T, files map[string]string) *workspace.Workspace {
 	t.Helper()
-	hermetic(t)
 	dir := t.TempDir()
 	for rel, content := range files {
 		abs := filepath.Join(dir, filepath.FromSlash(rel))
@@ -43,11 +44,7 @@ func newWS(t *testing.T, files map[string]string) *tools.Workspace {
 			t.Fatal(err)
 		}
 	}
-	ws, err := tools.NewWorkspace(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ws
+	return openWS(t, dir)
 }
 
 // goAt returns a Go source file whose statements sit on the given 1-based
@@ -116,9 +113,9 @@ func TestTS14_2_ZeroBudgetDoesNotWalk(t *testing.T) {
 	ws := newWS(t, map[string]string{"a.go": goAt(nil)})
 	walks := 0
 	old := walkFn
-	walkFn = func(ctx context.Context, w *tools.Workspace, root string, o tools.WalkOptions, fn func(string, fs.DirEntry) error) error {
+	walkFn = func(w *workspace.Workspace, ctx context.Context, sub string, o workspace.WalkOptions, fn func(string, fs.DirEntry) error) error {
 		walks++
-		return old(ctx, w, root, o, fn)
+		return old(w, ctx, sub, o, fn)
 	}
 	t.Cleanup(func() { walkFn = old })
 
@@ -131,7 +128,7 @@ func TestTS14_2_ZeroBudgetDoesNotWalk(t *testing.T) {
 	}
 }
 
-// TS-14-3: ignore rules and the hidden-entry rule of tools.Walk apply.
+// TS-14-3: ignore rules and the hidden-entry rule of Workspace.Walk apply.
 func TestTS14_3_IgnoreAndHidden(t *testing.T) {
 	ws := newWS(t, map[string]string{
 		".gitignore":          "ignored.go\n",
@@ -467,9 +464,8 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata/")
 // fixtureWS copies testdata/fixture into a fresh temp directory and returns a
 // workspace over it. Copying keeps the walk independent of the ignore files of
 // the repository the fixture is committed in.
-func fixtureWS(t *testing.T) *tools.Workspace {
+func fixtureWS(t *testing.T) *workspace.Workspace {
 	t.Helper()
-	hermetic(t)
 	src := filepath.Join("testdata", "fixture")
 	dst := t.TempDir()
 	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
@@ -492,11 +488,7 @@ func fixtureWS(t *testing.T) *tools.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := tools.NewWorkspace(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ws
+	return openWS(t, dst)
 }
 
 // TS-14-35: the map of the fixture workspace at several budgets is

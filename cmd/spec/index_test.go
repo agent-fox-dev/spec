@@ -10,6 +10,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/agentrun/indextest"
@@ -20,7 +21,7 @@ import (
 func withIndex(t *testing.T, idx tools.Index) {
 	t.Helper()
 	old := agentrun.NewIndex
-	agentrun.NewIndex = func(*tools.Workspace) (tools.Index, error) { return idx, nil }
+	agentrun.NewIndex = func(*workspace.Workspace) (tools.Index, error) { return idx, nil }
 	t.Cleanup(func() { agentrun.NewIndex = old })
 }
 

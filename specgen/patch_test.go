@@ -101,7 +101,7 @@ func TestARejectedArtifactIsPatched(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	got, res, err := a.GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepTestSpec, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 	})
 	if err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
@@ -138,7 +138,7 @@ func TestWarningsAreSentBackOnce(t *testing.T) {
 	a := &agentAuthor{runner: runner}
 	if _, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root, PRD: "## Intent\n\nx\n", Partial: &partial,
+		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
 	}); err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
 	}

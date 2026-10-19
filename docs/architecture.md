@@ -98,17 +98,18 @@ cut-down AgentKit, is [ADR 01](adr/01-run-the-spec-command-on-the-agentkit-drive
 ### Package graph
 
 ```
-cmd/spec ──> internal/cli ──> internal/agentrun ──> agentkit-go (driver, tools,
-   │              │                                  catalog, codesearch,
+cmd/spec ──> internal/cli ──> internal/agentrun ──> agentkit-go (driver, workspace,
+   │              │                                  tools, catalog, codesearch,
    │              └──> internal/issuex                provider/anthropic)
    └──> specgen ──> afspec, internal/{agentrun, cli, issuex, project, repomap}
 ```
 
 Nothing under `internal/` imports `specgen`, and `afspec` imports nothing
 from this repository. AgentKit is consumed for the driver (`agentkit.New`),
-the read-only file tools (`tools.All`), outlines (`outline`), the model
-catalog (`catalog.Lookup`), the Anthropic client (`anthropic.Resolve`), the
-schema combinators (`schema`) and the indexed search (`codesearch`).
+the workspace a run is rooted at (`workspace.Open`), the read-only file tools
+built over it (`tools.For`), outlines (`outline`), the model catalog
+(`catalog.Lookup`), the Anthropic client (`anthropic.Resolve`), the schema
+combinators (`schema`) and the indexed search (`codesearch`).
 
 ### A run
 

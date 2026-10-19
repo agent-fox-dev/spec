@@ -157,7 +157,7 @@ func TestASplitIsPipelined(t *testing.T) {
 	if got.SplitPlan != "" {
 		t.Errorf("the plan should be removed: %s", got.SplitPlan)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, ".specs", "widget_core"+SplitPlanSuffix)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Root(), ".specs", "widget_core"+SplitPlanSuffix)); !os.IsNotExist(err) {
 		t.Errorf("the plan is still on disk: %v", err)
 	}
 }
@@ -296,7 +296,7 @@ func TestAFailedPackageDoesNotTakeTheOthersWithIt(t *testing.T) {
 	if statuses["widget_core"] != ScopeDone || statuses["widget_github"] != ScopeFailed {
 		t.Errorf("statuses = %v", statuses)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Root, ".specs", "02_widget_github")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Root(), ".specs", "02_widget_github")); !os.IsNotExist(err) {
 		t.Errorf("the failed package's reservation was not given back: %v", err)
 	}
 }

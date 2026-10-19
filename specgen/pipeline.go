@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -36,7 +37,7 @@ type Options struct {
 	// forge issue thread. Required.
 	Input cli.Input
 	// Workspace roots the read-only source access. Required.
-	Workspace *tools.Workspace
+	Workspace *workspace.Workspace
 	// SpecsDir is where NN_name directories live. Empty means
 	// <workspace>/.specs, or $AF_SPEC_DIR when that is set.
 	SpecsDir string
@@ -90,7 +91,7 @@ type Options struct {
 	author author
 	// buildMap builds the repository map. It is unexported and injected by
 	// tests; nil means repomap.Build.
-	buildMap func(ctx context.Context, ws *tools.Workspace, budget int, inputPaths []string) (string, error)
+	buildMap func(ctx context.Context, ws *workspace.Workspace, budget int, inputPaths []string) (string, error)
 }
 
 // Result is what the tool reports as JSON: the envelope package's SpecResult,
@@ -339,7 +340,7 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	// The plans are looked at exactly as Run looks at them, --dry-run
 	// included; a dry run resumes none, so its estimate is the fresh one.
 	packages := 1
-	plan, err := findSplitPlan(resolveSpecsDir(o, o.Workspace.Root), o.Input, o.Run)
+	plan, err := findSplitPlan(resolveSpecsDir(o, o.Workspace.Root()), o.Input, o.Run)
 	if err != nil {
 		return nil, fail("preflight", "usage", err)
 	}
@@ -411,7 +412,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	// Whether the run has an index is decided once, here, for every phase.
 	// It is the index the Runner's phases read.
 	o.Index = runIndex(o)
-	root := o.Workspace.Root
+	root := o.Workspace.Root()
 	specsDir := resolveSpecsDir(o, root)
 
 	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author}

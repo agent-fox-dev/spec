@@ -12,6 +12,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 )
@@ -21,7 +22,7 @@ import (
 func withoutIndex(t *testing.T) {
 	t.Helper()
 	old := agentrun.NewIndex
-	agentrun.NewIndex = func(*tools.Workspace) (tools.Index, error) { return nil, errors.New("no index in tests") }
+	agentrun.NewIndex = func(*workspace.Workspace) (tools.Index, error) { return nil, errors.New("no index in tests") }
 	t.Cleanup(func() { agentrun.NewIndex = old })
 }
 

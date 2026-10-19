@@ -60,7 +60,7 @@ func TestSubmitPRDRefusesAnIntentHeadingActivationWouldRefuse(t *testing.T) {
 // that can be read are still the landscape every phase is shown.
 func TestAnUnreadableSpecDirDoesNotHideTheOthers(t *testing.T) {
 	ws := newWorkspace(t)
-	specs := filepath.Join(ws.Root, ".specs")
+	specs := filepath.Join(ws.Root(), ".specs")
 	good := filepath.Join(specs, "01_test_feature")
 	if err := os.MkdirAll(good, 0o755); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestTheSpecNumberIsReservedWhileThePhasesRun(t *testing.T) {
 	a := newAuthor(t, "01", "test_feature")
 	reserved := false
 	a.onGenerate = func(req artifactRequest) {
-		dir := filepath.Join(ws.Root, ".specs", req.SpecID+"_"+req.SpecName)
+		dir := filepath.Join(ws.Root(), ".specs", req.SpecID+"_"+req.SpecName)
 		_, err := os.Stat(dir)
 		reserved = reserved || err == nil
 	}
@@ -120,7 +120,7 @@ func TestTheSpecNumberIsReservedWhileThePhasesRun(t *testing.T) {
 	if _, err := Run(context.Background(), newOptions(ws2, b)); err == nil {
 		t.Fatal("want an error")
 	}
-	if entries, _ := os.ReadDir(filepath.Join(ws2.Root, ".specs")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(filepath.Join(ws2.Root(), ".specs")); len(entries) != 0 {
 		t.Errorf("the reservation was left behind: %v", entries)
 	}
 }
@@ -190,7 +190,7 @@ func TestADryRunReportsItsPackagesAsHypothetical(t *testing.T) {
 // another input's plan.
 func TestADryRunStillLooksAtTheSplitPlans(t *testing.T) {
 	ws := newWorkspace(t)
-	specs := filepath.Join(ws.Root, ".specs")
+	specs := filepath.Join(ws.Root(), ".specs")
 	other := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "docs/other.md", Body: "other"},
 		[]SplitScope{{Name: "other_core", Scope: "x"}, {Name: "other_rest", Scope: "y"}})
 	if err := other.save(specs); err != nil {
@@ -228,7 +228,7 @@ func TestADryRunStillLooksAtTheSplitPlans(t *testing.T) {
 // does not write the package a second time.
 func TestAScopeIsRecordedOnceItsPackageIsWritten(t *testing.T) {
 	ws := newWorkspace(t)
-	specs := filepath.Join(ws.Root, ".specs")
+	specs := filepath.Join(ws.Root(), ".specs")
 	o := fileOptions(ws, splitAuthor(t))
 	issue := issuex.IssueRef{Repo: issuex.Repo{Owner: "acme", Name: "widgets", Host: "github.com"}, Number: 7}
 	o.Input = cli.Input{Kind: cli.KindIssue, Origin: issue.URL(), Issue: &issue, Body: o.Input.Body}

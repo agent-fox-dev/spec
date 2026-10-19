@@ -19,19 +19,17 @@ import (
 	"strings"
 
 	"github.com/agent-fox-dev/agentkit-go/outline"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-// The walk, the outline and the ignore options are package-level seams so the
-// package's own tests can count walks, inject an outline failure
-// and pin the ignore engine's global layer. Production code never changes
+// The walk and the outline are package-level seams so the package's own tests
+// can count walks and inject an outline failure. Production code never changes
 // them.
 var (
-	walkFn    = tools.Walk
+	walkFn    = (*workspace.Workspace).Walk
 	outlineFn = outline.Outline
-	ignore    = tools.IgnoreOptions{}
 )
 
 // rootDir is the directory name of the workspace root in the map.
@@ -56,7 +54,7 @@ type file struct {
 // among directories of the same depth. A budget of 0 (or less) returns ""
 // without walking the workspace, as does a workspace with no
 // files.
-func Build(ctx context.Context, ws *tools.Workspace, budget int, inputPaths []string) (string, error) {
+func Build(ctx context.Context, ws *workspace.Workspace, budget int, inputPaths []string) (string, error) {
 	if budget <= 0 {
 		return "", nil
 	}
@@ -84,12 +82,13 @@ func Build(ctx context.Context, ws *tools.Workspace, budget int, inputPaths []st
 	return reduce(newModel(files, normalizeInputs(ws, inputPaths)), budget), nil
 }
 
-// walkFiles returns the slash-separated paths of every regular file tools.Walk
-// yields, sorted. Delegating to tools.Walk gives the map the ignore rules,
-// hidden-entry rule and workspace confinement of search_files.
-func walkFiles(ctx context.Context, ws *tools.Workspace) ([]string, error) {
+// walkFiles returns the slash-separated paths of every regular file the
+// workspace's walk yields, sorted. Delegating to Workspace.Walk gives the map
+// the ignore rules, hidden-entry rule and workspace confinement of
+// search_files.
+func walkFiles(ctx context.Context, ws *workspace.Workspace) ([]string, error) {
 	var paths []string
-	err := walkFn(ctx, ws, ws.Root, tools.WalkOptions{Ignore: ignore}, func(rel string, d fs.DirEntry) error {
+	err := walkFn(ws, ctx, ".", workspace.WalkOptions{}, func(rel string, d fs.DirEntry) error {
 		// Walk visits directories too; only regular files are tracked
 		// content (a symlink is not followed by the tools either).
 		if d.IsDir() || !d.Type().IsRegular() {
@@ -99,7 +98,7 @@ func walkFiles(ctx context.Context, ws *tools.Workspace) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("repomap: walk %s: %w", ws.Root, err)
+		return nil, fmt.Errorf("repomap: walk %s: %w", ws.Root(), err)
 	}
 	sort.Strings(paths)
 	return paths, nil
@@ -107,15 +106,15 @@ func walkFiles(ctx context.Context, ws *tools.Workspace) ([]string, error) {
 
 // describe outlines one file. An outline failure leaves the file listed
 // without declarations; only a cancelled context fails the build.
-func describe(ctx context.Context, ws *tools.Workspace, rel string) (*file, error) {
+func describe(ctx context.Context, ws *workspace.Workspace, rel string) (*file, error) {
 	dir := path.Dir(rel)
 	if dir == "." {
 		dir = rootDir
 	}
 	f := &file{path: rel, dir: dir, name: path.Base(rel), test: isTestFile(rel)}
 
-	out, err := outlineFn(ctx, filepath.Join(ws.Root, filepath.FromSlash(rel)), nil,
-		outline.Options{Root: ws.Root})
+	out, err := outlineFn(ctx, filepath.Join(ws.Root(), filepath.FromSlash(rel)), nil,
+		outline.Options{Root: ws.Root()})
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return nil, cerr
@@ -207,7 +206,7 @@ func isTestFile(rel string) bool {
 
 // normalizeInputs turns the tool's input paths into clean slash paths
 // relative to the workspace root, dropping empty and outside entries.
-func normalizeInputs(ws *tools.Workspace, in []string) []string {
+func normalizeInputs(ws *workspace.Workspace, in []string) []string {
 	var out []string
 	for _, p := range in {
 		p = strings.TrimSpace(p)
@@ -215,7 +214,7 @@ func normalizeInputs(ws *tools.Workspace, in []string) []string {
 			continue
 		}
 		if filepath.IsAbs(p) {
-			rel, err := filepath.Rel(ws.Root, p)
+			rel, err := filepath.Rel(ws.Root(), p)
 			if err != nil {
 				continue
 			}

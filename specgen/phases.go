@@ -9,7 +9,7 @@ import (
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/schema"
-	"github.com/agent-fox-dev/agentkit-go/tools"
+	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
@@ -109,7 +109,7 @@ type architectureRequest struct {
 // agentAuthor runs the phases against the configured model.
 type agentAuthor struct {
 	runner *agentrun.Runner
-	ws     *tools.Workspace
+	ws     *workspace.Workspace
 	// codeSearch grants the code_search tool to every phase this author runs.
 	// Run sets it once, from Options.Index.
 	codeSearch bool
