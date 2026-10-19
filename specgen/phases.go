@@ -31,6 +31,8 @@ const ToolSubmitArchitecture = "submit_architecture"
 // efforts, and a phase can be run at either whatever its tier says
 // (--effort, --phase-model). A truncated artifact is a validation failure
 // rather than a shorter answer, so no phase gets less.
+//
+// It is the default: --max-tokens replaces it for every phase of a run.
 const maxTokens = 65536
 
 // author is the model-driven half of this package: the four steps where

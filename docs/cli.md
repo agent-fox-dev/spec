@@ -173,6 +173,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--effort` | `$AF_MODEL_EFFORT`, else each phase's tier effort | `off`, `low`, `medium`, `high`, `xhigh`, `max`, for every phase. An effort a phase's model does not take is lowered to the highest it does, with an `effort_clamped` warning naming the phases |
 | `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `requirements`, `test_spec`, `tasks` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
 | `--max-turns` | 60 | per-phase turn ceiling, also the repair budget |
+| `--max-tokens` | 65536 | the output token cap of one model response in every phase. The model's thinking is spent from the same cap as its reply, so a phase on a high effort can use it up before it calls its submit tool; that fails as `no_result`, and this is the flag to raise. The model's own output ceiling still applies, so a larger value than it allows is lowered to it. Not `specr --max-tokens`, which is a render budget |
 | `--budget` | 5.00 | per-phase spend ceiling, in dollars |
 | `--phase-timeout` | none | wall-clock ceiling on one phase |
 | `--total-budget` | none | ceiling on the whole run. Checked before each scope's PRD phase after the first (a split that stops there keeps its plan); an input that does not split has no interior boundary, so there it lowers the one phase's ceiling like `--budget` |
@@ -215,8 +216,8 @@ spec ./idea.md --phase-model prd=ADVANCED      # STANDARD, with the PRD on ADVAN
 | `--show-text` | off | stream the model's prose to stderr |
 | `--version` | | print the build identity and exit |
 
-A negative `--budget`, `--total-budget`, `--max-turns`, `--phase-timeout` or
-`--repo-map-tokens` is a usage error.
+A negative `--budget`, `--total-budget`, `--max-turns`, `--max-tokens`,
+`--phase-timeout` or `--repo-map-tokens` is a usage error.
 
 ## Preflight (`--preflight`)
 
@@ -352,7 +353,7 @@ written, such as `invalid_spec`, still names the package on disk.
 | `budget`, `max_turns` | a phase stopped at its ceiling | no |
 | `aborted` | cancelled (Ctrl-C) or past `--phase-timeout` | yes |
 | `refusal` | the model declined the request | no |
-| `no_result` | a phase ended without an accepted submission; the message says why and what to change: a ceiling to raise, or, when a response hit the output token limit while the model was still thinking, the effort to lower | no |
+| `no_result` | a phase ended without an accepted submission; the message says why and what to change: a ceiling to raise, or, when a response hit the output token limit while the model was still thinking, `--max-tokens` to raise or the effort to lower | no |
 | `disk` | the filesystem refused a write | no |
 | `invalid_spec` | the package was written and does not validate | no |
 | `internal` | a bug in spec | no |

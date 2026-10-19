@@ -81,12 +81,50 @@ func TestTotalBudgetLowersTheOnePhasesCeiling(t *testing.T) {
 	}
 }
 
+// --max-tokens is the cap on one response of every phase, and it has to reach
+// the request a phase sends, not just the parsed flags. A phase that asks for
+// its own cap gets the flag's instead; with no flag it keeps its own.
+func TestMaxTokensReachesTheRequestsOfTheRun(t *testing.T) {
+	withoutIndex(t)
+	for _, tc := range []struct {
+		name string
+		argv []string
+		want int
+	}{
+		{"no flag keeps the phase's own cap", nil, 65536},
+		{"the flag replaces it", []string{"--max-tokens", "12345"}, 12345},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := faux.New()
+			t.Cleanup(SetProvider(p))
+			app, _ := newApp(t, func(ctx context.Context, d Deps) (int, any, *ErrorInfo) {
+				_, _ = d.Runner.Run(ctx, agentrun.Phase{
+					Name: "answer", User: "Go.", Terminator: "submit", MaxTokens: 65536,
+				})
+				return ExitOK, nil, nil
+			})
+			argv := append([]string{"--dir", t.TempDir()}, tc.argv...)
+			if _, code, _ := runApp(t, app, append(argv, "x"), ""); code != ExitOK {
+				t.Fatalf("code = %d", code)
+			}
+			reqs := p.Requests()
+			if len(reqs) == 0 {
+				t.Fatal("no request was sent")
+			}
+			if n := reqs[0].MaxTokens; n == nil || *n != tc.want {
+				t.Errorf("max_tokens = %v, want %d", n, tc.want)
+			}
+		})
+	}
+}
+
 func TestUsageErrorsAreRefusedBeforeAnythingRuns(t *testing.T) {
 	for _, argv := range [][]string{
 		{"--detail", "brief", "x"},
 		{"--budget", "-1", "x"},
 		{"--total-budget", "-1", "x"},
 		{"--max-turns", "-1", "x"},
+		{"--max-tokens", "-1", "x"},
 		{"--input-kind", "url", "x"},
 		{"--effort", "huge", "x"},
 		{"--no-such-flag", "x"},
@@ -101,6 +139,16 @@ func TestUsageErrorsAreRefusedBeforeAnythingRuns(t *testing.T) {
 		if code != ExitUsage || env.Status != "usage" || env.OK || env.Error == nil || env.Error.Category != "usage" {
 			t.Errorf("%v: code=%d env=%+v", argv, code, env)
 		}
+	}
+}
+
+// The table above cannot tell a negative value from a flag that does not exist:
+// both are usage errors. This one can.
+func TestANegativeMaxTokensIsRefusedByName(t *testing.T) {
+	app, _ := newApp(t, nil)
+	env, code, _ := runApp(t, app, []string{"--max-tokens", "-1", "x"}, "")
+	if code != ExitUsage || env.Error == nil || !strings.Contains(env.Error.Message, "--max-tokens cannot be negative") {
+		t.Errorf("code=%d error=%+v", code, env.Error)
 	}
 }
 

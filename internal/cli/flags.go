@@ -38,6 +38,7 @@ type Common struct {
 	Model          string
 	Effort         string
 	MaxTurns       int
+	MaxTokens      int
 	Budget         float64
 	Timeout        time.Duration
 	TotalBudgetUSD float64
@@ -131,6 +132,7 @@ func (c *Common) Register(fs *flag.FlagSet) {
 	fs.Var(&effortFlag{val: &c.Effort}, "effort", "reasoning effort: "+strings.Join(agentrun.EffortValues(), ", ")+"; default $"+EffortEnv+", else the tier's own effort")
 	fs.Var(&phaseModelFlag{val: &c.PhaseModels}, "phase-model", "PHASE=MODEL[:EFFORT]: run one phase ("+strings.Join(agentrun.Phases, ", ")+") on another model (a tier or a catalog id) and effort; repeatable")
 	fs.IntVar(&c.MaxTurns, "max-turns", 0, "per-phase turn ceiling, also the repair budget")
+	fs.IntVar(&c.MaxTokens, "max-tokens", 0, "output token cap of one model response in every phase, thinking included; 0 keeps each phase's own; the model's own output ceiling still applies")
 	fs.Float64Var(&c.Budget, "budget", 0, "per-phase spend ceiling, in dollars")
 	fs.DurationVar(&c.Timeout, "phase-timeout", 0, "wall-clock ceiling on one phase")
 	fs.Float64Var(&c.TotalBudgetUSD, "total-budget", 0, "spend ceiling for the whole run across every phase, in dollars; 0 means only the per-phase --budget")
@@ -182,6 +184,9 @@ func (c *Common) Validate() error {
 	if c.MaxTurns < 0 {
 		errs = append(errs, errors.New("--max-turns cannot be negative"))
 	}
+	if c.MaxTokens < 0 {
+		errs = append(errs, errors.New("--max-tokens cannot be negative"))
+	}
 	if c.Timeout < 0 {
 		errs = append(errs, errors.New("--phase-timeout cannot be negative"))
 	}
@@ -219,6 +224,9 @@ func (c *Common) Bounds(defaults agentrun.Bounds, singlePhase bool) agentrun.Bou
 	b := defaults
 	if c.MaxTurns > 0 {
 		b.MaxTurns = c.MaxTurns
+	}
+	if c.MaxTokens > 0 {
+		b.MaxTokens = c.MaxTokens
 	}
 	if c.Budget > 0 {
 		b.MaxBudgetUSD = c.Budget
