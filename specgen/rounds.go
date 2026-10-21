@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
@@ -56,6 +57,7 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 			findings = []Finding{}
 		}
 		rounds = append(rounds, ReviewRound{Round: round, Findings: findings})
+		o.Progress.Step(agentrun.PhasePRDReview, "%sthe review raised %s", prefixed(label), bySeverity(findings))
 		if len(findings) == 0 {
 			stop = envelope.ReviewStopNoFindings
 			break
@@ -78,6 +80,7 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 			break
 		}
 		answer(findings, dispositions)
+		o.Progress.Step(agentrun.PhasePRDRevision, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
 		prd = revised
 		earlier = append(earlier, findings...)
 
@@ -162,6 +165,41 @@ func answer(findings []Finding, dispositions []Disposition) {
 			}
 		}
 	}
+}
+
+// bySeverity is a review's findings counted by severity, most serious
+// first: "1 critical, 2 minor", or "no findings".
+func bySeverity(findings []Finding) string {
+	if len(findings) == 0 {
+		return "no findings"
+	}
+	var parts []string
+	for _, sev := range severities {
+		n := 0
+		for _, f := range findings {
+			if f.Severity == sev {
+				n++
+			}
+		}
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, sev))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// byDisposition is a revision's answers counted: "2 accepted, 1 rejected".
+func byDisposition(findings []Finding) string {
+	accepted, rejected := 0, 0
+	for _, f := range findings {
+		switch f.Disposition {
+		case envelope.DispositionAccepted:
+			accepted++
+		case envelope.DispositionRejected:
+			rejected++
+		}
+	}
+	return fmt.Sprintf("%d accepted, %d rejected", accepted, rejected)
 }
 
 // serious reports whether any finding is critical or major.

@@ -172,7 +172,43 @@ func (r Result) Summary() string {
 		}
 	}
 
+	if clause := reviewClause(append([]Package{r.Package}, r.FollowOnSpecs...)); clause != "" {
+		parts = append(parts, clause)
+	}
+
 	return strings.Join(parts, "; ")
+}
+
+// reviewClause counts the reviews of every package of the run, or is empty
+// when none was reviewed.
+func reviewClause(pkgs []Package) string {
+	reviewed := false
+	var rounds, findings, accepted int
+	for _, p := range pkgs {
+		if p.Review == nil {
+			continue
+		}
+		reviewed = true
+		rounds += p.Review.RoundsRun
+		findings += p.Review.FindingsCount
+		accepted += p.Review.AcceptedCount
+	}
+	if !reviewed {
+		return ""
+	}
+	clause := fmt.Sprintf("review: %s, %s", countOf(rounds, "round"), countOf(findings, "finding"))
+	if findings > 0 {
+		clause += fmt.Sprintf(", %d accepted", accepted)
+	}
+	return clause
+}
+
+// countOf is n and noun, plural unless n is 1.
+func countOf(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // Resumable implements cli.Resumabler. For specgen, this is true whenever

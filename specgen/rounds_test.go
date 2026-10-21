@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/agent-fox-dev/agentkit-go/core"
+
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 )
@@ -34,6 +36,9 @@ type revisionOutcome struct {
 	// place of appending a line to its body.
 	edit func(PRD) PRD
 }
+
+// fakeModel is the model a scripted review phase reports it ran on.
+var fakeModel = agentrun.Model{Spec: "fake", Row: core.Model{ID: "fake-model"}, Effort: core.EffortHigh}
 
 // scriptedReviewer stands in for the review phases, one outcome per call,
 // and records every request it was sent.
@@ -62,7 +67,7 @@ func (s *scriptedReviewer) Review(_ context.Context, req reviewRequest) ([]Findi
 		s.t.Fatalf("review %d was not scripted", i+1)
 	}
 	out := s.reviews[i]
-	res := agentrun.Result{Name: agentrun.PhasePRDReview, Turns: 2}
+	res := agentrun.Result{Name: agentrun.PhasePRDReview, Turns: 2, Model: fakeModel}
 	res.Usage.CostUSD = out.cost
 	if out.err != nil {
 		return nil, res, out.err
@@ -87,7 +92,7 @@ func (s *scriptedReviewer) Revise(_ context.Context, req revisionRequest) (PRD, 
 		s.t.Fatalf("revision %d was not scripted", i+1)
 	}
 	out := s.revisions[i]
-	res := agentrun.Result{Name: agentrun.PhasePRDRevision, Turns: 3}
+	res := agentrun.Result{Name: agentrun.PhasePRDRevision, Turns: 3, Model: fakeModel}
 	res.Usage.CostUSD = out.cost
 	if out.err != nil {
 		return PRD{}, nil, res, out.err

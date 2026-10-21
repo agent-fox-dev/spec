@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -310,5 +311,99 @@ func TestTS09_39_43_AFailedReviewKeepsThePackageAndAnInterruptDoesNot(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(o.Workspace.Root(), ".specs", "01_test_feature")); !os.IsNotExist(err) {
 		t.Error("an interrupted run reserved a package")
+	}
+}
+
+// TS-09-57 (integration): each review and revision is reported as a phase,
+// labelled with its scope and its round of the limit, and followed by the
+// findings by severity or the answers by disposition.
+//
+// Verifies: 09-REQ-10.1
+func TestTS09_57_TheReviewIsReportedAsPhases(t *testing.T) {
+	var stderr strings.Builder
+	rv := &scriptedReviewer{t: t,
+		reviews:   []reviewOutcome{{}, {severities: []string{"critical", "minor", "minor"}}, {}, {}},
+		revisions: []revisionOutcome{{reject: []int{1}}},
+	}
+	o := fileOptions(newWorkspace(t), splitAuthor(t))
+	o.Adversarial, o.AdversarialRounds, o.reviewer = true, 2, rv
+	o.Progress = cli.NewProgress(&lockedWriter{w: &stderr}, "spec", false, false, false)
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	out := stderr.String()
+	for _, want := range []string{
+		"[spec] scope 2 of 3 (widget_github): reviewing the PRD (round 1 of 2)\n",
+		"[spec] scope 2 of 3 (widget_github): revising the PRD (round 1 of 2)\n",
+		"[spec] scope 2 of 3 (widget_github): reviewing the PRD (round 2 of 2)\n",
+		"[spec] scope 1 of 3 (widget_core): reviewing the PRD (round 1 of 2)\n",
+		"1 critical, 2 minor",
+		"2 accepted, 1 rejected",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stderr has no %q:\n%s", want, out)
+		}
+	}
+	// The footer is every phase's (D-2): turns, tokens and cost.
+	footer := cli.PhaseSummary(agentrun.Result{Name: agentrun.PhasePRDReview, Turns: 2, Model: fakeModel})
+	if !strings.Contains(out, "scope 2 of 3 (widget_github): reviewing the PRD (round 1 of 2) done (") ||
+		!strings.Contains(out, footer) {
+		t.Errorf("stderr has no phase footer %q:\n%s", footer, out)
+	}
+	if strings.Index(out, "1 critical, 2 minor") < strings.Index(out, "scope 2 of 3 (widget_github): reviewing the PRD (round 1 of 2) done") {
+		t.Error("the severity line comes before the review ends")
+	}
+}
+
+// lockedWriter serialises writes, as stderr is shared by the coordinator and
+// the package goroutines.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  *strings.Builder
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// TS-09-58 (integration): each review and revision is recorded in
+// usage.phases under its own name, with its scope, model, effort, turns and
+// cost, and counts toward the run's spend.
+//
+// Verifies: 09-REQ-10.2
+func TestTS09_58_TheReviewIsRecordedInUsage(t *testing.T) {
+	a := newAuthor(t, "01", "test_feature")
+	a.prdCost = 0.5
+	rv := &scriptedReviewer{t: t, reviews: []reviewOutcome{{severities: []string{"minor"}, cost: 0.25}},
+		revisions: []revisionOutcome{{cost: 0.125}}}
+	o := adversarialOptions(t, a, rv, 1)
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	env := o.Run.Envelope(cli.ExitOK, nil, nil)
+	var names []string
+	byName := map[string]cli.PhaseInfo{}
+	for _, p := range env.Usage.Phases {
+		names = append(names, p.Name)
+		byName[p.Name] = p
+	}
+	if want := []string{"prd", "prd_review", "prd_revision", "generate:requirements", "generate:test_spec",
+		"generate:tasks"}; !slices.Equal(names, want) {
+		t.Errorf("usage phases = %v, want %v", names, want)
+	}
+	for name, cost := range map[string]float64{"prd_review": 0.25, "prd_revision": 0.125} {
+		p := byName[name]
+		if p.Scope != "test_feature" || p.Model != "fake-model" || p.Effort != "high" || p.Turns == 0 || p.CostUSD != cost {
+			t.Errorf("%s = %+v", name, p)
+		}
+	}
+	if got := o.Run.CostUSD(); got != 0.875 {
+		t.Errorf("spend = %v", got)
+	}
+	raw, _ := json.Marshal(env.Usage.Phases)
+	if strings.Contains(string(raw), `"round"`) {
+		t.Errorf("a usage entry carries a round: %s", raw)
 	}
 }
