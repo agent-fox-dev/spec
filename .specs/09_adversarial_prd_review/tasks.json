@@ -43,7 +43,7 @@
         "envelope/warn.go",
         "specgen/pipeline.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -84,7 +84,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -122,7 +122,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -164,7 +164,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -215,7 +215,7 @@
         3,
         4
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -251,7 +251,7 @@
         2,
         5
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 7,
@@ -287,7 +287,7 @@
       "depends_on": [
         6
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 8,
@@ -323,7 +323,7 @@
       "depends_on": [
         7
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 9,
@@ -362,7 +362,7 @@
       "depends_on": [
         8
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 10,
@@ -398,7 +398,7 @@
       "depends_on": [
         9
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 11,
@@ -435,7 +435,7 @@
         "`make check` passes",
         "docs/generated/ is regenerated with `make doc`"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

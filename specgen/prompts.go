@@ -89,6 +89,135 @@ func prdUserPrompt(root, landscapeBlock, splitBlock string) string {
 	}), "\n")
 }
 
+// prdReviewSystemPrompt is the review phase's mandate.
+func prdReviewSystemPrompt() string { return template("prd_review_system.md") }
+
+// prdRevisionSystemPrompt is the revision phase's mandate.
+func prdRevisionSystemPrompt() string { return template("prd_revision_system.md") }
+
+// prdReviewUserPrompt is a review phase's task: the input, the PRD as it
+// stands, the author's notes as claims, the existing specs, the split, and
+// the earlier rounds.
+func prdReviewUserPrompt(req reviewRequest) string {
+	return fill(template("prd_review_user.md"), reviewVars(req, true))
+}
+
+// prdRevisionUserPrompt is a revision phase's task: what the review was
+// sent, and the findings to answer.
+func prdRevisionUserPrompt(req revisionRequest) string {
+	vars := reviewVars(req.reviewRequest, false)
+	vars["findings_block"] = findingsBlock(req.Findings)
+	return fill(template("prd_revision_user.md"), vars)
+}
+
+// reviewVars fills what the review and the revision prompts share.
+func reviewVars(req reviewRequest, forReviewer bool) map[string]string {
+	return map[string]string{
+		"root":            req.Root,
+		"round":           fmt.Sprint(req.Round),
+		"limit":           fmt.Sprint(req.Limit),
+		"source_kind":     req.SourceKind,
+		"source_origin":   req.SourceOrigin,
+		"input":           strings.TrimSpace(req.Input),
+		"context_block":   callerContextBlock(req.Context),
+		"prd_block":       prdUnderReviewBlock(req.PRD),
+		"notes_block":     authorClaimsBlock(req.PRD.CodebaseNotes),
+		"landscape_block": landscapeBlock(req.Landscape, req.SpecRoot),
+		"split_block":     splitReviewBlock(req.Split),
+		"earlier_block":   earlierRoundsBlock(req.Earlier, forReviewer),
+	}
+}
+
+// prdUnderReviewBlock is the PRD as it stands: its name and title, its body,
+// and the open questions and relevant files that are part of it.
+func prdUnderReviewBlock(prd PRD) string {
+	var b strings.Builder
+	b.WriteString("\n## The PRD under review\n\n")
+	fmt.Fprintf(&b, "- **Spec name:** `%s`\n- **Title:** %s\n\n", prd.SpecName, prd.Title)
+	b.WriteString("--- BEGIN PRD ---\n" + strings.TrimSpace(prd.Body) + "\n--- END PRD ---\n")
+	if len(prd.OpenQuestions) > 0 {
+		b.WriteString("\n### The decisions its author is least sure of\n\n")
+		for _, q := range prd.OpenQuestions {
+			fmt.Fprintf(&b, "- %s — decided: %s (unsure because: %s)\n", oneLine(q.Question), oneLine(q.Decision), oneLine(q.Why))
+		}
+	}
+	if len(prd.RelevantFiles) > 0 {
+		b.WriteString("\n### The files its author found relevant\n\n")
+		for _, f := range prd.RelevantFiles {
+			fmt.Fprintf(&b, "- `%s` — %s\n", f.Path, oneLine(f.Why))
+		}
+	}
+	return b.String()
+}
+
+// authorClaimsBlock carries the PRD author's codebase notes into a review or
+// a revision, marked as claims to check: the review exists to catch what the
+// author got wrong, and that includes what it says about the code. It is
+// empty when there are none.
+func authorClaimsBlock(notes string) string {
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
+		return ""
+	}
+	return "\n## What the PRD's author says about the code\n\n" +
+		"The author's notes from reading the code. They are the author's claims to be checked against the " +
+		"code, not facts: read a file before relying on one, and a note the code contradicts is a flaw.\n\n" +
+		"--- BEGIN NOTES ---\n" + notes + "\n--- END NOTES ---\n"
+}
+
+// findingsBlock lists a round's findings for the revision to answer, each by
+// the id its disposition names.
+func findingsBlock(findings []Finding) string {
+	var b strings.Builder
+	b.WriteString("\n## The findings to answer\n\n")
+	fmt.Fprintf(&b, "%d finding(s). Answer each one by its id, exactly once.\n", len(findings))
+	for _, f := range findings {
+		writeFinding(&b, f)
+	}
+	return b.String()
+}
+
+// earlierRoundsBlock lists the findings of the rounds before this one with
+// what became of each. It is empty in round 1. The reviewer is held to the
+// rule on rejected findings; the reviser is told what has been settled.
+func earlierRoundsBlock(earlier []Finding, forReviewer bool) string {
+	if len(earlier) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Earlier rounds of this review\n\n" +
+		"This PRD has been reviewed before. An accepted finding changed the PRD; a rejected one carries the " +
+		"reviser's reason it does not hold.\n")
+	for _, f := range earlier {
+		writeFinding(&b, f)
+	}
+	if forReviewer {
+		b.WriteString("\nA rejected finding may be raised again only with evidence the rejection did not answer, " +
+			"and only by naming its id in `reopens`. Do not raise an accepted finding again unless the PRD still " +
+			"has the flaw; then raise it as a new finding with the evidence that it does.\n")
+	} else {
+		b.WriteString("\nDo not undo what an earlier round accepted unless a finding of this round shows it was wrong.\n")
+	}
+	return b.String()
+}
+
+// writeFinding renders one finding, with its disposition and reason once it
+// has them.
+func writeFinding(b *strings.Builder, f Finding) {
+	fmt.Fprintf(b, "\n**%s** · %s · %s", f.ID, f.Severity, oneLine(f.Section))
+	if f.Disposition != "" {
+		fmt.Fprintf(b, " · %s", f.Disposition)
+	}
+	b.WriteString("\n\n")
+	fmt.Fprintf(b, "- Flaw: %s\n- Evidence: %s\n- Remedy: %s\n", f.Flaw, f.Evidence, f.Remedy)
+	if f.Reopens != "" {
+		fmt.Fprintf(b, "- Reopens: %s\n", f.Reopens)
+	}
+	if f.Reason != "" {
+		fmt.Fprintf(b, "- Reason rejected: %s\n", f.Reason)
+	}
+}
+
 // repoMapBlock places the repository map after the steering block and before
 // whatever an earlier phase concluded. It is empty for an empty
 // map, so a run with --repo-map-tokens 0 sends the prompt it always did

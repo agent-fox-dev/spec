@@ -60,6 +60,14 @@ type Options struct {
 	// per-phase bound.
 	TotalBudgetUSD float64
 
+	// Adversarial reviews every PRD the run writes before its package is
+	// generated: a fresh agent looks for its flaws and another revises it to
+	// answer them, for up to AdversarialRounds rounds.
+	Adversarial bool
+	// AdversarialRounds is the round limit, 1 to 5. The command passes 1
+	// when --adversarial is given without --adversarial-rounds.
+	AdversarialRounds int
+
 	// MaxParallel is how many packages of a split are generated at once. The
 	// PRD phases still run one after another, each seeing the PRDs before it;
 	// a scope's package is generated as soon as its PRD exists, beside the
@@ -89,6 +97,9 @@ type Options struct {
 
 	// author is the model half. It is unexported and injected by tests.
 	author author
+	// reviewer is the model half of the adversarial review. It is
+	// unexported and injected by tests; nil means the phases against Runner.
+	reviewer reviewer
 	// buildMap builds the repository map. It is unexported and injected by
 	// tests; nil means repomap.Build.
 	buildMap func(ctx context.Context, ws *workspace.Workspace, budget int, inputPaths []string) (string, error)
@@ -161,7 +172,43 @@ func (r Result) Summary() string {
 		}
 	}
 
+	if clause := reviewClause(append([]Package{r.Package}, r.FollowOnSpecs...)); clause != "" {
+		parts = append(parts, clause)
+	}
+
 	return strings.Join(parts, "; ")
+}
+
+// reviewClause counts the reviews of every package of the run, or is empty
+// when none was reviewed.
+func reviewClause(pkgs []Package) string {
+	reviewed := false
+	var rounds, findings, accepted int
+	for _, p := range pkgs {
+		if p.Review == nil {
+			continue
+		}
+		reviewed = true
+		rounds += p.Review.RoundsRun
+		findings += p.Review.FindingsCount
+		accepted += p.Review.AcceptedCount
+	}
+	if !reviewed {
+		return ""
+	}
+	clause := fmt.Sprintf("review: %s, %s", countOf(rounds, "round"), countOf(findings, "finding"))
+	if findings > 0 {
+		clause += fmt.Sprintf(", %d accepted", accepted)
+	}
+	return clause
+}
+
+// countOf is n and noun, plural unless n is 1.
+func countOf(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // Resumable implements cli.Resumabler. For specgen, this is true whenever
@@ -185,6 +232,12 @@ type (
 	ValidationItem = envelope.ValidationItem
 	// TraceReport is the derived coverage summary.
 	TraceReport = envelope.TraceReport
+	// Review is the adversarial review of one package's PRD.
+	Review = envelope.Review
+	// ReviewRound is one review and the revision that answered it.
+	ReviewRound = envelope.ReviewRound
+	// Finding is one flaw a reviewer reported and what became of it.
+	Finding = envelope.ReviewFinding
 )
 
 // Scope states, as reported in Result.Split.
@@ -292,7 +345,7 @@ func Preflight(ctx context.Context, o Options) (*Result, *Failure) {
 	if o.Workspace == nil {
 		return nil, failf("preflight", agentrun.CategoryInternal, "no workspace configured")
 	}
-	if o.Runner == nil && o.author == nil {
+	if o.Runner == nil && (o.author == nil || (o.Adversarial && o.reviewer == nil)) {
 		return nil, failf("preflight", agentrun.CategoryInternal, "no runner configured")
 	}
 	for _, step := range afspec.GenerationSteps {
@@ -359,7 +412,7 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	}
 	add("code_search_index", true, indexDetail(o.Index, o.IndexUnavailable))
 	if o.Runner != nil {
-		add("phase_models", true, phaseModels(o.Runner, o.Architecture))
+		add("phase_models", true, phaseModels(o.Runner, o.Architecture, o.Adversarial))
 	}
 	result.Preflight = list
 
@@ -370,6 +423,11 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	phases := 1 + len(afspec.GenerationSteps)
 	if o.Architecture {
 		phases++
+	}
+	// A review stops early once nothing serious is found, so every allowed
+	// round is counted: the figure is an upper bound for the review phases.
+	if o.Adversarial {
+		phases += 2 * o.AdversarialRounds
 	}
 	phases *= packages
 	est := &cli.Estimate{Phases: phases}
@@ -415,9 +473,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	root := o.Workspace.Root()
 	specsDir := resolveSpecsDir(o, root)
 
-	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author}
-	if env.author == nil {
-		env.author = &agentAuthor{runner: o.Runner, ws: o.Workspace, codeSearch: o.Index != nil}
+	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author, reviewer: o.reviewer}
+	if env.author == nil || (env.reviewer == nil && o.Adversarial) {
+		phases := &agentAuthor{runner: o.Runner, ws: o.Workspace, codeSearch: o.Index != nil}
+		if env.author == nil {
+			env.author = phases
+		}
+		if env.reviewer == nil {
+			env.reviewer = phases
+		}
 	}
 	landscape, err := discoverLandscape(specsDir)
 	if err != nil {
@@ -503,11 +567,21 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	// ---------------------------------------------------- one package --
 	if plan == nil {
+		// The review comes before the number is reserved: a run interrupted
+		// while the PRD is reviewed leaves no reservation behind.
+		var review *Review
+		if o.Adversarial {
+			prd, rv, err := env.runRounds(ctx, *first, "", nil)
+			if err != nil {
+				return result, err
+			}
+			first, review = &prd, rv
+		}
 		slot, err := env.reservePackage(*first, "")
 		if err != nil {
 			return result, err
 		}
-		pkg, err := env.buildPackage(ctx, *first, "", slot, nil)
+		pkg, err := env.buildPackage(ctx, *first, "", slot, nil, review)
 		if pkg != nil {
 			result.Package = *pkg
 		}
@@ -541,6 +615,7 @@ type runEnv struct {
 	root     string
 	specsDir string
 	author   author
+	reviewer reviewer
 	profile  project.Profile
 	// repoMap is the run's repository map, or "" when it is disabled or could
 	// not be built.
@@ -693,13 +768,15 @@ func unwritten(pkg *Package) *Package {
 // write, the validation and the activation. label names the scope in progress
 // messages and errors; it is empty for an undivided input. onWritten, when
 // set, is told the package's id and directory the moment it is on disk.
+// review is how prd was reviewed, nil without --adversarial; it is reported
+// on the package, written or not, and never written into it.
 //
 // The package is returned alongside any error, so a caller can report what
 // exists — an invalid package in particular is on disk and worth naming. One
 // that failed before it was written has no SpecDir (see unwritten). Packages of a split are built concurrently, so
 // everything this shares with them goes through e.mu.
 func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slot,
-	onWritten func(specID, dirName string)) (*Package, error) {
+	onWritten func(specID, dirName string), review *Review) (*Package, error) {
 
 	o := e.o
 	wrap := func(err error) error { return scopedIf(label, err) }
@@ -722,6 +799,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		Source:        sourceField(o.Input),
 		OpenQuestions: prd.OpenQuestions,
 		RelevantFiles: prd.RelevantFiles,
+		Review:        review,
 	}
 
 	// ------------------------------------------------------- generation --
@@ -1149,10 +1227,13 @@ func recordPhase(run *cli.Run, res agentrun.Result, scope string) {
 // phaseModels is the detail of the informational phase_models preflight
 // check: the model and effort each phase the run will start runs on, in the
 // order a package is built.
-func phaseModels(r *agentrun.Runner, architecture bool) string {
+func phaseModels(r *agentrun.Runner, architecture, adversarial bool) string {
 	var parts []string
 	for _, phase := range agentrun.Phases {
 		if phase == agentrun.PhaseArchitecture && !architecture {
+			continue
+		}
+		if (phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision) && !adversarial {
 			continue
 		}
 		parts = append(parts, phase+" "+r.ModelFor(phase).String())

@@ -93,6 +93,12 @@ const ToolSubmitArchitecture = "submit_architecture"
 const ToolSubmitPRD = "submit_prd"
     ToolSubmitPRD is the terminating tool of the PRD phase.
 
+const ToolSubmitPRDReview = "submit_prd_review"
+    ToolSubmitPRDReview is the terminating tool of the review phase.
+
+const ToolSubmitPRDRevision = "submit_prd_revision"
+    ToolSubmitPRDRevision is the terminating tool of the revision phase.
+
 
 FUNCTIONS
 
@@ -148,6 +154,15 @@ func ValidSpecName(s string) bool
 
 TYPES
 
+type Disposition struct {
+	ID string `json:"id"`
+	// Disposition is accepted or rejected.
+	Disposition string `json:"disposition"`
+	// Reason says why a rejected finding does not hold; empty when accepted.
+	Reason string `json:"reason"`
+}
+    Disposition is the reviser's answer to one finding.
+
 type Failure struct {
 	Stage    string
 	Category string
@@ -168,6 +183,9 @@ func (f *Failure) TotalBudgetUSD() float64
     TotalBudgetUSD is the run-level ceiling behind a stage "budget" failure.
 
 func (f *Failure) Unwrap() error
+
+type Finding = envelope.ReviewFinding
+    Finding is one flaw a reviewer reported and what became of it.
 
 type OpenQuestion = envelope.OpenQuestion
     OpenQuestion is one decision made under uncertainty. It is defined in
@@ -200,6 +218,14 @@ type Options struct {
 	// bound by the one phase's ceiling alone. Zero means no cap beyond the
 	// per-phase bound.
 	TotalBudgetUSD float64
+
+	// Adversarial reviews every PRD the run writes before its package is
+	// generated: a fresh agent looks for its flaws and another revises it to
+	// answer them, for up to AdversarialRounds rounds.
+	Adversarial bool
+	// AdversarialRounds is the round limit, 1 to 5. The command passes 1
+	// when --adversarial is given without --adversarial-rounds.
+	AdversarialRounds int
 
 	// MaxParallel is how many packages of a split are generated at once. The
 	// PRD phases still run one after another, each seeing the PRDs before it;
@@ -368,6 +394,12 @@ func (r Result) Summary() string
 func (r *Result) SummaryView() any
     SummaryView implements cli.Summarizable. It is defined on Result (rather
     than on the embedded Package) because Split lives on Result alone.
+
+type Review = envelope.Review
+    Review is the adversarial review of one package's PRD.
+
+type ReviewRound = envelope.ReviewRound
+    ReviewRound is one review and the revision that answered it.
 
 type ScopeReport = envelope.ScopeReport
     ScopeReport is one scope of a split and where it stands.

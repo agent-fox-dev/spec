@@ -46,6 +46,18 @@ type author interface {
 	WriteArchitecture(context.Context, architectureRequest) (string, agentrun.Result, error)
 }
 
+// reviewer is the model-driven half of the adversarial review: a phase that
+// looks for a PRD's flaws, and one that answers them. It is its own
+// interface, beside author, so the pipeline's existing author fakes need no
+// review methods.
+type reviewer interface {
+	Review(context.Context, reviewRequest) ([]Finding, agentrun.Result, error)
+	Revise(context.Context, revisionRequest) (PRD, []Disposition, agentrun.Result, error)
+}
+
+// agentAuthor runs the review phases too, against the same Runner.
+var _ reviewer = (*agentAuthor)(nil)
+
 type prdRequest struct {
 	Root         string
 	SourceKind   string
@@ -66,6 +78,43 @@ type prdRequest struct {
 	// RepoMap is the repository map built once for the run, or "" when it
 	// is disabled or could not be built.
 	RepoMap string
+}
+
+// reviewRequest is what a review phase is sent: what the PRD phase saw, and
+// the PRD it wrote as it stands now.
+type reviewRequest struct {
+	Root         string
+	SourceKind   string
+	SourceOrigin string
+	Input        string
+	// Context is the caller's rendered --context block, or "".
+	Context   string
+	Profile   project.Profile
+	Landscape []afspec.SpecMeta
+	// SpecRoot is the directory the specs live in, relative to Root.
+	SpecRoot string
+	// Steering is the project's steering.md, or "".
+	Steering string
+	// RepoMap is the run's repository map, or "".
+	RepoMap string
+	// PRD is the PRD under review: the PRD phase's, or the last revision's.
+	PRD PRD
+	// Split is set when the PRD is one scope of a split.
+	Split *splitContext
+	// Round is this round's number, from 1, and Limit the most rounds the
+	// PRD gets.
+	Round, Limit int
+	// Earlier are the findings of the rounds before this one, with their
+	// dispositions and reasons.
+	Earlier []Finding
+}
+
+// revisionRequest is what a revision phase is sent: what the review was
+// sent, and the findings it raised.
+type revisionRequest struct {
+	reviewRequest
+	// Findings are this round's findings, with their ids.
+	Findings []Finding
 }
 
 type artifactRequest struct {
@@ -141,6 +190,56 @@ func (a *agentAuthor) WritePRD(ctx context.Context, req prdRequest) (PRD, agentr
 		return PRD{}, res, agentrun.NoResultError("prd", ToolSubmitPRD, res)
 	}
 	return prd, res, nil
+}
+
+// Review runs one review phase: a fresh conversation that looks for the
+// PRD's flaws and submits them, possibly none.
+func (a *agentAuthor) Review(ctx context.Context, req reviewRequest) ([]Finding, agentrun.Result, error) {
+	var sink reviewSink
+	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePRDReview, prdReviewSystemPrompt(),
+		prdReviewUserPrompt(req), req, ToolSubmitPRDReview, newReviewTool(&sink, req.Round, req.Earlier)))
+	if err != nil {
+		return nil, res, err
+	}
+	findings, ok := sink.get()
+	if !ok {
+		return nil, res, agentrun.NoResultError(agentrun.PhasePRDReview, ToolSubmitPRDReview, res)
+	}
+	return findings, res, nil
+}
+
+// Revise runs one revision phase: another fresh conversation, which answers
+// every finding of the round and submits the revised PRD.
+func (a *agentAuthor) Revise(ctx context.Context, req revisionRequest) (PRD, []Disposition, agentrun.Result, error) {
+	var sink revisionSink
+	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePRDRevision, prdRevisionSystemPrompt(),
+		prdRevisionUserPrompt(req), req.reviewRequest, ToolSubmitPRDRevision,
+		newRevisionTool(&sink, req.PRD, req.Findings, a.ws)))
+	if err != nil {
+		return PRD{}, nil, res, err
+	}
+	prd, dispositions, ok := sink.get()
+	if !ok {
+		return PRD{}, nil, res, agentrun.NoResultError(agentrun.PhasePRDRevision, ToolSubmitPRDRevision, res)
+	}
+	return prd, dispositions, res, nil
+}
+
+// reviewPhase is a review or revision phase: the run context every phase
+// ends its system prompt with, and the read-only tools every phase has.
+func (a *agentAuthor) reviewPhase(kind, system, user string, req reviewRequest, terminator string, tool core.Tool) agentrun.Phase {
+	return agentrun.Phase{
+		Name:               kind,
+		Kind:               kind,
+		System:             system + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
+		User:               user,
+		RepoMap:            req.RepoMap,
+		Terminator:         terminator,
+		Custom:             []core.Tool{tool},
+		BuiltinTools:       agentrun.WithCodeSearch(agentrun.ReadOnlyFileTools, a.codeSearch),
+		MaxTokens:          maxTokens,
+		LoadProjectContext: true,
+	}
 }
 
 func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest) (map[string]any, agentrun.Result, error) {

@@ -425,3 +425,79 @@ func TestEveryGenerationStepIsAPhase(t *testing.T) {
 		}
 	}
 }
+
+// advancedPreflightOptions is preflightOptions on a Runner that resolved the
+// ADVANCED tier, so phase_models names real models.
+func advancedPreflightOptions(t *testing.T) Options {
+	t.Helper()
+	o := preflightOptions(t)
+	plan, err := agentrun.ResolvePlan("ADVANCED", "", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := agentrun.NewRunner(agentrun.Config{Model: plan.Default, PhaseModels: plan.Phases, Provider: faux.New(),
+		Bounds: agentrun.Bounds{MaxTurns: 10, MaxBudgetUSD: 2.0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Runner = r
+	return o
+}
+
+// TS-09-59 (integration): with --adversarial, the estimate adds a review and
+// a revision for every allowed round, and phase_models names both right
+// after prd.
+//
+// Verifies: 09-REQ-10.3
+func TestTS09_59_PreflightCountsTheReviewPhases(t *testing.T) {
+	for _, arch := range []bool{false, true} {
+		o := advancedPreflightOptions(t)
+		o.Adversarial, o.AdversarialRounds, o.Architecture = true, 3, arch
+		r, err := RunPreflight(context.Background(), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 1 + 3 + 2*3
+		if arch {
+			want++
+		}
+		if r.Estimate.Phases != want {
+			t.Errorf("architecture %v: phases = %d, want %d", arch, r.Estimate.Phases, want)
+		}
+		if r.Estimate.MaxTotalUSD != float64(r.Estimate.Phases)*r.Estimate.MaxBudgetPerPhaseUSD {
+			t.Errorf("max_total_usd = %v for %d phases at %v", r.Estimate.MaxTotalUSD, r.Estimate.Phases,
+				r.Estimate.MaxBudgetPerPhaseUSD)
+		}
+		c, _ := findCheck(r.Preflight, "phase_models")
+		prefix := "prd claude-opus-5-5/xhigh; prd_review claude-opus-5-5/xhigh; prd_revision claude-opus-5-5/xhigh; requirements "
+		if !strings.HasPrefix(c.Detail, prefix) {
+			t.Errorf("phase_models = %q, want it to start %q", c.Detail, prefix)
+		}
+	}
+}
+
+// TS-09-60 (integration): without --adversarial the estimate and
+// phase_models are what they were before the feature.
+//
+// Verifies: 09-REQ-10.4
+func TestTS09_60_PreflightWithoutAdversarialIsUnchanged(t *testing.T) {
+	for _, arch := range []bool{false, true} {
+		o := advancedPreflightOptions(t)
+		o.Architecture = arch
+		r, err := RunPreflight(context.Background(), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 4
+		if arch {
+			want = 5
+		}
+		if r.Estimate.Phases != want {
+			t.Errorf("architecture %v: phases = %d, want %d", arch, r.Estimate.Phases, want)
+		}
+		c, _ := findCheck(r.Preflight, "phase_models")
+		if strings.Contains(c.Detail, "prd_review") || strings.Contains(c.Detail, "prd_revision") {
+			t.Errorf("phase_models = %q", c.Detail)
+		}
+	}
+}

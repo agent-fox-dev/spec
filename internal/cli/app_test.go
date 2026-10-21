@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -385,7 +386,47 @@ func TestClampedEffortsAreWarnedOncePerModel(t *testing.T) {
 			clamps = append(clamps, w)
 		}
 	}
-	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, requirements, test_spec, tasks, architecture") {
+	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, prd_review, prd_revision, requirements, test_spec, tasks, architecture") {
 		t.Errorf("clamp warnings = %+v", clamps)
+	}
+}
+
+// TS-09-64 (integration): model.phases, the --phase-model help and the
+// effort_clamped warning list prd_review and prd_revision, on a run that
+// never mentions --adversarial: they describe the resolved plan, not the
+// phases that ran.
+//
+// Verifies: 09-REQ-10.7
+func TestTS09_64_TheReviewPhasesAreListedWithoutAdversarial(t *testing.T) {
+	scripted(t)
+	withoutIndex(t)
+	app, _ := newApp(t, nil)
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
+	if code != ExitOK || env.Model == nil {
+		t.Fatalf("code=%d model=%+v", code, env.Model)
+	}
+	for _, phase := range []string{agentrun.PhasePRDReview, agentrun.PhasePRDRevision} {
+		if _, ok := env.Model.Phases[phase]; !ok {
+			t.Errorf("model.phases has no %s: %+v", phase, env.Model.Phases)
+		}
+	}
+
+	fs := flag.NewFlagSet("tool", flag.ContinueOnError)
+	(&Common{}).Register(fs)
+	help := fs.Lookup("phase-model").Usage
+	if !strings.Contains(help, "prd_review") || !strings.Contains(help, "prd_revision") {
+		t.Errorf("--phase-model help = %q", help)
+	}
+
+	app, _ = newApp(t, nil)
+	env, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "--model", "claude-haiku-4-5", "--effort", "max", "x"}, "")
+	var clamped string
+	for _, w := range env.Warnings {
+		if w.Code == WarnEffortClamped {
+			clamped = w.Message
+		}
+	}
+	if !strings.Contains(clamped, "prd_review") || !strings.Contains(clamped, "prd_revision") {
+		t.Errorf("effort_clamped = %q", clamped)
 	}
 }

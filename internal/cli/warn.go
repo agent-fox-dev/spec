@@ -32,6 +32,7 @@ const (
 	WarnActivationFailed         = envelope.WarnActivationFailed
 	WarnCommentNotPosted         = envelope.WarnCommentNotPosted
 	WarnOutputNotWritten         = envelope.WarnOutputNotWritten
+	WarnPRDReviewIncomplete      = envelope.WarnPRDReviewIncomplete
 	WarnSpecInvalid              = envelope.WarnSpecInvalid
 	WarnSectionAbsent            = envelope.WarnSectionAbsent
 	WarnOverBudget               = envelope.WarnOverBudget
@@ -62,6 +63,7 @@ var warnStages = map[WarnCode]string{
 	WarnActivationFailed:         "activate",
 	WarnCommentNotPosted:         "report",
 	WarnOutputNotWritten:         "emit",
+	WarnPRDReviewIncomplete:      "prd_review",
 	WarnSpecInvalid:              "validate",
 	WarnSectionAbsent:            "render",
 	WarnOverBudget:               "render",

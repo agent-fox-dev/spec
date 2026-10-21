@@ -37,7 +37,10 @@ type summaryResult struct {
 	Validation    summaryValidation `json:"validation"`
 	Traceability  summaryTrace      `json:"traceability"`
 	OpenQuestions []OpenQuestion    `json:"open_questions,omitempty"`
-	Split         []ScopeReport     `json:"split,omitempty"`
+	// Review is the first package's review without its rounds: whether the
+	// review finished and how much it changed, at a glance.
+	Review *Review       `json:"review,omitempty"`
+	Split  []ScopeReport `json:"split,omitempty"`
 	// Stage, Preflight and Estimate are the whole point of a --preflight
 	// run, so the default view keeps them. They are absent on every
 	// ordinary run.
@@ -70,10 +73,21 @@ func (r *Result) SummaryView() any {
 			TestsUnowned:      r.Traceability.TestsUnowned,
 		},
 		OpenQuestions: r.OpenQuestions,
+		Review:        reviewCounts(r.Review),
 		Split:         r.Split,
 		Stage:         r.Stage,
 		Preflight:     r.Preflight,
 		Estimate:      r.Estimate,
 		Detail:        "summary",
 	}
+}
+
+// reviewCounts is a review without its rounds, nil for none.
+func reviewCounts(r *Review) *Review {
+	if r == nil {
+		return nil
+	}
+	cp := *r
+	cp.Rounds = nil
+	return &cp
 }

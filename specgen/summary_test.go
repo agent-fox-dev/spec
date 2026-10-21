@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/agent-fox-dev/spec/envelope"
+	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
 // TS-06-19 (unit): spec's summary view reduces validation and traceability
@@ -126,5 +130,107 @@ func TestSplitReportCarriesEachPackagesState(t *testing.T) {
 	}
 	if got := r.Summary(); !strings.Contains(got, "3 open questions across 2 packages") {
 		t.Errorf("summary = %q", got)
+	}
+}
+
+func reviewOf(rounds, findings, accepted int) *Review {
+	return &Review{RoundsRun: rounds, RoundsAllowed: 5, StopReason: "no_findings", FindingsCount: findings,
+		AcceptedCount: accepted, RejectedCount: findings - accepted,
+		Rounds: []ReviewRound{{Round: 1, Findings: []Finding{}}}}
+}
+
+// TS-09-55 (unit): the summary gains one review clause, totalled over every
+// package, singular at 1, without the accepted count when nothing was found,
+// after the open questions and before the high-warning clause, inside the
+// cap.
+//
+// Verifies: 09-REQ-9.6
+func TestTS09_55_TheSummaryCountsTheReview(t *testing.T) {
+	r := &Result{}
+	r.SpecDir = ".specs/07_widget_cache"
+	r.OpenQuestions = []OpenQuestion{{Question: "a"}, {Question: "b"}}
+	r.Review = reviewOf(2, 9, 7)
+	if got, want := r.Summary(), "spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+
+	one := &Result{}
+	one.SpecDir = ".specs/07_widget_cache"
+	one.Review = reviewOf(1, 1, 1)
+	if got := one.Summary(); !strings.HasSuffix(got, "; review: 1 round, 1 finding, 1 accepted") {
+		t.Errorf("summary = %q", got)
+	}
+
+	none := &Result{}
+	none.SpecDir = ".specs/07_widget_cache"
+	none.Review = reviewOf(1, 0, 0)
+	if got := none.Summary(); !strings.HasSuffix(got, "; review: 1 round, 0 findings") {
+		t.Errorf("summary = %q", got)
+	}
+
+	split := &Result{}
+	split.SpecDir = ".specs/07_widget_cache"
+	split.Review = reviewOf(2, 3, 2)
+	split.FollowOnSpecs = []Package{{SpecDir: ".specs/08_b", Review: reviewOf(1, 2, 1)}, {SpecDir: ".specs/09_c"}}
+	if got := split.Summary(); !strings.HasSuffix(got, "; review: 3 rounds, 5 findings, 3 accepted") {
+		t.Errorf("totalled over the packages: %q", got)
+	}
+
+	plain := &Result{}
+	plain.SpecDir = ".specs/07_widget_cache"
+	if got := plain.Summary(); strings.Contains(got, "review:") {
+		t.Errorf("a run without a review: %q", got)
+	}
+
+	long := &Result{}
+	long.SpecDir = ".specs/07_" + strings.Repeat("very_long_name_", 12)
+	long.Review = reviewOf(2, 9, 7)
+	run := cli.NewRun("spec", "test")
+	run.Warn(cli.WarnPRDReviewIncomplete, "high", "the review stopped")
+	env := run.Envelope(cli.ExitOK, long, nil)
+	if n := utf8.RuneCountInString(env.Summary); n > 200 || !strings.HasSuffix(env.Summary, "; 1 high-severity warning") {
+		t.Errorf("%d runes: %q", n, env.Summary)
+	}
+	short := run.Envelope(cli.ExitOK, r, nil).Summary
+	if !strings.Contains(short, "7 accepted; 1 high-severity warning") {
+		t.Errorf("the review clause is not before the high-warning clause: %q", short)
+	}
+}
+
+// TS-09-56 (unit): the summary view keeps the first package's review without
+// its rounds, and still decodes into envelope.SpecResult.
+//
+// Verifies: 09-REQ-9.7
+func TestTS09_56_TheSummaryViewKeepsTheReviewCounts(t *testing.T) {
+	r := &Result{}
+	r.SpecDir = ".specs/07_widget_cache"
+	r.Review = &Review{RoundsRun: 2, RoundsAllowed: 3, StopReason: "no_findings", FindingsCount: 4,
+		AcceptedCount: 2, RejectedCount: 1, UnansweredCount: 1,
+		Rounds: []ReviewRound{{Round: 1, Findings: []Finding{{ID: "R1-F1"}}}, {Round: 2, Findings: []Finding{}}}}
+	b, err := json.Marshal(r.SummaryView())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	review, ok := m["review"].(map[string]any)
+	if !ok {
+		t.Fatalf("the summary view has no review: %s", b)
+	}
+	for _, k := range []string{"rounds_run", "rounds_allowed", "stop_reason", "findings_count", "accepted_count",
+		"rejected_count", "unanswered_count"} {
+		if _, ok := review[k]; !ok {
+			t.Errorf("the summary view's review has no %s", k)
+		}
+	}
+	if _, ok := review["rounds"]; ok {
+		t.Error("the summary view's review keeps its rounds")
+	}
+	var sr envelope.SpecResult
+	if err := json.Unmarshal(b, &sr); err != nil || sr.Review == nil || sr.Review.FindingsCount != 4 || sr.Review.UnansweredCount != 1 {
+		t.Errorf("decoded %+v (%v)", sr.Review, err)
+	}
+	if len(r.Review.Rounds) != 2 {
+		t.Error("the summary view changed the full result's review")
 	}
 }

@@ -104,6 +104,91 @@ not a failed run.
 The package is then written, read back from disk, validated, and activated
 (`draft → active`, computing the intent hash) if it validates.
 
+### The adversarial review (`--adversarial`)
+
+With `--adversarial`, every PRD the run writes is reviewed before its package
+is generated. That happens after the PRD phase and `--name`, and before the
+package number is reserved. In a split it happens for each scope in turn, after
+the planned name replaces the model's. Without the flag none of it runs: the
+phases, prompts, result, summary, files and usage are those of a run without
+it.
+
+A **round** is one review and, when the review raised anything, one revision:
+
+- **The review** (phase `prd_review`, tool `submit_prd_review`) is a fresh
+  conversation. It is told to find flaws, not to approve. It is sent:
+  - the PRD as it stands: its name, title, body, open questions and relevant
+    files;
+  - the input and `--context`;
+  - the PRD phase's `codebase_notes`, labelled as the author's claims to check
+    against the code;
+  - the steering, the repository map and the existing specs;
+  - in a split, the split, what the earlier scopes deliver, and that another
+    scope's work is not a dropped ask.
+
+  It has the read-only file tools. It submits at most 30 findings, each with a
+  `severity` (`critical`, `major` or `minor`), `section`, `flaw`, `evidence`,
+  `remedy` and `reopens`. The run numbers them `R<round>-F<n>`. A submission is
+  turned back when it has more than 30 findings or a finding with an empty
+  field, or when a finding:
+  - reopens anything in round 1;
+  - reopens an id no earlier round raised;
+  - reopens a rejected finding with the evidence its rejection answered,
+    compared with whitespace collapsed;
+  - repeats a rejected finding's section and flaw without naming it in
+    `reopens`.
+- **The revision** (phase `prd_revision`, tool `submit_prd_revision`) is
+  another fresh conversation, sent the same as the review plus the round's
+  findings by id. It answers every finding `accepted` (and changes the PRD) or
+  `rejected` with a reason, and submits the complete body.
+  - **What it may replace.** Open questions, relevant files and notes are
+    optional: an omitted one keeps the earlier value and an empty list clears
+    it. It has no field for the spec name, the title or the split, so they
+    cannot change.
+  - **What is turned back.** A finding with no answer or two; an id outside
+    the round; a rejection with no reason; accepted findings that left the PRD
+    unchanged; and a body or relevant file the PRD phase's tool would refuse
+    (`missing_intent`, `frontmatter_in_body`, `invalid_relevant_files`).
+
+Another round follows only when the round's review raised a `critical` or
+`major` finding and fewer than `--adversarial-rounds` rounds have run. Each
+round reviews the PRD the last revision left, and every round after the first
+is shown the earlier findings with their dispositions and reasons.
+`result.review.stop_reason` says why the rounds stopped:
+
+- `no_findings`: the last review raised none.
+- `no_serious_findings`: only `minor` ones, which were revised.
+- `rounds_exhausted`: a `critical` or `major` finding in the last allowed
+  round.
+- `incomplete`: a phase that did not finish, or the budget.
+
+**When a round cannot finish.** A review or revision can stop at its budget,
+turns or `--phase-timeout`, on a refusal, or on a model, API or internal error.
+That stops the rounds with a `high` `prd_review_incomplete` warning naming the
+spec, the round, the phase and why. The package is generated from the last
+complete PRD, and a failed revision's findings are `unanswered`. It never fails
+the run or changes its exit code.
+
+**The total budget.** With `--total-budget`, the spend is checked before each
+review and each revision. A run already at the ceiling stops the rounds the
+same way.
+
+**Interrupts.** An interrupt (Ctrl-C, SIGTERM) during a review or revision is
+not such a failure. The run stops as interrupted, at stage `prd_review` or
+`prd_revision` with category `aborted`.
+
+The package is generated from the final PRD: `prd.md`, the `--comment` text,
+`result.open_questions` and `result.relevant_files`, and what every later phase
+is sent. In a split, the next scope's PRD phase is shown the revised PRD and
+notes. The review itself is in the result only, never in the package or the
+comment.
+
+Each review and revision is a phase in the progress lines
+(`scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)`), followed
+by `the review raised 1 critical, 2 minor` or
+`the revision answered: 2 accepted, 1 rejected`. Each one is also a
+`prd_review` or `prd_revision` entry in `usage.phases[]`.
+
 ### The project audit
 
 The project's language is detected from its manifest (`go.mod`, `Cargo.toml`,
@@ -163,6 +248,8 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--no-activate` | off | leave a valid package in `draft` |
 | `--comment` | off | post the finished PRD back to the issue the input came from; needs an issue input and a forge token (`GITHUB_TOKEN`/`GH_TOKEN` or `GITLAB_TOKEN`). An invalid package's PRD is not posted |
 | `--max-parallel` | 3 | how many packages of a split are generated at once, beside the next scope's PRD phase; `1` writes the scopes one after another; less is a usage error |
+| `--adversarial` | off | review every PRD the run writes before its package is generated: a fresh agent looks for its flaws and another revises it to answer them (see [the adversarial review](#the-adversarial-review---adversarial)) |
+| `--adversarial-rounds` | 1 | the most review rounds a PRD gets, 1 to 5; the rounds stop once a review raises nothing `critical` or `major`. A value outside 1 to 5 (an explicit `0` included), or the flag without `--adversarial`, is a usage error; a non-integer is refused by the flag parser |
 
 ### The model and the ceilings
 
@@ -171,12 +258,12 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--dir` | `.` | the repository to work in; the file tools cannot reach outside it |
 | `--model` | `$AF_MODEL`, else `$AGENTKIT_MODEL`, else `STANDARD` | a tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or a model id from AgentKit's catalog (an `anthropic/` prefix is accepted). An id the catalog does not list is refused, since it would have no price and no budget could stop it |
 | `--effort` | `$AF_MODEL_EFFORT`, else each phase's tier effort | `off`, `low`, `medium`, `high`, `xhigh`, `max`, for every phase. An effort a phase's model does not take is lowered to the highest it does, with an `effort_clamped` warning naming the phases |
-| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `requirements`, `test_spec`, `tasks` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
+| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `test_spec`, `tasks` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
 | `--max-turns` | 60 | per-phase turn ceiling, also the repair budget |
 | `--max-tokens` | 65536 | the output token cap of one model response in every phase. The model's thinking is spent from the same cap as its reply, so a phase on a high effort can use it up before it calls its submit tool; that fails as `no_result`, and this is the flag to raise. The model's own output ceiling still applies, so a larger value than it allows is lowered to it. Not `specr --max-tokens`, which is a render budget |
 | `--budget` | 5.00 | per-phase spend ceiling, in dollars |
 | `--phase-timeout` | none | wall-clock ceiling on one phase |
-| `--total-budget` | none | ceiling on the whole run. Checked before each scope's PRD phase after the first (a split that stops there keeps its plan); an input that does not split has no interior boundary, so there it lowers the one phase's ceiling like `--budget` |
+| `--total-budget` | none | ceiling on the whole run. Checked before each scope's PRD phase after the first (a split that stops there keeps its plan), and with `--adversarial` before each review and revision, where it stops the rounds rather than the run; an input that does not split has no other interior boundary, so there it also lowers each phase's ceiling like `--budget` |
 | `--repo-map-tokens` | 6000 | token budget of the repository map (tracked files and their top-level declarations) in every phase's prompt; `0` disables it. A map that cannot be built is a `repo_map_build_failed` warning |
 | `--trust-project` | off | admit the repository's `AGENTS.md` and `CLAUDE.md` into every phase's system prompt. `.specs/steering.md` is always given to the phases |
 | `--context` | none | additional context, repeatable; each value is one paragraph of a labelled block shown beside the input |
@@ -192,6 +279,12 @@ later phases run lower:
 | `SIMPLE` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `low` |
 | `STANDARD` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `medium` |
 | `ADVANCED` | `claude-opus-5-5` `xhigh` | `claude-opus-5-5` `high` | `claude-sonnet-5-5` `high` |
+
+`prd_review` and `prd_revision` run on the `prd` column: judging a PRD takes
+the judgment writing one does. A `--phase-model prd=…` does not move them;
+`--phase-model prd_review=…` does. They are listed in `model.phases`, the
+`--phase-model` help and `effort_clamped` whether or not `--adversarial` is on,
+since those describe the resolved plan.
 
 A model id given to `--model` runs every phase, at `--effort` or none. To run
 everything at one effort, give `--effort`; to change one phase, give
@@ -243,9 +336,13 @@ model and effort each phase will run on, e.g.
 ```
 
 `phases` is the PRD phase plus one per generation step, plus one with
-`--architecture`, for the next package; when a split is being resumed, that
-figure times the scopes still to write. A split a not-yet-written PRD calls
-for is the model's decision, so the figure is a lower bound.
+`--architecture`, plus two per allowed round with `--adversarial`, for the next
+package; when a split is being resumed, that figure times the scopes still to
+write. `spec --preflight --adversarial --adversarial-rounds 3` therefore
+reports 10. A split a not-yet-written PRD calls for is the model's decision, so
+the package count is a lower bound; the review rounds can stop early, so their
+count is an upper bound. With `--adversarial`, `phase_models` lists
+`prd_review` and `prd_revision` right after `prd`.
 
 ## The output
 
@@ -278,7 +375,10 @@ for is the model's decision, so the figure is a lower bound.
 `ok` is the one field a caller has to read: true only when the whole job was
 done, never beside a non-zero `exit_code` or an `error`. `status` is derived
 from the exit code. `summary` is one sentence of at most 200 characters, with a
-clause counting high-severity warnings on a success.
+clause counting high-severity warnings on a success. With `--adversarial` it
+also counts the reviews of every package, after the open questions:
+`spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted`
+(`review: 1 round, 0 findings` when nothing was found).
 
 `usage.input_tokens` is net of the prompt cache; the cache figures are what
 make it agree with `cost_usd`. Each phase in `usage.phases[]` carries the same
@@ -328,8 +428,8 @@ Present exactly when `ok` is false:
            "fix_hint": { "flag": "--budget", "current": 5, "suggest": 10 } }
 ```
 
-`stage` names the step: `usage`, `input`, `preflight`, `prd`, `plan`,
-`requirements`, `test_spec`, `tasks`, `scaffold`, `write`, `validate`,
+`stage` names the step: `usage`, `input`, `preflight`, `prd`, `prd_review`,
+`prd_revision` (an interrupt during the review), `plan`, `requirements`, `test_spec`, `tasks`, `scaffold`, `write`, `validate`,
 `budget`. `resumable` is true while an unfinished split plan exists (never at
 stage `preflight`). `fix_hint` names a mechanical remedy where one is known: the
 flag to raise for a ceiling, the environment variables for a missing
@@ -379,6 +479,12 @@ written, such as `invalid_spec`, still names the package on disk.
 - `open_questions` — the decisions made under uncertainty
 - `relevant_files` — the files the PRD phase pointed the later phases at
 - `comment_url` — the PRD comment, under `--comment`
+- `review` — with `--adversarial`: `rounds_run`, `rounds_allowed`,
+  `stop_reason`, `findings_count`, `accepted_count`, `rejected_count`,
+  `unanswered_count`, and `rounds`, each `{round, findings}`. A finding has
+  `id`, `severity`, `section`, `flaw`, `evidence`, `remedy`, `reopens` (when it
+  has one), `disposition` (`accepted`, `rejected` or `unanswered`) and, when
+  rejected, `reason`. Absent without `--adversarial`
 
 When the input was more than one spec's worth of work: `follow_on_specs` (the
 further packages, each with the same fields), `split` (every scope with its
@@ -388,7 +494,7 @@ run wrote `valid`, `error_count`, `open_questions_count`, `trace_gaps`) and
 
 Under `--detail summary` (the default) `result` keeps `spec_dir`, `spec_id`,
 `spec_name`, `status`, `artifacts`, `validation` without its warnings,
-`traceability`, `open_questions`, `split`, and on a `--preflight` run `stage`,
+`traceability`, `open_questions`, `review` without its `rounds`, `split`, and on a `--preflight` run `stage`,
 `preflight` and `estimate`. `result.detail` says which view was printed.
 
 ### Warning codes
@@ -418,6 +524,7 @@ Under `--detail summary` (the default) `result` keeps `spec_dir`, `spec_id`,
 | `activation_failed` | high | activate |
 | `comment_not_posted` | low | report |
 | `output_not_written` | low | emit |
+| `prd_review_incomplete` | high | prd_review |
 
 ## What changed from agent-fox's `spec`
 
