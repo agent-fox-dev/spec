@@ -84,12 +84,7 @@ func prdSchema() *schema.Schema {
 				"'## Intent' section — the spec cannot be activated without one — plus "+
 				"'## Goals', '## Non-goals', '## Background', '## Requirements' and "+
 				"'## Design Decisions'.")),
-		schema.Opt("open_questions", schema.Array(schema.Object(
-			schema.Prop("question", schema.String("The question the input left open")),
-			schema.Prop("decision", schema.String("The answer you went with, as it appears in the PRD")),
-			schema.Prop("why_unsure", schema.String("Why a reviewer should check this one")),
-		), "Decisions you made where a different answer would change the shape of the work. "+
-			"Omit when the input and the codebase settled everything.")),
+		schema.Opt("open_questions", openQuestionsSchema()),
 		schema.Opt("recommended_split", schema.Array(schema.Object(
 			schema.Prop("name", schema.String("snake_case name for this scope")),
 			schema.Prop("scope", schema.String("What this spec would cover, in one or two sentences")),
@@ -104,6 +99,16 @@ func prdSchema() *schema.Schema {
 				"1500 words. The phases that write the requirements, tests and tasks read this instead "+
 				"of reading the same code again.")),
 	)
+}
+
+// openQuestionsSchema returns the schema for the open_questions array.
+func openQuestionsSchema() *schema.Schema {
+	return schema.Array(schema.Object(
+		schema.Prop("question", schema.String("The question the input left open")),
+		schema.Prop("decision", schema.String("The answer you went with, as it appears in the PRD")),
+		schema.Prop("why_unsure", schema.String("Why a reviewer should check this one")),
+	), "Decisions you made where a different answer would change the shape of the work. "+
+		"Omit when the input and the codebase settled everything.")
 }
 
 // relevantFilesArraySchema returns the schema for the relevant_files array.
@@ -173,27 +178,14 @@ func submitPRDTool(sink *prdSink, ws *workspace.Workspace) core.Tool {
 				return core.ErrResult("empty_title",
 					"title is empty, and the PRD frontmatter schema requires a non-empty one.")
 			}
-			if !HasIntent(prd.Body) {
-				return core.ErrResult("missing_intent",
-					"the body has no '## Intent' section, spelled exactly so on a line of its own. It is "+
-						"required: the spec's intent hash is computed from it, and a spec without one cannot be "+
-						"activated. Add it as the first section, one short paragraph stating what this spec is for.")
-			}
-			if strings.Contains(prd.Body, "---\n") && strings.HasPrefix(strings.TrimSpace(prd.Body), "---") {
-				return core.ErrResult("frontmatter_in_body",
-					"the body starts with YAML frontmatter. Submit the Markdown body only — the "+
-						"frontmatter is written by the tool.")
+			if bad, ok := checkPRDBody(prd.Body); !ok {
+				return bad
 			}
 			if err := checkSplit(prd.SpecName, prd.RecommendedSplit); err != nil {
 				return core.ErrResult("invalid_split", err.Error())
 			}
-
-			if len(prd.RelevantFiles) > 0 && ws != nil {
-				if bad := validateRelevantFiles(ws, prd.RelevantFiles); len(bad) > 0 {
-					return core.ErrResult("invalid_relevant_files",
-						fmt.Sprintf("these paths are not regular files in the workspace: %s",
-							strings.Join(bad, ", ")))
-				}
+			if bad, ok := checkRelevantFiles(ws, prd.RelevantFiles); !ok {
+				return bad
 			}
 
 			sink.set(prd)
@@ -202,6 +194,38 @@ func submitPRDTool(sink *prdSink, ws *workspace.Workspace) core.Tool {
 			return res
 		},
 	}
+}
+
+// checkPRDBody is the PRD tool's rejection of a body that cannot be written
+// as prd.md, and ok when there is none. The revision tool returns the same
+// rejection for the same body.
+func checkPRDBody(body string) (core.ToolResult, bool) {
+	if !HasIntent(body) {
+		return core.ErrResult("missing_intent",
+			"the body has no '## Intent' section, spelled exactly so on a line of its own. It is "+
+				"required: the spec's intent hash is computed from it, and a spec without one cannot be "+
+				"activated. Add it as the first section, one short paragraph stating what this spec is for."), false
+	}
+	if strings.Contains(body, "---\n") && strings.HasPrefix(strings.TrimSpace(body), "---") {
+		return core.ErrResult("frontmatter_in_body",
+			"the body starts with YAML frontmatter. Submit the Markdown body only — the "+
+				"frontmatter is written by the tool."), false
+	}
+	return core.ToolResult{}, true
+}
+
+// checkRelevantFiles is the PRD tool's rejection of relevant files that are
+// not regular files in the workspace, and ok when there is none or no
+// workspace to check them in.
+func checkRelevantFiles(ws *workspace.Workspace, files []RelevantFile) (core.ToolResult, bool) {
+	if len(files) == 0 || ws == nil {
+		return core.ToolResult{}, true
+	}
+	if bad := validateRelevantFiles(ws, files); len(bad) > 0 {
+		return core.ErrResult("invalid_relevant_files",
+			fmt.Sprintf("these paths are not regular files in the workspace: %s", strings.Join(bad, ", "))), false
+	}
+	return core.ToolResult{}, true
 }
 
 // boundNotes trims notes to maxCodebaseNotes, at a line boundary where there
