@@ -20,6 +20,8 @@ type reviewOutcome struct {
 	err        error
 	// cost is what the phase reports spending.
 	cost float64
+	// mark, when set, is written into every finding's flaw and evidence.
+	mark string
 }
 
 // revisionOutcome is what one scripted revision does: fail, or accept every
@@ -28,6 +30,9 @@ type revisionOutcome struct {
 	reject []int
 	err    error
 	cost   float64
+	// edit, when set, makes the revised PRD from the one under revision in
+	// place of appending a line to its body.
+	edit func(PRD) PRD
 }
 
 // scriptedReviewer stands in for the review phases, one outcome per call,
@@ -65,7 +70,7 @@ func (s *scriptedReviewer) Review(_ context.Context, req reviewRequest) ([]Findi
 	findings := make([]Finding, len(out.severities))
 	for n, sev := range out.severities {
 		findings[n] = Finding{ID: fmt.Sprintf("R%d-F%d", req.Round, n+1), Severity: sev,
-			Section: "Goals", Flaw: fmt.Sprintf("flaw %d.%d", req.Round, n+1), Evidence: "e", Remedy: "r"}
+			Section: "Goals", Flaw: fmt.Sprintf("flaw %d.%d%s", req.Round, n+1, out.mark), Evidence: "e" + out.mark, Remedy: "r"}
 	}
 	return findings, res, nil
 }
@@ -99,6 +104,9 @@ func (s *scriptedReviewer) Revise(_ context.Context, req revisionRequest) (PRD, 
 	}
 	revised := req.PRD
 	revised.Body = fmt.Sprintf("%s\nrevised in round %d\n", req.PRD.Body, req.Round)
+	if out.edit != nil {
+		revised = out.edit(req.PRD)
+	}
 	return revised, ds, res, nil
 }
 

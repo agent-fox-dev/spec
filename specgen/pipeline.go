@@ -309,7 +309,7 @@ func Preflight(ctx context.Context, o Options) (*Result, *Failure) {
 	if o.Workspace == nil {
 		return nil, failf("preflight", agentrun.CategoryInternal, "no workspace configured")
 	}
-	if o.Runner == nil && o.author == nil {
+	if o.Runner == nil && (o.author == nil || (o.Adversarial && o.reviewer == nil)) {
 		return nil, failf("preflight", agentrun.CategoryInternal, "no runner configured")
 	}
 	for _, step := range afspec.GenerationSteps {
@@ -437,9 +437,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	root := o.Workspace.Root()
 	specsDir := resolveSpecsDir(o, root)
 
-	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author}
-	if env.author == nil {
-		env.author = &agentAuthor{runner: o.Runner, ws: o.Workspace, codeSearch: o.Index != nil}
+	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author, reviewer: o.reviewer}
+	if env.author == nil || (env.reviewer == nil && o.Adversarial) {
+		phases := &agentAuthor{runner: o.Runner, ws: o.Workspace, codeSearch: o.Index != nil}
+		if env.author == nil {
+			env.author = phases
+		}
+		if env.reviewer == nil {
+			env.reviewer = phases
+		}
 	}
 	landscape, err := discoverLandscape(specsDir)
 	if err != nil {
@@ -525,11 +531,21 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	// ---------------------------------------------------- one package --
 	if plan == nil {
+		// The review comes before the number is reserved: a run interrupted
+		// while the PRD is reviewed leaves no reservation behind.
+		var review *Review
+		if o.Adversarial {
+			prd, rv, err := env.runRounds(ctx, *first, "", nil)
+			if err != nil {
+				return result, err
+			}
+			first, review = &prd, rv
+		}
 		slot, err := env.reservePackage(*first, "")
 		if err != nil {
 			return result, err
 		}
-		pkg, err := env.buildPackage(ctx, *first, "", slot, nil)
+		pkg, err := env.buildPackage(ctx, *first, "", slot, nil, review)
 		if pkg != nil {
 			result.Package = *pkg
 		}
@@ -716,13 +732,15 @@ func unwritten(pkg *Package) *Package {
 // write, the validation and the activation. label names the scope in progress
 // messages and errors; it is empty for an undivided input. onWritten, when
 // set, is told the package's id and directory the moment it is on disk.
+// review is how prd was reviewed, nil without --adversarial; it is reported
+// on the package, written or not, and never written into it.
 //
 // The package is returned alongside any error, so a caller can report what
 // exists — an invalid package in particular is on disk and worth naming. One
 // that failed before it was written has no SpecDir (see unwritten). Packages of a split are built concurrently, so
 // everything this shares with them goes through e.mu.
 func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slot,
-	onWritten func(specID, dirName string)) (*Package, error) {
+	onWritten func(specID, dirName string), review *Review) (*Package, error) {
 
 	o := e.o
 	wrap := func(err error) error { return scopedIf(label, err) }
@@ -745,6 +763,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		Source:        sourceField(o.Input),
 		OpenQuestions: prd.OpenQuestions,
 		RelevantFiles: prd.RelevantFiles,
+		Review:        review,
 	}
 
 	// ------------------------------------------------------- generation --

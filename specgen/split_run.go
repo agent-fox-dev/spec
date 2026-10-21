@@ -133,7 +133,7 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 			// run killed after the write must not leave a package the next
 			// run does not know about and writes a second time.
 			onWritten := func(specID, dirName string) { e.recordScope(plan, i, specID, dirName, false, label) }
-			pkg, err := e.buildPackage(ctx, prd, label, sl, onWritten)
+			pkg, err := e.buildPackage(ctx, prd, label, sl, onWritten, nil)
 			builds[i] = &built{pkg: pkg, err: err}
 			switch {
 			case err == nil:
