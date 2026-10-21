@@ -10,7 +10,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
@@ -77,29 +80,83 @@ type specFlags struct {
 	noActivate   bool
 	comment      bool
 	maxParallel  int
+	adversarial  bool
+	rounds       roundsFlag
+}
+
+// roundsFlag is --adversarial-rounds: an integer that remembers whether it
+// was given, so an explicit 0 is refused rather than read as "not given", and
+// a count with no --adversarial to count for is refused rather than ignored.
+type roundsFlag struct {
+	n   int
+	set bool
+}
+
+func (f *roundsFlag) String() string {
+	if f == nil || !f.set {
+		return ""
+	}
+	return strconv.Itoa(f.n)
+}
+
+func (f *roundsFlag) Set(raw string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("not an integer: %q", raw)
+	}
+	f.n, f.set = n, true
+	return nil
+}
+
+// maxAdversarialRounds is the most review rounds --adversarial-rounds allows.
+const maxAdversarialRounds = 5
+
+// adversarialRounds is the round limit the run uses: the count given, or 1.
+func (f *specFlags) adversarialRounds() int {
+	if f.rounds.set {
+		return f.rounds.n
+	}
+	return 1
+}
+
+// register adds spec's own flags to fs.
+func (f *specFlags) register(fs *flag.FlagSet) {
+	fs.StringVar(&f.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+specgen.DefaultSpecDirName+" or $"+specgen.SpecDirEnv)
+	fs.StringVar(&f.name, "name", "", "override the spec name the model chooses; must match [a-z][a-z0-9]*(_[a-z0-9]+)*")
+	fs.BoolVar(&f.architecture, "architecture", false, "also write the optional architecture.md")
+	fs.BoolVar(&f.noActivate, "no-activate", false, "leave a valid package in draft instead of activating it")
+	fs.BoolVar(&f.comment, "comment", false, "post the finished PRD back to the issue the input came from")
+	fs.IntVar(&f.maxParallel, "max-parallel", specgen.DefaultMaxParallel,
+		"how many packages of a split are generated at once, beside the next scope's PRD; 1 writes the scopes one after another")
+	fs.BoolVar(&f.adversarial, "adversarial", false,
+		"have a fresh agent look for flaws in every PRD, and another revise it to answer them, before the package is generated")
+	fs.Var(&f.rounds, "adversarial-rounds",
+		"the most review rounds a PRD gets with --adversarial, 1 to 5 (default 1); the rounds stop once a review finds nothing critical or major")
 }
 
 // specOptions builds the specgen.Options for one run from the parsed flags
 // and what the shell resolved.
 func (f *specFlags) specOptions(d cli.Deps) specgen.Options {
 	return specgen.Options{
-		Index:            d.Index,
-		IndexUnavailable: d.IndexUnavailable,
-		Input:            d.Input,
-		Workspace:        d.Workspace,
-		SpecsDir:         f.specsDir,
-		Name:             f.name,
-		Architecture:     f.architecture,
-		Activate:         !f.noActivate,
-		Comment:          f.comment,
-		MaxParallel:      f.maxParallel,
-		DryRun:           d.Common.DryRun,
-		TotalBudgetUSD:   d.Common.TotalBudgetUSD,
-		RepoMapTokens:    d.Common.RepoMapTokens,
-		Runner:           d.Runner,
-		Forge:            d.Forge,
-		Run:              d.Run,
-		Progress:         d.Progress,
+		Index:             d.Index,
+		IndexUnavailable:  d.IndexUnavailable,
+		Input:             d.Input,
+		Workspace:         d.Workspace,
+		SpecsDir:          f.specsDir,
+		Name:              f.name,
+		Architecture:      f.architecture,
+		Activate:          !f.noActivate,
+		Comment:           f.comment,
+		MaxParallel:       f.maxParallel,
+		Adversarial:       f.adversarial,
+		AdversarialRounds: f.adversarialRounds(),
+		DryRun:            d.Common.DryRun,
+		TotalBudgetUSD:    d.Common.TotalBudgetUSD,
+		RepoMapTokens:     d.Common.RepoMapTokens,
+		Runner:            d.Runner,
+		Forge:             d.Forge,
+		Run:               d.Run,
+		Progress:          d.Progress,
 	}
 }
 
@@ -126,15 +183,7 @@ func newApp() cli.App {
 		Name:    "spec",
 		Version: spec.Identity(),
 		Usage:   usage,
-		Flags: func(fs *flag.FlagSet) {
-			fs.StringVar(&f.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+specgen.DefaultSpecDirName+" or $"+specgen.SpecDirEnv)
-			fs.StringVar(&f.name, "name", "", "override the spec name the model chooses; must match [a-z][a-z0-9]*(_[a-z0-9]+)*")
-			fs.BoolVar(&f.architecture, "architecture", false, "also write the optional architecture.md")
-			fs.BoolVar(&f.noActivate, "no-activate", false, "leave a valid package in draft instead of activating it")
-			fs.BoolVar(&f.comment, "comment", false, "post the finished PRD back to the issue the input came from")
-			fs.IntVar(&f.maxParallel, "max-parallel", specgen.DefaultMaxParallel,
-				"how many packages of a split are generated at once, beside the next scope's PRD; 1 writes the scopes one after another")
-		},
+		Flags:   f.register,
 		// Generating an artifact is one long structured answer plus however
 		// many repairs the rules demand. The turn ceiling is the repair
 		// budget, and 60 is enough for a model that is converging and a stop
@@ -151,6 +200,13 @@ func newApp() cli.App {
 			}
 			if f.name != "" && !specgen.ValidSpecName(f.name) {
 				return cli.Usagef("--name %q must match [a-z][a-z0-9]*(_[a-z0-9]+)*", f.name)
+			}
+			if f.rounds.set && !f.adversarial {
+				return cli.Usagef("--adversarial-rounds %d was given without --adversarial; it sets the rounds of the review "+
+					"--adversarial turns on", f.rounds.n)
+			}
+			if f.rounds.set && (f.rounds.n < 1 || f.rounds.n > maxAdversarialRounds) {
+				return cli.Usagef("--adversarial-rounds must be 1 to %d, got %d", maxAdversarialRounds, f.rounds.n)
 			}
 			return nil
 		},

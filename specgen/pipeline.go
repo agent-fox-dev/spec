@@ -60,6 +60,14 @@ type Options struct {
 	// per-phase bound.
 	TotalBudgetUSD float64
 
+	// Adversarial reviews every PRD the run writes before its package is
+	// generated: a fresh agent looks for its flaws and another revises it to
+	// answer them, for up to AdversarialRounds rounds.
+	Adversarial bool
+	// AdversarialRounds is the round limit, 1 to 5. The command passes 1
+	// when --adversarial is given without --adversarial-rounds.
+	AdversarialRounds int
+
 	// MaxParallel is how many packages of a split are generated at once. The
 	// PRD phases still run one after another, each seeing the PRDs before it;
 	// a scope's package is generated as soon as its PRD exists, beside the
@@ -365,7 +373,7 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	}
 	add("code_search_index", true, indexDetail(o.Index, o.IndexUnavailable))
 	if o.Runner != nil {
-		add("phase_models", true, phaseModels(o.Runner, o.Architecture))
+		add("phase_models", true, phaseModels(o.Runner, o.Architecture, o.Adversarial))
 	}
 	result.Preflight = list
 
@@ -376,6 +384,11 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	phases := 1 + len(afspec.GenerationSteps)
 	if o.Architecture {
 		phases++
+	}
+	// A review stops early once nothing serious is found, so every allowed
+	// round is counted: the figure is an upper bound for the review phases.
+	if o.Adversarial {
+		phases += 2 * o.AdversarialRounds
 	}
 	phases *= packages
 	est := &cli.Estimate{Phases: phases}
@@ -1155,13 +1168,13 @@ func recordPhase(run *cli.Run, res agentrun.Result, scope string) {
 // phaseModels is the detail of the informational phase_models preflight
 // check: the model and effort each phase the run will start runs on, in the
 // order a package is built.
-func phaseModels(r *agentrun.Runner, architecture bool) string {
+func phaseModels(r *agentrun.Runner, architecture, adversarial bool) string {
 	var parts []string
 	for _, phase := range agentrun.Phases {
 		if phase == agentrun.PhaseArchitecture && !architecture {
 			continue
 		}
-		if phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision {
+		if (phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision) && !adversarial {
 			continue
 		}
 		parts = append(parts, phase+" "+r.ModelFor(phase).String())
