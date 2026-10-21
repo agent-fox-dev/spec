@@ -1,0 +1,1298 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "09",
+  "spec_name": "adversarial_prd_review",
+  "schema_version": 2,
+  "tests": [
+    {
+      "id": "TS-09-1",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-1.1"
+      ],
+      "title": "The flags exist, --adversarial is off by default and the round limit is 1 when only --adversarial is given",
+      "given": [
+        "the spec command's flag set"
+      ],
+      "when": "the flags are parsed with no arguments, with `--adversarial`, and with `--adversarial --adversarial-rounds 3`",
+      "then": [
+        "adversarial is false when not given",
+        "adversarial is true and the resulting Options round limit is 1 with `--adversarial` alone",
+        "the round limit is 3 when `--adversarial-rounds 3` is given"
+      ],
+      "pseudocode": "o = specOptions(parse([])); assert !o.Adversarial; o = specOptions(parse(['--adversarial'])); assert o.Adversarial && o.AdversarialRounds == 1; o = specOptions(parse(['--adversarial','--adversarial-rounds','3'])); assert o.AdversarialRounds == 3"
+    },
+    {
+      "id": "TS-09-2",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-1.2"
+      ],
+      "title": "A round count outside 1 to 5, including an explicit 0, is a usage error with or without --preflight",
+      "given": [
+        "a stub provider and a fetch hook that fail the test if called",
+        "an empty specs dir"
+      ],
+      "when": "spec runs with `--adversarial --adversarial-rounds N` for N in 0, 6 and -1, each with and without `--preflight`",
+      "then": [
+        "the exit code is 2",
+        "the envelope error category is `usage`",
+        "no model call and no input fetch happened",
+        "usage.phases is empty and no file was written"
+      ],
+      "pseudocode": "for n in [0,6,-1]: for pf in [false,true]: r = runSpec(args(n, pf)); assert r.exit == 2; assert r.env.error.category == 'usage'; assert fetchCalls == 0 && modelCalls == 0; assert len(r.env.usage.phases) == 0; assert dirEmpty(specsDir)"
+    },
+    {
+      "id": "TS-09-3",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-1.3"
+      ],
+      "title": "--adversarial-rounds without --adversarial is a usage error before anything is fetched",
+      "given": [
+        "a stub provider and a fetch hook that fail the test if called"
+      ],
+      "when": "spec runs with `--adversarial-rounds 2`, with and without `--preflight`",
+      "then": [
+        "the exit code is 2",
+        "the error category is `usage`",
+        "no model was called, nothing was fetched, no phase recorded and no file written"
+      ],
+      "pseudocode": "for pf in [false,true]: r = runSpec(['--adversarial-rounds','2'] + pf); assert r.exit == 2 && r.env.error.category == 'usage'; assert modelCalls == 0 && fetchCalls == 0"
+    },
+    {
+      "id": "TS-09-4",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-1.4"
+      ],
+      "title": "A non-integer --adversarial-rounds value is rejected by the flag parser as a usage error",
+      "given": [
+        "a stub provider that fails the test if called"
+      ],
+      "when": "spec runs with `--adversarial --adversarial-rounds abc` and with `--adversarial-rounds 1.5`",
+      "then": [
+        "the exit code is 2",
+        "the error category is `usage`",
+        "no model was called and nothing was fetched"
+      ],
+      "pseudocode": "for v in ['abc','1.5']: r = runSpec(['--adversarial','--adversarial-rounds',v]); assert r.exit == 2; assert r.env.error.category == 'usage'; assert modelCalls == 0"
+    },
+    {
+      "id": "TS-09-5",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-1.5"
+      ],
+      "title": "Without --adversarial the run has the same phases, result, summary, files and usage as before the feature",
+      "given": [
+        "the real specgen pipeline over the valid_spec fixture with a scripted author and a reviewer fake that fails the test if called",
+        "Adversarial is off"
+      ],
+      "when": "an undivided input is run to completion",
+      "then": [
+        "the phases run are exactly prd, requirements, test_spec and tasks",
+        "no package carries a `review` field in the JSON result",
+        "the summary sentence has no `review:` clause",
+        "the package directory holds only the files the format defines",
+        "usage.phases[] names are exactly prd, requirements, test_spec, tasks"
+      ],
+      "pseudocode": "res = Run(ctx, opts{Adversarial:false}); assert phaseNames(res) == ['prd','requirements','test_spec','tasks']; assert reviewerCalls == 0; assert !contains(json(res), '\"review\"'); assert !contains(res.Summary(), 'review:')"
+    },
+    {
+      "id": "TS-09-6",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-1.6"
+      ],
+      "title": "A dry run with --adversarial runs the review phases, writes nothing and reports the same review as a real run",
+      "given": [
+        "the real pipeline with scripted author, reviewer and reviser returning a major finding then no findings",
+        "two runs of the same input: one with --dry-run, one real"
+      ],
+      "when": "both runs complete",
+      "then": [
+        "the dry run invoked prd_review and prd_revision",
+        "the dry run wrote no file",
+        "the dry run's package review equals the real run's package review field by field"
+      ],
+      "pseudocode": "d = Run(opts{DryRun:true, Adversarial:true, Rounds:2}); r = Run(opts{Adversarial:true, Rounds:2}); assert noFiles(dryDir); assert d.Package.Review == r.Package.Review"
+    },
+    {
+      "id": "TS-09-7",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-2.1"
+      ],
+      "title": "The review phase is a fresh conversation sent the PRD, input, context, labelled notes, run context and read-only tools",
+      "given": [
+        "a recording runner that captures the agentrun.Phase of every call",
+        "a PRD with open questions, relevant files and codebase_notes 'NOTE-X', input text and `--context` text"
+      ],
+      "when": "the review phase of round 1 runs",
+      "then": [
+        "the phase Kind is prd_review and its name is `prd_review`",
+        "the prompt contains the spec name, title, body, an open question and a relevant file of the PRD",
+        "the prompt contains the original input and the --context text",
+        "the notes appear labelled as the author's claims to be checked against the code, not as facts",
+        "the system prompt carries the language block, steering, repository map and landscape of existing specs",
+        "the built-in tools are the read-only file tools, plus code_search when the index exists",
+        "the prompt is not a continuation of the PRD phase's conversation"
+      ],
+      "pseudocode": "ph = recorder.last(); assert ph.Kind == 'prd_review'; assert contains(ph.User, prd.Body) && contains(ph.User, 'NOTE-X'); assert contains(ph.User, 'claims') && contains(ph.User, 'not facts'); assert ph.BuiltinTools == WithCodeSearch(ReadOnlyFileTools, cs); assert ph.History == nil"
+    },
+    {
+      "id": "TS-09-8",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-2.2"
+      ],
+      "title": "A review of a split scope is told the split but not given the PRD-writing instructions",
+      "given": [
+        "a three-scope split plan where scope 2 is under review and scope 1 has a draft PRD and notes"
+      ],
+      "when": "the review phase for scope 2 starts",
+      "then": [
+        "the prompt lists every scope's name and one-line scope",
+        "the prompt says which scope this PRD covers",
+        "the prompt carries what scope 1 delivered as the PRD phase was shown it",
+        "the prompt states that work belonging to another scope is not a dropped ask",
+        "the prompt does not contain the PRD-writing instructions of the split block"
+      ],
+      "pseudocode": "p = reviewPrompt(prd2, splitCtx(plan, 1, drafts, notes)); for s in plan: assert contains(p, s.Name) && contains(p, s.Scope); assert contains(p, 'not a dropped ask'); assert !contains(p, writeInstructionsText)"
+    },
+    {
+      "id": "TS-09-9",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-2.3"
+      ],
+      "title": "The review system prompt names every flaw kind and tells the reviewer not to approve",
+      "given": [
+        "the review system prompt"
+      ],
+      "when": "its text is inspected",
+      "then": [
+        "it names behaviours without an error path, goals that cannot be verified, claims the code contradicts, a component that already exists under another name, scope the input did not ask for, dropped asks, ambiguous wording, contradicting sections, Design Decisions whose reason does not hold and leaked internal design",
+        "it tells the reviewer to find flaws and not to approve the PRD"
+      ],
+      "pseudocode": "s = prdReviewSystemPrompt(); for k in flawKindKeywords: assert contains(lower(s), k); assert contains(lower(s), 'not approve') or contains(lower(s), 'do not approve')"
+    },
+    {
+      "id": "TS-09-10",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-2.4"
+      ],
+      "title": "The review tool accepts an empty list and a valid finding with severity enum and all fields",
+      "given": [
+        "a review tool bound to a sink for round 1"
+      ],
+      "when": "it is called with an empty findings list, then with one well-formed finding",
+      "then": [
+        "both are accepted and terminate the phase",
+        "the schema requires severity (enum critical, major, minor), section, flaw, evidence, remedy and reopens in each finding",
+        "the sink holds the submitted findings"
+      ],
+      "pseudocode": "r = tool.Execute(json({findings:[]})); assert r.Terminate && sink.get() == []; r = tool.Execute(json({findings:[f]})); assert r.Terminate; assert schema.item.required == ['severity','section','flaw','evidence','remedy','reopens']"
+    },
+    {
+      "id": "TS-09-11",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-2.5"
+      ],
+      "title": "Accepted findings get ids R<round>-F<n> in submission order",
+      "given": [
+        "a review tool for round 2 with no earlier findings that are reopened"
+      ],
+      "when": "three findings are submitted",
+      "then": [
+        "their ids are R2-F1, R2-F2 and R2-F3 in submitted order"
+      ],
+      "pseudocode": "tool = newReviewTool(round=2, earlier=[]); tool.Execute(three); assert ids(sink.get()) == ['R2-F1','R2-F2','R2-F3']"
+    },
+    {
+      "id": "TS-09-12",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-2.6"
+      ],
+      "title": "A review that ends without an accepted submission is a no-result error naming the review tool",
+      "given": [
+        "a runner fake that finishes the review conversation without calling the submit tool"
+      ],
+      "when": "the reviewer's Review method is called",
+      "then": [
+        "it returns an error from NoResultError for phase `prd_review`",
+        "the error message names the review submit tool"
+      ],
+      "pseudocode": "_, _, err = reviewer.Review(ctx, req); assert err != nil; assert contains(err.Error(), 'prd_review') && contains(err.Error(), ToolSubmitPRDReview)"
+    },
+    {
+      "id": "TS-09-13",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-3.1"
+      ],
+      "title": "A submission of 31 findings is turned back with the count and limit while 30 are accepted",
+      "given": [
+        "a review tool in round 1"
+      ],
+      "when": "31 valid findings are submitted, then 30",
+      "then": [
+        "the first call is an error result naming 31 and 30 and the sink stays empty and the phase is not terminated",
+        "the second call is accepted"
+      ],
+      "pseudocode": "r = tool.Execute(n(31)); assert r.IsError && contains(r.Msg,'31') && contains(r.Msg,'30'); assert !r.Terminate && sink.empty(); r = tool.Execute(n(30)); assert r.Terminate"
+    },
+    {
+      "id": "TS-09-14",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-3.2"
+      ],
+      "title": "A finding with an empty severity, section, flaw, evidence or remedy is turned back naming position and fields",
+      "given": [
+        "a review tool in round 1"
+      ],
+      "when": "a submission has finding 2 with empty evidence and finding 3 with empty severity and remedy",
+      "then": [
+        "an error result is returned that names finding 2 with evidence and finding 3 with severity and remedy",
+        "the error tells the reviewer to support or withdraw the finding",
+        "no finding is recorded"
+      ],
+      "pseudocode": "r = tool.Execute([ok, noEvidence, noSevNoRemedy]); assert r.IsError; assert contains(r.Msg,'2') && contains(r.Msg,'evidence') && contains(r.Msg,'severity') && contains(r.Msg,'remedy'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-15",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-3.3"
+      ],
+      "title": "A round-1 finding with a non-empty reopens is turned back",
+      "given": [
+        "a review tool in round 1"
+      ],
+      "when": "a submission has a finding with reopens 'R1-F1'",
+      "then": [
+        "an error result names the offending finding",
+        "no finding is recorded"
+      ],
+      "pseudocode": "r = tool.Execute([f{reopens:'R1-F1'}]); assert r.IsError && contains(r.Msg,'1'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-16",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-3.4"
+      ],
+      "title": "A later-round reopens naming no earlier finding is turned back with the unknown id",
+      "given": [
+        "a review tool in round 2 with earlier findings R1-F1 and R1-F2"
+      ],
+      "when": "a finding has reopens 'R1-F9'",
+      "then": [
+        "an error result names the offending finding and 'R1-F9'",
+        "no finding is recorded"
+      ],
+      "pseudocode": "r = tool2.Execute([f{reopens:'R1-F9'}]); assert r.IsError && contains(r.Msg,'R1-F9'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-17",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-3.5"
+      ],
+      "title": "Reopening a rejected finding with identical evidence is turned back naming the repeated finding",
+      "given": [
+        "a round-2 review tool whose earlier R1-F1 is rejected with evidence 'a  b\\nc'"
+      ],
+      "when": "a finding has reopens 'R1-F1' and evidence ' a b c '",
+      "then": [
+        "an error result names the offending finding and R1-F1",
+        "no finding is recorded",
+        "with new evidence the same reopening is accepted"
+      ],
+      "pseudocode": "r = tool2.Execute([f{reopens:'R1-F1', evidence:' a b c '}]); assert r.IsError && contains(r.Msg,'R1-F1'); r = tool2.Execute([f{reopens:'R1-F1', evidence:'new'}]); assert r.Terminate"
+    },
+    {
+      "id": "TS-09-18",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-3.6"
+      ],
+      "title": "A later finding with empty reopens and the same section and flaw as a rejected finding is turned back",
+      "given": [
+        "a round-2 review tool whose earlier R1-F1 is rejected with section 'Goals' and flaw 'X is untestable'"
+      ],
+      "when": "a finding has empty reopens, section 'Goals' and flaw 'X is untestable'",
+      "then": [
+        "an error result names the offending finding and R1-F1",
+        "no finding is recorded",
+        "the same text against an earlier accepted finding is not turned back"
+      ],
+      "pseudocode": "r = tool2.Execute([f{reopens:'',section:'Goals',flaw:'X is untestable'}]); assert r.IsError && contains(r.Msg,'R1-F1'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-19",
+      "kind": "property",
+      "verifies": [
+        "09-REQ-3.7"
+      ],
+      "title": "Evidence comparison ignores only whitespace differences",
+      "given": [
+        "the evidence normalisation function used for the repeat check"
+      ],
+      "when": "for any two strings a and b, where b is a with leading and trailing whitespace added and internal whitespace runs replaced by runs of other whitespace characters, and for any pair that differs in a non-whitespace character",
+      "then": [
+        "normalised equality holds for the whitespace-only variants",
+        "normalised equality does not hold when a non-whitespace character differs"
+      ],
+      "pseudocode": "for a in gen_strings(): b = perturbWhitespace(a); assert sameEvidence(a,b); c = mutateNonSpaceChar(a); assert !sameEvidence(a,c)"
+    },
+    {
+      "id": "TS-09-20",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-4.1"
+      ],
+      "title": "The revision is a fresh conversation sent the PRD, id'd findings, input, context, notes and the review's split and run context",
+      "given": [
+        "a recording runner and a round-1 review that returned findings R1-F1 and R1-F2",
+        "a split scope PRD"
+      ],
+      "when": "the revision phase runs",
+      "then": [
+        "the phase Kind is prd_revision with a fresh conversation",
+        "the prompt carries the PRD, R1-F1 and R1-F2 with their fields, the input, the --context and the notes",
+        "the split context, language block, steering, repository map, landscape and read-only tools equal those of the review phase"
+      ],
+      "pseudocode": "rev = recorder.byKind('prd_revision'); rv = recorder.byKind('prd_review'); assert contains(rev.User,'R1-F1') && contains(rev.User,input); assert rev.BuiltinTools == rv.BuiltinTools; assert splitBlockOf(rev) == splitBlockOf(rv); assert rev.History == nil"
+    },
+    {
+      "id": "TS-09-21",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-4.2"
+      ],
+      "title": "The revision system prompt requires a disposition per finding, reasoned rejections and Design Decisions entries",
+      "given": [
+        "the revision system prompt"
+      ],
+      "when": "its text is inspected",
+      "then": [
+        "it tells the reviser to answer every finding as accepted or rejected",
+        "it requires a rejected reason that says why the finding does not hold, not merely disagreement",
+        "it tells the reviser to record what each accepted remedy settled in `## Design Decisions`"
+      ],
+      "pseudocode": "s = prdRevisionSystemPrompt(); assert contains(s,'accepted') && contains(s,'rejected') && contains(s,'## Design Decisions') && contains(s,'does not hold')"
+    },
+    {
+      "id": "TS-09-22",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-4.3"
+      ],
+      "title": "The revision tool schema requires body and dispositions, offers optional replacements and no name, title or split",
+      "given": [
+        "the revision tool's input schema"
+      ],
+      "when": "its properties are listed",
+      "then": [
+        "body and dispositions are required",
+        "open_questions, relevant_files and codebase_notes are optional",
+        "there is no spec_name, title or recommended_split property"
+      ],
+      "pseudocode": "s = revisionSchema(); assert required(s) == ['body','dispositions']; assert optional(s) == ['open_questions','relevant_files','codebase_notes']; assert !has(s,'spec_name') && !has(s,'title') && !has(s,'recommended_split')"
+    },
+    {
+      "id": "TS-09-23",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-4.4"
+      ],
+      "title": "An accepted revision keeps the spec name, title and recommended split of the PRD it revises",
+      "given": [
+        "a PRD with spec name 'widget_cache', title 'Widget cache' and a recommended split of two scopes"
+      ],
+      "when": "the revision tool accepts a submission with a new body",
+      "then": [
+        "the revised PRD has the new body",
+        "its spec name, title and recommended split equal the originals"
+      ],
+      "pseudocode": "out = sink.get(); assert out.Body == newBody; assert out.SpecName == prd.SpecName && out.Title == prd.Title && out.RecommendedSplit == prd.RecommendedSplit"
+    },
+    {
+      "id": "TS-09-24",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-4.5"
+      ],
+      "title": "Optional revision fields keep when omitted, replace when supplied and clear with an empty list",
+      "given": [
+        "a PRD with two open questions, two relevant files and notes 'OLD'"
+      ],
+      "when": "revisions are submitted that omit all optional fields; supply new ones; supply empty open_questions and relevant_files; and supply empty codebase_notes",
+      "then": [
+        "omitted fields keep the earlier values",
+        "supplied fields replace the earlier values",
+        "empty open_questions and relevant_files lists clear them",
+        "empty codebase_notes keeps 'OLD'"
+      ],
+      "pseudocode": "a = apply(omitAll); assert a.OpenQuestions == prd.OpenQuestions && a.CodebaseNotes == 'OLD'; b = apply({open_questions:[]}); assert len(b.OpenQuestions) == 0; c = apply({codebase_notes:''}); assert c.CodebaseNotes == 'OLD'"
+    },
+    {
+      "id": "TS-09-25",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-4.6"
+      ],
+      "title": "Replacement notes over 12000 bytes are bounded like the PRD phase's notes",
+      "given": [
+        "a revision submission with codebase_notes of 20000 bytes"
+      ],
+      "when": "the revision tool accepts it",
+      "then": [
+        "the revised PRD's notes are at most 12000 bytes",
+        "they equal boundNotes of the submitted notes"
+      ],
+      "pseudocode": "out = sink.get(); assert len(out.CodebaseNotes) <= 12000; assert out.CodebaseNotes == boundNotes(big)"
+    },
+    {
+      "id": "TS-09-26",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-4.7"
+      ],
+      "title": "A revision that ends without an accepted submission is a no-result error naming the revision tool",
+      "given": [
+        "a runner fake that finishes without calling the revision submit tool"
+      ],
+      "when": "the reviser's Revise method is called",
+      "then": [
+        "it returns a NoResultError for phase `prd_revision`",
+        "the message names the revision submit tool"
+      ],
+      "pseudocode": "_, _, err = reviser.Revise(ctx, req); assert contains(err.Error(),'prd_revision') && contains(err.Error(), ToolSubmitPRDRevision)"
+    },
+    {
+      "id": "TS-09-27",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-5.1"
+      ],
+      "title": "Missing, duplicated and unknown disposition ids turn the revision back naming each id",
+      "given": [
+        "a revision tool for findings R1-F1, R1-F2 and R1-F3"
+      ],
+      "when": "a submission answers R1-F1 twice, omits R1-F3 and names R1-F9",
+      "then": [
+        "an error result names R1-F1 as duplicated, R1-F3 as missing and R1-F9 as unknown",
+        "nothing is recorded"
+      ],
+      "pseudocode": "r = tool.Execute(dispositions([F1,F1,F2,F9])); assert r.IsError; assert contains(r.Msg,'R1-F1') && contains(r.Msg,'R1-F3') && contains(r.Msg,'R1-F9'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-28",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-5.2"
+      ],
+      "title": "A rejected disposition with an empty reason is turned back naming the finding id",
+      "given": [
+        "a revision tool for findings R1-F1 and R1-F2"
+      ],
+      "when": "R1-F2 is rejected with an empty (or whitespace-only) reason",
+      "then": [
+        "an error result names R1-F2",
+        "nothing is recorded"
+      ],
+      "pseudocode": "r = tool.Execute([acc(F1), rej(F2,'  ')]); assert r.IsError && contains(r.Msg,'R1-F2'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-29",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-5.3"
+      ],
+      "title": "Accepting a finding while leaving the PRD identical is turned back",
+      "given": [
+        "a revision tool for one finding"
+      ],
+      "when": "the submission accepts it with the same body and no optional fields, and a second submission rejects it with the same body",
+      "then": [
+        "the first submission is an error saying the accepted findings left the PRD unchanged and nothing is recorded",
+        "the all-rejected identical submission is accepted"
+      ],
+      "pseudocode": "r = tool.Execute(accept + sameBody); assert r.IsError && contains(r.Msg,'unchanged'); assert sink.empty(); r = tool.Execute(reject + sameBody); assert r.Terminate"
+    },
+    {
+      "id": "TS-09-30",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-5.4"
+      ],
+      "title": "A revised body without ## Intent or starting with frontmatter gets the PRD phase's rejection code",
+      "given": [
+        "the PRD tool's rejection codes for the same bodies"
+      ],
+      "when": "a revision submits a body with no `## Intent` section, and another body starting with `---` YAML frontmatter",
+      "then": [
+        "each is an error result with the same code the PRD tool gives for the same body",
+        "nothing is recorded"
+      ],
+      "pseudocode": "for body in [noIntent, withFrontmatter]: assert revTool.Execute(body).Code == prdTool.Execute(prdWith(body)).Code"
+    },
+    {
+      "id": "TS-09-31",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-5.5"
+      ],
+      "title": "A relevant file that is not a regular file in the workspace is turned back naming the path",
+      "given": [
+        "a workspace containing file a.go and a directory d/"
+      ],
+      "when": "a revision supplies relevant_files 'missing.go' and 'd'",
+      "then": [
+        "an error result names 'missing.go' and 'd'",
+        "nothing is recorded"
+      ],
+      "pseudocode": "r = tool.Execute(files(['missing.go','d'])); assert r.IsError && contains(r.Msg,'missing.go') && contains(r.Msg,'d'); assert sink.empty()"
+    },
+    {
+      "id": "TS-09-32",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-5.6"
+      ],
+      "title": "A revision that changes the ## Intent text is accepted",
+      "given": [
+        "a revision tool and a PRD whose Intent says 'old intent'"
+      ],
+      "when": "a revision accepts a finding with a body whose `## Intent` says 'new intent' and passes every other check",
+      "then": [
+        "the submission is accepted",
+        "the revised PRD body contains 'new intent'"
+      ],
+      "pseudocode": "r = tool.Execute(acceptWithBody(replaceIntent(prd.Body,'new intent'))); assert r.Terminate; assert contains(sink.get().Body,'new intent')"
+    },
+    {
+      "id": "TS-09-33",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-6.1"
+      ],
+      "title": "A review with no findings ends the rounds unchanged with stop_reason no_findings",
+      "given": [
+        "the real round loop with a scripted reviewer that submits no findings and a reviser that fails the test if called",
+        "round limit 3"
+      ],
+      "when": "the rounds run on a PRD",
+      "then": [
+        "no revision phase ran",
+        "the returned PRD equals the input PRD",
+        "the review has rounds_run 1 and one round with an empty findings list",
+        "stop_reason is `no_findings`"
+      ],
+      "pseudocode": "out, rv = runRounds(prd, limit=3); assert reviserCalls == 0 && out == prd; assert rv.RoundsRun == 1 && len(rv.Rounds[0].Findings) == 0; assert rv.StopReason == 'no_findings'"
+    },
+    {
+      "id": "TS-09-34",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-6.2",
+        "09-REQ-6.3"
+      ],
+      "title": "Findings are revised and a major finding starts another round that reads the revised PRD",
+      "given": [
+        "a scripted reviewer returning a major finding in round 1 and no findings in round 2",
+        "a scripted reviser that changes the body",
+        "round limit 2"
+      ],
+      "when": "the rounds run",
+      "then": [
+        "the revision of round 1 ran on round 1's findings",
+        "the round-2 review was sent the body the revision produced",
+        "rounds_run is 2"
+      ],
+      "pseudocode": "out, rv = runRounds(prd, limit=2); assert reviserCalls == 1; assert reviewerReqs[1].PRD.Body == revisedBody; assert rv.RoundsRun == 2"
+    },
+    {
+      "id": "TS-09-35",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-6.4"
+      ],
+      "title": "A round whose findings are all minor is revised and is the last, with stop_reason no_serious_findings",
+      "given": [
+        "a scripted reviewer returning only minor findings in round 1",
+        "round limit 5"
+      ],
+      "when": "the rounds run",
+      "then": [
+        "the revision ran once",
+        "no second review ran",
+        "stop_reason is `no_serious_findings`"
+      ],
+      "pseudocode": "out, rv = runRounds(prd, limit=5); assert reviserCalls == 1 && reviewerCalls == 1; assert rv.StopReason == 'no_serious_findings'"
+    },
+    {
+      "id": "TS-09-36",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-6.5"
+      ],
+      "title": "A critical finding in the last allowed round ends with rounds_exhausted after its revision",
+      "given": [
+        "a scripted reviewer returning a critical finding every round",
+        "a reviser that finishes each time",
+        "round limit 2"
+      ],
+      "when": "the rounds run",
+      "then": [
+        "exactly 2 reviews and 2 revisions ran",
+        "rounds_run is 2",
+        "stop_reason is `rounds_exhausted`"
+      ],
+      "pseudocode": "out, rv = runRounds(prd, limit=2); assert reviewerCalls == 2 && reviserCalls == 2; assert rv.StopReason == 'rounds_exhausted'"
+    },
+    {
+      "id": "TS-09-37",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-6.6"
+      ],
+      "title": "A later round's reviewer and reviser are both sent every earlier finding with ids, dispositions and reasons",
+      "given": [
+        "round 1 findings R1-F1 (accepted) and R1-F2 (rejected with reason 'REASON-Q')",
+        "round limit 2 and a major finding in round 1"
+      ],
+      "when": "round 2's review and revision start",
+      "then": [
+        "both prompts contain R1-F1, R1-F2, their dispositions and 'REASON-Q'",
+        "the reviewer prompt says a rejected finding may be raised again only with evidence the rejection did not answer and only by naming it in `reopens`",
+        "the round-1 prompts contain no earlier-findings section"
+      ],
+      "pseudocode": "for p in [reviewerReqs[1], reviserReqs[1]]: assert contains(p,'R1-F2') && contains(p,'rejected') && contains(p,'REASON-Q'); assert contains(reviewerReqs[1],'reopens'); assert !contains(reviewerReqs[0],'R1-F')"
+    },
+    {
+      "id": "TS-09-38",
+      "kind": "property",
+      "verifies": [
+        "09-REQ-6.7"
+      ],
+      "title": "For any round limit and outcome sequence the loop runs at most the limit of reviews and ends with exactly one stop reason, incomplete winning",
+      "given": [
+        "a round loop driven by scripted reviewer and reviser outcomes (findings of any severity mix, empty, failure, budget stop)"
+      ],
+      "when": "for any round limit from 1 to 5 and any sequence of review and revision outcomes",
+      "then": [
+        "the number of reviews is at most the round limit",
+        "stop_reason is exactly one of no_findings, no_serious_findings, rounds_exhausted, incomplete",
+        "stop_reason is incomplete whenever any phase failed or the budget stopped the rounds",
+        "otherwise stop_reason follows the last review and its revision"
+      ],
+      "pseudocode": "for limit in 1..5, seq in gen_outcomes(): out, rv = runRounds(prd, limit, seq); assert reviews <= limit; assert rv.StopReason in set; if anyFailure(seq, used) then assert rv.StopReason == 'incomplete'"
+    },
+    {
+      "id": "TS-09-39",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-7.1"
+      ],
+      "title": "A failed review or revision stops the rounds, warns high and leaves the exit code alone",
+      "given": [
+        "the real pipeline and rounds with a reviewer or reviser that fails by turn limit, timeout with a live context, refusal, API error and internal error in turn",
+        "the package otherwise generates"
+      ],
+      "when": "round 1's review fails, and separately round 1's revision fails",
+      "then": [
+        "the rounds stop and stop_reason is `incomplete`",
+        "a `high` warning `prd_review_incomplete` with stage `prd_review` is recorded naming the spec name, round 1, the failed phase and the reason",
+        "the package is generated from the last complete PRD",
+        "status and exit code equal those of a run without the failure"
+      ],
+      "pseudocode": "for fail in [turns,timeout,refusal,api,internal]: res = Run(opts, reviewerFails(fail)); w = warning(res,'prd_review_incomplete'); assert w.Severity=='high' && w.Stage=='prd_review'; assert contains(w.Message, specName) && contains(w.Message,'round 1') && contains(w.Message,'prd_review'); assert res.exit == 0"
+    },
+    {
+      "id": "TS-09-40",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-7.2"
+      ],
+      "title": "Findings of a round whose revision failed are unanswered and the package uses the PRD the review read",
+      "given": [
+        "a reviewer that submits two findings and a reviser that fails"
+      ],
+      "when": "the rounds run",
+      "then": [
+        "both findings have disposition `unanswered` and no reason",
+        "unanswered_count is 2",
+        "the generated PRD is the one the review read"
+      ],
+      "pseudocode": "out, rv = runRounds(prd, limit=2, reviserFails); for f in rv.Rounds[0].Findings: assert f.Disposition=='unanswered' && f.Reason==''; assert rv.UnansweredCount == 2; assert out == prd"
+    },
+    {
+      "id": "TS-09-41",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-7.3"
+      ],
+      "title": "A spent total budget before the first review stops the rounds with rounds_run 0 and a budget warning",
+      "given": [
+        "--total-budget set and the run's recorded spend already at or above it",
+        "a reviewer fake that fails the test if called"
+      ],
+      "when": "the rounds start",
+      "then": [
+        "no review ran",
+        "rounds_run is 0 and stop_reason is `incomplete`",
+        "a prd_review_incomplete warning names the total budget, the spend and the ceiling",
+        "the exit code is unchanged"
+      ],
+      "pseudocode": "run.AddPhase(costly); out, rv = runRounds(prd, totalBudget=run.CostUSD()); assert reviewerCalls==0 && rv.RoundsRun==0 && rv.StopReason=='incomplete'; assert contains(warn.Message,'total budget') && contains(warn.Message, spendStr) && contains(warn.Message, ceilingStr)"
+    },
+    {
+      "id": "TS-09-42",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-7.4"
+      ],
+      "title": "A budget stop between a review and its revision leaves that review's findings unanswered",
+      "given": [
+        "a review whose recorded cost pushes the spend to the total budget",
+        "a reviser fake that fails the test if called"
+      ],
+      "when": "the round loop reaches the check before the revision",
+      "then": [
+        "no revision ran",
+        "each finding of the review has disposition `unanswered`",
+        "unanswered_count equals the finding count"
+      ],
+      "pseudocode": "out, rv = runRounds(prd, totalBudget=reviewCost); assert reviserCalls==0; assert all(f.Disposition=='unanswered' for f in rv.Rounds[0].Findings); assert rv.UnansweredCount == rv.FindingsCount"
+    },
+    {
+      "id": "TS-09-43",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-7.5"
+      ],
+      "title": "An interrupt during a review or revision fails the run as aborted with no warning and no package",
+      "given": [
+        "a reviewer then a reviser fake that cancel the run's context while running"
+      ],
+      "when": "the run is cancelled during the review, and separately during the revision",
+      "then": [
+        "the run returns a Failure with stage `prd_review` or `prd_revision` respectively and category `aborted`",
+        "the exit code is 1",
+        "no prd_review_incomplete warning is recorded",
+        "no package is generated from the interrupted PRD"
+      ],
+      "pseudocode": "for ph in ['prd_review','prd_revision']: err = Run(ctx, opts with cancelDuring(ph)); f = asFailure(err); assert f.Stage==ph && f.Category=='aborted'; assert exitCode(err)==1; assert noWarning('prd_review_incomplete'); assert noPackage()"
+    },
+    {
+      "id": "TS-09-44",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-7.6"
+      ],
+      "title": "The total-budget check before each later split scope's PRD phase still fails the run with stage budget",
+      "given": [
+        "a split of three scopes with --total-budget already reached after scope 1"
+      ],
+      "when": "the coordinator reaches scope 2",
+      "then": [
+        "the run fails with stage `budget` and category budget",
+        "scope 2's PRD phase did not run"
+      ],
+      "pseudocode": "err = Run(opts{TotalBudgetUSD: x}); f = asFailure(err); assert f.Stage=='budget' && f.Category==CategoryBudget; assert prdCalls == 1"
+    },
+    {
+      "id": "TS-09-45",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-8.1"
+      ],
+      "title": "For an undivided input the rounds run after --name is applied and before the package is reserved",
+      "given": [
+        "the real pipeline with an event log across author, reviewer, reviser, reservePackage and generation",
+        "--name 'custom_name' and --adversarial"
+      ],
+      "when": "the run completes",
+      "then": [
+        "the review sees spec name 'custom_name'",
+        "the log order is prd, prd_review, prd_revision, reservePackage, requirements"
+      ],
+      "pseudocode": "assert order(log) == ['prd','prd_review','prd_revision','reserve','requirements']; assert reviewerReqs[0].PRD.SpecName == 'custom_name'"
+    },
+    {
+      "id": "TS-09-46",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-8.2"
+      ],
+      "title": "A split scope's rounds run in the coordinator after the planned name is applied and before its package is reserved",
+      "given": [
+        "a two-scope split whose model-chosen name differs from the planned name"
+      ],
+      "when": "scope 2's PRD phase finishes",
+      "then": [
+        "the review of scope 2 sees the planned name",
+        "scope 2's rounds finish before its reservePackage and before its package goroutine starts"
+      ],
+      "pseudocode": "assert reviewerReqsFor(2).PRD.SpecName == plan[1].Name; assert idx(log,'rounds-done 2') < idx(log,'reserve 2') < idx(log,'build-start 2')"
+    },
+    {
+      "id": "TS-09-47",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-8.3"
+      ],
+      "title": "The first split scope is reviewed after the split plan is recorded with a split context for scope 1",
+      "given": [
+        "a split run where the PRD phase recommends a split"
+      ],
+      "when": "scope 1's rounds run",
+      "then": [
+        "the split plan file exists on disk before scope 1's review starts",
+        "scope 1's review request carries a splitContext with Index 0 and the full plan"
+      ],
+      "pseudocode": "assert planSavedAt < firstReviewAt; assert reviewerReqs[0].Split != nil && reviewerReqs[0].Split.Index == 0 && len(reviewerReqs[0].Split.Plan.Scopes) == n"
+    },
+    {
+      "id": "TS-09-48",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-8.4"
+      ],
+      "title": "The next scope's PRD phase is shown the earlier scope's revised PRD and notes",
+      "given": [
+        "scope 1's revision changed the body to 'REVISED-1' and the notes to 'NOTES-REV'"
+      ],
+      "when": "scope 2's PRD phase starts",
+      "then": [
+        "its splitContext Drafts[0] has body 'REVISED-1'",
+        "its Notes[0] is 'NOTES-REV'",
+        "neither the original body nor the original notes appear"
+      ],
+      "pseudocode": "req = authorReqs[1]; assert req.Split.Drafts[0].Body == 'REVISED-1' && req.Split.Notes[0] == 'NOTES-REV'"
+    },
+    {
+      "id": "TS-09-49",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-8.5"
+      ],
+      "title": "A resumed split reviews only the scopes it writes in this run",
+      "given": [
+        "a split plan on disk with scope 1 already written and scopes 2 and 3 pending"
+      ],
+      "when": "the split is resumed with --adversarial",
+      "then": [
+        "the reviewer ran only for scopes 2 and 3",
+        "scope 1's package on disk is untouched and has no review round"
+      ],
+      "pseudocode": "Run(resumeOpts); assert reviewedScopes == ['scope2','scope3']; assert fileHash(scope1Dir) == before"
+    },
+    {
+      "id": "TS-09-50",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-9.1"
+      ],
+      "title": "The first package and every follow-on package carry a review, including an unwritten one",
+      "given": [
+        "a three-scope split with --adversarial where the third scope's generation fails"
+      ],
+      "when": "the run ends",
+      "then": [
+        "the first package carries a review with rounds_run, rounds_allowed, stop_reason and the four counts",
+        "every follow_on_specs package carries a review, including the unwritten one",
+        "each rounds entry has its round number and its findings"
+      ],
+      "pseudocode": "assert res.Review != nil; for p in res.FollowOnSpecs: assert p.Review != nil; assert res.FollowOnSpecs[1].Written == false && res.FollowOnSpecs[1].Review != nil; assert res.Review.Rounds[0].Round == 1"
+    },
+    {
+      "id": "TS-09-51",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-9.2"
+      ],
+      "title": "A finding serialises with reopens only when non-empty and reason only when rejected",
+      "given": [
+        "findings: accepted without reopens, rejected with reason and reopens, unanswered"
+      ],
+      "when": "each is marshalled to JSON",
+      "then": [
+        "every finding has id, severity, section, flaw, evidence, remedy and disposition",
+        "reopens is present only on the finding that has one",
+        "reason is present only on the rejected finding"
+      ],
+      "pseudocode": "a = json(acc); assert !has(a,'reopens') && !has(a,'reason'); r = json(rej); assert r.reason == 'why' && r.reopens == 'R1-F1'; u = json(unans); assert !has(u,'reason')"
+    },
+    {
+      "id": "TS-09-52",
+      "kind": "property",
+      "verifies": [
+        "09-REQ-9.3"
+      ],
+      "title": "Review totals are consistent with its rounds for any outcome",
+      "given": [
+        "the review record built by the round loop"
+      ],
+      "when": "for any sequence of rounds with any findings and dispositions",
+      "then": [
+        "findings_count equals the number of findings over all rounds",
+        "findings_count equals accepted_count plus rejected_count plus unanswered_count",
+        "rounds_run equals the number of rounds entries"
+      ],
+      "pseudocode": "for rounds in gen_rounds(): rv = buildReview(rounds); assert rv.FindingsCount == sum(len(r.Findings)); assert rv.FindingsCount == rv.Accepted+rv.Rejected+rv.Unanswered; assert rv.RoundsRun == len(rv.Rounds)"
+    },
+    {
+      "id": "TS-09-53",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-9.4"
+      ],
+      "title": "The final PRD feeds prd.md, the comment, open questions, relevant files and every generation phase",
+      "given": [
+        "a revision that changed the body, open questions, relevant files and notes",
+        "--comment enabled with a recording comment client"
+      ],
+      "when": "the run completes",
+      "then": [
+        "prd.md on disk has the revised body",
+        "the posted comment is built from the revised PRD",
+        "result.open_questions and result.relevant_files are the revised ones",
+        "requirements, test_spec, tasks and architecture phases are sent the revised body, relevant files and notes"
+      ],
+      "pseudocode": "assert read(prdmd).contains(revBody); assert comment.contains(revBody); assert res.OpenQuestions == rev.OQ && res.RelevantFiles == rev.RF; for ph in genPhases: assert contains(ph.User, revBody) && contains(ph.User, rev.Notes)"
+    },
+    {
+      "id": "TS-09-54",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-9.5"
+      ],
+      "title": "No review data is written into the package directory or the comment",
+      "given": [
+        "a run with findings whose text contains a unique marker 'FINDING-MARK'"
+      ],
+      "when": "the run completes with --comment",
+      "then": [
+        "the package directory holds only prd.md, requirements.json, test_spec.json, tasks.json (and architecture.md when asked)",
+        "no file contains 'FINDING-MARK'",
+        "the posted comment does not contain it or a review section"
+      ],
+      "pseudocode": "assert sorted(ls(pkg)) == formatFiles; for f in ls(pkg): assert !contains(read(f),'FINDING-MARK'); assert !contains(comment,'FINDING-MARK')"
+    },
+    {
+      "id": "TS-09-55",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-9.6"
+      ],
+      "title": "The summary gains the review clause totalled over all packages with singulars, omissions and the cap",
+      "given": [
+        "results whose packages carry reviews: 2 rounds/9 findings/7 accepted; 1 round/1 finding/1 accepted; 1 round/0 findings; a long-named result near the 200-character cap; a result with a high warning"
+      ],
+      "when": "Summary is computed for each",
+      "then": [
+        "the first gives `spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted`",
+        "the second reads `review: 1 round, 1 finding, 1 accepted`",
+        "the third reads `review: 1 round, 0 findings` without the accepted part",
+        "the clause follows the open-questions clause and precedes the high-warning clause",
+        "the whole sentence stays within 200 characters",
+        "a result with no review has no clause"
+      ],
+      "pseudocode": "assert Summary(r1) == 'spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted'; assert contains(Summary(r2),'review: 1 round, 1 finding, 1 accepted'); assert endsWith(Summary(r3),'review: 1 round, 0 findings'); assert runeLen(envSummary(rLong)) <= 200"
+    },
+    {
+      "id": "TS-09-56",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-9.7"
+      ],
+      "title": "The summary view keeps the first package's review without rounds and still decodes into SpecResult",
+      "given": [
+        "a Result whose first package has a review with two rounds"
+      ],
+      "when": "the --detail summary view is marshalled and decoded into envelope.SpecResult",
+      "then": [
+        "the review keeps rounds_run, rounds_allowed, stop_reason and the four counts",
+        "the review has no rounds field",
+        "the JSON decodes into envelope.SpecResult without error and with the counts intact"
+      ],
+      "pseudocode": "v = res.SummaryView(); b = json(v); assert has(b,'review.stop_reason') && !has(b,'review.rounds'); var sr envelope.SpecResult; assert json.Unmarshal(b,&sr)==nil; assert sr.Review.FindingsCount == n"
+    },
+    {
+      "id": "TS-09-57",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-10.1"
+      ],
+      "title": "Review and revision are reported as phases with scope prefix, round of limit and severity and disposition lines",
+      "given": [
+        "a split run of three scopes with --adversarial-rounds 2 and a progress writer capturing stderr",
+        "scope 2 review raises one critical and two minor findings, its revision accepts two and rejects one"
+      ],
+      "when": "the run completes",
+      "then": [
+        "stderr has a begin line `scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)` and a done line with turns and tokens",
+        "stderr has `revising the PRD (round 1 of 2)` with the scope prefix",
+        "a line after the review gives 1 critical and 2 minor",
+        "a line after the revision gives 2 accepted and 1 rejected",
+        "the footer shows turns and tokens, not cost"
+      ],
+      "pseudocode": "out = stderr(); assert contains(out,'scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)'); assert contains(out,'revising the PRD (round 1 of 2)'); assert regex(out,'1 critical.*2 minor'); assert regex(out,'2 accepted.*1 rejected')"
+    },
+    {
+      "id": "TS-09-58",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-10.2"
+      ],
+      "title": "Each review and revision is recorded in usage.phases and counts toward spend",
+      "given": [
+        "a run with scripted review and revision phases that each report a model, effort, turns and cost"
+      ],
+      "when": "the run completes",
+      "then": [
+        "usage.phases contains entries named `prd_review` and `prd_revision` with scope, model, effort, turns and cost",
+        "Run.CostUSD includes their cost"
+      ],
+      "pseudocode": "p = usagePhases(env); assert has(p,'prd_review') && has(p,'prd_revision'); assert p['prd_review'].Model != '' && p['prd_review'].Turns > 0; assert run.CostUSD() == sum(cost of all phases)"
+    },
+    {
+      "id": "TS-09-59",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-10.3"
+      ],
+      "title": "Preflight with --adversarial adds two phases per allowed round and lists the review phase models after prd",
+      "given": [
+        "a preflight run for a fresh input of one package with rounds 3, with and without --architecture"
+      ],
+      "when": "RunPreflight computes the estimate and the phase_models check",
+      "then": [
+        "estimate.phases is 1 + 3 + 2×3 = 10 (11 with --architecture) times the package count",
+        "max_total_usd equals phases times the per-phase ceiling",
+        "the phase_models detail lists prd_review and prd_revision with model and effort immediately after prd"
+      ],
+      "pseudocode": "r = RunPreflight(opts{Adversarial:true, Rounds:3}); assert r.Estimate.Phases == 10*pkgs; assert r.Estimate.MaxTotalUSD == r.Estimate.Phases*MaxBudgetPerPhaseUSD; d = detail(r,'phase_models'); assert idx(d,'prd_review') == idx(d,'prd')+1 && idx(d,'prd_revision') == idx(d,'prd_review')+1"
+    },
+    {
+      "id": "TS-09-60",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-10.4"
+      ],
+      "title": "Preflight without --adversarial leaves the estimate and phase_models detail as before",
+      "given": [
+        "a preflight run without --adversarial, with and without --architecture"
+      ],
+      "when": "RunPreflight computes the estimate and phase_models",
+      "then": [
+        "estimate.phases is (1+3[+1])×packages",
+        "phase_models detail lists prd, requirements, test_spec, tasks (architecture only with the flag) and neither prd_review nor prd_revision"
+      ],
+      "pseudocode": "r = RunPreflight(opts{}); assert r.Estimate.Phases == 4*pkgs; d = detail(r,'phase_models'); assert !contains(d,'prd_review') && !contains(d,'prd_revision')"
+    },
+    {
+      "id": "TS-09-61",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-10.5"
+      ],
+      "title": "--phase-model accepts the two phases and each tier resolves them to the tier's base entry",
+      "given": [
+        "tiers SIMPLE, STANDARD and ADVANCED with no phase choice naming the new phases"
+      ],
+      "when": "ParsePhaseChoice parses `prd_review=…` and `prd_revision=…`, and ResolvePlan resolves each tier",
+      "then": [
+        "both choices parse without error",
+        "SIMPLE resolves both to claude-sonnet-5-5 medium",
+        "STANDARD resolves both to claude-sonnet-5-5 high",
+        "ADVANCED resolves both to claude-opus-5-5 xhigh"
+      ],
+      "pseudocode": "assert ParsePhaseChoice('prd_review=claude-opus-5-5') ok; for (tier,m,e) in table: p = ResolvePlan(tier); assert p.Phases['prd_review'] == (m,e) && p.Phases['prd_revision'] == (m,e)"
+    },
+    {
+      "id": "TS-09-62",
+      "kind": "unit",
+      "verifies": [
+        "09-REQ-10.6"
+      ],
+      "title": "--model and --effort apply to the review phases while --phase-model prd does not move them",
+      "given": [
+        "a plan resolved with --model X, --effort high, and a separate plan with `--phase-model prd=claude-opus-5-5`"
+      ],
+      "when": "the plans are resolved",
+      "then": [
+        "prd_review and prd_revision use model X and effort high in the first plan",
+        "in the second plan prd moves but prd_review and prd_revision keep the tier's base entry",
+        "`--phase-model prd_review=…` moves only prd_review"
+      ],
+      "pseudocode": "p = ResolvePlan(model:'X', effort:'high'); assert p['prd_review'].Model=='X' && p['prd_revision'].Effort=='high'; q = ResolvePlan(choices:['prd=claude-opus-5-5']); assert q['prd'].Model=='claude-opus-5-5' && q['prd_review'] == tierBase"
+    },
+    {
+      "id": "TS-09-63",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-10.6"
+      ],
+      "title": "Each review and revision is bounded by --budget, --max-turns, --phase-timeout and --max-tokens as a phase of its own",
+      "given": [
+        "the real Runner with a fake model, bounds of a small --max-turns, --budget, --phase-timeout and --max-tokens in turn",
+        "a PRD phase that stayed within the bounds"
+      ],
+      "when": "the review phase exceeds the bound",
+      "then": [
+        "the review stops on its own bound without an accepted submission",
+        "the phase carries the --max-tokens value as its MaxTokens",
+        "the bounds of the PRD phase's spend do not carry over to the review"
+      ],
+      "pseudocode": "for bound in [turns,budget,timeout]: _, res, err = reviewer.Review(ctx, req); assert err != nil && res.StopReason == bound; assert recordedPhase.MaxTokens == maxTokens"
+    },
+    {
+      "id": "TS-09-64",
+      "kind": "integration",
+      "verifies": [
+        "09-REQ-10.7"
+      ],
+      "title": "model.phases, the --phase-model help and effort_clamped list the two phases with and without --adversarial",
+      "given": [
+        "spec runs without --adversarial, one with an effort the model clamps"
+      ],
+      "when": "the envelope and help text are produced",
+      "then": [
+        "model.phases includes prd_review and prd_revision",
+        "the --phase-model usage string names both",
+        "the effort_clamped warning lists both phases when clamping applies"
+      ],
+      "pseudocode": "env = run(args); assert has(env.Model.Phases,'prd_review') && has(env.Model.Phases,'prd_revision'); assert contains(helpText,'prd_review') && contains(helpText,'prd_revision'); assert contains(clampWarning.Message,'prd_review')"
+    },
+    {
+      "id": "TS-09-65",
+      "kind": "smoke",
+      "verifies": [
+        "09-PATH-1"
+      ],
+      "title": "An undivided input is reviewed, revised, re-reviewed clean and generated from the revised PRD",
+      "given": [
+        "the spec command with a scripted provider: PRD phase, round-1 review with a major finding, round-1 revision that changes the body, round-2 review with no findings, then generation phases",
+        "the valid_spec fixture and an empty specs dir"
+      ],
+      "when": "`spec --adversarial --adversarial-rounds 2` runs on a text input",
+      "then": [
+        "exit code 0",
+        "phases ran in order prd, prd_review, prd_revision, prd_review, requirements, test_spec, tasks",
+        "finding ids start at R1-F1",
+        "the written prd.md has the revised body and the package validates",
+        "the package carries a review with rounds_run 2, rounds_allowed 2 and stop_reason `no_findings`",
+        "the summary contains `review: 2 rounds, 1 finding, 1 accepted`"
+      ],
+      "pseudocode": "r = runSpecCmd(['--adversarial','--adversarial-rounds','2', input]); assert r.exit==0; assert phases(r)==[...]; assert read(prdmd)==revisedBody; assert r.pkg.Review.StopReason=='no_findings'; assert contains(r.env.summary,'review: 2 rounds')",
+      "real_components": [
+        "spec command",
+        "internal/cli App",
+        "specgen pipeline",
+        "round loop",
+        "review and revision tools",
+        "afspec validation",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-09-66",
+      "kind": "smoke",
+      "verifies": [
+        "09-PATH-2",
+        "09-REQ-8.2"
+      ],
+      "title": "Each split scope is reviewed in the coordinator before its package starts and every package carries a review",
+      "given": [
+        "a scripted provider whose PRD phase recommends a three-scope split, with reviews and revisions for each scope",
+        "a real specs dir"
+      ],
+      "when": "`spec --adversarial` runs",
+      "then": [
+        "the split plan is recorded before scope 1's review",
+        "scope 2's PRD phase is shown scope 1's revised PRD and notes",
+        "every package is written from its final PRD",
+        "the first package and every follow_on_specs package carry a review",
+        "the summary clause totals rounds, findings and accepted over all packages",
+        "exit code 0"
+      ],
+      "pseudocode": "r = runSpecCmd(['--adversarial', input]); assert planSavedBeforeFirstReview; assert authorReq[1].Drafts[0].Body == revised1; for p in allPackages(r): assert p.Review != nil; assert summaryTotals(r) == sum(p.Review)",
+      "real_components": [
+        "spec command",
+        "internal/cli App",
+        "specgen pipeline",
+        "split coordinator",
+        "split plan persistence",
+        "round loop",
+        "afspec validation",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-09-67",
+      "kind": "smoke",
+      "verifies": [
+        "09-PATH-3",
+        "09-REQ-7.1"
+      ],
+      "title": "A review that stops at its budget leaves a high warning and a package from the PRD phase's PRD",
+      "given": [
+        "the spec command with a per-phase --budget the scripted review phase exceeds before submitting",
+        "scripted PRD and generation phases"
+      ],
+      "when": "`spec --adversarial --budget <small>` runs",
+      "then": [
+        "exit code is 0, as for a run without the failure",
+        "a high prd_review_incomplete warning names the spec name, round 1, prd_review and the budget reason",
+        "the package on disk is generated from the PRD phase's PRD",
+        "the review has stop_reason `incomplete`"
+      ],
+      "pseudocode": "r = runSpecCmd(['--adversarial','--budget',small,input]); assert r.exit==0; w = warning(r,'prd_review_incomplete'); assert w.Severity=='high'; assert read(prdmd)==originalBody; assert r.pkg.Review.StopReason=='incomplete'",
+      "real_components": [
+        "spec command",
+        "internal/cli App",
+        "agentrun Runner",
+        "specgen pipeline",
+        "round loop",
+        "afspec validation",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-09-68",
+      "kind": "smoke",
+      "verifies": [
+        "09-PATH-4",
+        "09-REQ-10.3"
+      ],
+      "title": "Preflight counts the review phases without calling any model",
+      "given": [
+        "the spec command with a provider that fails the test if a model is called"
+      ],
+      "when": "`spec --preflight --adversarial --adversarial-rounds 3` runs",
+      "then": [
+        "exit code 0 and no model was called",
+        "estimate.phases is (1 + 3 + 2×3) × packages",
+        "max_total_usd derives from that count",
+        "the phase_models check lists prd_review and prd_revision with model and effort after prd"
+      ],
+      "pseudocode": "r = runSpecCmd(['--preflight','--adversarial','--adversarial-rounds','3', input]); assert r.exit==0 && modelCalls==0; assert r.env.estimate.phases == 10*pkgs; assert order(detail,'prd','prd_review','prd_revision')",
+      "real_components": [
+        "spec command",
+        "internal/cli App",
+        "preflight",
+        "agentrun model resolver"
+      ]
+    }
+  ]
+}

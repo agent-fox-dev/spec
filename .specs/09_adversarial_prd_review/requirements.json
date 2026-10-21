@@ -1,0 +1,740 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "09",
+  "spec_name": "adversarial_prd_review",
+  "schema_version": 2,
+  "introduction": "The `spec` command gains an opt-in adversarial review (`--adversarial`, `--adversarial-rounds`). A fresh reviewer agent looks for flaws in every PRD the run writes, and a fresh reviser agent answers each flaw before the requirements, test spec and tasks are generated. The result reports each review, and a failed review never fails the run.",
+  "glossary": {
+    "codebase_notes": "The notes the PRD phase hands to later phases after reading the code, bounded to 12000 bytes (ADR 04).",
+    "disposition": "What became of a finding: `accepted` (the PRD was changed to remedy it), `rejected` (with the reviser's reason) or `unanswered` (no revision finished for its round).",
+    "finding": "One flaw a reviewer reports, with severity (`critical`, `major` or `minor`), section, flaw, evidence, remedy and an optional `reopens` id. The run gives it the id `R<round>-F<n>`.",
+    "last complete PRD": "The PRD that the PRD phase wrote when no revision has finished, otherwise the PRD that the last finished revision left.",
+    "review phase": "The `prd_review` phase: a fresh agent conversation that reads the current PRD and submits a list of findings, possibly empty.",
+    "revision phase": "The `prd_revision` phase: a fresh agent conversation, separate from the PRD author and the reviewer, that answers every finding of a round and submits the revised PRD body.",
+    "round": "One review phase, followed by one revision phase when the review raised at least one finding.",
+    "round limit": "The highest number of rounds a PRD may get: the value of `--adversarial-rounds` (1 to 5), or 1 when the flag is not given.",
+    "stop_reason": "The single reason the rounds of a PRD stopped: `no_findings`, `no_serious_findings`, `rounds_exhausted` or `incomplete`.",
+    "whitespace normalisation": "Trimming leading and trailing whitespace and collapsing every internal run of whitespace into a single space, before two evidence strings are compared."
+  },
+  "requirements": [
+    {
+      "id": "09-REQ-1",
+      "title": "Adversarial flags and their validation",
+      "rationale": "A review that is off by default leaves every existing run unchanged, and a malformed round count is refused before any money is spent.",
+      "criteria": [
+        {
+          "id": "09-REQ-1.1",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "register a boolean flag `--adversarial` that is off by default and an integer flag `--adversarial-rounds`, and use a round limit of 1 when `--adversarial` is on and `--adversarial-rounds` is not given"
+        },
+        {
+          "id": "09-REQ-1.2",
+          "pattern": "unwanted",
+          "condition": "`--adversarial-rounds` is given with a value below 1 or above 5, including an explicit `0`, with or without `--preflight`",
+          "system": "spec command",
+          "action": "reject the invocation as a usage error before any input is fetched or any model is called",
+          "contract": "exit code 2, error category `usage`, no phase recorded in usage and no file written"
+        },
+        {
+          "id": "09-REQ-1.3",
+          "pattern": "unwanted",
+          "condition": "`--adversarial-rounds` is given while `--adversarial` is off, with or without `--preflight`",
+          "system": "spec command",
+          "action": "reject the invocation as a usage error before any input is fetched or any model is called",
+          "contract": "exit code 2, error category `usage`, no phase recorded in usage and no file written"
+        },
+        {
+          "id": "09-REQ-1.4",
+          "pattern": "unwanted",
+          "condition": "`--adversarial-rounds` is given a value that is not an integer",
+          "system": "spec command",
+          "action": "reject the invocation through the flag parser before any input is fetched or any model is called",
+          "contract": "exit code 2, error category `usage`"
+        },
+        {
+          "id": "09-REQ-1.5",
+          "pattern": "state_driven",
+          "condition": "`--adversarial` is off",
+          "system": "specgen pipeline",
+          "action": "run the same phases with the same prompts, and produce the same result, summary sentence, files on disk and `usage.phases[]` entries as a run of the same input before this feature, with no `review` field in any package"
+        },
+        {
+          "id": "09-REQ-1.6",
+          "pattern": "optional",
+          "condition": "`--dry-run` is given together with `--adversarial`",
+          "system": "specgen pipeline",
+          "action": "run the review and revision phases as in a real run, write no file, and report each package's `review` with the same fields and values a real run would report"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-2",
+      "title": "The review phase",
+      "rationale": "A reviewer that did not write the PRD and sees everything the author saw can find flaws the author's blind spots hid.",
+      "criteria": [
+        {
+          "id": "09-REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "a review phase starts",
+          "system": "review phase",
+          "action": "start a fresh conversation that is sent the current PRD (spec name, title, body, open questions and `relevant_files`), the original input, any `--context`, the current `codebase_notes` labelled as the author's claims to be checked against the code and not as facts, the language block, the steering, the repository map, the landscape of existing specs, and the read-only file tools plus `code_search` when the index exists"
+        },
+        {
+          "id": "09-REQ-2.2",
+          "pattern": "complex_event",
+          "condition": "a review phase starts",
+          "guard": "the PRD is one scope of a split",
+          "system": "review phase",
+          "action": "also send every scope's name and one-line scope, which scope this PRD covers, what the earlier scopes deliver as the PRD phase was shown it, and the statement that work belonging to another scope is not a dropped ask, without the PRD-writing instructions the PRD phase receives"
+        },
+        {
+          "id": "09-REQ-2.3",
+          "pattern": "ubiquitous",
+          "system": "review phase",
+          "action": "instruct the reviewer to find flaws rather than approve, and to look for behaviours without an error path, goals that cannot be verified, claims in the PRD or notes that the code contradicts, a proposed component that already exists under another name, scope the input did not ask for, asks of the input the PRD dropped, wording two readers would turn into different requirements, sections that contradict each other, Design Decisions whose reason does not hold, and internal design (package layout, types, signatures) that leaked into the PRD",
+          "contract": "the review phase's system prompt names each of the listed flaw kinds and tells the reviewer not to approve the PRD"
+        },
+        {
+          "id": "09-REQ-2.4",
+          "pattern": "ubiquitous",
+          "system": "review phase",
+          "action": "end the review through a submit tool that takes a list of findings, possibly empty, in which each finding carries a severity from `critical`, `major` or `minor`, a section, a flaw, an evidence, a remedy and a `reopens` id that may be empty"
+        },
+        {
+          "id": "09-REQ-2.5",
+          "pattern": "event_driven",
+          "condition": "the review tool accepts a submission in round r",
+          "system": "review phase",
+          "action": "assign each submitted finding the id `R<r>-F<n>`, with n counting from 1 in the order the findings were submitted",
+          "contract": "ids such as `R2-F3` that are unique within the PRD's review and unchanged for the rest of the run"
+        },
+        {
+          "id": "09-REQ-2.6",
+          "pattern": "unwanted",
+          "condition": "the reviewer ends its conversation without an accepted submission",
+          "system": "review phase",
+          "action": "report the phase as not finished, so that the round loop handles it as a review failure",
+          "contract": "a no-result error for phase `prd_review` naming the review tool"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-3",
+      "title": "Review submission checks",
+      "rationale": "A finding without evidence or a verbatim repeat of a rejected finding costs a revision without giving it anything to check.",
+      "criteria": [
+        {
+          "id": "09-REQ-3.1",
+          "pattern": "unwanted",
+          "condition": "a review submission contains more than 30 findings",
+          "system": "review tool",
+          "action": "turn the submission back to the reviewer, record no finding from it, and keep the phase running",
+          "contract": "a tool error that names the finding count and the limit of 30"
+        },
+        {
+          "id": "09-REQ-3.2",
+          "pattern": "unwanted",
+          "condition": "a finding in a review submission has an empty severity, section, flaw, evidence or remedy",
+          "system": "review tool",
+          "action": "turn the submission back to the reviewer, record no finding from it, and tell it to support or withdraw each such finding",
+          "contract": "a tool error that names each offending finding by its position and its empty fields"
+        },
+        {
+          "id": "09-REQ-3.3",
+          "pattern": "unwanted",
+          "condition": "a finding in a round-1 review submission has a non-empty `reopens`",
+          "system": "review tool",
+          "action": "turn the submission back to the reviewer and record no finding from it",
+          "contract": "a tool error that names each offending finding"
+        },
+        {
+          "id": "09-REQ-3.4",
+          "pattern": "unwanted",
+          "condition": "a finding in a later round's review submission has a `reopens` that names no earlier finding of this PRD",
+          "system": "review tool",
+          "action": "turn the submission back to the reviewer and record no finding from it",
+          "contract": "a tool error that names each offending finding and the unknown id"
+        },
+        {
+          "id": "09-REQ-3.5",
+          "pattern": "unwanted",
+          "condition": "a finding in a later round's review submission reopens an earlier `rejected` finding with evidence identical to that finding's evidence after whitespace normalisation",
+          "system": "review tool",
+          "action": "turn the submission back to the reviewer and record no finding from it",
+          "contract": "a tool error that names each offending finding and the rejected finding it repeats"
+        },
+        {
+          "id": "09-REQ-3.6",
+          "pattern": "unwanted",
+          "condition": "a finding in a later round's review submission has an empty `reopens` and the same section text and flaw text as an earlier `rejected` finding",
+          "system": "review tool",
+          "action": "turn the submission back to the reviewer and record no finding from it",
+          "contract": "a tool error that names each offending finding and the rejected finding it repeats"
+        },
+        {
+          "id": "09-REQ-3.7",
+          "pattern": "ubiquitous",
+          "system": "review tool",
+          "action": "for any two evidence strings that differ only in leading or trailing whitespace or in the length or kind of internal whitespace runs, treat them as identical, and for any two that differ in a non-whitespace character, treat them as different"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-4",
+      "title": "The revision phase",
+      "rationale": "A third agent weighs each finding on its evidence instead of defending the author's choices, and cannot change what the split depends on.",
+      "criteria": [
+        {
+          "id": "09-REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "a review raised at least one finding and its revision phase starts",
+          "system": "revision phase",
+          "action": "start a fresh conversation, separate from the PRD phase and the review, that is sent the current PRD, the round's findings with their ids, the original input, any `--context`, the current `codebase_notes`, and the same split context, run context and read-only tools as the review"
+        },
+        {
+          "id": "09-REQ-4.2",
+          "pattern": "ubiquitous",
+          "system": "revision phase",
+          "action": "instruct the reviser to answer every finding as `accepted`, changing the PRD to remedy it, or as `rejected` with a reason that says why the finding does not hold, and to record in `## Design Decisions` what each accepted remedy settled"
+        },
+        {
+          "id": "09-REQ-4.3",
+          "pattern": "ubiquitous",
+          "system": "revision tool",
+          "action": "require the complete revised body and the dispositions, accept optional replacement `open_questions`, `relevant_files` and `codebase_notes`, and offer no field for the spec name, the title or the split"
+        },
+        {
+          "id": "09-REQ-4.4",
+          "pattern": "event_driven",
+          "condition": "the revision tool accepts a submission",
+          "system": "revision phase",
+          "action": "produce a revised PRD that carries the submitted body and the spec name, title and recommended split of the PRD it revises",
+          "contract": "the revised PRD's spec name, title and recommended split equal those of the PRD under revision"
+        },
+        {
+          "id": "09-REQ-4.5",
+          "pattern": "event_driven",
+          "condition": "the revision tool accepts a submission",
+          "system": "revision phase",
+          "action": "keep the earlier value of each optional field that is omitted, replace it with each supplied value, clear `open_questions` or `relevant_files` when an empty list is supplied, and keep the earlier notes when an empty `codebase_notes` is supplied"
+        },
+        {
+          "id": "09-REQ-4.6",
+          "pattern": "unwanted",
+          "condition": "the replacement `codebase_notes` of an accepted revision exceed 12000 bytes",
+          "system": "revision phase",
+          "action": "bound the notes to 12000 bytes by the same rule the PRD phase applies to its notes",
+          "contract": "the revised PRD's notes are at most 12000 bytes long"
+        },
+        {
+          "id": "09-REQ-4.7",
+          "pattern": "unwanted",
+          "condition": "the reviser ends its conversation without an accepted submission",
+          "system": "revision phase",
+          "action": "report the phase as not finished, so that the round loop handles it as a revision failure",
+          "contract": "a no-result error for phase `prd_revision` naming the revision tool"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-5",
+      "title": "Revision submission checks",
+      "rationale": "Every finding must get exactly one answer, an acceptance must change the PRD, and a revised PRD must pass the checks the PRD phase applies.",
+      "criteria": [
+        {
+          "id": "09-REQ-5.1",
+          "pattern": "unwanted",
+          "condition": "a revision submission leaves a finding of this round without a disposition, gives a finding two dispositions, or has a disposition naming an id that is not one of this round's findings",
+          "system": "revision tool",
+          "action": "turn the submission back to the reviser and record nothing from it",
+          "contract": "a tool error that names each missing, duplicated or unknown finding id"
+        },
+        {
+          "id": "09-REQ-5.2",
+          "pattern": "unwanted",
+          "condition": "a `rejected` disposition in a revision submission has an empty reason",
+          "system": "revision tool",
+          "action": "turn the submission back to the reviser and record nothing from it",
+          "contract": "a tool error that names each finding id whose rejection has no reason"
+        },
+        {
+          "id": "09-REQ-5.3",
+          "pattern": "unwanted",
+          "condition": "a revision submission accepts at least one finding and its body, `open_questions`, `relevant_files` and notes, after the keep-or-replace rule, are all identical to those of the PRD under revision",
+          "system": "revision tool",
+          "action": "turn the submission back to the reviser and record nothing from it",
+          "contract": "a tool error that says the accepted findings left the PRD unchanged"
+        },
+        {
+          "id": "09-REQ-5.4",
+          "pattern": "unwanted",
+          "condition": "the revised body has no `## Intent` section by afspec's rule, or starts with YAML frontmatter",
+          "system": "revision tool",
+          "action": "turn the submission back to the reviser with the same rejection the PRD phase gives for the same body",
+          "contract": "a tool error with the PRD phase's code for the failed check"
+        },
+        {
+          "id": "09-REQ-5.5",
+          "pattern": "unwanted",
+          "condition": "a path supplied in `relevant_files` is not a regular file in the workspace",
+          "system": "revision tool",
+          "action": "turn the submission back to the reviser and record nothing from it",
+          "contract": "a tool error that names each offending path"
+        },
+        {
+          "id": "09-REQ-5.6",
+          "pattern": "event_driven",
+          "condition": "a revision submission changes the text of `## Intent` and passes every other check",
+          "system": "revision tool",
+          "action": "accept the submission",
+          "contract": "the revised PRD carries the changed `## Intent` text"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-6",
+      "title": "Rounds and stop reasons",
+      "rationale": "Each round is two full phases, so the rounds stop as soon as nothing serious is found or the limit is reached.",
+      "criteria": [
+        {
+          "id": "09-REQ-6.1",
+          "pattern": "event_driven",
+          "condition": "a review raises no findings",
+          "system": "round loop",
+          "action": "stop the rounds, record the round with an empty finding list and count it in `rounds_run`, and pass the PRD on unchanged",
+          "contract": "`stop_reason` is `no_findings`"
+        },
+        {
+          "id": "09-REQ-6.2",
+          "pattern": "event_driven",
+          "condition": "a review raises one or more findings",
+          "system": "round loop",
+          "action": "run the revision phase of the same round on those findings"
+        },
+        {
+          "id": "09-REQ-6.3",
+          "pattern": "complex_event",
+          "condition": "a round's revision finishes",
+          "guard": "that round's review raised at least one `critical` or `major` finding and fewer rounds than the round limit have run",
+          "system": "round loop",
+          "action": "start another round whose review reads the PRD as that revision left it"
+        },
+        {
+          "id": "09-REQ-6.4",
+          "pattern": "complex_event",
+          "condition": "a round's revision finishes",
+          "guard": "that round's review raised only `minor` findings",
+          "system": "round loop",
+          "action": "stop the rounds",
+          "contract": "`stop_reason` is `no_serious_findings`"
+        },
+        {
+          "id": "09-REQ-6.5",
+          "pattern": "complex_event",
+          "condition": "a round's revision finishes",
+          "guard": "that round's review raised at least one `critical` or `major` finding and the number of rounds run equals the round limit",
+          "system": "round loop",
+          "action": "stop the rounds",
+          "contract": "`stop_reason` is `rounds_exhausted`"
+        },
+        {
+          "id": "09-REQ-6.6",
+          "pattern": "event_driven",
+          "condition": "a round after the first starts",
+          "system": "round loop",
+          "action": "send both its reviewer and its reviser every earlier round's findings with their ids, dispositions and reasons, and tell the reviewer that it may raise a rejected finding again only with evidence the rejection did not answer and only by naming it in `reopens`"
+        },
+        {
+          "id": "09-REQ-6.7",
+          "pattern": "ubiquitous",
+          "system": "round loop",
+          "action": "for any round limit from 1 to 5 and any sequence of review and revision outcomes, run at most the round limit of reviews, end with exactly one `stop_reason`, and report `incomplete` whenever a review or revision did not finish or the budget stopped the rounds, ahead of every other reason"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-7",
+      "title": "A round that cannot finish",
+      "rationale": "The review only improves a PRD that is already complete, so losing the package because the critic failed would be worse than skipping the rest of the review.",
+      "criteria": [
+        {
+          "id": "09-REQ-7.1",
+          "pattern": "unwanted",
+          "condition": "a review or revision phase ends without an accepted submission because of its budget, its turn limit, `--phase-timeout` while the run's context is still live, a refusal, or a model, API or internal error",
+          "system": "round loop",
+          "action": "stop the rounds, generate the package from the last complete PRD, and record a `high` warning `prd_review_incomplete` with stage `prd_review` that names the scope's spec name, the round, the failed phase (`prd_review` or `prd_revision`) and the reason it failed",
+          "contract": "`stop_reason` is `incomplete`; the run's status and exit code are those it would have without the failure"
+        },
+        {
+          "id": "09-REQ-7.2",
+          "pattern": "unwanted",
+          "condition": "a round's review finished but its revision did not finish",
+          "system": "round loop",
+          "action": "report that round's findings with the disposition `unanswered` and generate the package from the PRD the review read",
+          "contract": "each such finding has `disposition` `unanswered` and no `reason`, and counts in `unanswered_count`"
+        },
+        {
+          "id": "09-REQ-7.3",
+          "pattern": "complex_event",
+          "condition": "a review or revision is about to start",
+          "guard": "`--total-budget` is set and the run's spend so far has reached the total budget",
+          "system": "round loop",
+          "action": "not start the phase, stop the rounds as for a failed phase, and name the total budget, the spend and the ceiling as the reason in the `prd_review_incomplete` warning",
+          "contract": "`stop_reason` is `incomplete`; `rounds_run` is 0 when the stop came before the first review; the exit code is unchanged"
+        },
+        {
+          "id": "09-REQ-7.4",
+          "pattern": "unwanted",
+          "condition": "the budget stops the rounds between a review and its revision",
+          "system": "round loop",
+          "action": "report that review's findings with the disposition `unanswered`",
+          "contract": "each such finding counts in `unanswered_count`"
+        },
+        {
+          "id": "09-REQ-7.5",
+          "pattern": "unwanted",
+          "condition": "the run's context is cancelled by Ctrl-C or SIGTERM during a review or revision",
+          "system": "specgen pipeline",
+          "action": "stop the run as an interrupted run, record no `prd_review_incomplete` warning, and generate no package from the interrupted PRD",
+          "contract": "a failure with stage `prd_review` or `prd_revision`, category `aborted`, exit code 1"
+        },
+        {
+          "id": "09-REQ-7.6",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "keep the existing total-budget check before each split scope's PRD phase after the first, failing the run with stage `budget` when the spend has reached the ceiling"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-8",
+      "title": "Where the rounds run",
+      "rationale": "Every PRD the run writes is reviewed before its package is reserved, and the next scope builds on the revised PRD rather than the original.",
+      "criteria": [
+        {
+          "id": "09-REQ-8.1",
+          "pattern": "event_driven",
+          "condition": "the PRD of an undivided input has been written and any `--name` has been applied, while `--adversarial` is on",
+          "system": "specgen pipeline",
+          "action": "run the PRD's rounds before its package number is reserved and before its package is generated"
+        },
+        {
+          "id": "09-REQ-8.2",
+          "pattern": "event_driven",
+          "condition": "a split scope's PRD phase has finished and the planned name has replaced any name the model chose, while `--adversarial` is on",
+          "system": "split coordinator",
+          "action": "run that PRD's rounds in the coordinator before the scope's package number is reserved and its package goroutine is started"
+        },
+        {
+          "id": "09-REQ-8.3",
+          "pattern": "event_driven",
+          "condition": "the first scope of a split is reviewed",
+          "system": "split coordinator",
+          "action": "run its rounds after the split plan is recorded, inside the split loop, with a split context built for scope 1 like every other scope's"
+        },
+        {
+          "id": "09-REQ-8.4",
+          "pattern": "event_driven",
+          "condition": "the PRD phase of a split scope after the first starts",
+          "system": "split coordinator",
+          "action": "show it the earlier scopes' final PRDs and final `codebase_notes` as the rounds left them, not the PRD phase's originals"
+        },
+        {
+          "id": "09-REQ-8.5",
+          "pattern": "event_driven",
+          "condition": "a split is resumed with `--adversarial`",
+          "system": "split coordinator",
+          "action": "review only the PRDs of the scopes written in this run and leave the packages written in earlier runs unreviewed"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-9",
+      "title": "The review in the result",
+      "rationale": "A caller must see how each PRD was reviewed and what changed, while the package on disk keeps exactly the files the format defines.",
+      "criteria": [
+        {
+          "id": "09-REQ-9.1",
+          "pattern": "optional",
+          "condition": "`--adversarial` is on",
+          "system": "specgen pipeline",
+          "action": "attach a `review` to the first package and to every package in `follow_on_specs`, including a package reported unwritten, with the fields `rounds_run`, `rounds_allowed`, `stop_reason`, `findings_count`, `accepted_count`, `rejected_count`, `unanswered_count` and `rounds`",
+          "contract": "each `rounds` entry has its round number and its findings"
+        },
+        {
+          "id": "09-REQ-9.2",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "report each finding with `id`, `severity`, `section`, `flaw`, `evidence`, `remedy`, `disposition`, `reopens` only when it is non-empty, and `reason` only when the disposition is `rejected`"
+        },
+        {
+          "id": "09-REQ-9.3",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any package `review`, report `findings_count` equal to the number of findings over all rounds and equal to the sum of `accepted_count`, `rejected_count` and `unanswered_count`, and `rounds_run` equal to the number of `rounds` entries"
+        },
+        {
+          "id": "09-REQ-9.4",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "use the final PRD for the written `prd.md`, the PRD posted by `--comment`, `result.open_questions` and `result.relevant_files`, and send its body, `relevant_files` and notes to the generation and architecture phases"
+        },
+        {
+          "id": "09-REQ-9.5",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "write no review data into any package directory or into the `--comment` text, so that the package holds only the files the format defines"
+        },
+        {
+          "id": "09-REQ-9.6",
+          "pattern": "event_driven",
+          "condition": "any package of the run carries a `review`",
+          "system": "result summary",
+          "action": "add after the open-questions clause the clause `review: <R> round(s), <F> finding(s), <A> accepted`, totalled over every package of the run, using the singular noun when a count is 1 and leaving out `, <A> accepted` when F is 0, inside the existing 200-character cap and before the high-warning clause",
+          "contract": "for example `spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted`"
+        },
+        {
+          "id": "09-REQ-9.7",
+          "pattern": "event_driven",
+          "condition": "the result is emitted with `--detail summary`",
+          "system": "result summary",
+          "action": "keep the first package's `review` with every field except `rounds`, so the result still decodes into `envelope.SpecResult`"
+        }
+      ]
+    },
+    {
+      "id": "09-REQ-10",
+      "title": "Progress, usage, preflight and models",
+      "rationale": "Review phases are phases like any other: they are shown, bounded, priced and resolved to a model the same way.",
+      "criteria": [
+        {
+          "id": "09-REQ-10.1",
+          "pattern": "event_driven",
+          "condition": "a review or revision phase runs",
+          "system": "specgen pipeline",
+          "action": "report it on stderr through the same begin and done lines and turns-and-tokens footer as every other phase, labelled `reviewing the PRD (round r of L)` or `revising the PRD (round r of L)` with the scope prefix in a split, then print a line with the number of findings by severity after a review, or the number accepted and rejected after a revision",
+          "contract": "for example `scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)`"
+        },
+        {
+          "id": "09-REQ-10.2",
+          "pattern": "event_driven",
+          "condition": "a review or revision phase ends",
+          "system": "specgen pipeline",
+          "action": "record it in `usage.phases[]` under the name `prd_review` or `prd_revision` with its scope, model, effort, turns and cost, and count its cost in the run's spend"
+        },
+        {
+          "id": "09-REQ-10.3",
+          "pattern": "optional",
+          "condition": "`--preflight` is given with `--adversarial`",
+          "system": "preflight",
+          "action": "set `estimate.phases` to (1 + 3, plus 1 with `--architecture`, + 2 × round limit) × packages, derive `max_total_usd` from it, and list `prd_review` and `prd_revision` with their model and effort after `prd` in the `phase_models` check detail"
+        },
+        {
+          "id": "09-REQ-10.4",
+          "pattern": "state_driven",
+          "condition": "`--preflight` is given without `--adversarial`",
+          "system": "preflight",
+          "action": "produce the same `estimate.phases`, `max_total_usd` and `phase_models` detail as before this feature"
+        },
+        {
+          "id": "09-REQ-10.5",
+          "pattern": "ubiquitous",
+          "system": "model resolver",
+          "action": "accept `prd_review` and `prd_revision` in `--phase-model` and resolve both, when no choice names them, to `claude-sonnet-5-5` `medium` on SIMPLE, `claude-sonnet-5-5` `high` on STANDARD and `claude-opus-5-5` `xhigh` on ADVANCED"
+        },
+        {
+          "id": "09-REQ-10.6",
+          "pattern": "ubiquitous",
+          "system": "model resolver",
+          "action": "apply a model id given to `--model` and `--effort` or `$AF_MODEL_EFFORT` to `prd_review` and `prd_revision`, leave them unmoved by `--phase-model prd=…`, and bound each review and revision by `--budget`, `--max-turns`, `--phase-timeout` and `--max-tokens` as a phase of its own",
+          "contract": "`model.phases` shows the `--model` id and effort for `prd_review` and `prd_revision`; a review that exceeds `--budget`, `--max-turns`, `--phase-timeout` or `--max-tokens` stops on its own bound"
+        },
+        {
+          "id": "09-REQ-10.7",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "list `prd_review` and `prd_revision` in `model.phases`, the `--phase-model` help and the `effort_clamped` warning whether or not `--adversarial` is on"
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "09-PATH-1",
+      "title": "An undivided input is reviewed, revised and generated from the revised PRD",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs `spec --adversarial --adversarial-rounds 2` on an input"
+        },
+        {
+          "actor": "spec command",
+          "action": "validates the flags and starts the specgen pipeline with a round limit of 2"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "runs the PRD phase and writes the first PRD"
+        },
+        {
+          "actor": "review phase",
+          "action": "submits findings including a `major` one, which the run numbers `R1-F1` onwards"
+        },
+        {
+          "actor": "revision phase",
+          "action": "answers every finding and submits the revised body"
+        },
+        {
+          "actor": "review phase",
+          "action": "reviews the revised PRD in round 2 and submits no findings"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "reserves the package, generates requirements, test spec and tasks from the final PRD and writes `prd.md` from it"
+        },
+        {
+          "actor": "spec command",
+          "action": "emits a result whose package carries `review` with `stop_reason` `no_findings`, and a summary with the review clause, exit 0"
+        }
+      ]
+    },
+    {
+      "id": "09-PATH-2",
+      "title": "Each split scope is reviewed in the coordinator before its package starts",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs `spec --adversarial` on an input the PRD phase splits into scopes"
+        },
+        {
+          "actor": "split coordinator",
+          "action": "records the split plan, then runs scope 1's rounds with its split context"
+        },
+        {
+          "actor": "split coordinator",
+          "action": "reserves scope 1's package and starts its generation goroutine with the final PRD"
+        },
+        {
+          "actor": "split coordinator",
+          "action": "runs scope 2's PRD phase, showing it scope 1's revised PRD and notes, then runs scope 2's rounds"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "writes every scope's package from its final PRD"
+        },
+        {
+          "actor": "spec command",
+          "action": "emits a result in which the first package and every `follow_on_specs` package carry `review`, and a summary clause totalled over all packages"
+        }
+      ]
+    },
+    {
+      "id": "09-PATH-3",
+      "title": "A review that cannot finish leaves a warning and the package from the last complete PRD",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs `spec --adversarial` with a per-phase `--budget` too small for the review phase"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "runs the PRD phase and starts round 1's review"
+        },
+        {
+          "actor": "review phase",
+          "action": "stops at its budget without an accepted submission"
+        },
+        {
+          "actor": "round loop",
+          "action": "stops the rounds and records a `high` `prd_review_incomplete` warning naming the scope, round 1, `prd_review` and the reason"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "generates and writes the package from the PRD phase's PRD"
+        },
+        {
+          "actor": "spec command",
+          "action": "emits a result whose `review` has `stop_reason` `incomplete`, with the exit code of a run without the failure"
+        }
+      ]
+    },
+    {
+      "id": "09-PATH-4",
+      "title": "Preflight counts the review phases",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs `spec --preflight --adversarial --adversarial-rounds 3`"
+        },
+        {
+          "actor": "preflight",
+          "action": "computes `estimate.phases` as (1 + 3 + 2 × 3) × packages and `max_total_usd` from it"
+        },
+        {
+          "actor": "preflight",
+          "action": "lists `prd_review` and `prd_revision` with model and effort after `prd` in the `phase_models` check"
+        },
+        {
+          "actor": "spec command",
+          "action": "emits the preflight result without calling any model"
+        }
+      ]
+    }
+  ],
+  "external_apis": [
+    {
+      "package": "github.com/agent-fox-dev/agentkit-go",
+      "version": "v0.0.0-20261021121346-32eb7cdca451",
+      "verified": false,
+      "symbols": [
+        {
+          "name": "Tool",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/core",
+          "signature": "type Tool struct { Name, Description string; InputSchema *schema.Schema; Terminating bool; PromptGuidelines []string; Execute func(context.Context, json.RawMessage) core.ToolResult }",
+          "notes": "Implied by submitPRDTool in specgen/prd.go."
+        },
+        {
+          "name": "ErrResult",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/core",
+          "signature": "func ErrResult(code, message string) core.ToolResult",
+          "notes": "Used to turn a submission back to the model."
+        },
+        {
+          "name": "OKResult",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/core",
+          "signature": "func OKResult(v any) core.ToolResult",
+          "notes": "The result has a field Terminate bool, set to true on acceptance."
+        },
+        {
+          "name": "Object",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/schema",
+          "signature": "func Object(props ...) *schema.Schema",
+          "notes": "Used by prdSchema."
+        },
+        {
+          "name": "Prop / Opt",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/schema",
+          "signature": "func Prop(name string, s *schema.Schema); func Opt(name string, s *schema.Schema)",
+          "notes": "Required and optional property; each optional property costs one union parameter in strict mode."
+        },
+        {
+          "name": "String",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/schema",
+          "signature": "func String(description string) *schema.Schema"
+        },
+        {
+          "name": "Array",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/schema",
+          "signature": "func Array(items *schema.Schema, description string) *schema.Schema",
+          "notes": "The schema has a field MaxItems *int."
+        },
+        {
+          "name": "Enum",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/schema",
+          "signature": "func Enum(description string, values ...string) *schema.Schema",
+          "notes": "Used in specgen/patch.go."
+        }
+      ]
+    }
+  ]
+}

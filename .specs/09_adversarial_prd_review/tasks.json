@@ -1,0 +1,441 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "09",
+  "spec_name": "adversarial_prd_review",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./specgen/... ./internal/agentrun/... ./internal/cli/... ./cmd/spec/... ./envelope/... -count=1"
+  },
+  "dependencies": [],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Add the prd_review and prd_revision phase kinds, the envelope review types and the warning code",
+      "criteria": [
+        "09-REQ-9.2",
+        "09-REQ-10.5",
+        "09-REQ-10.6",
+        "09-REQ-10.7"
+      ],
+      "tests": [
+        "TS-09-61",
+        "TS-09-62",
+        "TS-09-64",
+        "TS-09-51"
+      ],
+      "steps": [
+        "Write TS-09-61, TS-09-62, TS-09-64 and TS-09-51 and confirm they fail",
+        "In internal/agentrun/models.go add constants PhasePRDReview=\"prd_review\" and PhasePRDRevision=\"prd_revision\" and append them to Phases right after PhasePRD (keep the build order of the other kinds); add no tierTable rows, since tier.entry falls back to the base entry, which is the PRD phase's model and effort; confirm ParsePhaseChoice accepts them and that --phase-model prd=... does not move them",
+        "Confirm internal/cli/flags.go (--phase-model usage string), app.go (progress model lines, warnClamped, run.SetModels) all iterate agentrun.Phases so the two phases appear with and without --adversarial; fix app_test.go's len(env.Model.Phases)==len(agentrun.Phases) expectation only if it breaks",
+        "In envelope/spec_result.go add types Review (rounds_run, rounds_allowed, stop_reason, findings_count, accepted_count, rejected_count, unanswered_count, rounds omitempty), ReviewRound (round, findings) and ReviewFinding (id, severity, section, flaw, evidence, remedy, reopens omitempty, disposition, reason omitempty); add `Review *Review` with json `review,omitempty` to Package; add string constants for stop reasons, dispositions and severities",
+        "In envelope/warn.go add WarnPRDReviewIncomplete WarnCode = \"prd_review_incomplete\"; in internal/cli/warn.go add the alias constant and a warnStages entry mapping it to stage \"prd_review\"; in internal/cli/wire.go/specgen alias the new envelope types where the Package alias already exists (specgen/pipeline.go)",
+        "Update envelope tests that enumerate warn codes or stages if needed"
+      ],
+      "touches": [
+        "internal/agentrun/models.go",
+        "internal/cli/flags.go",
+        "internal/cli/app.go",
+        "internal/cli/warn.go",
+        "envelope/spec_result.go",
+        "envelope/warn.go",
+        "specgen/pipeline.go"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Register --adversarial and --adversarial-rounds, validate them in PreCheck and count review phases in preflight",
+      "criteria": [
+        "09-REQ-1.1",
+        "09-REQ-1.2",
+        "09-REQ-1.3",
+        "09-REQ-1.4",
+        "09-REQ-10.3",
+        "09-REQ-10.4"
+      ],
+      "tests": [
+        "TS-09-1",
+        "TS-09-2",
+        "TS-09-3",
+        "TS-09-4",
+        "TS-09-59",
+        "TS-09-60"
+      ],
+      "steps": [
+        "Write TS-09-1 to TS-09-4, TS-09-59 and TS-09-60 and confirm they fail",
+        "In specgen/pipeline.go add Options fields Adversarial bool and AdversarialRounds int (rounds limit; 0 treated as 1 only when constructed without the flag), plus the injectable reviewer/reviser seam field (an unexported interface such as `reviewer` with Review and Revise methods, defined in task 5; for now declare the Options field type once task 5 lands, or declare the interface here with the request/result types as stubs only if needed to compile)",
+        "In cmd/spec/main.go register --adversarial (bool) and --adversarial-rounds using a custom flag.Value (pattern of effortFlag in internal/cli/flags.go) that records whether it was set and parses an int, so a non-integer is rejected by the flag parser as a usage error (exit 2)",
+        "In PreCheck return cli.Usagef for a given value outside 1..5 (including explicit 0 and negatives) and for --adversarial-rounds given while --adversarial is off; PreCheck runs before any fetch or model resolve and under --preflight too",
+        "In specOptions map the flags to Options: AdversarialRounds = given value, or 1 when --adversarial is on and the flag is not given",
+        "In specgen/pipeline.go RunPreflight add 2*rounds to the per-package phase count when Adversarial, before `phases *= packages`, and derive MaxTotalUSD from it",
+        "Change phaseModels to take the adversarial flag: it already iterates agentrun.Phases (prd, prd_review, prd_revision, requirements...) so the review kinds appear right after prd; skip them when adversarial is off, the same way architecture is skipped when off",
+        "Confirm without --adversarial neither estimate nor phase_models changes"
+      ],
+      "touches": [
+        "cmd/spec/main.go",
+        "specgen/pipeline.go",
+        "specgen/preflight_test.go",
+        "cmd/spec/main_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Build the review tool: findings schema, submission checks and run-assigned ids",
+      "criteria": [
+        "09-REQ-2.4",
+        "09-REQ-2.5",
+        "09-REQ-3"
+      ],
+      "tests": [
+        "TS-09-10",
+        "TS-09-11",
+        "TS-09-13",
+        "TS-09-14",
+        "TS-09-15",
+        "TS-09-16",
+        "TS-09-17",
+        "TS-09-18",
+        "TS-09-19"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/review_tool_test.go and confirm they fail",
+        "Create specgen/review_tool.go with `const ToolSubmitPRDReview = \"submit_prd_review\"`, an internal Finding type (id, severity, section, flaw, evidence, remedy, reopens, disposition, reason) and a mutex-guarded reviewSink with set/get like prdSink",
+        "Add reviewSchema() with schema.Object holding one required `findings` array (MaxItems 30 for the schema, items an object with required severity (schema.Enum critical|major|minor), section, flaw, evidence, remedy, reopens) and no optional properties, to keep strict-mode union parameters low",
+        "Add newReviewTool(sink, round int, earlier []Finding) *core.Tool with Terminating true; Execute decodes the JSON and turns the submission back with core.ErrResult naming the problem when: >30 findings (name the count and 30); any empty severity/section/flaw/evidence/remedy (name each finding's position and empty fields, tell the reviewer to support or withdraw it); round 1 with non-empty reopens; later round with reopens naming no earlier finding id (name the finding and the unknown id); reopens of an earlier rejected finding whose evidence equals that finding's evidence after sameEvidence normalisation (name the finding and the repeated id); empty reopens with the same section and flaw text as an earlier rejected finding (name the finding and the repeated id). Check all findings and report every offender in one error, recording nothing on error",
+        "Implement normaliseEvidence (strings.Fields joined by one space) and sameEvidence(a,b) used by the repeat check",
+        "On success assign ids `R<round>-F<n>` counting from 1 in submitted order, store them in the sink and return core.OKResult with Terminate=true; an empty list is accepted",
+        "Reuse `earlier []Finding` carrying dispositions so the checks can tell rejected from accepted findings"
+      ],
+      "touches": [
+        "specgen/review_tool.go",
+        "specgen/review_tool_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Build the revision tool: schema, dispositions, keep-or-replace merge and PRD-phase checks",
+      "criteria": [
+        "09-REQ-4.3",
+        "09-REQ-4.4",
+        "09-REQ-4.5",
+        "09-REQ-4.6",
+        "09-REQ-5"
+      ],
+      "tests": [
+        "TS-09-22",
+        "TS-09-23",
+        "TS-09-24",
+        "TS-09-25",
+        "TS-09-27",
+        "TS-09-28",
+        "TS-09-29",
+        "TS-09-30",
+        "TS-09-31",
+        "TS-09-32"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/revision_tool_test.go and confirm they fail",
+        "Create specgen/revision_tool.go with `const ToolSubmitPRDRevision = \"submit_prd_revision\"`, a Disposition input type (id, disposition enum accepted|rejected, reason) and a mutex-guarded revisionSink holding the revised PRD and the dispositions",
+        "Add revisionSchema(): required `body` and `dispositions`; optional `open_questions`, `relevant_files` (reuse relevantFilesArraySchema and the open-question schema from prdSchema) and `codebase_notes`; NO spec_name, title or recommended_split property (three optional properties only, to limit union parameters)",
+        "Add newRevisionTool(sink, current PRD, findings []Finding, ws) *core.Tool, Terminating true. Execute decodes then checks in order, turning back with core.ErrResult and recording nothing: every finding must have exactly one disposition (name each missing, duplicated and unknown id); a rejected disposition needs a non-blank reason (name each id); apply keep-or-replace (omitted keeps, supplied replaces, empty open_questions/relevant_files clear, empty codebase_notes keeps earlier, replacement notes passed through boundNotes); at least one accepted finding with body, open questions, relevant files and notes all identical to the PRD under revision is an error saying the accepted findings left the PRD unchanged",
+        "Share the body checks with submitPRDTool by extracting a helper in specgen/prd.go (normalizeBody, HasIntent, frontmatter prefix, validateRelevantFiles) returning the same error codes/messages, so the revision returns the PRD tool's code for a body with no `## Intent` or starting with YAML frontmatter; a relevant file that is not a regular file in the workspace is named in the error",
+        "On acceptance build the revised PRD from the submitted body and carry over SpecName, Title and RecommendedSplit unchanged from the PRD under revision; a changed `## Intent` text is accepted; store it and the dispositions in the sink and return OKResult with Terminate=true",
+        "Make sure the existing PRD tool tests still pass after the helper extraction"
+      ],
+      "touches": [
+        "specgen/revision_tool.go",
+        "specgen/revision_tool_test.go",
+        "specgen/prd.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Add the reviewer and reviser agent phases, prompts and split/earlier-round context",
+      "criteria": [
+        "09-REQ-2.1",
+        "09-REQ-2.2",
+        "09-REQ-2.3",
+        "09-REQ-2.6",
+        "09-REQ-4.1",
+        "09-REQ-4.2",
+        "09-REQ-4.7"
+      ],
+      "tests": [
+        "TS-09-7",
+        "TS-09-8",
+        "TS-09-9",
+        "TS-09-12",
+        "TS-09-20",
+        "TS-09-21",
+        "TS-09-26",
+        "TS-09-63"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/review_test.go and confirm they fail; use a recording runner fake that captures each agentrun.Phase, and for TS-09-63 the real agentrun.Runner with a fake model",
+        "Add templates specgen/templates/prd_review_system.md, prd_review_user.md, prd_revision_system.md and prd_revision_user.md, embedded and filled with the existing fill(tmpl, map) in specgen/prompts.go; the review system prompt tells the reviewer to find flaws and not approve and names each of the nine flaw kinds; the revision system prompt requires an accepted/rejected disposition per finding, a rejected reason saying why the finding \"does not hold\", and recording in `## Design Decisions` what each accepted remedy settled",
+        "Add prompt builders that send the PRD (spec name, title, body, open questions, relevant files), the original input, any --context, and the codebase_notes in a new block labelled as the author's claims to be checked against the code, not facts (keep codebaseNotesBlock for other phases); reviser additionally gets the findings with ids and all fields",
+        "Add splitReviewBlock(c *splitContext) in specgen/split.go: every scope's name and one-line scope, which scope this PRD covers, earlierScopesBlock and earlierNotesBlock content, and the statement that work belonging to another scope is not a dropped ask, WITHOUT the PRD-writing instructions of splitBlock; both reviewer and reviser use it",
+        "Add a block listing earlier rounds' findings with ids, dispositions and reasons for rounds after the first (absent in round 1); the reviewer text says a rejected finding may be raised again only with evidence the rejection did not answer and only by naming it in `reopens`",
+        "Define request/result types (reviewRequest, revisionRequest carrying PRD, input, context, split *splitContext, round, limit, earlier findings, findings) and an unexported `reviewer` interface with Review(ctx, req) ([]Finding, agentrun.Result, error) and Revise(ctx, req) (PRD, []Disposition, agentrun.Result, error); implement it on agentAuthor (or a sibling agentReviewer sharing runner/ws/codeSearch) in specgen/phases.go, so the existing author fakes need no change",
+        "Each call builds a fresh agentrun.Phase: Name and Kind prd_review/prd_revision, System = review system prompt + runContextBlock(lang, steering, repoMap), landscape block, BuiltinTools = agentrun.WithCodeSearch(agentrun.ReadOnlyFileTools, a.codeSearch), Terminator, Custom tool from tasks 3/4, MaxTokens = the --max-tokens value, no history",
+        "When the conversation ends with no accepted submission return agentrun.NoResultError(\"prd_review\", ToolSubmitPRDReview, res) or the revision equivalent",
+        "Make Options accept an injected reviewer for tests (as the author field is)"
+      ],
+      "touches": [
+        "specgen/phases.go",
+        "specgen/prompts.go",
+        "specgen/split.go",
+        "specgen/review_test.go",
+        "specgen/pipeline.go",
+        "specgen/templates/prd_review_system.md",
+        "specgen/templates/prd_review_user.md",
+        "specgen/templates/prd_revision_system.md",
+        "specgen/templates/prd_revision_user.md"
+      ],
+      "depends_on": [
+        3,
+        4
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "implement",
+      "title": "Implement the round loop, stop reasons and the review record",
+      "criteria": [
+        "09-REQ-6",
+        "09-REQ-9.3"
+      ],
+      "tests": [
+        "TS-09-33",
+        "TS-09-34",
+        "TS-09-35",
+        "TS-09-36",
+        "TS-09-37",
+        "TS-09-38",
+        "TS-09-52"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/rounds_test.go (TS-09-38 and TS-09-52 as property tests over generated outcome sequences and round limits 1 to 5) and confirm they fail",
+        "Create specgen/rounds.go with runRounds(ctx, env, prd PRD, label string, split *splitContext) (PRD, *Review, error) that calls the reviewer interface from task 5 per round",
+        "Per round: run the review; zero findings -> record the round with an empty list, count it in rounds_run, stop `no_findings`, PRD unchanged; otherwise run the revision on those findings, mark dispositions accepted/rejected(with reason) from the accepted submission, replace the PRD with the revised one",
+        "After a finished revision continue only when the round's review had a critical or major finding and rounds run < limit; all-minor stops with `no_serious_findings`; a critical/major finding at the limit stops with `rounds_exhausted`",
+        "Pass the accumulated earlier findings (ids, dispositions, reasons) to both the reviewer and reviser of every round after the first, and the earlier findings to the review tool for its reopens checks",
+        "Build the Review record with a single buildReview(rounds, limit, stop) helper so findings_count = accepted+rejected+unanswered and rounds_run = len(rounds); a review/revision that did not finish yields stop `incomplete` which beats every other reason (failure handling itself is added in task 7: leave a clearly named hook returning the incomplete outcome)",
+        "Ensure at most `limit` reviews run and exactly one stop reason results for every sequence"
+      ],
+      "touches": [
+        "specgen/rounds.go",
+        "specgen/rounds_test.go"
+      ],
+      "depends_on": [
+        2,
+        5
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 7,
+      "kind": "implement",
+      "title": "Handle failed rounds, budget stops and interrupts without failing the run",
+      "criteria": [
+        "09-REQ-7.1",
+        "09-REQ-7.2",
+        "09-REQ-7.3",
+        "09-REQ-7.4",
+        "09-REQ-7.5"
+      ],
+      "tests": [
+        "TS-09-39",
+        "TS-09-40",
+        "TS-09-41",
+        "TS-09-42",
+        "TS-09-43"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/rounds_failure_test.go and confirm they fail",
+        "In runRounds, when the reviewer or reviser returns an error: if ctx.Err() != nil (user interrupt) return fail(\"prd_review\" or \"prd_revision\", agentrun.CategoryAborted, err) with no warning and no PRD; otherwise (turn limit, budget, --phase-timeout with a live ctx, refusal, API or internal error) stop the rounds, stop_reason `incomplete`, and return the last complete PRD",
+        "Record each finished or failed phase's usage via recordPhase before deciding, so its cost counts toward the spend",
+        "Record the warning through o.Run.Warn(envelope.WarnPRDReviewIncomplete, high, ...) naming the spec name, the round, the failed phase and the reason (use agentrun.CategoryOf and the error text)",
+        "If a review finished but its revision failed, mark that round's findings `unanswered` with no reason and keep the PRD the review read",
+        "Before each review and each revision, when o.TotalBudgetUSD > 0 and o.Run.CostUSD() >= o.TotalBudgetUSD, do not start the phase: stop as for a failed phase with a warning reason naming the total budget, the spend and the ceiling; rounds_run stays 0 when stopped before the first review; a stop between review and revision leaves that review's findings unanswered",
+        "Confirm the run's status and exit code are unaffected by these warnings (high warning only)"
+      ],
+      "touches": [
+        "specgen/rounds.go",
+        "specgen/rounds_failure_test.go"
+      ],
+      "depends_on": [
+        6
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 8,
+      "kind": "implement",
+      "title": "Run the rounds for an undivided input and generate from the final PRD",
+      "criteria": [
+        "09-REQ-1.5",
+        "09-REQ-1.6",
+        "09-REQ-8.1",
+        "09-REQ-9.1",
+        "09-REQ-9.4",
+        "09-REQ-9.5"
+      ],
+      "tests": [
+        "TS-09-5",
+        "TS-09-6",
+        "TS-09-45",
+        "TS-09-53",
+        "TS-09-54"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/pipeline_review_test.go driving the real pipeline over the afspec/testdata/valid_spec fixture with scripted author, reviewer and reviser fakes, and confirm they fail",
+        "In specgen/pipeline.go Run, for an undivided input and Options.Adversarial, call runRounds after the PRD phase and after o.Name is applied, and before env.reservePackage; use the returned PRD for reservePackage and buildPackage",
+        "Change buildPackage to take the review record: set Package.Review on the pkg (also on the unwritten copy, since unwritten(pkg) copies the struct) so a package whose generation fails still reports its review",
+        "Make sure prd.md, the comment from prdComment, result.OpenQuestions and result.RelevantFiles, and the requirements/test_spec/tasks/architecture phase inputs all come from the final PRD (body, relevant files, notes); write no review data to disk or comment",
+        "With Adversarial off, call nothing of the review path: same phases, prompts, result, summary, files and usage; no `review` key",
+        "Dry run runs the rounds as normal and writes nothing; its Review equals a real run's field by field"
+      ],
+      "touches": [
+        "specgen/pipeline.go",
+        "specgen/pipeline_review_test.go"
+      ],
+      "depends_on": [
+        7
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 9,
+      "kind": "implement",
+      "title": "Run the rounds per split scope in the coordinator",
+      "criteria": [
+        "09-REQ-7.6",
+        "09-REQ-8.2",
+        "09-REQ-8.3",
+        "09-REQ-8.4",
+        "09-REQ-8.5"
+      ],
+      "tests": [
+        "TS-09-44",
+        "TS-09-46",
+        "TS-09-47",
+        "TS-09-48",
+        "TS-09-49",
+        "TS-09-50"
+      ],
+      "steps": [
+        "Write the listed tests in specgen/split_review_test.go using the concurrentAuthor/scripted fakes and confirm they fail",
+        "In specgen/split_run.go writeSplit, after each scope's PRD phase and the forced planned-name replacement (WarnScopeRenamed), call runRounds with that scope's splitContext, then store the returned PRD in drafts[i] and notes, then reserve the package and start its goroutine with the final PRD and review",
+        "For scope 0 (the `first` PRD, which has no splitContext today) build a splitContext {Plan, Index 0, SpecsDir, SpecRoot, Drafts, Notes} inside the loop after the split plan is recorded, and run its rounds there",
+        "Make sure drafted(drafts, plan, e) and notesOf(drafts) hand the next scope's PRD phase the revised PRDs and notes",
+        "On resume only the scopes written in this run are reviewed; packages from earlier runs get no rounds and no Review",
+        "Attach the Review to the first package and every follow-on package, including unwritten ones",
+        "Keep the existing before-PRD-phase total-budget check unchanged (failf stage budget, category budget)",
+        "Check pipelining still works: package goroutines run concurrently while the coordinator runs rounds"
+      ],
+      "touches": [
+        "specgen/split_run.go",
+        "specgen/split_review_test.go",
+        "specgen/pipeline.go"
+      ],
+      "depends_on": [
+        8
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 10,
+      "kind": "implement",
+      "title": "Add the summary clause, the summary view, progress lines and usage records",
+      "criteria": [
+        "09-REQ-9.6",
+        "09-REQ-9.7",
+        "09-REQ-10.1",
+        "09-REQ-10.2"
+      ],
+      "tests": [
+        "TS-09-55",
+        "TS-09-56",
+        "TS-09-57",
+        "TS-09-58"
+      ],
+      "steps": [
+        "Write the listed tests and confirm they fail",
+        "In specgen/pipeline.go Result.Summary add, after the open-questions clause and before the high-warning clause, `review: <R> round(s), <F> finding(s), <A> accepted` totalled over the first package and every follow-on package that has a Review; singular noun at 1, drop `, <A> accepted` when F is 0; no clause when no package has a review; check the cli summarize 200-rune cap and high-warning clause still apply",
+        "In specgen/summary.go SummaryView keep the first package's Review with every field except Rounds (copy the struct with Rounds=nil) so the output still decodes into envelope.SpecResult",
+        "In runRounds wrap each phase with o.Progress.Begin(\"%s%s the PRD (round %d of %d)\") using prefixed(label), finishing with cli.PhaseSummary(stats) (turns and tokens); after a review print a line with the count by severity (e.g. `1 critical, 2 minor`), after a revision a line with `N accepted, M rejected`",
+        "Record each phase through recordPhase(o.Run, stats, scope) under the names prd_review and prd_revision with scope, model, effort, turns and cost so Run.CostUSD includes them",
+        "Verify usage.phases[] entries have the shape of other phases and carry no round field"
+      ],
+      "touches": [
+        "specgen/pipeline.go",
+        "specgen/summary.go",
+        "specgen/rounds.go",
+        "specgen/summary_test.go",
+        "specgen/pipeline_review_test.go"
+      ],
+      "depends_on": [
+        9
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 11,
+      "kind": "integration",
+      "title": "Verify the adversarial review paths end to end and update the documentation",
+      "tests": [
+        "TS-09-65",
+        "TS-09-66",
+        "TS-09-67",
+        "TS-09-68"
+      ],
+      "steps": [
+        "Write TS-09-65 to TS-09-68 against the real spec command (cmd/spec main with a scripted provider and a real temp specs dir) and confirm they pass",
+        "Trace 09-PATH-1 to 09-PATH-4 through the real code: PreCheck -> specOptions -> specgen.Run/RunPreflight -> runRounds -> reviewer/reviser tools -> reservePackage -> buildPackage -> Summary; confirm each step calls the next and no stub remains",
+        "Confirm every contract is consumed in production code: Review is attached to Package and emitted in the envelope, stop_reason `incomplete` and the prd_review_incomplete warning reach the envelope, the aborted failure reaches the exit code, the preflight estimate reaches the result",
+        "Grep every file listed in the tasks' touches for TODO, NotImplementedError, panic(\"not implemented\") and bare `return nil` on non-trivial paths, and remove any that remain",
+        "Update docs/cli.md (flags, tier table, --phase-model phases, preflight, review in the result, summary clause, warning code and stages), docs/api.md (new envelope types and fields), docs/architecture.md (a run, a phase, what each phase is sent) and add docs/adr/09-review-the-prd-adversarially.md recording this decision, without writing tests for docs",
+        "Run make doc to refresh docs/generated/, then make check, and confirm both pass"
+      ],
+      "touches": [
+        "cmd/spec/e2e_test.go",
+        "specgen/smoke_integration_test.go",
+        "docs/cli.md",
+        "docs/api.md",
+        "docs/architecture.md",
+        "docs/adr/09-review-the-prd-adversarially.md",
+        "docs/generated/"
+      ],
+      "depends_on": [
+        10,
+        2
+      ],
+      "done_when": [
+        "`make check` passes",
+        "docs/generated/ is regenerated with `make doc`"
+      ],
+      "state": "pending"
+    }
+  ]
+}
