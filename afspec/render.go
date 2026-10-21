@@ -619,9 +619,12 @@ func renderTaskFull(sb *strings.Builder, task Task, commands *TestCommands) {
 		sb.WriteString(fmt.Sprintf("**Depends on:** %s\n\n", strings.Join(deps, ", ")))
 	}
 
+	// Steps are numbered task.step, so one can be named outside its task.
+	// The number is not an ordered-list marker, which Markdown would
+	// renumber, so each step is a bullet.
 	sb.WriteString("**Steps:**\n\n")
-	for _, step := range task.Steps {
-		sb.WriteString(fmt.Sprintf("1. %s\n", step))
+	for i, step := range task.Steps {
+		sb.WriteString(fmt.Sprintf("- %d.%d %s\n", task.Id, i+1, step))
 	}
 	sb.WriteString("\n")
 

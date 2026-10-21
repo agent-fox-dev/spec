@@ -103,6 +103,26 @@ func TestRenderTasksShowsThePlan(t *testing.T) {
 	}
 }
 
+// Each step is numbered task.step, so a step can be named across tasks.
+func TestRenderTasksNumbersSteps(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	out := spec.Tasks.Render()
+
+	for _, want := range []string{
+		"- 1.1 Write TS-01-1, TS-01-2 and TS-01-3 and confirm they fail\n",
+		"- 1.4 Write the artifacts back through the deterministic marshaller\n",
+		"- 2.1 Write TS-01-4 and confirm it fails\n",
+		"- 3.3 Confirm Validate is called from production code, not only from tests\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the tasks render is missing %q", want)
+		}
+	}
+	if strings.Contains(out, "\n1. ") {
+		t.Error("a step is still rendered as an unnumbered ordered-list item")
+	}
+}
+
 func TestRenderCombinedSectionOrder(t *testing.T) {
 	spec := loadFixture(t, "testdata/valid_spec_with_arch")
 	out := spec.RenderCombined()
