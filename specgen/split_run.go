@@ -26,6 +26,11 @@ const DefaultMaxParallel = 3
 // phase, with at most Options.MaxParallel packages in flight. One or less
 // keeps the old order: each scope's PRD waits for the package before it.
 //
+// With --adversarial, each scope's PRD is reviewed in the coordinator after
+// its PRD phase, before its package is reserved, so the scope after it is
+// written against the PRD the review left. A resumed split reviews only the
+// scopes it writes.
+//
 // A package that does not validate stops nothing: it is on disk, its errors
 // name the rules, and the scopes after it are not made better by being
 // skipped. Any other failure stops the run starting anything new; packages
@@ -112,6 +117,20 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 					label, len(prd.RecommendedSplit))
 			}
 		}
+		// The scope's PRD is reviewed here, in the coordinator, so the next
+		// scope's PRD phase is shown the PRD the review left, and before the
+		// number is reserved, so an interrupt leaves no reservation behind.
+		var review *Review
+		if o.Adversarial {
+			split := &splitContext{Plan: e.planSnapshot(plan), Index: i, SpecsDir: e.specsDir,
+				SpecRoot: specRoot, Drafts: drafted(drafts, plan, e), Notes: notesOf(drafts)}
+			var err error
+			prd, review, err = e.runRounds(ctx, prd, label, split)
+			if err != nil {
+				fail(i, err)
+				break
+			}
+		}
 		drafts[i] = prd
 		if stopped() {
 			// Another scope failed while this PRD was written.
@@ -125,7 +144,7 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 
 		sem <- struct{}{}
 		wg.Add(1)
-		go func(i int, prd PRD, label string, sl slot) {
+		go func(i int, prd PRD, label string, sl slot, review *Review) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			// The scope is recorded in the plan the moment its package is on
@@ -133,7 +152,7 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 			// run killed after the write must not leave a package the next
 			// run does not know about and writes a second time.
 			onWritten := func(specID, dirName string) { e.recordScope(plan, i, specID, dirName, false, label) }
-			pkg, err := e.buildPackage(ctx, prd, label, sl, onWritten, nil)
+			pkg, err := e.buildPackage(ctx, prd, label, sl, onWritten, review)
 			builds[i] = &built{pkg: pkg, err: err}
 			switch {
 			case err == nil:
@@ -143,7 +162,7 @@ func (e *runEnv) writeSplit(ctx context.Context, plan *SplitPlan, first *PRD, re
 			default:
 				fail(i, err)
 			}
-		}(i, prd, label, sl)
+		}(i, prd, label, sl, review)
 		if parallel == 1 {
 			wg.Wait()
 		}
