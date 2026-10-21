@@ -204,6 +204,83 @@ func TestUnknownTask(t *testing.T) {
 	}
 }
 
+// A package with no tasks says so, rather than listing none.
+func TestUnknownTaskInEmptyPlan(t *testing.T) {
+	root := newRepo(t)
+	tasks := filepath.Join(root, ".specs", "09_agent_mode", "tasks.json")
+	b, err := os.ReadFile(tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(b, []byte(`"tasks": [`))
+	if i < 0 {
+		t.Fatal("no tasks array in the fixture")
+	}
+	if err := os.WriteFile(tasks, append(b[:i:i], []byte(`"tasks": []}`)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env, code, _ := run(t, "--dir", root, "9", "--task", "1")
+	if code != cli.ExitUsage || !strings.HasSuffix(env.Error.Message, "has no task 1; it has no tasks") {
+		t.Errorf("code %d: %+v", code, env.Error)
+	}
+}
+
+// newLegacyPackage adds a package in format version 1 as 07_legacy: the v2
+// example with its frontmatter's version set back and a v1 task plan, whose
+// task_groups the v2 types do not read.
+func newLegacyPackage(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, ".specs", "07_legacy")
+	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "v2_example"), dir)
+	prd := filepath.Join(dir, "prd.md")
+	b, err := os.ReadFile(prd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prd, bytes.Replace(b, []byte("schema_version: 2"), []byte("schema_version: 1"), 1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v1 := `{"spec_id": "09", "spec_name": "agent_mode", "schema_version": 1,
+  "task_groups": [{"id": 1, "kind": "tests", "title": "Write tests",
+    "subtasks": [{"id": "1.1", "title": "Write a test", "state": "done"}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "tasks.json"), []byte(v1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --task on a package in an older format is refused naming the version,
+// since none of its tasks can be read.
+func TestTaskInLegacyPackage(t *testing.T) {
+	root := newRepo(t)
+	newLegacyPackage(t, root)
+	env, code, stderr := run(t, "--dir", root, "7", "--task", "1")
+	if code != cli.ExitUsage || env.Error.Stage != "usage" ||
+		!strings.Contains(env.Error.Message, "format version 1") || !strings.Contains(env.Error.Message, "§13") {
+		t.Errorf("code %d: %+v", code, env.Error)
+	}
+	if !strings.Contains(stderr, "format version 1") {
+		t.Errorf("stderr: %q", stderr)
+	}
+}
+
+// A package in an older format still renders whole, with a high-severity
+// warning that its tests and tasks were not read.
+func TestWholeLegacyPackage(t *testing.T) {
+	root := newRepo(t)
+	newLegacyPackage(t, root)
+	env, code, _ := run(t, "--dir", root, "7")
+	if code != cli.ExitOK || env.Result.Valid || len(env.Result.Tasks) != 0 {
+		t.Fatalf("code %d valid %v tasks %+v", code, env.Result.Valid, env.Result.Tasks)
+	}
+	if len(env.Warnings) != 1 || env.Warnings[0].Code != cli.WarnSpecInvalid || env.Warnings[0].Severity != "high" ||
+		!strings.Contains(env.Warnings[0].Message, "format version 1") {
+		t.Errorf("warnings %+v", env.Warnings)
+	}
+	if !strings.Contains(env.Summary, "1 high-severity warning") {
+		t.Errorf("summary %q", env.Summary)
+	}
+}
+
 // --section renders only the sections named, in the package's order.
 func TestSection(t *testing.T) {
 	root := newRepo(t)

@@ -61,7 +61,16 @@ reads a package from disk.
 | `--max-tokens N` | the library's budget: when the estimated tokens (bytes / 4) are over N, first the architecture section is dropped, then each test's `given`, `when`, `real_components` and `pseudocode`. What was dropped is `result.reduced`; a render still over N after both carries an `over_budget` warning. Cannot be combined with `--section` |
 
 `--task` names an id from `result.tasks`. An id the plan does not have is a
-usage error whose `fix_hint.valid` lists the ids.
+usage error whose `fix_hint.valid` lists the ids, or that says the plan has no
+tasks.
+
+`specr` reads format version 2 only. A package whose PRD frontmatter declares
+another `schema_version` — such as the version 1 packages under
+`.specs/archive/`, whose plan is `task_groups` — still loads, but none of its
+tests or tasks are read. Rendered whole, it carries a high-severity
+`spec_invalid` warning saying so; `--task` on it is a usage error naming the
+version, since it has no task to scope to. Format v2 §13 maps each v1
+construct to its v2 form.
 
 ## The output
 
@@ -147,7 +156,7 @@ It is absent when there is none.
 
 | `stage` | `category` | When |
 |---|---|---|
-| `usage` | `usage` | a flag that cannot hold, a reference that names no package or two, an unknown task. Nothing was read |
+| `usage` | `usage` | a flag that cannot hold, a reference that names no package or two, an unknown task, `--task` on a package in an older format. Nothing was rendered |
 | `load` | `input` | `afspec.LoadSpec` refused the package: a missing artifact, malformed JSON or YAML |
 | `write` | `disk` | `--markdown-file` could not be written; `result` is still present |
 
@@ -166,7 +175,7 @@ on a second identical try.
 
 | Code | Severity | Stage | When |
 |---|---|---|---|
-| `spec_invalid` | low | validate | the package does not validate; it is rendered as it is |
+| `spec_invalid` | low, or high for a package in an older format | validate | the package does not validate; it is rendered as it is. An older-format package's tests and tasks are not read, so the render is missing them |
 | `section_absent` | low | render | `--section architecture` on a package without `architecture.md` |
 | `over_budget` | low | render | the render is still over `--max-tokens` with everything droppable dropped |
 

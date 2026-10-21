@@ -235,12 +235,24 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 		Status:   spec.Status,
 		Tasks:    taskInfos(spec),
 	}}
+	// A package in an older format loads, but the v2 types read none of its
+	// tests or tasks: a v1 plan is task_groups, not tasks.
+	legacy := spec.SchemaVersion != 0 && spec.SchemaVersion != afspec.SchemaVersion
 	if o.task > 0 {
+		if legacy {
+			return cli.ExitUsage, nil, usageInfo(fmt.Errorf(
+				"%s is format version %d, and specr reads version %d only: none of its tasks can be read, so it cannot be scoped to one; "+
+					"render it whole without --task, or convert it to version %d (format v2 §13 maps each v1 construct to its v2 form)",
+				res.SpecDir, spec.SchemaVersion, afspec.SchemaVersion, afspec.SchemaVersion), nil)
+		}
 		t, ok := findTask(spec, o.task)
 		if !ok {
 			ids := make([]string, len(res.Tasks))
 			for i, ti := range res.Tasks {
 				ids[i] = fmt.Sprint(ti.ID)
+			}
+			if len(ids) == 0 {
+				return cli.ExitUsage, nil, usageInfo(fmt.Errorf("%s has no task %d; it has no tasks", res.SpecDir, o.task), nil)
 			}
 			return cli.ExitUsage, nil, usageInfo(
 				fmt.Errorf("%s has no task %d; its tasks are %s", res.SpecDir, o.task, strings.Join(ids, ", ")),
@@ -252,6 +264,10 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 
 	if v := spec.Validate(); v.Valid {
 		res.Valid = true
+	} else if legacy {
+		run.Warn(cli.WarnSpecInvalid, "high", "the package is format version %d, and specr reads version %d only: "+
+			"its tests and tasks are not read, and the render holds only what the two versions share — "+
+			"format v2 §13 maps each v1 construct to its v2 form", spec.SchemaVersion, afspec.SchemaVersion)
 	} else {
 		run.Warn(cli.WarnSpecInvalid, "low", "the package does not validate (%d errors: %s); it is rendered as it is",
 			len(v.Errors), rules(v.Errors))
