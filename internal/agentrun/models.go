@@ -29,7 +29,12 @@ var Tiers = []ModelTier{TierSimple, TierStandard, TierAdvanced}
 
 // The phases of a run a model and an effort can be chosen for.
 const (
-	PhasePRD          = "prd"
+	PhasePRD = "prd"
+	// PhasePRDReview and PhasePRDRevision are the adversarial review of a
+	// PRD and its answer (--adversarial). No tier lists them, so they run on
+	// the tier's base entry: the PRD phase's model and effort.
+	PhasePRDReview    = "prd_review"
+	PhasePRDRevision  = "prd_revision"
 	PhaseRequirements = "requirements"
 	PhaseTestSpec     = "test_spec"
 	PhaseTasks        = "tasks"
@@ -38,7 +43,7 @@ const (
 
 // Phases are the phases a model can be chosen for, in the order a package is
 // built.
-var Phases = []string{PhasePRD, PhaseRequirements, PhaseTestSpec, PhaseTasks, PhaseArchitecture}
+var Phases = []string{PhasePRD, PhasePRDReview, PhasePRDRevision, PhaseRequirements, PhaseTestSpec, PhaseTasks, PhaseArchitecture}
 
 // tierEntry pairs a catalog model id with the effort the tier prescribes.
 // Separating model from effort lets two tiers share a model while running it

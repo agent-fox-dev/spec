@@ -185,6 +185,12 @@ type (
 	ValidationItem = envelope.ValidationItem
 	// TraceReport is the derived coverage summary.
 	TraceReport = envelope.TraceReport
+	// Review is the adversarial review of one package's PRD.
+	Review = envelope.Review
+	// ReviewRound is one review and the revision that answered it.
+	ReviewRound = envelope.ReviewRound
+	// Finding is one flaw a reviewer reported and what became of it.
+	Finding = envelope.ReviewFinding
 )
 
 // Scope states, as reported in Result.Split.
@@ -1153,6 +1159,9 @@ func phaseModels(r *agentrun.Runner, architecture bool) string {
 	var parts []string
 	for _, phase := range agentrun.Phases {
 		if phase == agentrun.PhaseArchitecture && !architecture {
+			continue
+		}
+		if phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision {
 			continue
 		}
 		parts = append(parts, phase+" "+r.ModelFor(phase).String())

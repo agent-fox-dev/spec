@@ -76,6 +76,11 @@ type Package struct {
 	// run-time pipeline, never inside the spec package directory.
 	RelevantFiles []RelevantFile `json:"relevant_files,omitempty"`
 
+	// Review is how the PRD was reviewed and revised before the package was
+	// generated from it. It is present exactly when the run had
+	// --adversarial on.
+	Review *Review `json:"review,omitempty"`
+
 	// Detail records which view of this result was emitted: "summary" or
 	// "full". It is present on both.
 	Detail string `json:"detail"`
@@ -159,3 +164,86 @@ type RelevantFile struct {
 	Path string `json:"path"`
 	Why  string `json:"why"`
 }
+
+// Review is the adversarial review of one package's PRD: every round, every
+// finding, and what became of it. It lives only in the result, never in the
+// package directory.
+type Review struct {
+	// RoundsRun counts the rounds started, a review with no findings
+	// included. It is 0 when the budget stopped the run before the first
+	// review.
+	RoundsRun int `json:"rounds_run"`
+	// RoundsAllowed is the round limit, --adversarial-rounds or 1.
+	RoundsAllowed int `json:"rounds_allowed"`
+	// StopReason is the one reason the rounds stopped: one of the
+	// ReviewStop constants.
+	StopReason string `json:"stop_reason"`
+	// The totals over every round. FindingsCount is the sum of the other
+	// three.
+	FindingsCount   int `json:"findings_count"`
+	AcceptedCount   int `json:"accepted_count"`
+	RejectedCount   int `json:"rejected_count"`
+	UnansweredCount int `json:"unanswered_count"`
+	// Rounds are the rounds in order. The --detail summary view leaves them
+	// out and keeps the counts.
+	Rounds []ReviewRound `json:"rounds,omitempty"`
+}
+
+// ReviewRound is one review and the revision that answered it.
+type ReviewRound struct {
+	Round    int             `json:"round"`
+	Findings []ReviewFinding `json:"findings"`
+}
+
+// ReviewFinding is one flaw a reviewer reported and what became of it.
+type ReviewFinding struct {
+	// ID is R<round>-F<n>, assigned by the run in the order the reviewer
+	// submitted the findings.
+	ID       string `json:"id"`
+	Severity string `json:"severity"`
+	Section  string `json:"section"`
+	Flaw     string `json:"flaw"`
+	Evidence string `json:"evidence"`
+	Remedy   string `json:"remedy"`
+	// Reopens is the id of an earlier rejected finding this one raises
+	// again with new evidence.
+	Reopens     string `json:"reopens,omitempty"`
+	Disposition string `json:"disposition"`
+	// Reason is the reviser's reason for a rejection, and absent otherwise.
+	Reason string `json:"reason,omitempty"`
+}
+
+// A finding's severity.
+const (
+	// SeverityCritical means the package would specify the wrong thing.
+	SeverityCritical = "critical"
+	// SeverityMajor means a requirement would be missing or untestable.
+	SeverityMajor = "major"
+	// SeverityMinor is wording and clarity.
+	SeverityMinor = "minor"
+)
+
+// A finding's disposition.
+const (
+	// DispositionAccepted means the PRD was changed to remedy the finding.
+	DispositionAccepted = "accepted"
+	// DispositionRejected means the reviser gave a reason it does not hold.
+	DispositionRejected = "rejected"
+	// DispositionUnanswered means no revision finished for its round.
+	DispositionUnanswered = "unanswered"
+)
+
+// Why the rounds of a review stopped.
+const (
+	// ReviewStopNoFindings means the last review raised none.
+	ReviewStopNoFindings = "no_findings"
+	// ReviewStopNoSeriousFindings means the last review raised only minor
+	// findings, and its revision finished.
+	ReviewStopNoSeriousFindings = "no_serious_findings"
+	// ReviewStopRoundsExhausted means the last review raised a critical or
+	// major finding, its revision finished, and the round limit was reached.
+	ReviewStopRoundsExhausted = "rounds_exhausted"
+	// ReviewStopIncomplete means a review or revision did not finish, or the
+	// total budget stopped the rounds. It wins over every other reason.
+	ReviewStopIncomplete = "incomplete"
+)

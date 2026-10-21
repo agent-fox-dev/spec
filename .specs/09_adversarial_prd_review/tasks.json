@@ -43,7 +43,7 @@
         "envelope/warn.go",
         "specgen/pipeline.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

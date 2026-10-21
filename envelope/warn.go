@@ -29,6 +29,7 @@ const (
 	WarnActivationFailed         WarnCode = "activation_failed"
 	WarnCommentNotPosted         WarnCode = "comment_not_posted"
 	WarnOutputNotWritten         WarnCode = "output_not_written"
+	WarnPRDReviewIncomplete      WarnCode = "prd_review_incomplete"
 	// specr's codes.
 	WarnSpecInvalid   WarnCode = "spec_invalid"
 	WarnSectionAbsent WarnCode = "section_absent"
