@@ -57,6 +57,11 @@ package is generated as soon as its PRD exists, up to --max-parallel at once. Th
 <first_scope>.split.json until the last package is written; a run that stops
 early is resumed by running spec on the same input again.
 
+--adversarial reviews every PRD before its package is generated: a fresh
+agent looks for its flaws and another revises it to answer them, for up to
+--adversarial-rounds rounds (default 1). A review that cannot finish is a
+warning, not a failure: the package is generated from the last complete PRD.
+
 Everything the model does here is read-only. The only thing written is the
 spec package itself, by this program, after the run.
 

@@ -104,57 +104,9 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 			var problems []string
 			unsupported := false
 			for i := range payload.Findings {
-				f := &payload.Findings[i]
-				for _, s := range []*string{&f.Severity, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
-					*s = strings.TrimSpace(*s)
-				}
-				f.ID, f.Disposition, f.Reason = "", "", ""
-				pos := i + 1
-
-				var empty []string
-				for _, field := range []struct{ name, val string }{
-					{"severity", f.Severity}, {"section", f.Section}, {"flaw", f.Flaw},
-					{"evidence", f.Evidence}, {"remedy", f.Remedy},
-				} {
-					if field.val == "" {
-						empty = append(empty, field.name)
-					}
-				}
-				if len(empty) > 0 {
-					unsupported = true
-					problems = append(problems, fmt.Sprintf("finding %d has an empty %s", pos, strings.Join(empty, ", ")))
-				}
-				if f.Severity != "" && !slices.Contains(severities, f.Severity) {
-					problems = append(problems, fmt.Sprintf("finding %d has severity %q; it is one of %s",
-						pos, f.Severity, strings.Join(severities, ", ")))
-				}
-
-				switch {
-				case f.Reopens != "" && round == 1:
-					problems = append(problems, fmt.Sprintf("finding %d reopens %s, and round 1 has no earlier "+
-						"finding to reopen; leave reopens empty", pos, f.Reopens))
-				case f.Reopens != "":
-					was, ok := byID[f.Reopens]
-					switch {
-					case !ok:
-						problems = append(problems, fmt.Sprintf("finding %d reopens %s, which is no earlier "+
-							"finding of this PRD", pos, f.Reopens))
-					case was.Disposition == envelope.DispositionRejected && sameEvidence(was.Evidence, f.Evidence):
-						problems = append(problems, fmt.Sprintf("finding %d reopens %s with the evidence its "+
-							"rejection already answered; reopen it only with evidence the rejection did not "+
-							"answer, or withdraw it", pos, was.ID))
-					}
-				default:
-					for _, was := range earlier {
-						if was.Disposition == envelope.DispositionRejected &&
-							sameEvidence(was.Section, f.Section) && sameEvidence(was.Flaw, f.Flaw) {
-							problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was rejected; "+
-								"raise it again only by naming %s in reopens with evidence the rejection did not "+
-								"answer, or withdraw it", pos, was.ID, was.ID))
-							break
-						}
-					}
-				}
+				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID)
+				problems = append(problems, p...)
+				unsupported = unsupported || empty
 			}
 			if len(problems) > 0 {
 				msg := "the review was not accepted: " + strings.Join(problems, "; ") + "."
@@ -177,6 +129,61 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 			return res
 		},
 	}
+}
+
+// checkFinding normalises the finding at position pos of round round's
+// review and says what is wrong with it, and whether a field is empty.
+// earlier are the earlier rounds' findings, byID the same by id.
+func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding) (problems []string, empty bool) {
+	for _, s := range []*string{&f.Severity, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
+		*s = strings.TrimSpace(*s)
+	}
+	f.ID, f.Disposition, f.Reason = "", "", ""
+
+	var missing []string
+	for _, field := range []struct{ name, val string }{
+		{"severity", f.Severity}, {"section", f.Section}, {"flaw", f.Flaw},
+		{"evidence", f.Evidence}, {"remedy", f.Remedy},
+	} {
+		if field.val == "" {
+			missing = append(missing, field.name)
+		}
+	}
+	if len(missing) > 0 {
+		problems = append(problems, fmt.Sprintf("finding %d has an empty %s", pos, strings.Join(missing, ", ")))
+	}
+	if f.Severity != "" && !slices.Contains(severities, f.Severity) {
+		problems = append(problems, fmt.Sprintf("finding %d has severity %q; it is one of %s",
+			pos, f.Severity, strings.Join(severities, ", ")))
+	}
+
+	switch {
+	case f.Reopens != "" && round == 1:
+		problems = append(problems, fmt.Sprintf("finding %d reopens %s, and round 1 has no earlier "+
+			"finding to reopen; leave reopens empty", pos, f.Reopens))
+	case f.Reopens != "":
+		was, ok := byID[f.Reopens]
+		switch {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("finding %d reopens %s, which is no earlier "+
+				"finding of this PRD", pos, f.Reopens))
+		case was.Disposition == envelope.DispositionRejected && sameEvidence(was.Evidence, f.Evidence):
+			problems = append(problems, fmt.Sprintf("finding %d reopens %s with the evidence its "+
+				"rejection already answered; reopen it only with evidence the rejection did not "+
+				"answer, or withdraw it", pos, was.ID))
+		}
+	default:
+		for _, was := range earlier {
+			if was.Disposition == envelope.DispositionRejected &&
+				sameEvidence(was.Section, f.Section) && sameEvidence(was.Flaw, f.Flaw) {
+				problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was rejected; "+
+					"raise it again only by naming %s in reopens with evidence the rejection did not "+
+					"answer, or withdraw it", pos, was.ID, was.ID))
+				break
+			}
+		}
+	}
+	return problems, len(missing) > 0
 }
 
 // normaliseEvidence trims s and collapses every run of whitespace inside it

@@ -272,13 +272,14 @@ func TestTS09_37_LaterRoundsAreSentTheEarlierFindings(t *testing.T) {
 	}
 }
 
-// outcomeSequence is a random script for up to limit rounds.
+// outcomeSequence is a random script for up to limit rounds. Each phase
+// costs 0 or 1, so a total budget can stop the rounds anywhere.
 func outcomeSequence(rng *rand.Rand, limit int) ([]reviewOutcome, []revisionOutcome) {
 	sevs := []string{"critical", "major", "minor"}
 	var reviews []reviewOutcome
 	var revisions []revisionOutcome
 	for range limit {
-		r := reviewOutcome{}
+		r := reviewOutcome{cost: float64(rng.Intn(2))}
 		switch rng.Intn(5) {
 		case 0:
 			r.err = errors.New("review failed")
@@ -290,7 +291,7 @@ func outcomeSequence(rng *rand.Rand, limit int) ([]reviewOutcome, []revisionOutc
 			}
 		}
 		reviews = append(reviews, r)
-		v := revisionOutcome{}
+		v := revisionOutcome{cost: float64(rng.Intn(2))}
 		if rng.Intn(5) == 0 {
 			v.err = errors.New("revision failed")
 		}
@@ -304,25 +305,68 @@ func outcomeSequence(rng *rand.Rand, limit int) ([]reviewOutcome, []revisionOutc
 	return reviews, revisions
 }
 
-// TS-09-38 (property): for any limit and any outcomes the loop runs at most
-// the limit of reviews and ends with exactly one stop reason, incomplete
-// whenever a phase did not finish.
+// expectedStop is the stop rules of 09-REQ-6 and 09-REQ-7 applied to a
+// script, as a reference the loop is checked against: the reason, and how
+// many reviews run. budget is the total budget, 0 for none.
+func expectedStop(limit int, budget float64, reviews []reviewOutcome, revisions []revisionOutcome) (string, int) {
+	spent := 0.0
+	over := func() bool { return budget > 0 && spent >= budget }
+	for round := 1; round <= limit; round++ {
+		if over() {
+			return envelope.ReviewStopIncomplete, round - 1
+		}
+		r := reviews[round-1]
+		spent += r.cost
+		if r.err != nil {
+			return envelope.ReviewStopIncomplete, round
+		}
+		if len(r.severities) == 0 {
+			return envelope.ReviewStopNoFindings, round
+		}
+		if over() {
+			return envelope.ReviewStopIncomplete, round
+		}
+		v := revisions[round-1]
+		spent += v.cost
+		if v.err != nil {
+			return envelope.ReviewStopIncomplete, round
+		}
+		serious := false
+		for _, s := range r.severities {
+			serious = serious || s != "minor"
+		}
+		if !serious {
+			return envelope.ReviewStopNoSeriousFindings, round
+		}
+		if round == limit {
+			return envelope.ReviewStopRoundsExhausted, round
+		}
+	}
+	return "", 0
+}
+
+// TS-09-38 (property): for any limit and any outcomes, failures and budget
+// stops included, the loop runs at most the limit of reviews and ends with
+// exactly one stop reason, incomplete whenever a phase did not finish or the
+// budget stopped the rounds, otherwise the last round's.
 //
 // Verifies: 09-REQ-6.7
 func TestTS09_38_TheLoopIsBoundedAndHasOneStopReason(t *testing.T) {
 	rng := rand.New(rand.NewSource(38))
 	reasons := []string{envelope.ReviewStopNoFindings, envelope.ReviewStopNoSeriousFindings,
 		envelope.ReviewStopRoundsExhausted, envelope.ReviewStopIncomplete}
-	for range 500 {
+	for range 1000 {
 		limit := 1 + rng.Intn(5)
+		budget := float64(rng.Intn(4)) // 0 is no total budget
 		reviews, revisions := outcomeSequence(rng, limit)
 		rv := &scriptedReviewer{t: t, reviews: reviews, revisions: revisions}
 		e := roundEnv(t, rv, limit)
+		e.o.TotalBudgetUSD = budget
 		_, review, err := e.runRounds(context.Background(), roundPRD(), "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		nReviews, nRevisions := rv.counts()
+		nReviews, _ := rv.counts()
 		if nReviews > limit || review.RoundsRun > limit {
 			t.Fatalf("limit %d: %d reviews", limit, nReviews)
 		}
@@ -335,40 +379,10 @@ func TestTS09_38_TheLoopIsBoundedAndHasOneStopReason(t *testing.T) {
 		if n != 1 {
 			t.Fatalf("stop reason %q", review.StopReason)
 		}
-
-		failed := false
-		for i := range nReviews {
-			if reviews[i].err != nil {
-				failed = true
-			}
-		}
-		for i := range nRevisions {
-			if revisions[i].err != nil {
-				failed = true
-			}
-		}
-		if failed != (review.StopReason == envelope.ReviewStopIncomplete) {
-			t.Fatalf("a phase failed %v, stop reason %q", failed, review.StopReason)
-		}
-		if failed {
-			continue
-		}
-		last := reviews[nReviews-1]
-		serious := false
-		for _, s := range last.severities {
-			serious = serious || s != "minor"
-		}
-		var want string
-		switch {
-		case len(last.severities) == 0:
-			want = envelope.ReviewStopNoFindings
-		case !serious:
-			want = envelope.ReviewStopNoSeriousFindings
-		default:
-			want = envelope.ReviewStopRoundsExhausted
-		}
-		if review.StopReason != want {
-			t.Fatalf("limit %d, last review %v: stop %q, want %q", limit, last.severities, review.StopReason, want)
+		want, wantReviews := expectedStop(limit, budget, reviews, revisions)
+		if review.StopReason != want || nReviews != wantReviews {
+			t.Fatalf("limit %d, budget %v: stop %q after %d reviews, want %q after %d",
+				limit, budget, review.StopReason, nReviews, want, wantReviews)
 		}
 	}
 }
