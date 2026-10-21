@@ -97,6 +97,9 @@ type Options struct {
 
 	// author is the model half. It is unexported and injected by tests.
 	author author
+	// reviewer is the model half of the adversarial review. It is
+	// unexported and injected by tests; nil means the phases against Runner.
+	reviewer reviewer
 	// buildMap builds the repository map. It is unexported and injected by
 	// tests; nil means repomap.Build.
 	buildMap func(ctx context.Context, ws *workspace.Workspace, budget int, inputPaths []string) (string, error)
@@ -560,6 +563,7 @@ type runEnv struct {
 	root     string
 	specsDir string
 	author   author
+	reviewer reviewer
 	profile  project.Profile
 	// repoMap is the run's repository map, or "" when it is disabled or could
 	// not be built.
