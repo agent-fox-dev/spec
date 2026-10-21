@@ -19,7 +19,7 @@ afspec/                     # The reference library, package afspec
 envelope/                   # The commands' JSON output as Go types (stdlib only)
 cmd/spec/                   # The spec command: flags, help, the entry point
 cmd/specr/                  # The specr command: a package rendered as Markdown
-specgen/                    # The generation pipeline: phases, prompts, split
+specgen/                    # The generation pipeline: phases, prompts, review, split
   templates/                #   The prompts, as Markdown, embedded
 internal/
   agentrun/                 #   One model phase on the AgentKit driver
@@ -124,6 +124,12 @@ combinators (`schema`) and the indexed search (`codesearch`).
    specs, and builds the repository map once (`internal/repomap`).
 3. The **PRD phase** runs, unless a plan is being resumed. It may report a
    split, which is recorded as `<first_scope>.split.json` in the spec root.
+   With `--adversarial`, the PRD then goes through its **review rounds**
+   (`specgen/rounds.go`, [ADR 09](adr/09-review-the-prd-adversarially.md)):
+   a `prd_review` phase finds its flaws, a `prd_revision` phase answers them,
+   and the package is built from the last complete PRD. A split runs each
+   scope's rounds in the coordinator, after its PRD phase and before its
+   number is reserved, so the next scope's PRD phase is shown the revised PRD.
 4. For each package: a spec number is reserved by creating its directory; the
    **requirements**, **test spec** and **tasks** phases run in that order, each
    a fresh agent that sees the PRD and the artifacts before it; the optional
@@ -171,8 +177,8 @@ combinators (`schema`) and the indexed search (`codesearch`).
   retries only a request whose response has not begun, and the driver ends
   the run on the first failed turn.
 
-Each phase declares its kind (`prd`, `requirements`, `test_spec`, `tasks`,
-`architecture`), and the runner builds its agent on that kind's model and
+Each phase declares its kind (`prd`, `prd_review`, `prd_revision`,
+`requirements`, `test_spec`, `tasks`, `architecture`), and the runner builds its agent on that kind's model and
 effort from the run's `agentrun.Plan`: the tier's choice for the phase, or a
 `--phase-model` override. A submit tool's rejection runs
 `afspec.ValidateGenerationStepComplete` and the project audit together, so it
@@ -186,11 +192,11 @@ provider caches it by prefix: whatever two requests share from the start is
 paid for once at the full rate. The prompts are laid out for that
 (ADR 04):
 
-| Part | PRD phase | Generation and architecture phases |
-|---|---|---|
-| system | the mandate, then the run context: language, `steering.md`, repository map | the format's rules, then the same run context |
-| prefix | the input and `--context` | — |
-| task | the landscape of specs and, in a split, the scope block | the PRD, the codebase notes, the landscape, the relevant files, the artifacts before it, the step's instructions |
+| Part | PRD phase | Review and revision phases | Generation and architecture phases |
+|---|---|---|---|
+| system | the mandate, then the run context: language, `steering.md`, repository map | the review's or the revision's mandate, then the same run context | the format's rules, then the same run context |
+| prefix | the input and `--context` | — | — |
+| task | the landscape of specs and, in a split, the scope block | the input and `--context`, the PRD with its open questions and relevant files, the codebase notes as the author's claims, the landscape, in a split the scope block without the PRD-writing instructions, earlier rounds' findings; the revision also the round's findings | the PRD, the codebase notes, the landscape, the relevant files, the artifacts before it, the step's instructions |
 
 The run context (`runContextBlock`) is the same for every phase of a run, so
 the packages of a split that run the same step on the same model read it,
@@ -198,8 +204,8 @@ and the 6000-token map in it, from the cache; every scope's PRD phase shares
 the input as well. Tool sets differ between steps, and tools come first, so
 the steps of one package do not share a prefix with each other.
 
-A phase's own tools (the PRD or artifact submit tool, and for the artifact
-steps the patch tool) are declared strict; its built-in read-only tools are
+A phase's own tools (the PRD, review, revision or artifact submit tool, and
+for the artifact steps the patch tool) are declared strict; its built-in read-only tools are
 not ([ADR 07](adr/07-keep-the-builtin-tools-out-of-strict-mode.md)).
 agentkit-go declares strict the tools it is not told to leave out, in the
 order they are sent, while they fit the API's counted limits (20 tools, 16

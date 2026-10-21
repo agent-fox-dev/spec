@@ -435,7 +435,7 @@
         "`make check` passes",
         "docs/generated/ is regenerated with `make doc`"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

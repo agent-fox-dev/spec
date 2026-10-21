@@ -34,6 +34,7 @@ drift from what is written.
 | `Envelope[R]`, and `SpecEnvelope` / `RenderEnvelope` for the two commands | the object: `tool`, `version`, `ok`, `status`, `exit_code`, `summary`, `error`, `warnings`, `result`, `artifacts`, `side_effects`, `next`, `input`, `model`, `usage`, `duration_ms`, `started_at` |
 | `DecodeSpec`, `DecodeSpecr`, `Decode[R]` | read one envelope; unknown fields are ignored, anything but exactly one object is an error |
 | `SpecResult`, `Package`, `ScopeReport`, `ValidationReport`, `TraceReport`, `OpenQuestion` | `spec`'s result, see [cli.md](cli.md#result) |
+| `Review`, `ReviewRound`, `ReviewFinding`, the `Severity…`, `Disposition…` and `ReviewStop…` constants | `Package.Review`, the adversarial review of a package's PRD (`--adversarial`), see [cli.md](cli.md#the-adversarial-review---adversarial) |
 | `RenderResult`, `TaskInfo` | `specr`'s result, see [specr.md](specr.md#result) |
 | `ErrorInfo`, `FixHint`, the `Category…` constants | the failure; `*ErrorInfo` is an `error` |
 | `Warning`, `WarnCode` and the `Warn…` constants | what went differently without stopping the run |

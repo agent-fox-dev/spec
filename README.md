@@ -108,6 +108,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--max-tokens` | The output token cap of one model response, thinking included (default 65536) |
 | `--preflight` | Run every check that would refuse the run, then stop before any model call |
 | `--max-parallel` | How many packages of a split are generated at once (default 3) |
+| `--adversarial`, `--adversarial-rounds` | Have a fresh agent look for flaws in every PRD, and another revise it, before the package is generated; up to 1–5 rounds (default 1) |
 
 The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
 Bedrock. Every flag, the envelope, the error categories and the warning codes
