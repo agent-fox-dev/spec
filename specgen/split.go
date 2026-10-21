@@ -267,6 +267,25 @@ func splitBlock(c *splitContext) string {
 	}
 	var b strings.Builder
 	sc := c.Scope()
+	b.WriteString(splitTable(c))
+	b.WriteString(earlierScopesBlock(c))
+	b.WriteString(earlierNotesBlock(c))
+	fmt.Fprintf(&b, "\nWrite the PRD for scope %d only: **%s** — %s\n\n", c.Index+1, sc.Name, oneLine(sc.Scope))
+	fmt.Fprintf(&b, "- Its `spec_name` is `%s`. Submit exactly that name.\n", sc.Name)
+	b.WriteString("- Cover nothing an earlier spec of this split already covers, and nothing a " +
+		"later one will. What the earlier scopes deliver is summarised above, from their PRDs; " +
+		"this PRD builds on it rather than restating it.\n")
+	b.WriteString("- Where this scope consumes what an earlier spec of this split delivers, name " +
+		"that spec in `## Dependencies` with the reason.\n")
+	b.WriteString("- The split has been decided. Do not report a `recommended_split`; if this scope " +
+		"still feels large, keep it to its foundations and say so in `## Non-goals`.\n")
+	return b.String()
+}
+
+// splitTable states the decided split: every scope in order, which one this
+// PRD is, and where the written packages live.
+func splitTable(c *splitContext) string {
+	var b strings.Builder
 	fmt.Fprintf(&b, "\n## This PRD is one scope of a split\n\n")
 	fmt.Fprintf(&b, "The input above is more than one spec's worth of work. It has been split "+
 		"into %d specs, written in this order:\n\n", len(c.Plan.Scopes))
@@ -289,17 +308,26 @@ func splitBlock(c *splitContext) string {
 		fmt.Fprintf(&b, "\nThe written packages are directories under `%s/`, relative to the repository root.\n",
 			c.SpecRoot)
 	}
+	return b.String()
+}
+
+// splitReviewBlock tells a review or a revision of one scope's PRD the split
+// it belongs to, as the PRD phase was told it, without the instructions for
+// writing the PRD. Without it, the other scopes' work reads as asks of the
+// input this PRD dropped. It is empty for an undivided input.
+func splitReviewBlock(c *splitContext) string {
+	if c == nil {
+		return ""
+	}
+	sc := c.Scope()
+	var b strings.Builder
+	b.WriteString(splitTable(c))
 	b.WriteString(earlierScopesBlock(c))
 	b.WriteString(earlierNotesBlock(c))
-	fmt.Fprintf(&b, "\nWrite the PRD for scope %d only: **%s** — %s\n\n", c.Index+1, sc.Name, oneLine(sc.Scope))
-	fmt.Fprintf(&b, "- Its `spec_name` is `%s`. Submit exactly that name.\n", sc.Name)
-	b.WriteString("- Cover nothing an earlier spec of this split already covers, and nothing a " +
-		"later one will. What the earlier scopes deliver is summarised above, from their PRDs; " +
-		"this PRD builds on it rather than restating it.\n")
-	b.WriteString("- Where this scope consumes what an earlier spec of this split delivers, name " +
-		"that spec in `## Dependencies` with the reason.\n")
-	b.WriteString("- The split has been decided. Do not report a `recommended_split`; if this scope " +
-		"still feels large, keep it to its foundations and say so in `## Non-goals`.\n")
+	fmt.Fprintf(&b, "\nThis PRD covers scope %d only: **%s** — %s\n\n", c.Index+1, sc.Name, oneLine(sc.Scope))
+	b.WriteString("- Work that belongs to another scope of the split is not a dropped ask: judge the PRD " +
+		"against its own scope.\n")
+	b.WriteString("- Work this PRD takes from another scope, or restates from an earlier one, is a flaw.\n")
 	return b.String()
 }
 
