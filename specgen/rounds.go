@@ -2,9 +2,12 @@ package specgen
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/agent-fox-dev/spec/envelope"
+	"github.com/agent-fox-dev/spec/internal/agentrun"
+	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/internal/project"
 )
 
@@ -18,19 +21,35 @@ import (
 // reviews the PRD the previous revision left, and every round after the
 // first is shown the earlier findings with what became of them.
 //
+// A review or revision that does not finish, or a --total-budget already
+// spent before one starts, stops the rounds with a warning: the PRD returned
+// is then the last complete one. An interrupt of the run is not that; it
+// fails the run as aborted, at the phase it stopped.
+//
 // label names the scope in a split and is empty for an undivided input;
 // split is the scope's split context, nil for an undivided input.
 func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *splitContext) (PRD, *Review, error) {
-	limit := max(1, e.o.AdversarialRounds)
+	o := e.o
+	limit := max(1, o.AdversarialRounds)
 	var rounds []ReviewRound
 	var earlier []Finding
 	stop := envelope.ReviewStopIncomplete
 
 	for round := 1; round <= limit; round++ {
+		if reason, spent := e.overTotalBudget(); spent {
+			e.warnIncomplete(prd, round, agentrun.PhasePRDReview, reason)
+			break
+		}
 		req := e.reviewRequest(prd, split, round, limit, earlier)
-		findings, _, err := e.reviewer.Review(ctx, req)
+		done := o.Progress.Begin("%sreviewing the PRD (round %d of %d)", prefixed(label), round, limit)
+		findings, stats, err := e.reviewer.Review(ctx, req)
+		recordPhase(o.Run, stats, prd.SpecName)
+		done(cli.PhaseSummary(stats))
 		if err != nil {
-			stop = e.roundIncomplete()
+			if ctx.Err() != nil {
+				return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDReview, agentrun.CategoryAborted, err))
+			}
+			e.warnIncomplete(prd, round, agentrun.PhasePRDReview, failureReason(err))
 			break
 		}
 		if findings == nil {
@@ -42,10 +61,20 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 			break
 		}
 
-		revised, dispositions, _, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
+		answer(findings, nil)
+		if reason, spent := e.overTotalBudget(); spent {
+			e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, reason)
+			break
+		}
+		done = o.Progress.Begin("%srevising the PRD (round %d of %d)", prefixed(label), round, limit)
+		revised, dispositions, stats, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
+		recordPhase(o.Run, stats, prd.SpecName)
+		done(cli.PhaseSummary(stats))
 		if err != nil {
-			answer(findings, nil)
-			stop = e.roundIncomplete()
+			if ctx.Err() != nil {
+				return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDRevision, agentrun.CategoryAborted, err))
+			}
+			e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, failureReason(err))
 			break
 		}
 		answer(findings, dispositions)
@@ -65,9 +94,33 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 	return prd, buildReview(rounds, limit, stop), nil
 }
 
-// roundIncomplete is where a review or revision that did not finish stops
-// the rounds: the PRD the round loop holds is the last complete one.
-func (e *runEnv) roundIncomplete() string { return envelope.ReviewStopIncomplete }
+// warnIncomplete records why the rounds of prd stopped before they
+// finished. The review only improves a PRD that is already complete, so a
+// phase that did not finish costs the run the rest of the review, never the
+// package: the run goes on from the last complete PRD, and says so.
+func (e *runEnv) warnIncomplete(prd PRD, round int, phase, reason string) {
+	e.o.Run.Warn(cli.WarnPRDReviewIncomplete, "high",
+		"the review of %s stopped in round %d: %s did not finish (%s); the package is generated from "+
+			"the last complete PRD", prd.SpecName, round, phase, reason)
+}
+
+// overTotalBudget reports whether the run has spent its --total-budget, and
+// the reason to give. A review is never started past the ceiling: the
+// rounds stop instead, and the package is still generated.
+func (e *runEnv) overTotalBudget() (string, bool) {
+	o := e.o
+	spent := o.Run.CostUSD()
+	if o.TotalBudgetUSD <= 0 || spent < o.TotalBudgetUSD {
+		return "", false
+	}
+	return fmt.Sprintf("the run has spent $%.2f of its $%.2f total budget", spent, o.TotalBudgetUSD), true
+}
+
+// failureReason is why a phase stopped, for the warning: its category and
+// what it said.
+func failureReason(err error) string {
+	return fmt.Sprintf("%s: %v", agentrun.CategoryOf(err), err)
+}
 
 // reviewRequest is what a review of prd in round round is sent: what the PRD
 // phase was shown, and the PRD as it stands.
