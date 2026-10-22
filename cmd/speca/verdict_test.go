@@ -77,23 +77,34 @@ func addLegacyPackage(t *testing.T, root string) {
 var both = map[string][]string{"report": nil, "verdict": {"--validate"}}
 
 // TS-10-33: a package the library refuses fails the call at stage load, in the
-// report and in the verdict, naming the directory and the reason.
+// report and in the verdict, naming the directory and the library's reason.
 func TestAPackageThatDoesNotLoadFailsBothForms_TS10_33(t *testing.T) {
 	root := newRepo(t)
-	broken := pkgDir(root, "05_broken")
-	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "malformed_json"), broken)
+	malformedPRD := pkgDir(root, "05_badprd")
+	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "valid_spec"), malformedPRD)
+	if err := os.WriteFile(filepath.Join(malformedPRD, "prd.md"), []byte("---\nspec_id: [unclosed\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	malformedJSON := pkgDir(root, "06_badjson")
+	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "malformed_json"), malformedJSON)
 
-	for form, flags := range both {
-		env, code, stderr := run(t, append([]string{"--dir", root, broken}, flags...)...)
-		if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "load" || env.Error.Category != "input" || env.Result != nil || env.OK {
-			t.Errorf("%s: code %d: %+v", form, code, env.Error)
-			continue
+	for name, broken := range map[string]string{"a malformed prd.md": malformedPRD, "a malformed artifact": malformedJSON} {
+		_, reason := afspec.LoadSpec(broken)
+		if reason == nil {
+			t.Fatalf("%s: the library loads %s", name, broken)
 		}
-		if !strings.Contains(env.Error.Message, broken) || !strings.Contains(env.Error.Message, "could not be read") {
-			t.Errorf("%s: message = %q; want the directory and the reason", form, env.Error.Message)
-		}
-		if env.Error.Retryable || env.Error.Resumable || stderr != "" {
-			t.Errorf("%s: retryable %v resumable %v stderr %q", form, env.Error.Retryable, env.Error.Resumable, stderr)
+		for form, flags := range both {
+			env, code, stderr := run(t, append([]string{"--dir", root, broken}, flags...)...)
+			if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "load" || env.Error.Category != "input" || env.Result != nil || env.OK {
+				t.Errorf("%s, %s: code %d: %+v", name, form, code, env.Error)
+				continue
+			}
+			if !strings.Contains(env.Error.Message, broken) || !strings.Contains(env.Error.Message, reason.Error()) {
+				t.Errorf("%s, %s: message = %q; want the directory and the library's reason %q", name, form, env.Error.Message, reason)
+			}
+			if env.Error.Retryable || env.Error.Resumable || stderr != "" {
+				t.Errorf("%s, %s: retryable %v resumable %v stderr %q", name, form, env.Error.Retryable, env.Error.Resumable, stderr)
+			}
 		}
 	}
 }
@@ -221,9 +232,13 @@ func TestVerdictKeepsTheCrossSpecFindingsOfThePackage_TS10_36(t *testing.T) {
 
 	// A: its own findings, then its unknown dependency and the cycle.
 	ownErrs, _ := ownChecks(t, a)
-	errs, _, _ := verdict("01")
+	errs, _, report := verdict("01")
 	if want := append(slices.Clone(ownErrs), "cross_spec_unknown_dependency", "cross_spec_cycle"); !slices.Equal(errs, want) {
 		t.Errorf("A: errors %v; want %v", errs, want)
+	}
+	// The cycle is made of dependencies, which tasks.json declares; the library names no artifact for it.
+	if cycle := report.Errors[len(report.Errors)-1]; cycle.Check != "cross_spec_cycle" || cycle.Artifact != "tasks.json" || cycle.Message == "" {
+		t.Errorf("A: the cycle is reported as %+v", cycle)
 	}
 
 	// B: the cycle, and its actor error; not A's unknown dependency.
@@ -232,10 +247,12 @@ func TestVerdictKeepsTheCrossSpecFindingsOfThePackage_TS10_36(t *testing.T) {
 	if want := append(slices.Clone(ownErrs), "cross_spec_cycle", "cross_spec_actor"); !slices.Equal(errs, want) {
 		t.Errorf("B: errors %v; want %v", errs, want)
 	}
-	// The glossary conflict is the library's only warning with no rule of its
-	// own to name; it is about the term.
-	if want := append(slices.Clone(ownWarns), ""); !slices.Equal(warns, want) || report.Warnings[len(report.Warnings)-1].Entity != "frobnicate" {
-		t.Errorf("B: warnings %v; want its own and the glossary conflict over frobnicate", warns)
+	// The library gives a glossary conflict no rule and no artifact, and a
+	// verdict names the rule of every finding; the conflict is about the term.
+	glossary := report.Warnings[len(report.Warnings)-1]
+	if want := append(slices.Clone(ownWarns), "cross_spec_glossary"); !slices.Equal(warns, want) ||
+		glossary.Entity != "frobnicate" || glossary.Artifact != "requirements.json" || glossary.Message == "" {
+		t.Errorf("B: warnings %v, last %+v; want its own and the glossary conflict over frobnicate", warns, glossary)
 	}
 	for _, it := range report.Errors {
 		if it.Check == "cross_spec_unknown_dependency" {

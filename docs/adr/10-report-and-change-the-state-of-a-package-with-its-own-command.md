@@ -61,8 +61,9 @@ reason: an agent that can drive one command can drive all of them.
 - **Readiness follows the format.** `(*TasksV2Json).IsReady` and `NextTask` are
   in `afspec`. A task's dependencies are its `depends_on` when present, an
   empty list meaning none, otherwise the task before it (§8.3); only `done`
-  satisfies a dependency. `speca`, `specr` and `examples/tasks` all use them, so
-  "ready" and "next" mean one thing.
+  satisfies a dependency. `speca` uses both, `specr` shows `IsReady` on each task
+  it lists and `examples/tasks` picks its task with `NextTask`, so "ready" and
+  "next" mean one thing.
 - **`speca` writes no file, makes no model or network call and reads no
   credential.** It runs in milliseconds on the files alone.
 
@@ -100,6 +101,7 @@ and the later scopes add their fields to the same type.
 - `specr`'s tasks carry `ready`, the one change to its output. A field on the
   shared `TaskInfo` never means something different depending on which command
   wrote it.
-- `speca --validate` is the only form that loads every package of the spec root.
-  It is the price of the cross-spec rules, which cannot be applied to one
-  package alone.
+- `speca --validate` and `speca --list` load every package of the spec root.
+  For `--validate` that is the price of the cross-spec rules, which cannot be
+  applied to one package alone; `--list` loads each package to say whether it
+  validates and what its next task is.

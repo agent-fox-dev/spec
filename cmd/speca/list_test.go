@@ -156,7 +156,8 @@ func TestListAll_TS10_42(t *testing.T) {
 	}
 	env, code, _ = run(t, "--dir", blocked, "--list", "--all")
 	if code != cli.ExitOK || len(result(t, env).Packages) != 1 || len(env.Warnings) != 1 ||
-		env.Warnings[0].Code != cli.WarnSpecsDirUnreadable || env.Warnings[0].Severity != "low" || !strings.Contains(env.Warnings[0].Message, "archive") {
+		env.Warnings[0].Code != cli.WarnSpecsDirUnreadable || env.Warnings[0].Severity != "low" ||
+		!strings.HasPrefix(env.Warnings[0].Message, "the archive ") || strings.Contains(env.Warnings[0].Message, "spec root") {
 		t.Errorf("an archive that is a file: code %d, warnings %+v", code, env.Warnings)
 	}
 }

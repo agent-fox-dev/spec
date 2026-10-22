@@ -228,8 +228,9 @@ reason, which `agentrun` maps onto the envelope's error categories.
 
 ```
 cmd/specr ──> afspec
-    ├──────> envelope       (its result: RenderResult)
-    └──────> internal/cli   (the Run, SplitArgs, WriteAtomic, the --schema generator)
+    ├──────> envelope          (its result: RenderResult)
+    ├──────> internal/specpkg  (the resolver, the display rule, the task summary)
+    └──────> internal/cli      (the Run, SplitArgs, WriteAtomic, the --schema generator)
 ```
 
 It does not use `cli.App`, which resolves a model, a forge and a code-search
@@ -278,8 +279,9 @@ standard-library only and `internal/cli` does not import `afspec`.
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` |
 
 It writes nothing. Readiness is not decided here: `IsReady` and `NextTask` are
-`afspec`'s, and `specr` and `examples/tasks` use them too, so the three agree on
-what "ready" and "next" mean.
+`afspec`'s. `speca` uses both; `specr` reports `IsReady` on each task it lists,
+through `specpkg.TaskInfo`; and `examples/tasks` picks its task with `NextTask`.
+So the three agree on what "ready" and "next" mean.
 
 ## Consumers
 

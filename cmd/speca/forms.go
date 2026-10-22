@@ -97,12 +97,13 @@ func intentDrift(spec *afspec.Spec) bool {
 	return err != nil || hash != *spec.IntentHash
 }
 
-// warnRootUnreadable raises the low specs_dir_unreadable warning: the spec root
-// (missing, not a directory, or not readable) could not be read, and the form
-// goes without what it would have read there.
-func (c *call) warnRootUnreadable(err error, leftOut string) {
-	c.run.Warn(cli.WarnSpecsDirUnreadable, "low", "the spec root %s could not be read (%v); %s",
-		specpkg.Display(c.specsDir, c.root), err, leftOut)
+// warnUnreadable raises the low specs_dir_unreadable warning: a directory the
+// form reads (what, "the spec root" or "the archive") is missing, is not a
+// directory or is not readable, and the form goes without what it would have
+// read there.
+func (c *call) warnUnreadable(what, path string, err error, leftOut string) {
+	c.run.Warn(cli.WarnSpecsDirUnreadable, "low", "%s %s could not be read (%v); %s",
+		what, specpkg.Display(path, c.root), err, leftOut)
 }
 
 // discover lists the packages of the spec root whose PRD can be read. When the
@@ -114,7 +115,7 @@ func (c *call) discover(leftOut string) (metas []afspec.SpecMeta, ok bool) {
 	metas, err := afspec.DiscoverSpecs(c.specsDir)
 	if metas == nil {
 		// DiscoverSpecs returns a list, empty at worst, once it has read the root.
-		c.warnRootUnreadable(err, leftOut)
+		c.warnUnreadable("the spec root", c.specsDir, err, leftOut)
 		return nil, false
 	}
 	return metas, true

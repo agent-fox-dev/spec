@@ -122,7 +122,7 @@ are the answer.
 | Field | Meaning |
 |---|---|
 | `valid` | the combined verdict: `true` exactly when no error was kept from the package's own validation or from the cross-spec rules. It equals `validation.valid` |
-| `validation` | `valid`, `error_count`, `warning_count`, and `errors` and `warnings`, each finding with its `check` (the rule), `artifact`, `entity` and `message`. The package's own findings come first, then the cross-spec findings that concern it |
+| `validation` | `valid`, `error_count`, `warning_count`, and `errors` and `warnings`, each finding with its `check` (the rule), `artifact`, `entity` and `message`. The package's own findings come first, then the cross-spec findings that concern it. The library names no rule for a glossary conflict, and no artifact for the dependency cycle; `speca` reports the conflict as `cross_spec_glossary` in `requirements.json`, and the cycle in `tasks.json` |
 | `traceability` | the derived coverage, in the shape `spec` reports: `criteria_covered`, `criteria_uncovered`, `paths_covered`, `paths_uncovered` and `tests_unowned` |
 
 The fields that are specific to the report (`tasks`, `task_counts`,
@@ -271,8 +271,8 @@ One sentence per form, which the shell caps at 200 characters:
 | Form | Shape |
 |---|---|
 | report | `speca: <directory> <status>, <done> of <total> tasks done`, then `; next task N` when there is one, then `; does not validate (<rules>)` when `valid` is `false` |
-| `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)` |
-| `--list` | `speca: <n> packages (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
+| `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)`; `1 error` for one |
+| `--list` | `speca: <n> packages` (`1 package` for one), then, when there is anything to count, ` (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
 
 ### Reading it from Go
 

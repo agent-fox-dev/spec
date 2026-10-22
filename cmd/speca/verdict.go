@@ -47,7 +47,7 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 func (c *call) crossSpec(spec *afspec.Spec, dir string) (concerning afspec.ValidationResult, ok bool) {
 	names, err := specpkg.List(c.specsDir)
 	if err != nil {
-		c.warnRootUnreadable(err, "the cross-spec rules are skipped, and the verdict is the package's own")
+		c.warnUnreadable("the spec root", c.specsDir, err, "the cross-spec rules are skipped, and the verdict is the package's own")
 		return afspec.ValidationResult{}, false
 	}
 	var specs []*afspec.Spec
@@ -85,17 +85,40 @@ func concern(spec *afspec.Spec, graph *afspec.DependencyGraph, all afspec.Valida
 	var kept afspec.ValidationResult
 	for _, e := range all.Errors {
 		if e.EntityID == spec.SpecID || (e.EntityID == "" && linked) {
-			kept.Errors = append(kept.Errors, e)
+			kept.Errors = append(kept.Errors, named(e))
 		}
 	}
 	if spec.Requirements != nil {
 		for _, w := range all.Warnings {
 			if _, defined := spec.Requirements.Glossary[w.EntityID]; defined {
-				kept.Warnings = append(kept.Warnings, w)
+				kept.Warnings = append(kept.Warnings, named(w))
 			}
 		}
 	}
 	return kept
+}
+
+// glossaryCheck is the rule a glossary conflict is reported under. The library
+// gives such a warning no rule of its own, and a verdict names the rule of
+// every finding.
+const glossaryCheck = "cross_spec_glossary"
+
+// named gives a cross-spec finding the rule and the artifact the library leaves
+// off: a glossary conflict has neither, and the dependency cycle, which is made
+// of the dependencies that tasks.json declares, has no artifact.
+func named(e afspec.ValidationEntry) afspec.ValidationEntry {
+	if e.Check == "" && e.Category == "warning" {
+		e.Check = glossaryCheck
+	}
+	if e.Artifact == "" {
+		switch e.Check {
+		case glossaryCheck:
+			e.Artifact = "requirements.json"
+		case "cross_spec_cycle":
+			e.Artifact = "tasks.json"
+		}
+	}
+	return e
 }
 
 // sameDir reports whether two paths are one directory, however they are spelled.

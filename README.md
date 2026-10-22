@@ -117,9 +117,9 @@ Bedrock. Every flag, the envelope, the error categories and the warning codes
 are in [docs/cli.md](docs/cli.md); the environment variables in
 [docs/configuration.md](docs/configuration.md).
 
-A Go program that calls either command decodes its output with the
+A Go program that calls one of the commands decodes its output with the
 [`envelope`](docs/api.md#envelope) package (`envelope.DecodeSpec`,
-`envelope.DecodeSpecr`) instead of writing structs of its own.
+`envelope.DecodeSpecr`, `envelope.DecodeSpeca`) instead of writing structs of its own.
 
 Changing an existing package — activating, sealing, archiving or superseding
 it, or moving a task from one state to another — has no CLI surface; it's

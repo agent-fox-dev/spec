@@ -70,24 +70,29 @@ order of the names a refusal lists.
 **Test of the delivered behaviour:** `TestListAndDisplay_TS10_11`
 (`internal/specpkg/specpkg_test.go`).
 
-## D-12: TS-10-13 pins the converters, not a pipeline run
+## D-12: TS-10-13 runs the converters and the pipeline on different packages
 
-**Spec:** TS-10-13 has "specgen run the pipeline over the same package" and the
-JSON of `spec`'s result equal the golden output byte for byte.
+**Spec:** TS-10-13 has "specgen run the pipeline over the same package" as the
+converters, and the JSON of `spec`'s result equal the golden output byte for
+byte.
 
 **Code:** the pipeline writes the package from a model's submissions, so it
-cannot be run over a package damaged in memory in each way the report names.
-The golden file (`internal/specpkg/testdata/report.golden.json`) was captured
-from `specgen`'s own converters before they moved, over such a package, and
-the test compares `specpkg.ReportOf` and `TraceOf` with it. `specgen` calls
-the same two functions (`specgen/pipeline.go`, the `Validate` step), and its
-pipeline tests, which pin the validation and traceability of a package with an
-unowned test, pass unchanged.
+cannot be run over the package the converters are tried on, which is damaged in
+memory in each way the report names (an unowned test, a criterion and a path no
+test verifies, a warning). The test is therefore two. The converters are
+compared with `internal/specpkg/testdata/report.golden.json`, captured from
+`specgen`'s own converters before they moved, over that package. The pipeline
+is run over a scripted package with an unowned test, and the JSON of its
+result's `validation` and `traceability` is compared with
+`internal/specpkg/testdata/pipeline.golden.json`, captured from the same
+scenario on `main`, before the move. Both are equal byte for byte; the two
+packages differ.
 
 **Test of the delivered behaviour:**
 `TestConvertersGiveTheReportSpecAlwaysWrote_TS10_13`
-(`internal/specpkg/specpkg_test.go`) and `TestAnInvalidPackageIsWrittenAndReported`
-(`specgen/pipeline_test.go`).
+(`internal/specpkg/specpkg_test.go`) and
+`TestTheResultsReportIsTheOneSpecAlwaysWrote_TS10_13`
+(`specgen/validation_report_test.go`).
 
 ## D-13: the nested report types carry no description tags
 
@@ -186,3 +191,23 @@ absence of the archived packages is not mistaken for there being none.
 
 **Test of the delivered behaviour:** `TestListAll_TS10_42` (the `archive`
 that is a file) in `cmd/speca/list_test.go`.
+
+## D-17: speca names the rule of a glossary conflict and the artifact of the cycle
+
+**Spec:** 10-REQ-6.1 has each finding of `validation` carry `check`, `artifact`,
+`entity` and `message`, and the PRD's goals say each names its rule.
+10-REQ-6.3 has `validation` list "exactly the kept cross-spec findings".
+
+**Code:** the library gives a glossary conflict (`afspec.ValidateCrossSpec`,
+`afspec/validate.go`) no `Check` and no `Artifact`, and the dependency cycle no
+`Artifact`, so `specpkg.ReportOf` would write them empty. `named`
+(`cmd/speca/verdict.go`, `named`) fills them for the findings it keeps: the
+conflict is `cross_spec_glossary` in `requirements.json`, after the other
+`cross_spec_` rules, and the cycle is in `tasks.json`, where the dependencies it
+is made of are declared. The findings kept are the same; they are named.
+`afspec` is not changed, so `spec`'s output, which does not use these rules, is
+not either.
+
+**Test of the delivered behaviour:**
+`TestVerdictKeepsTheCrossSpecFindingsOfThePackage_TS10_36`
+(`cmd/speca/verdict_test.go`).

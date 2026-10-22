@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -264,9 +268,23 @@ func TestSpecaWritesNothingAndReadsNoCredential_TS10_22(t *testing.T) {
 		return out
 	}
 
+	// Nothing may leave the process: a request through the default transport or
+	// a lookup through the default resolver is a network attempt.
+	refuse := func(what string) error {
+		t.Errorf("speca attempted a network connection: %s", what)
+		return errors.New("the network is not available to speca")
+	}
+	wasTransport, wasResolver := http.DefaultTransport, net.DefaultResolver
+	t.Cleanup(func() { http.DefaultTransport, net.DefaultResolver = wasTransport, wasResolver })
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) { return nil, refuse(r.Method + " " + r.URL.String()) })
+	net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(_ context.Context, network, address string) (net.Conn, error) {
+		return nil, refuse(network + " " + address)
+	}}
+
+	before := snapshot(t, root) // before the first call, so that a file the first call writes is seen
 	unset := outputs()
-	before := snapshot(t, root)
 	for _, name := range []string{
+		cli.ModelEnv, cli.ModelEnvFallback, cli.EffortEnv, // the model the shell flags read
 		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_VERTEX_PROJECT_ID",
 		"CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION",
 		"GOOGLE_APPLICATION_CREDENTIALS", "OPENAI_API_KEY", "GITHUB_TOKEN", "GITLAB_TOKEN",
@@ -275,7 +293,7 @@ func TestSpecaWritesNothingAndReadsNoCredential_TS10_22(t *testing.T) {
 	}
 	set := outputs()
 
-	if after := snapshot(t, root); !maps_equal(before, after) {
+	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the file tree changed:\nbefore %v\nafter  %v", before, after)
 	}
 	for name := range forms {
@@ -285,7 +303,12 @@ func TestSpecaWritesNothingAndReadsNoCredential_TS10_22(t *testing.T) {
 	}
 }
 
-func maps_equal(a, b map[string]string) bool {
+// roundTripFunc is an http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func mapsEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
 	}

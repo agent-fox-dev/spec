@@ -40,7 +40,7 @@ func list(c *call) (*Result, *cli.ErrorInfo) {
 		case errors.Is(err, fs.ErrNotExist):
 			// A root without an archive is the usual one.
 		case err != nil:
-			c.warnRootUnreadable(err, "the packages under archive/ are not listed")
+			c.warnUnreadable("the archive", archive, err, "the packages under archive/ are not listed")
 		default:
 			for _, name := range archived {
 				packages = append(packages, c.entry(filepath.Join(archive, name), true))

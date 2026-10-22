@@ -74,7 +74,7 @@ func TestAnAgentReadsAPackageAndFollowsNext_TS10_57(t *testing.T) {
 		}
 	}
 
-	if after := snapshot(t, root); !maps_equal(before, after) {
+	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed:\nbefore %v\nafter  %v", before, after)
 	}
 }
@@ -110,7 +110,7 @@ func TestAnAgentAsksForTheFullVerdict_TS10_58(t *testing.T) {
 	if len(env.Next) != 0 {
 		t.Errorf("next = %+v", env.Next)
 	}
-	if after := snapshot(t, root); !maps_equal(before, after) {
+	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed")
 	}
 }
@@ -159,7 +159,7 @@ func TestAnAgentListsEveryPackageWithTheArchive_TS10_59(t *testing.T) {
 		!slices.Equal(env.Next[0].Flags, []string{"--task", "2"}) {
 		t.Errorf("next = %+v; want specr .specs/03_c --task 2", env.Next)
 	}
-	if after := snapshot(t, root); !maps_equal(before, after) {
+	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed")
 	}
 }
@@ -182,7 +182,7 @@ func TestAMalformedCallIsRefusedBeforeAnythingIsRead_TS10_60(t *testing.T) {
 	if !strings.Contains(stderr.String(), env.Error.Message) || env.Error.Message == "" {
 		t.Errorf("stderr %q does not hold the message", stderr.String())
 	}
-	if after := snapshot(t, root); !maps_equal(before, after) {
+	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed")
 	}
 }
