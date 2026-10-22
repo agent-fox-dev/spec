@@ -10,10 +10,10 @@ github.com/OpenRouterTeam/go-sdk v0.9.66 h1:iXt/VaCUfDJec0az2lZQ0/s33JqxG/kvZHz3
 github.com/OpenRouterTeam/go-sdk v0.9.66/go.mod h1:8vFtUZ9I2YiDntYbck42wQhrx9DsJN5PHbViaHwTkXc=
 github.com/RoaringBitmap/roaring/v2 v2.19.0 h1:zsWtVE+biht4eVl0YDLvykUqGkftR3Qc5UCbeKB4UQ4=
 github.com/RoaringBitmap/roaring/v2 v2.19.0/go.mod h1:SfT3of9nYh3vis1dIbCj4Yw6KQGujTN+f345nrN/0JA=
-github.com/agent-fox-dev/agentkit-go v0.0.0-20261022061537-3006f61a4c6f h1:NtOs9KFXmGewxt64Q9EmX7exnTB2RIGBbkYQShf1Ggw=
-github.com/agent-fox-dev/agentkit-go v0.0.0-20261022061537-3006f61a4c6f/go.mod h1:5pDOULAggGq1z0q1PczzvH5HKJtiW01l7GHKG3f0DJ0=
-github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261022061537-3006f61a4c6f h1:UXaqGW17OOHAJJblnPpch+sYEUkDF1JgV28a6tzhEQQ=
-github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261022061537-3006f61a4c6f/go.mod h1:N4LHzFF2m+gBGADpGtAecnaFsZgmpkHoE2TjRDYLJLg=
+github.com/agent-fox-dev/agentkit-go v0.0.0-20261022085432-cc4badebecc6 h1:ZqvMaZeApuwgU4vgi+My+VQDNu529SK+OM3k3nORO58=
+github.com/agent-fox-dev/agentkit-go v0.0.0-20261022085432-cc4badebecc6/go.mod h1:5pDOULAggGq1z0q1PczzvH5HKJtiW01l7GHKG3f0DJ0=
+github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261022085432-cc4badebecc6 h1:4F5afvHGT2TpnV24a2A5KV/Xnju+kw83mHKMHIkHvAY=
+github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261022085432-cc4badebecc6/go.mod h1:N4LHzFF2m+gBGADpGtAecnaFsZgmpkHoE2TjRDYLJLg=
 github.com/anthropics/anthropic-sdk-go v1.79.1 h1:R+DGl2fpI8mIg7OGjEEHpr1WN7HOja76sz89Z2DMcqk=
 github.com/anthropics/anthropic-sdk-go v1.79.1/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/aws/aws-sdk-go-v2 v1.38.0 h1:UCRQ5mlqcFk9HJDIqENSLR3wiG1VTWlyUfLDEvY7RxU=
