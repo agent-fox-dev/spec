@@ -29,9 +29,6 @@ const (
 	ReducedTestDetail   = envelope.ReducedTestDetail
 )
 
-// TaskInfo is one task of the plan, by id, without its body.
-type TaskInfo = envelope.TaskInfo
-
 // Result is specr's result. Its fields are the envelope package's
 // RenderResult, which a program reading the output decodes into; the methods
 // are what the shell asks of a result.
@@ -193,25 +190,6 @@ func reducedParts(spec *afspec.Spec, got, full map[string]string) []string {
 		out = append(out, ReducedTestDetail)
 	}
 	return out
-}
-
-// taskInfos lists the plan's tasks without their bodies.
-func taskInfos(spec *afspec.Spec) []TaskInfo {
-	out := []TaskInfo{}
-	if spec.Tasks == nil {
-		return out
-	}
-	for _, t := range spec.Tasks.Tasks {
-		out = append(out, taskInfo(t))
-	}
-	return out
-}
-
-func taskInfo(t afspec.Task) TaskInfo {
-	return TaskInfo{
-		ID: t.Id, Title: t.Title, Kind: string(t.Kind), State: string(t.State),
-		Optional: t.IsOptional(), DependsOn: append([]int(nil), t.DependsOn...),
-	}
 }
 
 func has(list []string, s string) bool {

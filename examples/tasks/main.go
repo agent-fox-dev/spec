@@ -97,7 +97,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 // pick returns the task with the given ID, or with id 0 the next one that is
 // ready: a task already in progress, else the first pending task whose
-// dependencies (depends_on) are all done.
+// dependencies are all done (a task without depends_on follows the task
+// before it, format v2 §8.3). That choice is NextTask's.
 func pick(tasks *afspec.TasksV2Json, id int) (*afspec.Task, error) {
 	if id != 0 {
 		task, ok := tasks.GetTask(id)
@@ -110,22 +111,8 @@ func pick(tasks *afspec.TasksV2Json, id int) (*afspec.Task, error) {
 		return task, nil
 	}
 
-	done := map[int]bool{}
-	for _, t := range tasks.Tasks {
-		done[t.Id] = t.State == afspec.TaskStateDone
-	}
-	for _, t := range tasks.Tasks {
-		if t.State == afspec.TaskStateInProgress {
-			return &t, nil
-		}
-	}
-	for _, t := range tasks.Tasks {
-		if t.State != afspec.TaskStatePending {
-			continue
-		}
-		if !slices.ContainsFunc(t.DependsOn, func(dep int) bool { return !done[dep] }) {
-			return &t, nil
-		}
+	if task, ok := tasks.NextTask(); ok {
+		return task, nil
 	}
 	if !slices.ContainsFunc(tasks.Tasks, func(t afspec.Task) bool { return t.State == afspec.TaskStatePending }) {
 		return nil, errors.New("every task is done or dropped")

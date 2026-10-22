@@ -233,6 +233,10 @@
                 "items": {
                   "type": "integer"
                 }
+              },
+              "ready": {
+                "type": "boolean",
+                "description": "true for a pending task whose dependencies are all done; absent otherwise"
               }
             },
             "required": [
@@ -296,6 +300,10 @@
                   "items": {
                     "type": "integer"
                   }
+                },
+                "ready": {
+                  "type": "boolean",
+                  "description": "true for a pending task whose dependencies are all done; absent otherwise"
                 }
               },
               "required": [

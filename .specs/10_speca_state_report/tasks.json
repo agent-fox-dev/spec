@@ -40,7 +40,7 @@
         "examples/tasks/main.go",
         "examples/tasks/main_test.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -73,7 +73,7 @@
         "envelope/envelope.go",
         "envelope/admin_result_test.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -117,7 +117,7 @@
         1,
         2
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -146,7 +146,7 @@
       "depends_on": [
         3
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -189,7 +189,7 @@
       "depends_on": [
         3
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -221,7 +221,7 @@
       "depends_on": [
         5
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 7,
@@ -265,7 +265,7 @@
         6,
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 8,
@@ -302,7 +302,7 @@
       "depends_on": [
         7
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 9,
@@ -339,7 +339,7 @@
       "depends_on": [
         8
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 10,
@@ -373,7 +373,7 @@
       "depends_on": [
         9
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 11,
@@ -401,7 +401,7 @@
       "done_when": [
         "`make test` and `make lint` pass"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

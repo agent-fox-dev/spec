@@ -1,0 +1,22 @@
+{
+  "traceability": {
+    "criteria_covered": 4,
+    "paths_covered": 1,
+    "tests_unowned": [
+      "TS-01-3"
+    ]
+  },
+  "validation": {
+    "valid": false,
+    "error_count": 1,
+    "warning_count": 0,
+    "errors": [
+      {
+        "check": "C7",
+        "artifact": "test_spec.json",
+        "entity": "TS-01-3",
+        "message": "test TS-01-3 is not owned by any task; add TS-01-3 to the tests of an existing task (the task that builds what it checks)"
+      }
+    ]
+  }
+}

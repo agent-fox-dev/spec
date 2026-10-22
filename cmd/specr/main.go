@@ -23,6 +23,7 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
+	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
 
 const tool = "specr"
@@ -217,7 +218,7 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 	}
 	specsDir := afspec.ResolveSpecsDir(o.specsDir, root)
 
-	dir, err := locate(ref, root, specsDir)
+	dir, err := specpkg.Locate(tool, ref, root, specsDir)
 	if err != nil {
 		return cli.ExitUsage, nil, usageInfo(err, nil)
 	}
@@ -228,16 +229,16 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 	}
 
 	res := &Result{RenderResult: envelope.RenderResult{
-		SpecDir:  displayPath(dir, root),
+		SpecDir:  specpkg.Display(dir, root),
 		SpecID:   spec.SpecID,
 		SpecName: spec.SpecName,
 		Title:    spec.Title,
 		Status:   spec.Status,
-		Tasks:    taskInfos(spec),
+		Tasks:    specpkg.TaskInfos(spec),
 	}}
 	// A package in an older format loads, but the v2 types read none of its
 	// tests or tasks: a v1 plan is task_groups, not tasks.
-	legacy := spec.SchemaVersion != 0 && spec.SchemaVersion != afspec.SchemaVersion
+	legacy := specpkg.Legacy(spec)
 	if o.task > 0 {
 		if legacy {
 			return cli.ExitUsage, nil, usageInfo(fmt.Errorf(
@@ -258,7 +259,7 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 				fmt.Errorf("%s has no task %d; its tasks are %s", res.SpecDir, o.task, strings.Join(ids, ", ")),
 				&cli.FixHint{Flag: "--task", Valid: ids})
 		}
-		info := taskInfo(t)
+		info := specpkg.TaskInfo(spec.Tasks, t)
 		res.Task = &info
 	}
 
@@ -270,7 +271,7 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 			"format v2 §13 maps each v1 construct to its v2 form", spec.SchemaVersion, afspec.SchemaVersion)
 	} else {
 		run.Warn(cli.WarnSpecInvalid, "low", "the package does not validate (%d errors: %s); it is rendered as it is",
-			len(v.Errors), rules(v.Errors))
+			len(v.Errors), strings.Join(specpkg.Rules(v.Errors), ", "))
 	}
 
 	render(spec, renderOptions{task: o.task, sections: o.sections, maxTokens: o.maxTokens}, res, run)
@@ -299,31 +300,6 @@ func findTask(spec *afspec.Spec, id int) (afspec.Task, bool) {
 		}
 	}
 	return afspec.Task{}, false
-}
-
-// rules names the distinct rules the validation errors break, in order.
-func rules(entries []afspec.ValidationEntry) string {
-	var out []string
-	for _, e := range entries {
-		name := e.Check
-		if name == "" {
-			name = e.Category
-		}
-		if !has(out, name) {
-			out = append(out, name)
-		}
-	}
-	return strings.Join(out, ", ")
-}
-
-// displayPath is dir relative to root when it is inside it, so a next[]
-// entry stays short and runnable from the repository; absolute otherwise.
-func displayPath(dir, root string) string {
-	rel, err := filepath.Rel(root, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return dir
-	}
-	return rel
 }
 
 func usageInfo(err error, hint *cli.FixHint) *cli.ErrorInfo {

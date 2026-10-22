@@ -1,12 +1,13 @@
-// Package envelope defines the JSON that the spec and specr commands write to
-// stdout, as Go types a program can decode it into.
+// Package envelope defines the JSON that the spec, specr and speca commands
+// write to stdout, as Go types a program can decode it into.
 //
-// Both commands write exactly one JSON object on every program-driven path,
+// Every command writes exactly one JSON object on every program-driven path,
 // including the failing ones: an Envelope. Its result property holds the
 // command's own result, and which type that is depends on the command:
 //
 //	spec   a SpecResult    the package(s) a run wrote
 //	specr  a RenderResult  a package rendered as Markdown
+//	speca  an AdminResult  a package's state, its verdict, or the list of packages
 //
 // Decode a command's output with the function for its result:
 //

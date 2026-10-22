@@ -54,6 +54,3 @@ func (r *Result) Next() []cli.Next
 func (r *Result) Summary() string
     Summary is the envelope's one sentence.
 
-type TaskInfo = envelope.TaskInfo
-    TaskInfo is one task of the plan, by id, without its body.
-

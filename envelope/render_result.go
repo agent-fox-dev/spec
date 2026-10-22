@@ -57,4 +57,5 @@ type TaskInfo struct {
 	State     string `json:"state" description:"pending, in_progress, done or dropped"`
 	Optional  bool   `json:"optional,omitempty" description:"true when the task may be skipped"`
 	DependsOn []int  `json:"depends_on,omitempty" description:"the tasks that must be done first"`
+	Ready     bool   `json:"ready,omitempty" description:"true for a pending task whose dependencies are all done; absent otherwise"`
 }

@@ -1,10 +1,11 @@
-package main
+package specpkg
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,8 +13,9 @@ import (
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-// locate turns the one positional argument into the absolute directory of a
-// spec package.
+// Locate turns the one positional argument of a command into the absolute
+// directory of a spec package. tool is the command that was called, specr or
+// speca, and every refusal begins with it.
 //
 // The argument is a reference, not a document. It is tried as a path first —
 // the package directory, or a file inside it — relative to the working
@@ -21,17 +23,18 @@ import (
 // names under the spec root, as the whole name (16_indexed_code_search), the
 // number (16, or 016) or the name after it (indexed_code_search). A
 // reference that matches two packages is refused naming both, and one that
-// matches none is refused naming what is there. Every refusal is a usage
-// error: nothing was read.
-func locate(ref, root, specsDir string) (string, error) {
+// matches none is refused naming what is there, and the archived package it
+// matches, which is reached by its path only. Every refusal is a usage error:
+// nothing was read.
+func Locate(tool, ref, root, specsDir string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	switch {
 	case ref == "-":
-		return "", cli.Usagef("specr reads a spec package from disk, not stdin: give its directory, id or name")
+		return "", cli.Usagef("%s reads a spec package from disk, not stdin: give its directory, id or name", tool)
 	case strings.Contains(ref, "://"):
-		return "", cli.Usagef("specr takes a spec package, not a URL: %s; give its directory, id or name", ref)
+		return "", cli.Usagef("%s takes a spec package, not a URL: %s; give its directory, id or name", tool, ref)
 	case strings.ContainsAny(ref, "\r\n"):
-		return "", cli.Usagef("the input is several lines; specr takes one reference to a spec package")
+		return "", cli.Usagef("%s takes one reference to a spec package, not several lines", tool)
 	}
 
 	var notPackage string
@@ -52,31 +55,32 @@ func locate(ref, root, specsDir string) (string, error) {
 		}
 	}
 
+	refused := tool + " cannot resolve the reference: "
 	notFound := fmt.Sprintf("%s names no spec package", ref)
 	if notPackage != "" {
-		notFound = fmt.Sprintf("%s is not a spec package or a file in one (no prd.md there)", displayPath(notPackage, root))
+		notFound = fmt.Sprintf("%s is not a spec package or a file in one (no prd.md there)", Display(notPackage, root))
 	}
-	shownRoot := displayPath(specsDir, root)
-	entries, err := specDirs(specsDir)
+	shownRoot := Display(specsDir, root)
+	entries, err := List(specsDir)
 	if err != nil {
-		return "", cli.Usagef("%s, and the spec root %s could not be read: %v", notFound, shownRoot, err)
+		return "", cli.Usagef("%s%s, and the spec root %s could not be read: %v", refused, notFound, shownRoot, err)
 	}
 	matches := matching(entries, ref)
 	switch len(matches) {
 	case 1:
 		return filepath.Join(specsDir, matches[0]), nil
 	case 0:
-		msg := fmt.Sprintf("%s; the spec root %s holds %s", notFound, shownRoot, listed(entries))
+		msg := fmt.Sprintf("%s%s; the spec root %s holds %s", refused, notFound, shownRoot, listed(entries))
 		archive := filepath.Join(specsDir, "archive")
-		if archived, aerr := specDirs(archive); aerr == nil {
+		if archived, aerr := List(archive); aerr == nil {
 			if m := matching(archived, ref); len(m) > 0 {
-				msg += fmt.Sprintf("; an archived package matches: give its path, %s", displayPath(filepath.Join(archive, m[0]), root))
+				msg += fmt.Sprintf("; an archived package matches: give its path, %s", Display(filepath.Join(archive, m[0]), root))
 			}
 		}
 		return "", cli.Usagef("%s", msg)
 	default:
-		return "", cli.Usagef("%s names %d spec packages (%s); give the directory name",
-			ref, len(matches), strings.Join(matches, ", "))
+		return "", cli.Usagef("%s%s names %d spec packages (%s); give the directory name",
+			refused, ref, len(matches), strings.Join(matches, ", "))
 	}
 }
 
@@ -98,8 +102,11 @@ func isSpecDir(dir string) bool {
 	return err == nil && prd.Mode().IsRegular()
 }
 
-// specDirs lists the NN_name directories under root, sorted.
-func specDirs(root string) ([]string, error) {
+// List returns the names of the NN_name directories under root, in the order
+// of their numbers: the prefix compared as a number, so that 99_y comes before
+// 100_x, and a tie broken by the whole name. It lists directories whether or
+// not they hold a package that loads.
+func List(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
@@ -110,8 +117,24 @@ func specDirs(root string) ([]string, error) {
 			out = append(out, e.Name())
 		}
 	}
-	sort.Strings(out)
+	slices.SortFunc(out, compareDirs)
 	return out, nil
+}
+
+// compareDirs orders two NN_name directory names by their numbers. The
+// numbers are compared as digit strings without their leading zeros, shorter
+// first, so that a number too long for an int still orders.
+func compareDirs(a, b string) int {
+	na, _, _ := strings.Cut(a, "_")
+	nb, _, _ := strings.Cut(b, "_")
+	na, nb = strings.TrimLeft(na, "0"), strings.TrimLeft(nb, "0")
+	if c := cmp.Compare(len(na), len(nb)); c != 0 {
+		return c
+	}
+	if c := strings.Compare(na, nb); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
 }
 
 // matching returns the directory names ref names: the whole name, its

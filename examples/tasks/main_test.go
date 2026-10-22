@@ -74,3 +74,53 @@ func TestTasksRefusesATaskThatIsDone(t *testing.T) {
 		t.Error("run on a done task = nil; want an error")
 	}
 }
+
+// TS-10-7: pick with id 0 takes NextTask's choice and keeps its two messages.
+func TestPickWithoutAnIDUsesNextTask_TS10_7(t *testing.T) {
+	task := func(id int, state afspec.TaskState, deps []int) afspec.Task {
+		return afspec.Task{Id: id, State: state, DependsOn: deps}
+	}
+	plan := func(tasks ...afspec.Task) *afspec.TasksV2Json { return &afspec.TasksV2Json{Tasks: tasks} }
+
+	_, err := pick(plan(task(1, afspec.TaskStateDone, nil), task(2, afspec.TaskStateDropped, nil)), 0)
+	if err == nil || !strings.Contains(err.Error(), "every task is done or dropped") {
+		t.Errorf("a finished plan: err = %v", err)
+	}
+
+	_, err = pick(plan(task(1, afspec.TaskStateDropped, nil), task(2, afspec.TaskStatePending, []int{1})), 0)
+	if err == nil || !strings.Contains(err.Error(), "no pending task has all its dependencies done") {
+		t.Errorf("a blocked plan: err = %v", err)
+	}
+
+	got, err := pick(plan(
+		task(1, afspec.TaskStateDone, nil),
+		task(2, afspec.TaskStatePending, nil),
+		task(3, afspec.TaskStateInProgress, []int{1}),
+	), 0)
+	if err != nil || got.Id != 3 {
+		t.Errorf("in_progress and ready tasks: pick = %+v, %v; want the in_progress task 3", got, err)
+	}
+
+	got, err = pick(plan(
+		task(1, afspec.TaskStateDone, nil),
+		task(2, afspec.TaskStatePending, []int{1}),
+		task(3, afspec.TaskStatePending, nil),
+	), 0)
+	if err != nil || got.Id != 2 {
+		t.Errorf("ready tasks: pick = %+v, %v; want task 2", got, err)
+	}
+
+	// A task without depends_on follows the task before it (format v2 §8.3);
+	// the old pick treated it as having no dependencies at all.
+	got, err = pick(plan(
+		task(1, afspec.TaskStateInProgress, nil),
+		task(2, afspec.TaskStatePending, nil),
+	), 0)
+	if err != nil || got.Id != 1 {
+		t.Errorf("pick = %+v, %v; want the in_progress task 1", got, err)
+	}
+	_, err = pick(plan(task(1, afspec.TaskStatePending, []int{2}), task(2, afspec.TaskStatePending, nil)), 0)
+	if err == nil {
+		t.Error("task 2 follows task 1, which is pending, so no task is ready")
+	}
+}
