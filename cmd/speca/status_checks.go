@@ -94,7 +94,7 @@ func (sc *statusCall) checkActivation() *cli.ErrorInfo {
 // would make the drift permanent. A task still open (an optional one too)
 // refuses it unless --force is given.
 func (sc *statusCall) checkSealing() *cli.ErrorInfo {
-	if intentDrift(sc.spec) {
+	if specpkg.IntentDrift(sc.spec) {
 		return lifecycleRefusal(fmt.Sprintf("%s cannot be sealed: its ## Intent has changed since it was activated (or is gone); "+
 			"restore the intent that was activated, or write a new package that supersedes this one", sc.name), nil)
 	}

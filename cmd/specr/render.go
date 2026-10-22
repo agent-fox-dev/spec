@@ -34,6 +34,10 @@ const (
 // are what the shell asks of a result.
 type Result struct {
 	envelope.RenderResult
+
+	// writable is whether the package can take a write, as specpkg.Writable says.
+	// It decides whether next suggests a call of speca, and is not written.
+	writable bool
 }
 
 // Summary is the envelope's one sentence.
@@ -61,29 +65,85 @@ func (r *Result) Artifacts() []cli.Artifact {
 	return []cli.Artifact{{Kind: cli.ArtifactMarkdownFile, Path: r.MarkdownFile}}
 }
 
-// Next suggests rendering the next task that is not done: after a whole
-// render, the first; after a task, the next one after it.
+// Next suggests the calls to make after this render, in the order an agent makes
+// them. After a whole render of a package that can take a write, with nothing in
+// progress, the first call is the claim of the next ready task, with speca; the
+// render of the next task that is not done follows it, and is the only entry when
+// there is no claim to make. After a whole render that task is the first, and after
+// a task, the one after it.
 func (r *Result) Next() []cli.Next {
 	after := 0
 	if r.Task != nil {
 		after = r.Task.ID
 	}
+	var next *envelope.TaskInfo
 	seen := after == 0
-	for _, t := range r.Tasks {
+	for i, t := range r.Tasks {
 		if !seen {
 			seen = t.ID == after
 			continue
 		}
-		if t.State == string(afspec.TaskStateDone) || t.State == string(afspec.TaskStateDropped) {
-			continue
+		if t.State != string(afspec.TaskStateDone) && t.State != string(afspec.TaskStateDropped) {
+			next = &r.Tasks[i]
+			break
 		}
-		why := fmt.Sprintf("task %d (%s) is the first task not done; render the package scoped to it", t.ID, t.Title)
-		if after != 0 {
-			why = fmt.Sprintf("task %d (%s) is the next task not done", t.ID, t.Title)
-		}
-		return []cli.Next{{Tool: "specr", Input: r.SpecDir, Flags: []string{"--task", fmt.Sprint(t.ID)}, Why: why}}
 	}
-	return nil
+
+	var out []cli.Next
+	if claim, ok := r.claim(next); ok {
+		out = append(out, claim)
+	}
+	if next != nil {
+		why := fmt.Sprintf("task %d (%s) is the first task not done; render the package scoped to it", next.ID, next.Title)
+		if after != 0 {
+			why = fmt.Sprintf("task %d (%s) is the next task not done", next.ID, next.Title)
+		}
+		out = append(out, cli.Next{Tool: "specr", Input: r.SpecDir, Flags: []string{"--task", fmt.Sprint(next.ID)}, Why: why})
+	}
+	return out
+}
+
+// claim is the speca call to make before the render suggestion, when it would
+// succeed and speca would suggest the same: none unless the package can take a
+// write.
+//
+// After a whole render it claims the first task not done: pending and ready,
+// with no task in progress (speca's own report suggests a claim only then, and
+// then for this task).
+//
+// After a render of task N the caller has chosen N, so the claim is not withheld
+// by another task in progress, which is the compare-and-set that settles a race.
+// A pending ready N is claimed; an N in progress is recorded done; a pending task
+// that is not ready would raise a warning, and a task done or dropped has nothing
+// to claim or record, so those have none.
+func (r *Result) claim(first *envelope.TaskInfo) (cli.Next, bool) {
+	if !r.writable {
+		return cli.Next{}, false
+	}
+	if r.Task != nil {
+		switch {
+		case r.Task.State == string(afspec.TaskStatePending) && r.Task.Ready:
+			return r.speca(*r.Task, afspec.TaskStateInProgress, fmt.Sprintf("claim task %d (%s) before working on it, so that no other agent takes it", r.Task.ID, r.Task.Title)), true
+		case r.Task.State == string(afspec.TaskStateInProgress):
+			return r.speca(*r.Task, afspec.TaskStateDone, fmt.Sprintf("record task %d (%s) done once its work is finished and its tests pass", r.Task.ID, r.Task.Title)), true
+		}
+		return cli.Next{}, false
+	}
+	if first == nil || first.State != string(afspec.TaskStatePending) || !first.Ready {
+		return cli.Next{}, false
+	}
+	for _, t := range r.Tasks {
+		if t.State == string(afspec.TaskStateInProgress) {
+			return cli.Next{}, false
+		}
+	}
+	return r.speca(*first, afspec.TaskStateInProgress, fmt.Sprintf("task %d (%s) is the next ready task; claim it before working on it so that no other agent takes it", first.ID, first.Title)), true
+}
+
+// speca is the call that moves task t to state, against this package: four
+// flags, each value its own element.
+func (r *Result) speca(t envelope.TaskInfo, state afspec.TaskState, why string) cli.Next {
+	return cli.Next{Tool: "speca", Input: r.SpecDir, Flags: []string{"--task", fmt.Sprint(t.ID), "--state", string(state)}, Why: why}
 }
 
 // renderOptions are the flags that shape the render.

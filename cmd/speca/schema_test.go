@@ -227,3 +227,49 @@ func TestSchemaAndHelpDescribeTheStatusForm_TS12_14(t *testing.T) {
 		}
 	}
 }
+
+// TS-13-9: the description --schema gives ends with the sentence naming the
+// three commands, which it holds once, and the old wording is gone.
+func TestSchemaDescriptionEndsWithTheSiblingSentence_TS13_9(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--schema"}, &stdout, &stderr); code != cli.ExitOK {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	var doc struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	d := doc.Description
+	if !strings.HasSuffix(d, " "+cli.SiblingCommands) || strings.Count(d, cli.SiblingCommands) != 1 || strings.Contains(d, "reports its state") {
+		t.Errorf("description %q does not end with the sentence, once, and without the old wording", d)
+	}
+}
+
+// TS-13-10 (speca): the golden file is the live --schema, byte for byte, and its
+// description ends with the sentence. The result schema gains no field for
+// writability.
+func TestSchemaGoldenCarriesTheSiblingSentence_TS13_10(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--schema"}, &stdout, &stderr); code != cli.ExitOK {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "schema.golden.json"))
+	if err != nil || !bytes.Equal(stdout.Bytes(), golden) {
+		t.Fatalf("--schema differs from the golden file (%v)", err)
+	}
+	var doc struct {
+		Description string          `json:"description"`
+		Result      json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(golden, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(doc.Description, " "+cli.SiblingCommands) {
+		t.Errorf("the golden description %q does not end with the sentence", doc.Description)
+	}
+	if strings.Contains(string(doc.Result), "writable") {
+		t.Error("the result schema has a field for writability")
+	}
+}

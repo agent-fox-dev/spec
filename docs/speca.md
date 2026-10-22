@@ -18,8 +18,9 @@ same interface as `spec` and `specr`: **exactly one positional input**
 program-driven path, the help on stderr, and one exit-code table. The forms are
 flags, not subcommands.
 
-`spec` writes a package from an idea, `specr` renders one, `speca` reports its
-state.
+`spec` writes a package from an idea, `specr` renders one, `speca` reports and
+changes its state. Each command's help and each `--schema` description say so,
+in the sentence `cli.SiblingCommands`.
 
 The report, `--validate` and `--list` read the packages and change nothing.
 The task form and the status form write. The task form moves tasks through the
@@ -854,6 +855,32 @@ the one in progress, else the first ready one. `result.tasks` lists the plan
 with each task's state and readiness. `next` names the `specr` call that
 renders that task. `speca --list` shows every package at once.
 ```
+
+The same skill's "one task at a time" step claims the task before it renders it
+and records it done after:
+
+```markdown
+**One task at a time.** Claim the task before you start it:
+`speca <package> --task <N> --state in_progress`. A refusal at stage `task`
+means another agent holds it; pick another from `result.tasks`. Then work
+from the spec scoped to it: run `specr <package> --task <N>` and read
+`result.markdown` — the requirements that own the task's criteria, its tests
+and the paths they verify in full, everything else by id. When its tests
+pass, record it: `speca <package> --task <N> --state done`, and follow `next`
+to the task after it. If you stop before it is done, release it with
+`--state pending`. Never edit `tasks.json` by hand: if `speca` or `specr` is
+not installed, read the four artefacts and scope them by hand, and say in your
+report which task you finished instead of changing its state.
+```
+
+`specr` suggests those two calls itself: its `next` holds the claim after a whole
+render of a package that can take a write, and after `specr <package> --task N` the
+claim of a ready `N` or, once `N` is in progress, the call that records it done (see
+[specr.md](specr.md#artifacts-and-next)). `speca` and `specr` agree on whether a
+package can take a write (`specpkg.Writable`: a draft, or an active package whose
+intent has not drifted), so neither suggests a claim for one the other would refuse
+for that reason. Both still offer it for a package that holds a key the schema does not
+allow, or is in another format version, and `speca` refuses the call with the reason.
 
 Reading the state of a package is the first half of working through it; the
 second, recording a task as claimed, finished or released, is the task form. The

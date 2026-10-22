@@ -62,7 +62,7 @@ func (sc *statusCall) recordSupersedes() *envelope.Change {
 	switch {
 	case by.Status == string(afspec.PrdFrontmatterV2JsonStatusSealed):
 		return notRecorded("it is sealed, and a sealed package cannot be saved")
-	case intentDrift(by):
+	case specpkg.IntentDrift(by):
 		return notRecorded("its ## Intent has changed since it was activated, and the library refuses every save of such a package")
 	}
 	if keys := append(unknownKeys(by.Validate().Errors), frontmatterUnknownKeys(sc.byDir)...); len(keys) > 0 {

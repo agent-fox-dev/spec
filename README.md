@@ -145,7 +145,8 @@ specr --schema                         # the flags and the output, as JSON Schem
 Like `spec`, it writes one JSON object to stdout: the Markdown is
 `result.markdown`, beside the spec's identity, the sections rendered, what a
 budget dropped, and the plan's tasks with their states; `next` names the next
-task not done. `--markdown-file` also writes the Markdown to a file. Exit
+task not done and, where the package can take the change, the `speca` call that
+claims the task to work on or records the task rendered as done. `--markdown-file` also writes the Markdown to a file. Exit
 codes: `0` rendered, `1` the package could not be read, `2` a usage error.
 Everything is in [docs/specr.md](docs/specr.md); the decision is
 [ADR 05](docs/adr/05-render-a-package-with-its-own-command.md).

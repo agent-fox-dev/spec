@@ -59,7 +59,7 @@
       "done_when": [
         "go test ./cmd/spec ./cmd/specr ./internal/cli -count=1 passes"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -107,7 +107,7 @@
       "done_when": [
         "go test ./cmd/... ./internal/cli -count=1 passes without UPDATE_GOLDEN"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -147,7 +147,7 @@
       "done_when": [
         "go test ./internal/specpkg ./cmd/speca -count=1 passes"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -186,7 +186,7 @@
       "done_when": [
         "go test ./cmd/specr -count=1 passes"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -226,7 +226,7 @@
       "done_when": [
         "go test ./cmd/specr -count=1 passes"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -262,7 +262,7 @@
         "make test and make lint pass",
         "make doc leaves docs/generated up to date"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

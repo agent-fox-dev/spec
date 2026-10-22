@@ -90,7 +90,9 @@ func TestWholePackageIsRenderCombined(t *testing.T) {
 	if r.Tokens != afspec.EstimateTokens(r.Markdown) || !r.Valid || len(r.Tasks) != 3 {
 		t.Errorf("tokens %d valid %v tasks %d", r.Tokens, r.Valid, len(r.Tasks))
 	}
-	if len(env.Next) != 1 || strings.Join(env.Next[0].Flags, " ") != "--task 1" || env.Next[0].Input != r.SpecDir {
+	// The claim of task 1 comes first (spec 13), and then the render of it.
+	if len(env.Next) != 2 || env.Next[0].Tool != "speca" || strings.Join(env.Next[0].Flags, " ") != "--task 1 --state in_progress" ||
+		env.Next[1].Tool != "specr" || strings.Join(env.Next[1].Flags, " ") != "--task 1" || env.Next[1].Input != r.SpecDir || env.Next[0].Input != r.SpecDir {
 		t.Errorf("next = %+v", env.Next)
 	}
 }
@@ -132,8 +134,8 @@ func TestNextSkipsDoneTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, _, _ := run(t, "--dir", root, "09")
-	if len(env.Next) != 1 || strings.Join(env.Next[0].Flags, " ") != "--task 2" {
-		t.Errorf("next = %+v", env.Next)
+	if len(env.Next) != 2 || strings.Join(env.Next[0].Flags, " ") != "--task 2 --state in_progress" || strings.Join(env.Next[1].Flags, " ") != "--task 2" {
+		t.Errorf("next = %+v; want the claim of task 2, then its render", env.Next)
 	}
 	if env.Result.Tasks[0].State != "done" {
 		t.Errorf("tasks[0] = %+v", env.Result.Tasks[0])
@@ -482,4 +484,74 @@ func TestTasksCarryReady_TS10_15(t *testing.T) {
 	if err != nil || !strings.Contains(string(golden), `"ready": {`) {
 		t.Errorf("the schema golden does not describe ready (%v)", err)
 	}
+}
+
+// TS-13-5: the help says, where it describes next, that it names the task to
+// render after this one and the speca call that claims the rendered task or
+// records it done.
+func TestHelpDescribesNextAsNamingTheSpecaCall_TS13_5(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--help"}, &stdout, &stderr); code != cli.ExitOK || stdout.Len() != 0 {
+		t.Fatalf("code %d, stdout %q", code, stdout.String())
+	}
+	help := stderr.String()
+	if !strings.Contains(help, "specr <spec> --task N") {
+		t.Errorf("the help lost the form %q", "specr <spec> --task N")
+	}
+	var para string
+	for _, p := range strings.Split(help, "\n\n") {
+		if flat := strings.Join(strings.Fields(p), " "); strings.Contains(flat, "next names") {
+			para = flat
+		}
+	}
+	if para == "" {
+		t.Fatalf("no paragraph of the help describes next:\n%s", help)
+	}
+	for _, want := range []string{"the task to render after this one", "speca", "claims the rendered task", "records it done", "can take the change"} {
+		if !strings.Contains(para, want) {
+			t.Errorf("the paragraph on next does not say %q:\n%s", want, para)
+		}
+	}
+}
+
+// siblingLine fails the test unless help carries the sentence naming the three
+// commands on a line of its own, after the title line and before Usage:, with a
+// blank line on each side.
+func siblingLine(t *testing.T, what, help string) {
+	t.Helper()
+	usage := strings.Index(help, "Usage:")
+	if usage < 0 {
+		t.Errorf("%s: the help has no Usage: line:\n%s", what, help)
+		return
+	}
+	before := help[:usage]
+	if !strings.Contains(before, "\n\n"+cli.SiblingCommands+"\n\n") {
+		t.Errorf("%s: the sentence is not on a line of its own, with a blank line on each side, before Usage::\n%s", what, before)
+	}
+	if title, _, _ := strings.Cut(help, "\n"); title == "" || strings.Index(before, cli.SiblingCommands) < len(title) {
+		t.Errorf("%s: the title line %q does not come before the sentence:\n%s", what, title, before)
+	}
+}
+
+// TS-13-3: -h and --help print the sentence between the title and Usage:.
+func TestHelpCarriesTheSiblingLine_TS13_3(t *testing.T) {
+	for _, flag := range []string{"-h", "--help"} {
+		var stdout, stderr bytes.Buffer
+		if code := Main([]string{flag}, &stdout, &stderr); code != cli.ExitOK || stdout.Len() != 0 {
+			t.Fatalf("%s: code %d, stdout %q", flag, code, stdout.String())
+		}
+		siblingLine(t, flag, stderr.String())
+	}
+}
+
+// TS-13-4: a bare invocation exits 2 with a usage envelope, and the help on
+// stderr carries the sentence.
+func TestBareInvocationCarriesTheSiblingLine_TS13_4(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Main(nil, &stdout, &stderr)
+	env, err := envelope.DecodeSpecr(stdout.Bytes())
+	if err != nil || code != cli.ExitUsage || env.Error == nil || env.Error.Category != "usage" {
+		t.Fatalf("code %d, envelope %+v (%v)", code, env.Error, err)
+	}
+	siblingLine(t, "a bare invocation", stderr.String())
 }

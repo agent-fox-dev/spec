@@ -15,6 +15,13 @@ are flags, not subcommands.
 It reads the package and changes nothing. The only file it can write is the
 one `--markdown-file` names.
 
+`spec` writes a package from an idea, `specr` renders one, `speca` reports and
+changes its state. Each command's help and `specr --schema` say so, in the sentence
+`cli.SiblingCommands`; and `specr`'s `next` names the `speca` call that records a
+task as claimed or done, where it would succeed (see [`artifacts` and
+`next`](#artifacts-and-next)). `specr` itself never writes a package: recording
+progress is `speca`'s.
+
 ```sh
 specr .specs/16_indexed_code_search              # the whole package
 specr 16 --task 3                                # scoped to task 3
@@ -94,7 +101,7 @@ construct to its v2 form.
               "state": "pending", "depends_on": [1] },
     "sections": ["prd", "requirements", "test_spec", "tasks"],
     "tokens": 1191,
-    "tasks": [ { "id": 1, "title": "Detect agent mode and keep stdout JSON-only", "kind": "implement", "state": "pending" }, … ],
+    "tasks": [ { "id": 1, "title": "Detect agent mode and keep stdout JSON-only", "kind": "implement", "state": "pending", "ready": true }, … ],
     "markdown": "> The package `09_agent_mode`, scoped to task 2: …"
   },
   "next": [ { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "3"],
@@ -148,9 +155,51 @@ md := env.Result.Markdown
 `artifacts` holds one `{"kind": "markdown_file", "path"}` when
 `--markdown-file` was written, and is absent otherwise.
 
-`next` suggests rendering the next task that is not `done` or `dropped`: after
-a whole render, the first such task; after `--task N`, the first one after N.
-It is absent when there is none.
+`next` lists the calls to make after this render, in the order an agent makes
+them. The last is the render of the next task that is not `done` or `dropped`:
+after a whole render, the first such task; after `--task N`, the first one after N.
+Its rule, flags and `why` are the same whatever else `next` holds. Before it, where
+the call would succeed, comes a call of `speca` that records the progress:
+
+| After | When | The `speca` entry |
+|---|---|---|
+| a whole render (with or without `--section` or `--max-tokens`) | the package can take a write, no task is in progress, and the first task not done is `pending` and ready | `speca <spec_dir> --task M --state in_progress`, the claim of that task (`M` is also the task the render suggestion names, and the task `speca <spec>` suggests claiming) |
+| `--task N` | the package can take a write and `N` is `pending` and ready | the claim of `N`, even if another task is in progress: the caller chose `N`, and the claim is the compare-and-set that settles a race |
+| `--task N` | the package can take a write and `N` is `in_progress` | `speca <spec_dir> --task N --state done` |
+
+There is no `speca` entry for a task `done` or `dropped`, a `pending` task that is
+not ready, a package that cannot take a write (sealed, superseded, archived, or
+active with a drifted `## Intent`), a whole render with a task in progress, or when
+no task is left. `specr` suggests no release (`--state pending`), which it cannot
+know an agent wants, and no lifecycle call: those are `speca`'s own `next`. The
+`speca` entry comes first, with the same `input` as the render suggestion and four
+`flags`. `next` is absent when there is no task left to render and no call to make,
+and when the package could not be loaded; it is there after a failed
+`--markdown-file` write, as after a good one. The writability behind it is kept in a
+field of `specr`'s result that is never written.
+
+A call of `speca` is offered where `speca` would take the package: a draft, or an
+active package whose intent has not drifted. A package that holds a key the schema does
+not allow, or is in another format version, is offered the call all the same, as
+`speca <spec>` offers its claim, and `speca` refuses it with the reason.
+
+A whole render of the example, where no task is claimed and task 1 is ready:
+
+```jsonc
+"next": [ { "tool": "speca", "input": ".specs/09_agent_mode", "flags": ["--task", "1", "--state", "in_progress"],
+            "why": "task 1 (Detect agent mode and keep stdout JSON-only) is the next ready task; claim it before working on it so that no other agent takes it" },
+          { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "1"],
+            "why": "task 1 (Detect agent mode and keep stdout JSON-only) is the first task not done; render the package scoped to it" } ]
+```
+
+And `specr 09 --task 1` once task 1 is in progress:
+
+```jsonc
+"next": [ { "tool": "speca", "input": ".specs/09_agent_mode", "flags": ["--task", "1", "--state", "done"],
+            "why": "record task 1 (Detect agent mode and keep stdout JSON-only) done once its work is finished and its tests pass" },
+          { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "2"],
+            "why": "task 2 (Error envelope and closed-pipe handling) is the next task not done" } ]
+```
 
 ### `error`
 
@@ -221,18 +270,25 @@ deliberately.
 
 The help, `--schema` and `next` are what make `specr` discoverable: an agent
 that knows only the command's name can run `specr --help` or `specr --schema`,
-and one that rendered a whole package is told which `--task` to render next.
+and one that rendered a whole package is told to claim the task it will work on
+and which `--task` to render next.
 
 In a skill's instructions, for example agent-fox's `af-impl` at its
-"one task at a time" step:
+"one task at a time" step, which claims the task before the render and records it done
+after it:
 
 ```markdown
-**Scope.** Work from the spec scoped to this task. Run
-`specr <package> --task <N>` and read `result.markdown`: the requirements
-that own the task's criteria, its tests and the paths they verify in full,
-everything else by id. `result.tasks` lists the plan with each task's state,
-and `next` names the task after this one. If `specr` is not installed, read
-the four artefacts and scope them by hand.
+**One task at a time.** Claim the task before you start it:
+`speca <package> --task <N> --state in_progress`. A refusal at stage `task`
+means another agent holds it; pick another from `result.tasks`. Then work
+from the spec scoped to it: run `specr <package> --task <N>` and read
+`result.markdown` — the requirements that own the task's criteria, its tests
+and the paths they verify in full, everything else by id. When its tests
+pass, record it: `speca <package> --task <N> --state done`, and follow `next`
+to the task after it. If you stop before it is done, release it with
+`--state pending`. Never edit `tasks.json` by hand: if `speca` or `specr` is
+not installed, read the four artefacts and scope them by hand, and say in your
+report which task you finished instead of changing its state.
 ```
 
 Where a JSON parser is not at hand, `--markdown-file` puts the Markdown in a

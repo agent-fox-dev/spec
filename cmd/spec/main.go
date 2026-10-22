@@ -4,7 +4,9 @@
 //	spec [flags] <text | file | issue-url | ->
 //
 // It takes exactly one input and writes exactly one JSON object to stdout.
-// Progress goes to stderr, so the two never interleave.
+// Progress goes to stderr, so the two never interleave. Its siblings are specr,
+// which renders a package as Markdown, and speca, which reports a package's
+// state and changes it.
 package main
 
 import (
@@ -22,6 +24,8 @@ import (
 )
 
 const usage = `spec — turn a product idea into a validated specification package
+
+` + cli.SiblingCommands + `
 
 Usage:
   spec [flags] <input>

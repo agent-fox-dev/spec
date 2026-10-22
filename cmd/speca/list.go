@@ -29,11 +29,11 @@ func list(c *call) (*Result, *cli.ErrorInfo) {
 			FixHint: &cli.FixHint{Flag: "--specs-dir", Env: []string{afspec.SpecDirEnv}}}
 	}
 	packages := []envelope.PackageInfo{}
-	drifted := map[string]bool{}
+	writable := map[string]bool{}
 	add := func(path string, archived bool) {
-		info, drift := c.entry(path, archived)
+		info, canWrite := c.entry(path, archived)
 		packages = append(packages, info)
-		drifted[info.SpecDir] = drift
+		writable[info.SpecDir] = canWrite
 	}
 	for _, name := range names {
 		add(filepath.Join(c.specsDir, name), false)
@@ -53,14 +53,14 @@ func list(c *call) (*Result, *cli.ErrorInfo) {
 			}
 		}
 	}
-	return &Result{AdminResult: envelope.AdminResult{Packages: packages}, drifted: drifted}, nil
+	return &Result{AdminResult: envelope.AdminResult{Packages: packages}, writableDirs: writable}, nil
 }
 
-// entry describes the package in path, and says whether its intent drifted,
+// entry describes the package in path, and says whether it can take a write,
 // which an entry has no field for. One that fails to load is described by its
 // directory and the library's reason alone, whether or not it is in the
 // archive: where it was is in its path.
-func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, drifted bool) {
+func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, writable bool) {
 	info = envelope.PackageInfo{SpecDir: specpkg.Display(path, c.root)}
 	spec, err := afspec.LoadSpec(path)
 	if err != nil {
@@ -76,5 +76,5 @@ func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, dri
 		info.NextTask = &task
 	}
 	info.Archived = archived
-	return info, intentDrift(spec)
+	return info, specpkg.Writable(spec)
 }

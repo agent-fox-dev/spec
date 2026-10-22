@@ -1,6 +1,6 @@
 {
   "tool": "specr",
-  "description": "Renders a specification package as Markdown: the whole package, or the package scoped to one task, with what the task owns in full and everything else by id.",
+  "description": "Renders a specification package as Markdown: the whole package, or the package scoped to one task, with what the task owns in full and everything else by id. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
   "input": {
     "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search).",
     "examples": [

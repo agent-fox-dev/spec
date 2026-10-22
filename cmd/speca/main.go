@@ -15,7 +15,8 @@
 // write no file. The task form and the status form write the package through
 // the library, which rewrites every artifact of it, and the status form moves
 // an archived or superseded package under archive/. No form makes a model or
-// network call or reads a credential.
+// network call or reads a credential. Its siblings are spec, which writes a
+// package from an idea, and specr, which renders one as Markdown.
 package main
 
 import (
@@ -35,10 +36,6 @@ import (
 
 const tool = "speca"
 
-// siblings is the sentence the help and --schema each carry, so that an agent
-// that finds one of the three commands learns what the others are for.
-const siblings = "spec writes a package from an idea, specr renders one, speca reports its state"
-
 // description is the one sentence --schema gives, with the sentence naming the
 // three commands.
 const description = "Reports the state of a specification package: its lifecycle status, whether it " +
@@ -49,7 +46,7 @@ const description = "Reports the state of a specification package: its lifecycle
 	"every one or none, and saves the package through the library, which rewrites all of its " +
 	"artifacts. With --status it moves the package through its lifecycle: activates, seals, archives " +
 	"or supersedes it (with --by, the package that replaces it), and moves an archived or superseded " +
-	"package under archive/. Without these it changes nothing. " + siblings + "."
+	"package under archive/. Without these it changes nothing. " + cli.SiblingCommands
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
@@ -58,7 +55,7 @@ const inputDescription = "Exactly one reference to a spec package: a path to its
 
 const usage = `speca — report the state of a specification package
 
-` + siblings + `.
+` + cli.SiblingCommands + `
 
 Usage:
   speca [flags] <spec>
