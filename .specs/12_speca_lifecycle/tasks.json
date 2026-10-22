@@ -50,7 +50,7 @@
       "done_when": [
         "TestMoveToArchive passes unchanged"
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {

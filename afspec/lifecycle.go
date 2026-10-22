@@ -147,61 +147,94 @@ func (s *Spec) Supersede(supersedingSpecID, dir string) (*Spec, error) {
 	return &newSpec, nil
 }
 
-// MoveToArchive transitions a spec to the archived state and moves the
-// spec directory to {root}/archive/ using an atomic rename or
-// copy-then-delete.
+// saveFailure is a *SaveError with a formatted message.
+func saveFailure(format string, args ...any) *SaveError {
+	msg := fmt.Sprintf(format, args...)
+	return &SaveError{Msg: msg, Err: &SpecError{Msg: msg}}
+}
+
+// ArchiveDestination is where MoveUnderArchive puts the package at specDir:
+// <root>/archive/<base name of specDir>. It writes nothing.
 //
-// Creates the archive directory if it does not exist.
-// Returns a SaveError if the archive directory already contains a
-// directory with the same name.
+// Returns a SaveError when that path already exists (the message is "archive
+// conflict: <path> already exists"; a dangling symbolic link counts, since a
+// rename would replace it) or when whether it exists cannot be found out.
+func ArchiveDestination(specDir, root string) (string, error) {
+	dest := filepath.Join(root, "archive", filepath.Base(specDir))
+	_, err := os.Lstat(dest)
+	switch {
+	case err == nil:
+		return "", saveFailure("archive conflict: %s already exists", dest)
+	case !errors.Is(err, os.ErrNotExist):
+		return "", saveFailure("cannot check archive destination: %s", err)
+	}
+	return dest, nil
+}
+
+// MoveUnderArchive moves the package at specDir to ArchiveDestination(specDir,
+// root) and returns the new directory. It rewrites no file, so the package's
+// status, updated_at and content stay as they were: the caller writes the
+// status first, with Transition or Supersede, and only an archived or a
+// superseded package lives under archive/ (format v2 §9).
+//
+// It creates <root>/archive/ (mode 0755 before the umask) if it is missing.
+//
+// Returns the LoadError when the package does not load, a LifecycleError when
+// its status is neither archived nor superseded, and a SaveError when the
+// destination is taken or the directory cannot be created or renamed. In each
+// case the package is where it was.
+func MoveUnderArchive(specDir, root string) (string, error) {
+	spec, err := LoadSpec(specDir)
+	if err != nil {
+		return "", err
+	}
+	if spec.Status != "archived" && spec.Status != "superseded" {
+		msg := fmt.Sprintf("cannot move a %s spec under archive/; only archived and superseded specs live there", spec.Status)
+		return "", &LifecycleError{Msg: msg, Err: &SpecError{Msg: msg}}
+	}
+	dest, err := ArchiveDestination(specDir, root)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(root, "archive"), 0o755); err != nil {
+		return "", saveFailure("cannot create archive directory: %s", err)
+	}
+	if err := os.Rename(specDir, dest); err != nil {
+		return "", saveFailure("cannot move spec to archive: %s", err)
+	}
+	return dest, nil
+}
+
+// MoveToArchive transitions a spec to the archived state and moves the
+// spec directory to {root}/archive/ with MoveUnderArchive.
+//
+// A spec that is not already archived is transitioned first, a superseded one
+// included (superseded to archived is a move the lifecycle allows). The
+// destination is looked at before that, so a taken destination leaves the spec
+// as it was. Creates the archive directory if it does not exist.
+//
+// Returns a SaveError if the archive directory already contains a directory
+// with the same name, or the spec cannot be loaded, moved or written.
 func MoveToArchive(specDir, root string) error {
 	// Load the spec from the source directory.
 	spec, err := LoadSpec(specDir)
 	if err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot load spec for archiving: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot load spec for archiving: %s", err)},
-		}
+		return saveFailure("cannot load spec for archiving: %s", err)
+	}
+
+	// Refuse before anything is written: the transition below would leave the
+	// spec archived but still in place.
+	if _, err := ArchiveDestination(specDir, root); err != nil {
+		return err
 	}
 
 	// Transition to archived state if not already archived.
 	if spec.Status != "archived" {
-		_, err = spec.Transition("archived", specDir)
-		if err != nil {
+		if _, err := spec.Transition("archived", specDir); err != nil {
 			return err
 		}
 	}
 
-	// Create the archive directory if it does not exist.
-	archiveDir := filepath.Join(root, "archive")
-	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot create archive directory: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot create archive directory: %s", err)},
-		}
-	}
-
-	// Check for conflict — refuse to overwrite existing archive entry.
-	destDir := filepath.Join(archiveDir, filepath.Base(specDir))
-	if _, err := os.Stat(destDir); err == nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("archive conflict: %s already exists", destDir),
-			Err: &SpecError{Msg: fmt.Sprintf("archive conflict: %s already exists", destDir)},
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot check archive destination: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot check archive destination: %s", err)},
-		}
-	}
-
-	// Move the spec directory to the archive.
-	if err := os.Rename(specDir, destDir); err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot move spec to archive: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot move spec to archive: %s", err)},
-		}
-	}
-
-	return nil
+	_, err = MoveUnderArchive(specDir, root)
+	return err
 }
