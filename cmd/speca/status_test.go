@@ -211,3 +211,267 @@ func TestAMoveOnlyCallIsAPackageAtItsTargetOutsideArchive(t *testing.T) {
 		})
 	}
 }
+
+// activePackage adds a package, activates it through the library, which records
+// the hash of its intent, and gives it the plan.
+func activePackage(t *testing.T, root, dirName, id, name string, tasks ...map[string]any) string {
+	t.Helper()
+	dir := addPackage(t, root, dirName, id, name)
+	activate(t, dir)
+	if len(tasks) > 0 {
+		setTasks(t, dir, tasks...)
+	}
+	return dir
+}
+
+// withFrontmatterKey adds a key of its own to the frontmatter of prd.md, which
+// the schema does not allow and a write would drop.
+func withFrontmatterKey(t *testing.T, dir string) {
+	t.Helper()
+	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 2", "schema_version: 2\nbadkey: \"x\"")
+}
+
+// succeeds runs the call and fails the test unless it exits 0 with a result.
+func succeeds(t *testing.T, root string, argv ...string) (envelope.AdminEnvelope, *envelope.AdminResult) {
+	t.Helper()
+	env, code, _ := run(t, append([]string{"--dir", root}, argv...)...)
+	if code != cli.ExitOK || !env.OK || env.Result == nil {
+		t.Fatalf("%v: code %d, error %+v", argv, code, env.Error)
+	}
+	return env, env.Result
+}
+
+func statusOnDisk(t *testing.T, dir string) string {
+	t.Helper()
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec.Status
+}
+
+// oneWarning returns the only warning with the code, or fails the test.
+func oneWarning(t *testing.T, env envelope.AdminEnvelope, code, severity string) envelope.Warning {
+	t.Helper()
+	ws := warningsOf(env, code)
+	if len(ws) != 1 || ws[0].Severity != severity {
+		t.Fatalf("warnings %+v; want one %s warning of severity %s", env.Warnings, code, severity)
+	}
+	return ws[0]
+}
+
+// TS-12-20: sealing, archiving and superseding refuse a package that holds keys
+// the schema does not allow, in prd.md or in the other artifacts, naming each.
+func TestUnknownKeysRefuseSealingAndArchiving_TS12_20(t *testing.T) {
+	root := newRepo(t)
+	a := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	withFrontmatterKey(t, a)
+	s := packageWith(t, root, "04_s", "04", "s", "sealed")
+	addUnknownKey(t, s)
+
+	for _, tc := range []struct {
+		argv []string
+		want []string
+	}{
+		{[]string{"03_a", "--status", "sealed"}, []string{"prd.md", "badkey"}},
+		{[]string{"04_s", "--status", "archived"}, []string{"tasks.json", "traceability"}},
+	} {
+		e := refusedAt(t, root, "status", envelope.CategoryLifecycle, tc.argv...)
+		if e == nil {
+			continue
+		}
+		saysAll(t, tc.argv, e.Message, tc.want...)
+		if e.FixHint == nil || e.FixHint.Flag != "--force" {
+			t.Errorf("%v: fix_hint %+v; want --force", tc.argv, e.FixHint)
+		}
+	}
+}
+
+// TS-12-21: --force goes ahead past unknown keys, with a high spec_invalid
+// warning that names them, and the written package holds none.
+func TestForceSealsPastUnknownKeys_TS12_21(t *testing.T) {
+	root := newRepo(t)
+	a := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	withFrontmatterKey(t, a)
+
+	env, r := succeeds(t, root, "03_a", "--status", "sealed", "--force")
+	if r.Status != "sealed" || statusOnDisk(t, a) != "sealed" {
+		t.Errorf("status %q, on disk %q; want sealed", r.Status, statusOnDisk(t, a))
+	}
+	w := oneWarning(t, env, "spec_invalid", "high")
+	if !strings.Contains(w.Message, "badkey") || w.Stage != "validate" {
+		t.Errorf("warning %+v; want stage validate, naming badkey", w)
+	}
+	if b, _ := os.ReadFile(filepath.Join(a, "prd.md")); strings.Contains(string(b), "badkey") {
+		t.Error("the key is still in prd.md")
+	}
+}
+
+// TS-12-23: a draft that validates and has an intent is activated: the status
+// and the hash of the intent are written, and the package stays where it is.
+func TestActivationWritesTheStatusAndTheHash_TS12_23(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+
+	_, r := succeeds(t, root, "09", "--status", "active")
+	if r.Status != "active" || r.IntentHash == "" || r.SpecDir != ".specs/09_agent_mode" {
+		t.Errorf("status %q, intent_hash %q, spec_dir %q; want active, a hash, .specs/09_agent_mode", r.Status, r.IntentHash, r.SpecDir)
+	}
+	if want := []envelope.Change{{Kind: "status", From: "draft", To: "active"}}; !slices.Equal(r.Changes, want) {
+		t.Errorf("changes %+v; want %+v", r.Changes, want)
+	}
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil || spec.Status != "active" || spec.IntentHash == nil || *spec.IntentHash != r.IntentHash {
+		t.Errorf("on disk: %+v, %v", spec, err)
+	}
+}
+
+// TS-12-24: a draft with no ## Intent cannot be activated, and --force does not
+// change that.
+func TestActivationWithoutAnIntentIsRefused_TS12_24(t *testing.T) {
+	root := newRepo(t)
+	editFile(t, filepath.Join(pkgDir(root, "09_agent_mode"), "prd.md"), "## Intent", "## Purpose")
+
+	e := refusedAt(t, root, "status", envelope.CategoryLifecycle, "09", "--status", "active", "--force")
+	if e != nil {
+		saysAll(t, nil, e.Message, "## Intent", "on a line of its own", "prd.md")
+	}
+}
+
+// breakValidity makes the example fail validation without touching its intent:
+// a test the plan names is not in the test specification.
+func breakValidity(t *testing.T, root string) {
+	t.Helper()
+	editFile(t, filepath.Join(pkgDir(root, "09_agent_mode"), "tasks.json"), `"TS-09-6"`, `"TS-09-99"`)
+}
+
+// TS-12-25: a draft that does not validate is refused at stage validate, naming
+// the failing rules, with --force as the way past.
+func TestActivationOfAnInvalidPackageIsRefused_TS12_25(t *testing.T) {
+	root := newRepo(t)
+	breakValidity(t, root)
+
+	e := refusedAt(t, root, "validate", envelope.CategoryInvalidSpec, "09", "--status", "active")
+	if e == nil {
+		return
+	}
+	saysAll(t, nil, e.Message, "09_agent_mode", "does not validate", "C6")
+	if e.FixHint == nil || e.FixHint.Flag != "--force" {
+		t.Errorf("fix_hint %+v; want --force", e.FixHint)
+	}
+}
+
+// TS-12-26: --force activates it, with a high spec_invalid warning naming the
+// rules.
+func TestForceActivatesAnInvalidPackage_TS12_26(t *testing.T) {
+	root := newRepo(t)
+	breakValidity(t, root)
+
+	env, r := succeeds(t, root, "09", "--status", "active", "--force")
+	if r.Status != "active" {
+		t.Errorf("status %q; want active", r.Status)
+	}
+	if w := oneWarning(t, env, "spec_invalid", "high"); !strings.Contains(w.Message, "C6") {
+		t.Errorf("warning %q does not name the failing rules", w.Message)
+	}
+}
+
+// 12-REQ-3.6 applies to the frontmatter of prd.md at activation too: the library
+// reports no key of the frontmatter, and the write drops it, so the activation is
+// refused as one that does not validate, and --force names the key.
+func TestActivationRefusesAFrontmatterKeyTheLibraryDoesNotReport(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	withFrontmatterKey(t, dir)
+
+	e := refusedAt(t, root, "validate", envelope.CategoryInvalidSpec, "09", "--status", "active")
+	if e != nil {
+		saysAll(t, nil, e.Message, "unknown_field", "prd.md", "badkey")
+	}
+	env, r := succeeds(t, root, "09", "--status", "active", "--force")
+	if w := oneWarning(t, env, "spec_invalid", "high"); !strings.Contains(w.Message, "badkey") || r.Status != "active" {
+		t.Errorf("warning %q, status %q; want one naming badkey, and active", w.Message, r.Status)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "prd.md")); strings.Contains(string(b), "badkey") {
+		t.Error("the key is still in prd.md")
+	}
+}
+
+// TS-12-28: an active package with no drift and no open task is sealed.
+func TestSealingWritesTheStatus_TS12_28(t *testing.T) {
+	root := newRepo(t)
+	dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), planTask(2, "dropped", []int{}))
+
+	_, r := succeeds(t, root, "03_a", "--status", "sealed")
+	if r.Status != "sealed" || r.SpecDir != ".specs/03_a" || statusOnDisk(t, dir) != "sealed" {
+		t.Errorf("status %q, spec_dir %q, on disk %q; want sealed in .specs/03_a", r.Status, r.SpecDir, statusOnDisk(t, dir))
+	}
+	if want := []envelope.Change{{Kind: "status", From: "active", To: "sealed"}}; !slices.Equal(r.Changes, want) {
+		t.Errorf("changes %+v; want %+v", r.Changes, want)
+	}
+}
+
+// TS-12-29: a package whose intent drifted cannot be sealed, even with --force.
+func TestSealingAPackageWhoseIntentDriftedIsRefused_TS12_29(t *testing.T) {
+	for name, edit := range map[string]func(t *testing.T, dir string){
+		"the intent was edited": func(t *testing.T, dir string) {
+			editFile(t, filepath.Join(dir, "prd.md"), "Coding agents drive", "Coding agents might drive")
+		},
+		"the section was removed": func(t *testing.T, dir string) { editFile(t, filepath.Join(dir, "prd.md"), "## Intent", "## Purpose") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+			edit(t, dir)
+
+			e := refusedAt(t, root, "status", envelope.CategoryLifecycle, "03_a", "--status", "sealed", "--force")
+			if e == nil {
+				return
+			}
+			saysAll(t, nil, e.Message, "03_a", "restore the intent that was activated", "supersedes this one")
+			if e.FixHint != nil {
+				t.Errorf("fix_hint %+v; want none", e.FixHint)
+			}
+		})
+	}
+}
+
+// planWithOpenTasks is a plan with a pending task and an optional one in progress.
+func planWithOpenTasks() []map[string]any {
+	optional := planTask(2, "in_progress", []int{})
+	optional["optional"] = true
+	return []map[string]any{planTask(1, "pending", nil), optional}
+}
+
+// TS-12-30: sealing with a task open, an optional one included, is refused,
+// naming each with its state.
+func TestSealingWithOpenTasksIsRefused_TS12_30(t *testing.T) {
+	root := newRepo(t)
+	activePackage(t, root, "03_a", "03", "a", planWithOpenTasks()...)
+
+	e := refusedAt(t, root, "status", envelope.CategoryLifecycle, "03_a", "--status", "sealed")
+	if e == nil {
+		return
+	}
+	saysAll(t, nil, e.Message, "task 1 (pending)", "task 2 (in_progress)", "finish or drop")
+	if e.FixHint == nil || e.FixHint.Flag != "--force" {
+		t.Errorf("fix_hint %+v; want --force", e.FixHint)
+	}
+}
+
+// TS-12-31: --force seals despite open tasks, with a high tasks_open warning that
+// lists them.
+func TestForceSealsWithOpenTasks_TS12_31(t *testing.T) {
+	root := newRepo(t)
+	dir := activePackage(t, root, "03_a", "03", "a", planWithOpenTasks()...)
+
+	env, r := succeeds(t, root, "03_a", "--status", "sealed", "--force")
+	if r.Status != "sealed" || statusOnDisk(t, dir) != "sealed" {
+		t.Errorf("status %q, on disk %q; want sealed", r.Status, statusOnDisk(t, dir))
+	}
+	w := oneWarning(t, env, "tasks_open", "high")
+	saysAll(t, nil, w.Message, "task 1", "pending", "task 2", "in_progress")
+	if w.Stage != "status" {
+		t.Errorf("warning stage %q; want status", w.Stage)
+	}
+}

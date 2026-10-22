@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -51,6 +53,9 @@ type statusCall struct {
 	// status, which is archived or superseded, and is not under archive/. It
 	// resumes a call that was interrupted after it wrote the status.
 	under, moveOnly bool
+
+	// warnings are what the call will say when it goes ahead.
+	warnings []plannedWarning
 }
 
 // A statusCheck looks at a call before anything is written, and refuses it, or
@@ -60,7 +65,14 @@ type statusCheck func(*statusCall) *cli.ErrorInfo
 // statusChecks are the checks of every --status call, in the order they run,
 // under --dry-run too. The first one that refuses ends the call: it has no
 // result, and nothing was written.
-var statusChecks = []statusCheck{checkLoaded, checkMove}
+var statusChecks = []statusCheck{checkLoaded, checkMove, checkTarget, checkUnknownKeys}
+
+// The library calls the form makes and the read-back that follows them are
+// variables, so that a test can fail them.
+var (
+	transitionSpec = (*afspec.Spec).Transition
+	loadWritten    = afspec.LoadSpec
+)
 
 // executeStatus is the status form: speca <spec> --status S [--by <spec>].
 //
@@ -77,8 +89,41 @@ func executeStatus(c *call, dir string) (*Result, *cli.ErrorInfo) {
 			return nil, refusal
 		}
 	}
-	return nil, &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryInternal,
-		Message: "the --status form is not implemented yet"}
+	return sc.apply()
+}
+
+// apply writes what the call asks for, in order, and returns the package as it
+// is now. updated_at is set, since the library does not, on every package the
+// call writes.
+func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
+	sc.spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if _, err := transitionSpec(sc.spec, sc.target, sc.dir); err != nil {
+		return nil, writeFailure(sc.name, err)
+	}
+	changes := []envelope.Change{{Kind: "status", From: sc.spec.Status, To: sc.target}}
+	sc.raise()
+
+	written, err := loadWritten(sc.dir)
+	if err != nil {
+		return nil, &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
+			Message: fmt.Sprintf("the package %s was written but could not be read back: %v", sc.dir, err)}
+	}
+	r := sc.reportOf(sc.dir, written)
+	r.Changes = changes
+	r.nextSet = true
+	return r, nil
+}
+
+// writeFailure says how a write of the status failed. What the lifecycle or the
+// intent refuses despite the checks is a refusal at stage status; anything else
+// is the disk's, in the library's words.
+func writeFailure(name string, err error) *cli.ErrorInfo {
+	var lifecycleErr *afspec.LifecycleError
+	var intentErr *afspec.IntentError
+	if errors.As(err, &lifecycleErr) || errors.As(err, &intentErr) {
+		return lifecycleRefusal(fmt.Sprintf("%s cannot be changed: %v", name, err), nil)
+	}
+	return &cli.ErrorInfo{Stage: "write", Category: envelope.CategoryDisk, Message: err.Error()}
 }
 
 // locateBy resolves --by as the input is resolved, and refuses a --by that names

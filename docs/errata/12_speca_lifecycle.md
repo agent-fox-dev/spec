@@ -83,3 +83,64 @@ version 1 plan; `--force` reaches neither.
 **Test of the delivered behaviour:**
 `TestLoadFailuresAndOtherFormatVersionsAreRefusedAtLoad_TS12_16`
 (`cmd/speca/status_test.go`).
+
+## D-3: the keys of the `prd.md` frontmatter are looked for by `speca`
+
+**Spec:** the Background says `Validate` reports each key the schema does not
+allow as an `unknown_field` error, and 12-REQ-3.6 and 3.7 have sealing, archiving
+and superseding refuse, or with `--force` warn about, a package for which it does.
+TS-12-20 and TS-12-21 put the unknown key in the frontmatter of `prd.md`.
+
+**Code:** the library records the unknown keys of `requirements.json`,
+`test_spec.json` and `tasks.json` only (`afspec/validate.go`, `ValidateSchema`).
+The frontmatter is rendered again from the fields the library knows, by the same
+write, so a key of one's own in it is dropped and `Validate` never said so.
+`frontmatterUnknownKeys` (`cmd/speca/task.go`, from spec 11's D-20) parses the
+frontmatter as the loader does and asks which keys the schema's type lacks; they
+join the keys of the other artifacts as `prd.md /key`, in the refusal and in the
+warning.
+
+Activation, which the spec covers with its validation check, treats such a key as
+a failing rule `unknown_field` of the same check: refused at stage `validate`,
+category `invalid_spec`, with `--force` the way past and the key named in the
+high `spec_invalid` warning. Without that an activation would drop it silently.
+
+**Test of the delivered behaviour:**
+`TestUnknownKeysRefuseSealingAndArchiving_TS12_20`,
+`TestForceSealsPastUnknownKeys_TS12_21` and
+`TestActivationRefusesAFrontmatterKeyTheLibraryDoesNotReport`
+(`cmd/speca/status_test.go`).
+
+## D-5: the Intent message names the heading; it does not contain it on a line
+
+**Spec:** 12-REQ-4.2 has the message tell the caller to add a `## Intent`
+section to `prd.md`, "spelled exactly so on a line of its own". The pseudocode of
+TS-12-24 asserts `contains(msg,'\n## Intent\n')`.
+
+**Code:** "spelled exactly so, on a line of its own" is the rule the library holds a
+heading to: `HasIntent` (`afspec/intent.go`) matches `## Intent` alone on its
+line, and `afspec/README.md` says so in those words. The message says the same
+of the heading to add ("the heading `## Intent`, spelled exactly so and on a line
+of its own"), and does not carry a newline-delimited heading itself.
+
+**Test of the delivered behaviour:**
+`TestActivationWithoutAnIntentIsRefused_TS12_24` (`cmd/speca/status_test.go`).
+
+## D-13: the no-write scan allows `Transition`, `Supersede` and `Save` in the status form
+
+**Spec:** 10-REQ-3.7 (spec 10) has `speca` write no file in any form; spec 11
+allowed `Save` in `task.go`.
+
+**Code:** `TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` forbids `Save`,
+`Transition`, `Supersede`, `MoveToArchive` and every write by `os` in
+`cmd/speca`, and allows `Save` in `task.go`. The status form writes through
+`Transition` and `Supersede` (`cmd/speca/status.go`) and, for the replacing
+package, `Save`; the scan now allows each in the file that makes the call and
+nowhere else. `MoveToArchive`, the writes of `os`, the environment, `net` and
+`os/exec` stay forbidden everywhere: the directory move is the library's
+`MoveUnderArchive`. The behavioural half of the test, which runs the read-only
+forms and compares the file tree, is unchanged.
+
+**Test of the delivered behaviour:**
+`TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` and
+`TestSpecaWritesNothingAndReadsNoCredential_TS10_22` (`cmd/speca/main_test.go`).
