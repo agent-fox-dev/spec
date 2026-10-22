@@ -347,15 +347,17 @@ func mapsEqual(a, b map[string]string) bool {
 // The code of the command writes no file, reads no variable, runs no program
 // and reaches no network. The test above shows what a call does; this shows
 // the command has nothing that could. The one exception is the task form, which
-// writes the package it changes through the library: task.go may use Save, and
-// nothing else of this list, so the report, the verdict and the list stay as
-// they were.
+// writes the package it changes through the library: task.go may use Save,
+// status.go Transition, status_supersede.go Supersede and Save, and nothing else
+// of this list, so the report, the verdict and the list stay as they were. The
+// move of a package's directory, MoveUnderArchive, is on the list too, and
+// status.go alone may call it.
 func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
 	forbiddenImports := []string{"net", "net/http", "os/exec"}
 	forbiddenOS := []string{"Create", "CreateTemp", "OpenFile", "WriteFile", "Mkdir", "MkdirAll", "MkdirTemp", "Rename",
 		"Remove", "RemoveAll", "Truncate", "Chmod", "Chtimes", "Symlink", "Link", "Getenv", "LookupEnv", "Environ", "Setenv"}
-	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
-	allowedMethods := map[string][]string{"task.go": {"Save"}, "status.go": {"Transition"}, "status_supersede.go": {"Supersede", "Save"}}
+	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "MoveUnderArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
+	allowedMethods := map[string][]string{"task.go": {"Save"}, "status.go": {"Transition", "MoveUnderArchive"}, "status_supersede.go": {"Supersede", "Save"}}
 
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {

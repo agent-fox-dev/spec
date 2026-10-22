@@ -405,9 +405,16 @@ func TestMoveUnderArchiveMovesWithoutRewritingAnyFile_TS12_3(t *testing.T) {
 			if err != nil || got != want {
 				t.Fatalf("MoveUnderArchive = %q, %v; want %q", got, err, want)
 			}
+			// The mode is 0755 before the umask, which a directory made the same way
+			// is subject to as well.
 			info, err := os.Stat(filepath.Join(root, "archive"))
-			if err != nil || info.Mode().Perm() != 0o755 {
-				t.Errorf("archive/ = %v, %v; want mode 0755", info, err)
+			sample := filepath.Join(t.TempDir(), "sample")
+			if err := os.Mkdir(sample, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sampleInfo, serr := os.Stat(sample)
+			if err != nil || serr != nil || info.Mode().Perm() != sampleInfo.Mode().Perm() || info.Mode().Perm()&0o700 != 0o700 {
+				t.Errorf("archive/ = %v, %v; want the mode of a directory made with 0755, %v", info, err, sampleInfo)
 			}
 			if exists(dir) {
 				t.Error("the source directory is still there")

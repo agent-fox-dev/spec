@@ -325,7 +325,9 @@ A package is *under `archive/`* when the directory that holds it is named
 `archive`; archived and superseded packages belong there, the others do not. The
 move goes under the directory that holds the package, not under `--specs-dir`
 (`<holding directory>/archive/<name>`): the two are the same for a package in the
-spec root, and a package reached by a path outside it stays in its own tree.
+spec root, and a package reached by a path outside it stays in its own tree. A
+package that is in a directory named `archive` and is not archived or superseded
+can still be activated or sealed where it is; `speca` does not move it.
 
 **The checks** run in this order, under `--dry-run` too. The first to refuse ends
 the call: nothing is written, and the envelope has no `result`.
@@ -487,7 +489,11 @@ Report on package `09`, whose first task is done:
     "depends_on": ["08"],
     "dependents": []
   },
-  "next": [ { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "2"],
+  "next": [ { "tool": "speca", "input": ".specs/09_agent_mode", "flags": ["--status", "active"],
+              "why": "the package validates and has an intent; activating it records the hash of its ## Intent" },
+            { "tool": "speca", "input": ".specs/09_agent_mode", "flags": ["--task", "2", "--state", "in_progress"],
+              "why": "task 2 (Error envelope and closed-pipe handling) is the next ready task and nothing is in progress; claim it before working on it" },
+            { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "2"],
               "why": "task 2 (Error envelope and closed-pipe handling) is the next ready task; render the package scoped to it" } ],
   "duration_ms": 3,
   "started_at": "2026-10-22T08:28:47Z"
@@ -713,9 +719,11 @@ if env.Result.NextTask != nil {
 - after `--list`: the claim and the render for the first active package, in list
   order and not under `archive/`, that has no task in progress, has a ready task
   N and whose intent has not drifted;
-- after a task form that made changes: the report's `next` on the package as it
-  now is, so a claim is followed by the render of the task, and a task finished by
-  the claim of the next ready one, or by nothing when no task is left;
+- after a task form that made changes: the report's calls about the tasks on the
+  package as it now is, so a claim is followed by the render of the task, and a
+  task finished by the claim of the next ready one, or by nothing when no task is
+  left. The status call that `speca <spec>` suggests (below) is the report form's
+  alone: after the last task is done, `speca <spec>` is what suggests sealing;
 - after a dry run: the one call that makes the changes (see above), or nothing
   when there are none;
 - after a report on a `draft` that validates, has a `## Intent` and holds no key
@@ -739,7 +747,7 @@ if env.Result.NextTask != nil {
 
 | `stage` | `category` | When |
 |---|---|---|
-| `usage` | `usage` | more than one input; an input with `--list`; `--validate` with `--list`; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 2. For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
+| `usage` | `usage` | more than one input; an input with `--list`; `--validate` with `--list`; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task` or `--status`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 2. For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
 | `load` | `input` | `afspec.LoadSpec` refused the package (a missing artifact, malformed JSON or YAML), naming the directory and the library's reason; or `--list` on a spec root that cannot be read, with `fix_hint.flag` `--specs-dir`. The status form: also the `--by` package (the message names `--by`), a package in a format version other than 2, and a package that was written but cannot be read back (its `result` carries the changes) |
 | `status` | `lifecycle` | the task form on a package that cannot take a write: sealed, superseded or archived, or active with a drifted `## Intent`; or `Save` refused it as such. No `fix_hint`; `--force` and `--dry-run` change nothing. The status form: a move the lifecycle does not allow (`fix_hint` is `{flag: "--status", valid: [the moves allowed]}`, none when there are none); an activation with no `## Intent`; sealing a package whose intent drifted (no `fix_hint`) or that has a task open (`fix_hint.flag` `--force`); a replacing package that is superseded or archived (`fix_hint.flag` `--by`); keys the schema does not allow (`fix_hint.flag` `--force`); or a lifecycle or intent error that reached the write. `--force` reaches only the ones with a `fix_hint.flag` of `--force` |
 | `task` | `lifecycle` | the task state machine does not allow a named move. The message names every refused task with its state and the target, cites §8.3.1 and says where each may go; `fix_hint` is `{flag: "--state", valid: [the first refused task's targets]}`, none when that task is `dropped`, and the message then says `--force` with `done` or `pending` is the only way out. Nothing was changed |
@@ -872,8 +880,9 @@ package and changes nothing else.
 run are absent: there is no model, no `--preflight`, no `--detail`, no `--output`
 and no progress on stderr. (`--dry-run` here is that of the task and status forms, not `spec`'s.)
 It changes nothing but the state of the tasks of a package, its lifecycle status
-and where it lives, the `supersedes` of a replacing package, and the `updated_at`
-of what it writes: not a package's content (requirements, tests, a task's title,
+(with the `intent_hash` an activation records and the banner a superseded package
+is given) and where it lives, the `supersedes` of a replacing package, and the
+`updated_at` of what it writes: not a package's content (requirements, tests, a task's title,
 steps or dependencies), and it creates and renders no package, which are `spec`'s
 and `specr`'s. It does not move a package back to `draft`, reopen a sealed one,
 or take one out of `archive/`; it does not re-hash a changed `## Intent`, edit

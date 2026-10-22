@@ -2,8 +2,8 @@ package envelope
 
 // AdminResult is speca's result, for every form of the command: the report on
 // one package, the verdict on one package (--validate), the list of every
-// package (--list) and the task form, which is the report on the package after
-// a change, with the changes it made. A form fills the fields it produces and
+// package (--list) and the task and status forms, which are the report on the
+// package after a change, with the changes they made. A form fills the fields it produces and
 // the rest are absent: Valid is a pointer so that false is written, and the slices that
 // must show as [] in their own form are omitted when nil rather than empty.
 type AdminResult struct {

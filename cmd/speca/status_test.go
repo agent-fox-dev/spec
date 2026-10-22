@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -271,12 +272,24 @@ func TestUnknownKeysRefuseSealingAndArchiving_TS12_20(t *testing.T) {
 	s := packageWith(t, root, "04_s", "04", "s", "sealed")
 	addUnknownKey(t, s)
 
+	// A key in each of the other artifacts, and superseding with one.
+	requirements := packageWith(t, root, "05_r", "05", "r", "sealed")
+	editJSON(t, filepath.Join(requirements, "requirements.json"), func(m map[string]any) { m["stray"] = 1 })
+	testSpec := packageWith(t, root, "06_t", "06", "t", "sealed")
+	editJSON(t, filepath.Join(testSpec, "test_spec.json"), func(m map[string]any) { m["stray"] = 1 })
+	packageWith(t, root, "07_old", "07", "old", "sealed")
+	addUnknownKey(t, pkgDir(root, "07_old"))
+	packageWith(t, root, "12_new", "12", "new", "draft")
+
 	for _, tc := range []struct {
 		argv []string
 		want []string
 	}{
 		{[]string{"03_a", "--status", "sealed"}, []string{"prd.md", "badkey"}},
 		{[]string{"04_s", "--status", "archived"}, []string{"tasks.json", "traceability"}},
+		{[]string{"05_r", "--status", "archived"}, []string{"requirements.json", "stray"}},
+		{[]string{"06_t", "--status", "archived"}, []string{"test_spec.json", "stray"}},
+		{[]string{"07_old", "--status", "superseded", "--by", "12_new"}, []string{"tasks.json", "traceability"}},
 	} {
 		e := refusedAt(t, root, "status", envelope.CategoryLifecycle, tc.argv...)
 		if e == nil {
@@ -336,7 +349,7 @@ func TestActivationWithoutAnIntentIsRefused_TS12_24(t *testing.T) {
 
 	e := refusedAt(t, root, "status", envelope.CategoryLifecycle, "09", "--status", "active", "--force")
 	if e != nil {
-		saysAll(t, nil, e.Message, "## Intent", "on a line of its own", "prd.md")
+		saysAll(t, nil, e.Message, "`## Intent`", "spelled exactly so", "on a line of its own", "prd.md")
 	}
 }
 
@@ -537,11 +550,23 @@ func TestTheChecksRunInOrderAndTheFirstRefusalEndsTheCall_TS12_15(t *testing.T) 
 		addUnknownKey(t, pkgDir(root, "04_s"))
 		mustMkdir(t, pkgDir(root, "archive/04_s"))
 
+		// A draft with a task open: sealing it is not a move the lifecycle allows,
+		// and the sealing check would refuse it for its open tasks.
+		packageWith(t, root, "05_d", "05", "d", "draft")
+		// An active package with a task open and a key of its own: the target's
+		// check comes before the keys.
+		open := activePackage(t, root, "06_o", "06", "o", planWithOpenTasks()...)
+		addUnknownKey(t, open)
+
 		for name, tc := range map[string]struct {
 			argv         []string
 			stage, cat   string
 			want, notSay []string
 		}{
+			"the move before the target": {[]string{"05_d", "--status", "sealed"}, "status", "lifecycle",
+				[]string{"activate it first"}, []string{"open tasks"}},
+			"the sealing check before the keys": {[]string{"06_o", "--status", "sealed"}, "status", "lifecycle",
+				[]string{"open tasks", "task 1 (pending)"}, []string{"traceability", "holds keys"}},
 			"the target before the keys": {[]string{"09", "--status", "active"}, "status", "lifecycle", []string{"## Intent"}, []string{"unknown_field", "badkey"}},
 			"the move before the keys":   {[]string{"03_a", "--status", "archived"}, "status", "lifecycle", []string{"seal it first"}, []string{"traceability"}},
 			"the keys before the destination": {[]string{"04_s", "--status", "archived"}, "status", "lifecycle",
@@ -794,6 +819,11 @@ func TestAReplacingPackageThatCannotBeSavedIsAWarning_TS12_37(t *testing.T) {
 			addUnknownKey(t, dir)
 			return dir
 		}, "traceability"},
+		"a key in the frontmatter": {func(t *testing.T, root string) string {
+			dir := packageWith(t, root, "12_new", "12", "new", "draft")
+			withFrontmatterKey(t, dir)
+			return dir
+		}, "badkey"},
 		"a save that fails": {func(t *testing.T, root string) string {
 			dir := packageWith(t, root, "12_new", "12", "new", "draft")
 			readOnly(t, dir)
@@ -897,33 +927,48 @@ func TestAnActiveReplacingPackageIsGivenTheID(t *testing.T) {
 // left it, the old id is in the replacing package's supersedes once, after the
 // ids that were there.
 func TestTheOldIDIsInTheReplacingPackageExactlyOnce_TS12_39(t *testing.T) {
-	for _, interrupted := range []bool{false, true} {
-		for calls := 1; calls <= 5; calls++ {
-			root := newRepo(t)
-			packageWith(t, root, "03_old", "03", "old", "sealed")
-			replacing := packageWith(t, root, "12_new", "12", "new", "draft")
-			editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 2", "schema_version: 2\nsupersedes: [\"01\", \"02\"]")
+	// What the replacing package lists to begin with, and what it lists at the end:
+	// the old id once, after the ids that were there, which keep their order.
+	for _, tc := range []struct {
+		initial string
+		want    []string
+	}{
+		{"", []string{"03"}},
+		{`["01"]`, []string{"01", "03"}},
+		{`["01", "02"]`, []string{"01", "02", "03"}},
+		{`["05", "01"]`, []string{"05", "01", "03"}},
+		{`["02", "03", "05"]`, []string{"02", "03", "05"}},
+	} {
+		for _, interrupted := range []bool{false, true} {
+			for calls := 1; calls <= 5; calls++ {
+				root := newRepo(t)
+				packageWith(t, root, "03_old", "03", "old", "sealed")
+				replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+				if tc.initial != "" {
+					editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 2", "schema_version: 2\nsupersedes: "+tc.initial)
+				}
 
-			if interrupted {
-				// The status and the record are written; the move is not.
-				readOnly(t, filepath.Join(root, ".specs"))
-				run(t, "--dir", root, ".specs/03_old", "--status", "superseded", "--by", "12_new")
-				if err := os.Chmod(filepath.Join(root, ".specs"), 0o755); err != nil {
-					t.Fatal(err)
+				if interrupted {
+					// The status and the record are written; the move is not.
+					readOnly(t, filepath.Join(root, ".specs"))
+					run(t, "--dir", root, ".specs/03_old", "--status", "superseded", "--by", "12_new")
+					if err := os.Chmod(filepath.Join(root, ".specs"), 0o755); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			for i := 0; i < calls; i++ {
-				path := ".specs/03_old"
-				if exists(pkgDir(root, "archive/03_old")) {
-					path = ".specs/archive/03_old"
+				for i := 0; i < calls; i++ {
+					path := ".specs/03_old"
+					if exists(pkgDir(root, "archive/03_old")) {
+						path = ".specs/archive/03_old"
+					}
+					run(t, "--dir", root, path, "--status", "superseded", "--by", "12_new")
 				}
-				run(t, "--dir", root, path, "--status", "superseded", "--by", "12_new")
-			}
-			if got := supersedesOf(t, replacing); !slices.Equal(got, []string{"01", "02", "03"}) {
-				t.Errorf("interrupted %v, %d calls: supersedes = %v; want [01 02 03]", interrupted, calls, got)
-			}
-			if !exists(pkgDir(root, "archive/03_old")) || statusOnDisk(t, pkgDir(root, "archive/03_old")) != "superseded" {
-				t.Errorf("interrupted %v, %d calls: the old package is not superseded under archive/", interrupted, calls)
+				if got := supersedesOf(t, replacing); !slices.Equal(got, tc.want) {
+					t.Errorf("starting from %q, interrupted %v, %d calls: supersedes = %v; want %v", tc.initial, interrupted, calls, got, tc.want)
+				}
+				if !exists(pkgDir(root, "archive/03_old")) || statusOnDisk(t, pkgDir(root, "archive/03_old")) != "superseded" {
+					t.Errorf("starting from %q, interrupted %v, %d calls: the old package is not superseded under archive/", tc.initial, interrupted, calls)
+				}
 			}
 		}
 	}
@@ -1148,6 +1193,15 @@ func TestResumableIsTrueOnlyForTheArchiveStageFailure_TS12_46(t *testing.T) {
 		t.Error("a success or a refusal is resumable")
 	}
 	func() {
+		// A write the disk refuses: the package directory cannot take a temporary file.
+		locked := activePackage(t, root, "06_w", "06", "w", planTask(1, "done", nil))
+		readOnly(t, locked)
+		env, code, _ := run(t, "--dir", root, "06_w", "--status", "sealed")
+		if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "write" || resumable(env) {
+			t.Errorf("a failed write: code %d, error %+v; want stage write, not resumable", code, env.Error)
+		}
+	}()
+	func() {
 		failWith(t, &loadWritten, func(string) (*afspec.Spec, error) { return nil, errors.New("gone") })
 		if env, _, _ := run(t, "--dir", root, "04_s", "--status", "sealed"); resumable(env) {
 			t.Error("a failure to read back is resumable")
@@ -1252,6 +1306,10 @@ func sameOutcome(t *testing.T, name string, dry envelope.AdminEnvelope, dryCode 
 		return
 	}
 	d, r := dry.Result, real.Result
+	if !reflect.DeepEqual(d.Tasks, r.Tasks) || !reflect.DeepEqual(d.TaskCounts, r.TaskCounts) || !reflect.DeepEqual(d.NextTask, r.NextTask) ||
+		!slices.Equal(d.DependsOn, r.DependsOn) || !slices.Equal(d.Dependents, r.Dependents) {
+		t.Errorf("%s: the tasks, counts or dependencies under --dry-run are %+v; without it %+v", name, d, r)
+	}
 	if !slices.Equal(d.Changes, r.Changes) || d.SpecDir != r.SpecDir || d.Status != r.Status || d.IntentHash != r.IntentHash ||
 		d.IntentDrift != r.IntentDrift || !slices.Equal(d.AllowedStatus, r.AllowedStatus) || !slices.Equal(d.FailingRules, r.FailingRules) ||
 		(d.Valid == nil) != (r.Valid == nil) || d.Valid != nil && *d.Valid != *r.Valid {
@@ -1288,6 +1346,15 @@ func TestADryRunIsTheRealCallWithoutTheWrites_TS12_48(t *testing.T) {
 		}, []string{"03_old", "--status", "superseded", "--by", "12_new"}},
 		"a move only": {func(t *testing.T, root string) { packageWith(t, root, "03_x", "03", "x", "archived") },
 			[]string{"03_x", "--status", "archived"}},
+		// Nothing is rewritten, so the package keeps its key and does not validate,
+		// in the dry run as in the call.
+		"a move only, on a package with a key": {func(t *testing.T, root string) {
+			addUnknownKey(t, packageWith(t, root, "03_x", "03", "x", "archived"))
+		}, []string{"03_x", "--status", "archived"}},
+		"a move only of a superseded package, with a key": {func(t *testing.T, root string) {
+			addUnknownKey(t, packageWith(t, root, "03_old", "03", "old", "superseded"))
+			packageWith(t, root, "12_new", "12", "new", "draft")
+		}, []string{"03_old", "--status", "superseded", "--by", "12_new"}},
 		"a refusal": {func(t *testing.T, root string) { packageWith(t, root, "03_x", "03", "x", "sealed") },
 			[]string{"03_x", "--status", "sealed"}},
 		"a taken destination": {func(t *testing.T, root string) {
@@ -1421,5 +1488,23 @@ func TestADryRunSuggestsTheSameCallWithoutDryRun_TS12_51(t *testing.T) {
 		if len(env.Next) != 1 || env.Next[0].Tool != "speca" || env.Next[0].Input != tc.input || !slices.Equal(env.Next[0].Flags, tc.flags) {
 			t.Errorf("%v: next %+v; want speca %s %v", tc.argv, env.Next, tc.input, tc.flags)
 		}
+	}
+}
+
+// Design decision 4: the package goes under archive/ in the directory that holds
+// it, not under --specs-dir, so a package reached by a path outside the spec
+// root is archived in its own tree.
+func TestAPackageOutsideTheSpecRootIsArchivedInItsOwnTree(t *testing.T) {
+	root := newRepo(t)
+	external := filepath.Join(root, "elsewhere", "03_x")
+	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "v2_example"), external)
+	setStatus(t, external, "sealed")
+
+	_, r := succeeds(t, root, "elsewhere/03_x", "--status", "archived")
+	if r.SpecDir != "elsewhere/archive/03_x" || !exists(filepath.Join(root, "elsewhere", "archive", "03_x")) {
+		t.Errorf("spec_dir %q; want it under archive/ next to where it was", r.SpecDir)
+	}
+	if exists(pkgDir(root, "archive")) || exists(external) {
+		t.Error("the spec root has an archive/, or the package is still where it was")
 	}
 }

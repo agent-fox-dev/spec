@@ -125,7 +125,12 @@ TS-12-24 asserts `contains(msg,'\n## Intent\n')`.
 heading to: `HasIntent` (`afspec/intent.go`) matches `## Intent` alone on its
 line, and `afspec/README.md` says so in those words. The message says the same
 of the heading to add ("the heading `## Intent`, spelled exactly so and on a line
-of its own"), and does not carry a newline-delimited heading itself.
+of its own"), and does not carry a newline-delimited heading itself. A refusal's
+message is also its `summary` when the call has no result (the shell's fallback),
+which is meant to be one sentence of at most 200 characters; a message with the
+heading on lines of its own would break that. The test asserts the whole
+instruction (`## Intent`, spelled exactly so, on a line of its own, in `prd.md`),
+not the newline.
 
 **Test of the delivered behaviour:**
 `TestActivationWithoutAnIntentIsRefused_TS12_24` (`cmd/speca/status_test.go`).
@@ -141,8 +146,8 @@ allowed `Save` in `task.go`.
 `Transition` and `Supersede` (`cmd/speca/status.go`) and, for the replacing
 package, `Save`; the scan now allows each in the file that makes the call and
 nowhere else. `MoveToArchive`, the writes of `os`, the environment, `net` and
-`os/exec` stay forbidden everywhere: the directory move is the library's
-`MoveUnderArchive`. The behavioural half of the test, which runs the read-only
+`os/exec` stay forbidden everywhere. The directory move is the library's
+`MoveUnderArchive`, which only `status.go` may call. The behavioural half of the test, which runs the read-only
 forms and compares the file tree, is unchanged.
 
 **Test of the delivered behaviour:**
@@ -166,7 +171,14 @@ three calls instead, all refused with no result and nothing written, also under
 - an active package with a key of its own and a taken destination,
   `--status archived`: refused by the move (seal it first), before either;
 - a sealed package with the same, `--status archived`: refused for the key
-  (stage `status`), and with `--force`, for the destination (stage `archive`).
+  (stage `status`), and with `--force`, for the destination (stage `archive`);
+- a draft with a task open, `--status sealed`: refused by the move (activate it
+  first), not by the sealing check, which would name the open task;
+- an active package with a task open and a key of its own, `--status sealed`:
+  refused by the sealing check, not by the keys.
+
+The activation call cannot show that the target's check comes before the keys
+(activation is not asked for them), so that order is shown by the sealing call.
 
 **Test of the delivered behaviour:**
 `TestTheChecksRunInOrderAndTheFirstRefusalEndsTheCall_TS12_15`
@@ -308,3 +320,38 @@ claim and the render is unchanged.
 `TestAnAgentReadsAPackageAndFollowsNext_TS10_57`,
 `TestAnAgentClaimsTheNextTaskAndFinishesIt_TS11_54` (`cmd/speca/smoke_test.go`)
 and `TestTheReportSuggestsTheClaim_TS11_46` (`cmd/speca/task_dryrun_test.go`).
+
+## D-19: the report suggests a status call only when the call would go through
+
+**Spec:** 12-REQ-9.6 has the report suggest `--status active` for a draft whose
+`Validate` is valid and whose body has a `## Intent`; 9.7 `--status sealed` for an
+active package with no open task. 12-REQ-9.8 has any suggested call run without a
+refusal.
+
+**Code:** the two criteria are not enough for 9.8: an active package with no open
+task may have drifted, or hold keys the schema does not allow, and a draft that
+validates may hold a key in its `prd.md` frontmatter, which `Validate` does not
+report. The suggestion carries the conditions of the checks too (`statusSuggestion`,
+`cmd/speca/report.go`): no drift and no key for sealing, no key for activating, and
+none for a package in another format version. This is design decision 18 of the
+spec ("copy the checks' own conditions").
+
+**Test of the delivered behaviour:** `TestASuggestedStatusCallIsNeverRefused_TS12_54`
+(`cmd/speca/report_test.go`), over 60 packages.
+
+## D-20: a replacing package that cannot be saved is a warning, not a write failure
+
+**Spec:** the PRD lists, among the failures while writing, a `*SaveError` from
+"the step-2 `Save` of the target package" at stage `write`. 12-REQ-7.3 says that a
+replacing package whose `Save` fails is skipped, with a low
+`supersedes_not_recorded` warning, and the call succeeds.
+
+**Code:** 12-REQ-7.3 and design decision 12 are followed: the failure of the
+replacing package's save is a warning (`recordSupersedes`,
+`cmd/speca/status_supersede.go`). Stage `write` is for the status write of the old
+package.
+
+**Test of the delivered behaviour:**
+`TestAReplacingPackageThatCannotBeSavedIsAWarning_TS12_37` (the case "a save that
+fails") (`cmd/speca/status_test.go`).
+

@@ -150,12 +150,13 @@ Exit codes:
      result then holds the package as it is on disk. The status form is refused
      the same way, with no result: the lifecycle does not allow the move, an
      activation has no intent or does not validate, a task is open, keys would
-     be dropped (stage status or validate), or the archive destination is taken
-     (stage archive). If only the move under archive/ failed, the status is
+     be dropped, the replacing package is superseded or archived (stage status
+     or validate), or the archive destination is taken (stage archive). If only the move under archive/ failed, the status is
      written, the result says so and the call is resumable
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have; --status
-     draft or a --by that cannot replace the package. Nothing was written
+     draft, or a --by that names the package itself, no package or one with
+     its spec_id. Nothing was written
 
 Examples:
   speca 16
@@ -165,6 +166,9 @@ Examples:
   speca 16 --task next --state in_progress
   speca 16 --task 4 --state done
   speca 16 --task 1,2 --state in_progress --dry-run
+  speca 16 --status active
+  speca 16 --status sealed --dry-run
+  speca 03 --status superseded --by 12
 
 Flags:
 `
@@ -201,7 +205,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.Var(&o.tasks, "task", "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)")
 	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped")
 	fs.Var(&o.status, "status", "the status form: move the package to this lifecycle status: active (computes the intent hash), sealed, archived or superseded (which needs --by); archived and superseded packages are moved under archive/. A move the lifecycle does not allow is refused, with the moves that are allowed")
-	fs.Var(&o.by, "by", "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and its supersedes list gets this package's id")
+	fs.Var(&o.by, "by", "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and when it can be saved its supersedes list gets this package's id")
 	fs.BoolVar(&o.force, "force", false, "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; with the status form (--status), skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not know would be dropped; it skips nothing else, and a high task_state_forced, spec_invalid or tasks_open warning says what it skipped")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form or the status form (--status), run every check and report what would change, and write nothing")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
@@ -429,8 +433,8 @@ func describe(fs *flag.FlagSet) selfDescription {
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
 			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, or the status changed",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable",
-			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that cannot replace the package; nothing was written",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable",
+			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written",
 		},
 	}
 }

@@ -28,7 +28,7 @@ func (sc *statusCall) checkReplacing() *cli.ErrorInfo {
 	case string(afspec.PrdFrontmatterV2JsonStatusDraft), string(afspec.PrdFrontmatterV2JsonStatusActive), string(afspec.PrdFrontmatterV2JsonStatusSealed):
 		return nil
 	}
-	return lifecycleRefusal(fmt.Sprintf("the --by package %s is %s, and a %s package cannot replace another one: name a draft, active or sealed package",
+	return lifecycleRefusal(fmt.Sprintf("the --by package %s is %s, and a package that is %s cannot replace another one: name a draft, active or sealed package",
 		specpkg.Display(sc.byDir, sc.root), sc.by.Status, sc.by.Status), &cli.FixHint{Flag: "--by"})
 }
 

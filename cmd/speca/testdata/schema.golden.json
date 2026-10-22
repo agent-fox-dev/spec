@@ -22,7 +22,7 @@
       "by": {
         "type": "string",
         "default": "",
-        "description": "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and its supersedes list gets this package's id"
+        "description": "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and when it can be saved its supersedes list gets this package's id"
       },
       "dir": {
         "type": "string",
@@ -786,7 +786,7 @@
   },
   "exit_codes": {
     "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, or the status changed",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable",
-    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that cannot replace the package; nothing was written"
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable",
+    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written"
   }
 }

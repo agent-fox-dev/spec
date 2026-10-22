@@ -200,8 +200,13 @@ func (sc *statusCall) preview() *Result {
 		here = dest
 	}
 	// The write drops the keys the library reported, so the package it leaves
-	// validates without them: the verdict is on the package as written.
-	return sc.finish(sc.reportWith(here, &after, validateWritten(&after)), changes)
+	// validates without them: the verdict is on the package as written. A call
+	// that only moves the package rewrites nothing, and the package keeps them.
+	verdict := validateWritten(&after)
+	if sc.moveOnly {
+		verdict = after.Validate()
+	}
+	return sc.finish(sc.reportWith(here, &after, verdict), changes)
 }
 
 // finish gives the result of a call that went through, or would have, what only
