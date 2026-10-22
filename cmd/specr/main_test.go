@@ -90,7 +90,9 @@ func TestWholePackageIsRenderCombined(t *testing.T) {
 	if r.Tokens != afspec.EstimateTokens(r.Markdown) || !r.Valid || len(r.Tasks) != 3 {
 		t.Errorf("tokens %d valid %v tasks %d", r.Tokens, r.Valid, len(r.Tasks))
 	}
-	if len(env.Next) != 1 || strings.Join(env.Next[0].Flags, " ") != "--task 1" || env.Next[0].Input != r.SpecDir {
+	// The claim of task 1 comes first (spec 13), and then the render of it.
+	if len(env.Next) != 2 || env.Next[0].Tool != "speca" || strings.Join(env.Next[0].Flags, " ") != "--task 1 --state in_progress" ||
+		env.Next[1].Tool != "specr" || strings.Join(env.Next[1].Flags, " ") != "--task 1" || env.Next[1].Input != r.SpecDir || env.Next[0].Input != r.SpecDir {
 		t.Errorf("next = %+v", env.Next)
 	}
 }
@@ -132,8 +134,8 @@ func TestNextSkipsDoneTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, _, _ := run(t, "--dir", root, "09")
-	if len(env.Next) != 1 || strings.Join(env.Next[0].Flags, " ") != "--task 2" {
-		t.Errorf("next = %+v", env.Next)
+	if len(env.Next) != 2 || strings.Join(env.Next[0].Flags, " ") != "--task 2 --state in_progress" || strings.Join(env.Next[1].Flags, " ") != "--task 2" {
+		t.Errorf("next = %+v; want the claim of task 2, then its render", env.Next)
 	}
 	if env.Result.Tasks[0].State != "done" {
 		t.Errorf("tasks[0] = %+v", env.Result.Tasks[0])

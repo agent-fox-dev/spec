@@ -80,3 +80,23 @@ it used to report no drift and fail at the write.
 `TestIntentDriftIsTrueOnlyForAnActivePackageWhoseHashFailsOrDiffers_TS13_11`
 (`internal/specpkg/writable_test.go`) and
 `TestAnActivePackageWithAnEmptyHashHasDrifted` (`cmd/speca/writable_test.go`).
+
+## D-3: the two commands claim the same task, except for a package that does not validate
+
+**Spec:** 13-REQ-5.7 has `specr` and `speca` hold a claim "exactly when" the other
+does, for any package state; 13-REQ-5.4 has `specr` offer none when the first
+unfinished task is not ready.
+
+**Code:** the two rules agree whenever a task depends only on earlier ones. They
+differ when one depends on a later task, which fails validation (rule C6): with
+task 1 done, task 2 depending on 3 and task 3 on 1, the first unfinished task (2) is
+not ready while a later one (3) is. `speca`'s `next_task` is the first *ready* task,
+so it suggests the claim of 3; `specr` follows 13-REQ-5.4 and suggests the render of
+2 alone (reproduced with both built commands). I followed 5.1 to 5.4, whose cases are
+each tested, and kept the safe direction of 5.7: `specr` never offers a claim that
+`speca` would not. The property test draws states whose dependencies point at earlier
+tasks, and a second test pins the corner.
+
+**Test of the delivered behaviour:** `TestSpecrAndSpecaClaimTheSameTask_TS13_22` and
+`TestAWholeRenderWithAForwardDependencyClaimsNothingSpecaWouldNot`
+(`cmd/specr/next_test.go`), which run the built `speca` beside `specr`.

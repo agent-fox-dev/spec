@@ -41,6 +41,8 @@ TYPES
 
 type Result struct {
 	envelope.RenderResult
+
+	// Has unexported fields.
 }
     Result is specr's result. Its fields are the envelope package's
     RenderResult, which a program reading the output decodes into; the methods
@@ -50,8 +52,12 @@ func (r *Result) Artifacts() []cli.Artifact
     Artifacts names the file --markdown-file wrote.
 
 func (r *Result) Next() []cli.Next
-    Next suggests rendering the next task that is not done: after a whole
-    render, the first; after a task, the next one after it.
+    Next suggests the calls to make after this render, in the order an agent
+    makes them. After a whole render of a package that can take a write, with
+    nothing in progress, the first call is the claim of the next ready task,
+    with speca; the render of the next task that is not done follows it,
+    and is the only entry when there is no claim to make. After a whole render
+    that task is the first, and after a task, the one after it.
 
 func (r *Result) Summary() string
     Summary is the envelope's one sentence.

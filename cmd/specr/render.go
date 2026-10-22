@@ -34,6 +34,10 @@ const (
 // are what the shell asks of a result.
 type Result struct {
 	envelope.RenderResult
+
+	// writable is whether the package can take a write, as specpkg.Writable says.
+	// It decides whether next suggests a call of speca, and is not written.
+	writable bool
 }
 
 // Summary is the envelope's one sentence.
@@ -61,29 +65,60 @@ func (r *Result) Artifacts() []cli.Artifact {
 	return []cli.Artifact{{Kind: cli.ArtifactMarkdownFile, Path: r.MarkdownFile}}
 }
 
-// Next suggests rendering the next task that is not done: after a whole
-// render, the first; after a task, the next one after it.
+// Next suggests the calls to make after this render, in the order an agent makes
+// them. After a whole render of a package that can take a write, with nothing in
+// progress, the first call is the claim of the next ready task, with speca; the
+// render of the next task that is not done follows it, and is the only entry when
+// there is no claim to make. After a whole render that task is the first, and after
+// a task, the one after it.
 func (r *Result) Next() []cli.Next {
 	after := 0
 	if r.Task != nil {
 		after = r.Task.ID
 	}
+	var next *envelope.TaskInfo
 	seen := after == 0
-	for _, t := range r.Tasks {
+	for i, t := range r.Tasks {
 		if !seen {
 			seen = t.ID == after
 			continue
 		}
-		if t.State == string(afspec.TaskStateDone) || t.State == string(afspec.TaskStateDropped) {
-			continue
+		if t.State != string(afspec.TaskStateDone) && t.State != string(afspec.TaskStateDropped) {
+			next = &r.Tasks[i]
+			break
 		}
-		why := fmt.Sprintf("task %d (%s) is the first task not done; render the package scoped to it", t.ID, t.Title)
-		if after != 0 {
-			why = fmt.Sprintf("task %d (%s) is the next task not done", t.ID, t.Title)
-		}
-		return []cli.Next{{Tool: "specr", Input: r.SpecDir, Flags: []string{"--task", fmt.Sprint(t.ID)}, Why: why}}
 	}
-	return nil
+
+	var out []cli.Next
+	if claim, ok := r.claim(next); ok {
+		out = append(out, claim)
+	}
+	if next != nil {
+		why := fmt.Sprintf("task %d (%s) is the first task not done; render the package scoped to it", next.ID, next.Title)
+		if after != 0 {
+			why = fmt.Sprintf("task %d (%s) is the next task not done", next.ID, next.Title)
+		}
+		out = append(out, cli.Next{Tool: "specr", Input: r.SpecDir, Flags: []string{"--task", fmt.Sprint(next.ID)}, Why: why})
+	}
+	return out
+}
+
+// claim is the speca call that claims the task the render suggests next, when it
+// would succeed and speca would suggest the same. After a whole render that is
+// the first task not done: pending and ready, on a package that can take a write,
+// with no task in progress (speca's own report suggests a claim only then, and
+// then for this task).
+func (r *Result) claim(first *envelope.TaskInfo) (cli.Next, bool) {
+	if r.Task != nil || !r.writable || first == nil || first.State != string(afspec.TaskStatePending) || !first.Ready {
+		return cli.Next{}, false
+	}
+	for _, t := range r.Tasks {
+		if t.State == string(afspec.TaskStateInProgress) {
+			return cli.Next{}, false
+		}
+	}
+	return cli.Next{Tool: "speca", Input: r.SpecDir, Flags: []string{"--task", fmt.Sprint(first.ID), "--state", string(afspec.TaskStateInProgress)},
+		Why: fmt.Sprintf("task %d (%s) is the next ready task; claim it before working on it so that no other agent takes it", first.ID, first.Title)}, true
 }
 
 // renderOptions are the flags that shape the render.

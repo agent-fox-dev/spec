@@ -240,7 +240,7 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 		Title:    spec.Title,
 		Status:   spec.Status,
 		Tasks:    specpkg.TaskInfos(spec),
-	}}
+	}, writable: specpkg.Writable(spec)}
 	// A package in an older format loads, but the v2 types read none of its
 	// tests or tasks: a v1 plan is task_groups, not tasks.
 	legacy := specpkg.Legacy(spec)
