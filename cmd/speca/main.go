@@ -250,7 +250,11 @@ func usageInfo(err error, hint *cli.FixHint) *cli.ErrorInfo {
 // emit builds the envelope and writes it. A nil *Result is no result.
 func emit(stdout io.Writer, run *cli.Run, code int, result *Result, failure *cli.ErrorInfo) int {
 	var r any
-	if result != nil {
+	switch {
+	case result == nil:
+	case failure != nil:
+		r = refused{result}
+	default:
 		r = result
 	}
 	return cli.Emit(stdout, run.Envelope(code, r, failure))

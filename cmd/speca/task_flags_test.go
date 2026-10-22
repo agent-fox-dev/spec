@@ -66,19 +66,20 @@ func TestParseTaskSpec_11REQ1_1(t *testing.T) {
 	}
 }
 
-// A call that is well-formed is not a usage error: it reaches the package.
+// A call that is well-formed is not a usage error: it reaches the package. Each
+// call has a repository of its own, since the calls that are accepted now write.
 func TestAValidTaskFormIsNotAUsageError(t *testing.T) {
-	root := newRepo(t)
-	for name, argv := range map[string][]string{
-		"an id":                {"--dir", root, "09", "--task", "1", "--state", "in_progress"},
-		"ids, repeated":        {"--dir", root, "09", "--task", "1,2", "--task", "2", "--state", "in_progress"},
-		"next":                 {"--dir", root, "09", "--task", "next", "--state", "in_progress"},
-		"all":                  {"--dir", root, "09", "--task", "all", "--state", "done"},
-		"flags after":          {"--dir", root, "--task", "1", "--state", "in_progress", "--force", "--dry-run", "09"},
-		"every state: pending": {"--dir", root, "09", "--task", "1", "--state", "pending"},
-		"every state: dropped": {"--dir", root, "09", "--task", "1", "--state", "dropped"},
+	for name, flags := range map[string][]string{
+		"an id":                {"09", "--task", "1", "--state", "in_progress"},
+		"ids, repeated":        {"09", "--task", "1,2", "--task", "2", "--state", "in_progress"},
+		"next":                 {"09", "--task", "next", "--state", "in_progress"},
+		"all":                  {"09", "--task", "all", "--state", "done"},
+		"flags after":          {"--task", "1", "--state", "in_progress", "--force", "--dry-run", "09"},
+		"every state: pending": {"09", "--task", "1", "--state", "pending"},
+		"every state: dropped": {"09", "--task", "1", "--state", "dropped"},
 	} {
-		env, _, _ := run(t, argv...)
+		root := newRepo(t)
+		env, _, _ := run(t, append([]string{"--dir", root}, flags...)...)
 		if env.Error != nil && env.Error.Stage == "usage" {
 			t.Errorf("%s: refused as a usage error: %s", name, env.Error.Message)
 		}

@@ -19,3 +19,51 @@ added lines). Task 8 adds only what the help and the enum of `--state` change.
 
 **Test of the delivered behaviour:** `TestSchemaGolden_TS10_20`
 (`cmd/speca/schema_test.go`).
+
+## D-2: `Result` holds unexported state beside `AdminResult`
+
+**Spec:** 10-REQ-9.5 (spec 10) has `cmd/speca`'s `Result` embed
+`envelope.AdminResult`. Spec 11 says nothing of what else it holds.
+
+**Code:** the task form's result needs to say that it is the task form's (its
+summary names the changes, and "no task changed" is not a report), and later
+tasks add the dry-run call and the packages whose intent drifted. `Result`
+(`cmd/speca/result.go`, `Result`) keeps them in unexported fields, which are not
+written. Spec 10's `TS-10-55` required `Result` to have the one field; it now
+requires the first to be the embedded `AdminResult` and any other to be
+unexported, which is the criterion it tested.
+
+**Test of the delivered behaviour:** `TestResultAndEnvelopeFlags_TS10_55`
+(`cmd/speca/result_test.go`).
+
+## D-3: a refusal carries the report without borrowing its sentence or next
+
+**Spec:** 11-REQ-7.6 has a refusal at stage status, task or validate, and a write
+failure, return "the report of the package as it is on disk, without changes and
+without next".
+
+**Code:** `Run.Envelope` takes `summary` and `next` from any result that has
+them, so the report's "1 of 3 tasks done; next task 2" would stand as the summary
+of a refusal, and its suggestions would follow it. `emit` (`cmd/speca/main.go`,
+`emit`) wraps a result that comes with a failure in `refused`
+(`cmd/speca/result.go`, `refused`), which has neither: the summary falls back to
+the refusal's message, and `next` is absent, as 11-REQ-9.4 asks.
+
+**Test of the delivered behaviour:** `TestARefusalCarriesTheOnDiskReport_TS11_41`
+(`cmd/speca/task_write_test.go`).
+
+## D-6: the no-write scan allows `Save` in `task.go`
+
+**Spec:** 10-REQ-3.7 (spec 10) has `speca` write no file in any form; spec 11
+adds the first form that writes.
+
+**Code:** `TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` forbade `Save`, and
+every write by `os`, anywhere in `cmd/speca`. It now allows `Save` in `task.go`
+(`saveSpec`, `cmd/speca/task.go`) and nowhere else, and still forbids the writes
+of `os`, the environment, `net` and `os/exec` in every file. The behavioural half
+of the test, which runs the report, the verdict, the list and `--schema` and
+compares the file tree, is unchanged, so the read-only forms stay read-only.
+
+**Test of the delivered behaviour:**
+`TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` and
+`TestSpecaWritesNothingAndReadsNoCredential_TS10_22` (`cmd/speca/main_test.go`).

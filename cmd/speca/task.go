@@ -1,16 +1,22 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
+
+// saveSpec writes the package. It is a variable so that a test can make the
+// write fail.
+var saveSpec = (*afspec.Spec).Save
 
 // executeTask is the task form: speca <spec> --task T --state S.
 //
@@ -36,7 +42,7 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	// A package Save would refuse is refused here, before any move is looked at,
 	// so that --dry-run reports the refusal the real call would meet.
 	if refusal := unwritable(name, spec); refusal != nil {
-		return nil, refusal
+		return c.refused(dir, spec, refusal)
 	}
 
 	// c.opts.tasks was checked with the flags, so it parses.
@@ -45,10 +51,62 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		return nil, refusal
 	}
 
-	if _, refusal := planMoves(name, spec.Tasks, wanted, afspec.TaskState(c.opts.state)); refusal != nil {
-		return nil, refusal
+	moves, refusal := planMoves(name, spec.Tasks, wanted, afspec.TaskState(c.opts.state))
+	if refusal != nil {
+		return c.refused(dir, spec, refusal)
 	}
-	return nil, &cli.ErrorInfo{Stage: "load", Category: "input", Message: "the task form is not yet implemented"}
+
+	if len(moves.moves) > 0 {
+		spec.Tasks = moves.after
+		spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if !c.opts.dryRun {
+			if failure := writeSpec(spec, name); failure != nil {
+				return c.onDisk(dir, failure)
+			}
+		}
+	}
+
+	r := c.reportOf(dir, spec)
+	r.taskForm = true
+	for _, m := range moves.moves {
+		r.Changes = append(r.Changes, envelope.Change{Kind: "task", ID: m.id, From: string(m.from), To: string(m.to)})
+	}
+	return r, nil
+}
+
+// refused returns failure with the report of spec, the package as it is on disk:
+// nothing was changed, so the package as it was loaded is that.
+func (c *call) refused(dir string, spec *afspec.Spec, failure *cli.ErrorInfo) (*Result, *cli.ErrorInfo) {
+	return c.reportOf(dir, spec), failure
+}
+
+// onDisk returns failure with the report of the package as it is on disk, read
+// again, since a write that failed may have left it other than it was loaded.
+// If it cannot be read the failure goes without one.
+func (c *call) onDisk(dir string, failure *cli.ErrorInfo) (*Result, *cli.ErrorInfo) {
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil {
+		return nil, failure
+	}
+	return c.reportOf(dir, spec), failure
+}
+
+// writeSpec saves the package. What Save refuses on lifecycle or intent grounds
+// is the status refusal it is; a failure to write is a disk failure, and says
+// what the caller may find.
+func writeSpec(spec *afspec.Spec, name string) *cli.ErrorInfo {
+	err := saveSpec(spec, spec.Dir)
+	if err == nil {
+		return nil
+	}
+	var lifecycle *afspec.LifecycleError
+	var intent *afspec.IntentError
+	if errors.As(err, &lifecycle) || errors.As(err, &intent) {
+		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle, Message: fmt.Sprintf("%s cannot be written: %v", name, err)}
+	}
+	return &cli.ErrorInfo{Stage: "write", Category: envelope.CategoryDisk,
+		Message: fmt.Sprintf("%s could not be written: %v. A failure while writing the temporary files leaves the package unchanged; "+
+			"a failure during the final renames may leave some files updated, so run `speca %s` to see the state", name, err, name)}
 }
 
 // unwritable refuses a package that Save would refuse to write: one that is

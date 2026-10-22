@@ -26,6 +26,12 @@ var lifecycle = []string{
 // are what the shell asks of a result.
 type Result struct {
 	envelope.AdminResult
+
+	// What follows is state the shell asks of a result; none of it is written.
+
+	// taskForm marks the result of the task form, whose summary names the
+	// changes.
+	taskForm bool
 }
 
 // Summary is the envelope's one sentence. The fields a form fills say which
@@ -33,6 +39,8 @@ type Result struct {
 // otherwise it is the report.
 func (r *Result) Summary() string {
 	switch {
+	case r.taskForm:
+		return r.taskSummary()
 	case r.Packages != nil:
 		return r.listSummary()
 	case r.Validation != nil:
@@ -84,6 +92,40 @@ func entriesOf(items []envelope.ValidationItem) []afspec.ValidationEntry {
 	}
 	return entries
 }
+
+// taskSummary names what the task form did: the one task and its states, the
+// tasks and where they went, or that none changed; and, under --dry-run, that
+// nothing was written.
+func (r *Result) taskSummary() string {
+	s := fmt.Sprintf("%s: %s", tool, r.dirName())
+	switch n := len(r.Changes); n {
+	case 0:
+		s += " no task changed"
+	case 1:
+		c := r.Changes[0]
+		s += fmt.Sprintf(" task %d %s → %s", c.ID, c.From, c.To)
+	default:
+		ids := make([]string, n)
+		for i, c := range r.Changes {
+			ids[i] = fmt.Sprint(c.ID)
+		}
+		s += fmt.Sprintf(" tasks %s → %s", strings.Join(ids, ", "), r.Changes[0].To)
+	}
+	if r.DryRun {
+		s += " (dry run, nothing written)"
+	}
+	return s
+}
+
+// refused is the result of a call that was refused or failed after the package
+// was read: the report of the package as it is, so that the caller sees its
+// tasks without another call. It has no sentence of its own, so the envelope's
+// summary is the refusal, and no next: a suggestion after a refused claim could
+// point one agent at the task another agent holds.
+type refused struct{ *Result }
+
+func (refused) Summary() string  { return "" }
+func (refused) Next() []cli.Next { return nil }
 
 func (r *Result) listSummary() string {
 	noun := "packages"

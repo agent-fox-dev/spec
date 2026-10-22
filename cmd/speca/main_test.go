@@ -322,12 +322,16 @@ func mapsEqual(a, b map[string]string) bool {
 
 // The code of the command writes no file, reads no variable, runs no program
 // and reaches no network. The test above shows what a call does; this shows
-// the command has nothing that could.
+// the command has nothing that could. The one exception is the task form, which
+// writes the package it changes through the library: task.go may use Save, and
+// nothing else of this list, so the report, the verdict and the list stay as
+// they were.
 func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
 	forbiddenImports := []string{"net", "net/http", "os/exec"}
 	forbiddenOS := []string{"Create", "CreateTemp", "OpenFile", "WriteFile", "Mkdir", "MkdirAll", "MkdirTemp", "Rename",
 		"Remove", "RemoveAll", "Truncate", "Chmod", "Chtimes", "Symlink", "Link", "Getenv", "LookupEnv", "Environ", "Setenv"}
 	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
+	allowedMethods := map[string][]string{"task.go": {"Save"}}
 
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {
@@ -354,7 +358,7 @@ func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
 			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "os" && slices.Contains(forbiddenOS, sel.Sel.Name) {
 				t.Errorf("%s calls os.%s", file, sel.Sel.Name)
 			}
-			if slices.Contains(forbiddenMethods, sel.Sel.Name) {
+			if slices.Contains(forbiddenMethods, sel.Sel.Name) && !slices.Contains(allowedMethods[file], sel.Sel.Name) {
 				t.Errorf("%s uses %s", file, sel.Sel.Name)
 			}
 			return true

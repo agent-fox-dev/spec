@@ -25,6 +25,8 @@ TYPES
 
 type Result struct {
 	envelope.AdminResult
+
+	// Has unexported fields.
 }
     Result is speca's result. Its fields are the envelope package's AdminResult,
     which a program reading the output decodes into; the methods are what the
