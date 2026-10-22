@@ -478,6 +478,40 @@
               "paths_covered"
             ]
           },
+          "changes": {
+            "type": "array",
+            "description": "the tasks the call changed, in plan order, each with the state it left and the state it entered; with --dry-run, the tasks it would have changed; absent when none changed; the task form only",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "description": "what changed; task is the only kind so far, and the set is open"
+                },
+                "id": {
+                  "type": "integer",
+                  "description": "the id of the task that changed"
+                },
+                "from": {
+                  "type": "string",
+                  "description": "the state it was in: pending, in_progress, done or dropped"
+                },
+                "to": {
+                  "type": "string",
+                  "description": "the state it was set to"
+                },
+                "forced": {
+                  "type": "boolean",
+                  "description": "true when --force set a state the task state machine would have refused; absent otherwise"
+                }
+              },
+              "required": []
+            }
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task form only"
+          },
           "packages": {
             "type": "array",
             "description": "one entry for every package under the spec root in number order, then with --all those under archive/; [] when there are none; --list only",

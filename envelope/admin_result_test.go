@@ -67,7 +67,7 @@ func adminForms() (report, verdict, list AdminResult) {
 // holds the fields that form produces and no others.
 func TestAdminResultDocumentsEveryFieldAndOmitsWhatAFormDoesNotProduce_TS10_51(t *testing.T) {
 	for _, typ := range []reflect.Type{
-		reflect.TypeFor[AdminResult](), reflect.TypeFor[TaskCounts](), reflect.TypeFor[PackageInfo](), reflect.TypeFor[TaskInfo](),
+		reflect.TypeFor[AdminResult](), reflect.TypeFor[TaskCounts](), reflect.TypeFor[PackageInfo](), reflect.TypeFor[TaskInfo](), reflect.TypeFor[Change](),
 	} {
 		for f := range typ.Fields() {
 			if f.Tag.Get("description") == "" {
@@ -300,5 +300,40 @@ func TestEnvelopeImportsOnlyTheStandardLibraryAndKeepsItsNames_TS10_54(t *testin
 		if !exported[name] {
 			t.Errorf("%s is no longer exported", name)
 		}
+	}
+}
+
+// TS-11-51: changes and dry_run round-trip through DecodeSpeca and are left out
+// when empty; a change leaves out what it does not set.
+func TestChangesAndDryRunRoundTrip_TS11_51(t *testing.T) {
+	changes := []Change{
+		{Kind: "task", ID: 2, From: "pending", To: "in_progress"},
+		{Kind: "task", ID: 3, From: "dropped", To: "pending", Forced: true},
+	}
+	with := AdminResult{SpecDir: ".specs/09_x", Changes: changes, DryRun: true}
+	b, err := json.Marshal(AdminEnvelope{Tool: "speca", Result: &with})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeSpeca(b)
+	if err != nil || got.Result == nil || !reflect.DeepEqual(got.Result.Changes, changes) || !got.Result.DryRun {
+		t.Fatalf("decoded %+v, %v; want changes %+v and dry_run", got.Result, err, changes)
+	}
+
+	without := keysOf(t, AdminResult{SpecDir: ".specs/09_x", Changes: []Change{}})
+	for _, k := range []string{"changes", "dry_run"} {
+		if _, ok := without[k]; ok {
+			t.Errorf("a result with no changes and no dry run writes %s", k)
+		}
+	}
+
+	if got := sortedKeys(keysOf(t, Change{Kind: "task", ID: 4})); !slices.Equal(got, []string{"id", "kind"}) {
+		t.Errorf("a change with only a kind and an id writes %v", got)
+	}
+	if got := sortedKeys(keysOf(t, changes[1])); !slices.Equal(got, []string{"forced", "from", "id", "kind", "to"}) {
+		t.Errorf("a forced change writes %v", got)
+	}
+	if got := keysOf(t, changes[0]); got["forced"] != nil {
+		t.Errorf("a change that was not forced writes forced = %s", got["forced"])
 	}
 }

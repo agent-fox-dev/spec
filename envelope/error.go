@@ -38,6 +38,13 @@ const (
 	CategoryInvalidSpec = "invalid_spec"
 )
 
+// CategoryLifecycle is a call that was read and well-formed, and that the
+// package's lifecycle or its task state machine does not allow: a move the
+// machine refuses, or a write to a package that can no longer take one.
+// Nothing was written. Running the same call again changes nothing, and the
+// error's fix hint, where there is one, lists what would be allowed.
+const CategoryLifecycle = "lifecycle"
+
 // RetryableFor reports whether an error of the given category can succeed if
 // re-run unchanged. Only "api" and "aborted" are retryable.
 func RetryableFor(category string) bool {
@@ -58,7 +65,8 @@ type FixHint struct {
 type ErrorInfo struct {
 	// Stage is the pipeline step that failed: usage, input, preflight, prd,
 	// requirements, test_spec, tasks, plan, scaffold, write, validate, budget,
-	// load.
+	// load; and, for speca's task form, status (the package cannot take a
+	// write) and task (the state machine refuses a move).
 	Stage string `json:"stage" description:"the step that failed"`
 	// Category says whether re-running could help.
 	Category  string   `json:"category" description:"the kind of failure, which says whether re-running could help; an open set"`

@@ -47,7 +47,7 @@
         "internal/cli/warn.go",
         "internal/cli/warn_test.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

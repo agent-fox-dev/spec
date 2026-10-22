@@ -9,7 +9,7 @@ own result, and which type that is depends on the command:
 
     spec   a SpecResult    the package(s) a run wrote
     specr  a RenderResult  a package rendered as Markdown
-    speca  an AdminResult  a package's state, its verdict, or the list of packages
+    speca  an AdminResult  a package's state, its verdict, the list of packages, or a change to its tasks
 
 Decode a command's output with the function for its result:
 
@@ -168,6 +168,13 @@ const (
 )
     Why the rounds of a review stopped.
 
+const CategoryLifecycle = "lifecycle"
+    CategoryLifecycle is a call that was read and well-formed, and that the
+    package's lifecycle or its task state machine does not allow: a move the
+    machine refuses, or a write to a package that can no longer take one.
+    Nothing was written. Running the same call again changes nothing, and the
+    error's fix hint, where there is one, lists what would be allowed.
+
 const SameInputPlaceholder = "<same input>"
     SameInputPlaceholder stands for the original input in a suggested invocation
     whose input may be arbitrarily large (raw text, stdin).
@@ -225,13 +232,18 @@ type AdminResult struct {
 	Validation   *ValidationReport `json:"validation,omitempty" description:"the format's verdict: valid, error_count, warning_count, and every error and warning with its check (the rule), artifact, entity and message; the package's own findings first, then the cross-spec findings that concern it; --validate only"`
 	Traceability *TraceReport      `json:"traceability,omitempty" description:"the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and tests_unowned; --validate only"`
 
+	Changes []Change `json:"changes,omitempty" description:"the tasks the call changed, in plan order, each with the state it left and the state it entered; with --dry-run, the tasks it would have changed; absent when none changed; the task form only"`
+	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task form only"`
+
 	Packages []PackageInfo `json:"packages,omitzero" description:"one entry for every package under the spec root in number order, then with --all those under archive/; [] when there are none; --list only"`
 }
     AdminResult is speca's result, for every form of the command: the report
-    on one package, the verdict on one package (--validate) and the list of
-    every package (--list). A form fills the fields it produces and the rest
-    are absent: Valid is a pointer so that false is written, and the slices that
-    must show as [] in their own form are omitted when nil rather than empty.
+    on one package, the verdict on one package (--validate), the list of every
+    package (--list) and the task form, which is the report on the package after
+    a change, with the changes it made. A form fills the fields it produces
+    and the rest are absent: Valid is a pointer so that false is written,
+    and the slices that must show as [] in their own form are omitted when nil
+    rather than empty.
 
 type Artifact struct {
 	Kind ArtifactKind
@@ -265,6 +277,16 @@ const (
 	ArtifactMarkdownFile ArtifactKind = "markdown_file"
 )
     The artifact kinds the commands produce.
+
+type Change struct {
+	Kind   string `json:"kind,omitempty" description:"what changed; task is the only kind so far, and the set is open"`
+	ID     int    `json:"id,omitempty" description:"the id of the task that changed"`
+	From   string `json:"from,omitempty" description:"the state it was in: pending, in_progress, done or dropped"`
+	To     string `json:"to,omitempty" description:"the state it was set to"`
+	Forced bool   `json:"forced,omitempty" description:"true when --force set a state the task state machine would have refused; absent otherwise"`
+}
+    Change is one change a call made to a package, or under --dry-run would have
+    made. The task form writes only kind task; the set of kinds is open.
 
 type Envelope[R any] struct {
 	Tool     string `json:"tool" description:"the command that wrote this envelope"`
@@ -302,7 +324,8 @@ func Decode[R any](data []byte) (Envelope[R], error)
 type ErrorInfo struct {
 	// Stage is the pipeline step that failed: usage, input, preflight, prd,
 	// requirements, test_spec, tasks, plan, scaffold, write, validate, budget,
-	// load.
+	// load; and, for speca's task form, status (the package cannot take a
+	// write) and task (the state machine refuses a move).
 	Stage string `json:"stage" description:"the step that failed"`
 	// Category says whether re-running could help.
 	Category  string   `json:"category" description:"the kind of failure, which says whether re-running could help; an open set"`
@@ -724,6 +747,9 @@ const (
 	WarnCommentNotPosted         WarnCode = "comment_not_posted"
 	WarnOutputNotWritten         WarnCode = "output_not_written"
 	WarnPRDReviewIncomplete      WarnCode = "prd_review_incomplete"
+	// speca's task form.
+	WarnTaskNotReady    WarnCode = "task_not_ready"
+	WarnTaskStateForced WarnCode = "task_state_forced"
 	// specr's codes.
 	WarnSpecInvalid   WarnCode = "spec_invalid"
 	WarnSectionAbsent WarnCode = "section_absent"

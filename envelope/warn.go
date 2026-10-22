@@ -30,6 +30,9 @@ const (
 	WarnCommentNotPosted         WarnCode = "comment_not_posted"
 	WarnOutputNotWritten         WarnCode = "output_not_written"
 	WarnPRDReviewIncomplete      WarnCode = "prd_review_incomplete"
+	// speca's task form.
+	WarnTaskNotReady    WarnCode = "task_not_ready"
+	WarnTaskStateForced WarnCode = "task_state_forced"
 	// specr's codes.
 	WarnSpecInvalid   WarnCode = "spec_invalid"
 	WarnSectionAbsent WarnCode = "section_absent"

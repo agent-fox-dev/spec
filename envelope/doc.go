@@ -7,7 +7,7 @@
 //
 //	spec   a SpecResult    the package(s) a run wrote
 //	specr  a RenderResult  a package rendered as Markdown
-//	speca  an AdminResult  a package's state, its verdict, or the list of packages
+//	speca  an AdminResult  a package's state, its verdict, the list of packages, or a change to its tasks
 //
 // Decode a command's output with the function for its result:
 //

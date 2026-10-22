@@ -1,9 +1,10 @@
 package envelope
 
 // AdminResult is speca's result, for every form of the command: the report on
-// one package, the verdict on one package (--validate) and the list of every
-// package (--list). A form fills the fields it produces and the rest are
-// absent: Valid is a pointer so that false is written, and the slices that
+// one package, the verdict on one package (--validate), the list of every
+// package (--list) and the task form, which is the report on the package after
+// a change, with the changes it made. A form fills the fields it produces and
+// the rest are absent: Valid is a pointer so that false is written, and the slices that
 // must show as [] in their own form are omitted when nil rather than empty.
 type AdminResult struct {
 	SpecDir    string   `json:"spec_dir,omitempty" description:"the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca; the report and the verdict"`
@@ -31,6 +32,9 @@ type AdminResult struct {
 	Validation   *ValidationReport `json:"validation,omitempty" description:"the format's verdict: valid, error_count, warning_count, and every error and warning with its check (the rule), artifact, entity and message; the package's own findings first, then the cross-spec findings that concern it; --validate only"`
 	Traceability *TraceReport      `json:"traceability,omitempty" description:"the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and tests_unowned; --validate only"`
 
+	Changes []Change `json:"changes,omitempty" description:"the tasks the call changed, in plan order, each with the state it left and the state it entered; with --dry-run, the tasks it would have changed; absent when none changed; the task form only"`
+	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task form only"`
+
 	Packages []PackageInfo `json:"packages,omitzero" description:"one entry for every package under the spec root in number order, then with --all those under archive/; [] when there are none; --list only"`
 }
 
@@ -56,4 +60,14 @@ type PackageInfo struct {
 	NextTask   *TaskInfo   `json:"next_task,omitempty" description:"the task to work on now: the first in_progress task, else the first ready one; absent when there is none"`
 	Archived   bool        `json:"archived,omitempty" description:"true for a package listed from archive/, whatever its status (a superseded package there is archived: true with status superseded); absent otherwise"`
 	LoadError  string      `json:"load_error,omitempty" description:"why the package did not load, in the library's words; present exactly when it did not, and then the only field besides spec_dir"`
+}
+
+// Change is one change a call made to a package, or under --dry-run would have
+// made. The task form writes only kind task; the set of kinds is open.
+type Change struct {
+	Kind   string `json:"kind,omitempty" description:"what changed; task is the only kind so far, and the set is open"`
+	ID     int    `json:"id,omitempty" description:"the id of the task that changed"`
+	From   string `json:"from,omitempty" description:"the state it was in: pending, in_progress, done or dropped"`
+	To     string `json:"to,omitempty" description:"the state it was set to"`
+	Forced bool   `json:"forced,omitempty" description:"true when --force set a state the task state machine would have refused; absent otherwise"`
 }
