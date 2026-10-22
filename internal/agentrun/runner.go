@@ -30,6 +30,7 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 
 	agentkit "github.com/agent-fox-dev/agentkit-go"
+	"github.com/agent-fox-dev/agentkit-go/catalog"
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/anthropic"
 	"github.com/agent-fox-dev/agentkit-go/tools"
@@ -333,8 +334,8 @@ func (r *Runner) newAgent(p Phase) (*agentkit.Agent, error) {
 	model := r.ModelFor(p.Kind)
 
 	agent, err := agentkit.New(agentkit.Config{
-		Client:     r.cfg.Client,
-		Provider:   r.providerFor(model, p),
+		Client:     r.providerFor(model, p),
+		Provider:   catalog.ProviderAnthropic,
 		Model:      model.ID(),
 		Effort:     model.Effort,
 		System:     system,

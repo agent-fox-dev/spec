@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/agent-fox-dev/agentkit-go v0.0.0
-	github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261021143245-3f32a1fbcff4
+	github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261022061537-3006f61a4c6f
 	github.com/anthropics/anthropic-sdk-go v1.79.1
 	github.com/goccy/go-yaml v1.19.2
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/auth v0.14.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.7 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/OpenRouterTeam/go-sdk v0.9.66 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.19.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.38.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
@@ -58,11 +59,13 @@ require (
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/ollama/ollama v0.40.7 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -75,6 +78,7 @@ require (
 	github.com/sourcegraph/go-ctags v0.0.0-20250729094530-349a251d78d8 // indirect
 	github.com/sourcegraph/log v0.0.0-20241024013702-574f7079c888 // indirect
 	github.com/sourcegraph/zoekt v0.0.0-20260911061844-153817f643cd // indirect
+	github.com/spyzhov/ajson v0.8.0 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -98,6 +102,7 @@ require (
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2 // indirect
 	github.com/wasilibs/go-re2 v1.10.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52 // indirect
+	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.63.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.54.0 // indirect
@@ -119,6 +124,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/agent-fox-dev/agentkit-go v0.0.0 => github.com/agent-fox-dev/agentkit-go v0.0.0-20261021143245-3f32a1fbcff4
+replace github.com/agent-fox-dev/agentkit-go v0.0.0 => github.com/agent-fox-dev/agentkit-go v0.0.0-20261022061537-3006f61a4c6f
