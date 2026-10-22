@@ -100,3 +100,18 @@ tasks, and a second test pins the corner.
 **Test of the delivered behaviour:** `TestSpecrAndSpecaClaimTheSameTask_TS13_22` and
 `TestAWholeRenderWithAForwardDependencyClaimsNothingSpecaWouldNot`
 (`cmd/specr/next_test.go`), which run the built `speca` beside `specr`.
+
+## D-9: a reference that names no package is a usage error, not exit 1
+
+**Spec:** TS-13-30 has `specr` run on "a spec reference that resolves to no
+package or to a package with malformed JSON" and asserts exit 1 for both, with an
+error and no next. 13-REQ-7.5 has exit 1 for a package `specr` "cannot load".
+
+**Code:** a reference that resolves to no package is refused by the resolver, before
+anything is loaded, as a usage error (exit 2, stage `usage`); `specr`'s help and
+`--schema` say so ("2 usage error — the reference names no package"). A package that
+resolves but does not load is the failure at stage `load` (exit 1). Both have an
+error and no next. The test asserts each its own code.
+
+**Test of the delivered behaviour:** `TestAPackageThatCannotBeLoadedHasNoNext_TS13_30`
+(`cmd/specr/next_test.go`).

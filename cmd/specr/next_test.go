@@ -428,3 +428,217 @@ func TestAWholeRenderWithAForwardDependencyClaimsNothingSpecaWouldNot(t *testing
 		t.Error("a package that depends on a later task validates")
 	}
 }
+
+// firstUnfinished renders the example with the tasks in the states, each task
+// depending on the one before it unless deps says otherwise, and returns the repo.
+func exampleWith(t *testing.T, states []string, deps [][]int) string {
+	t.Helper()
+	root := newRepo(t)
+	plan(t, filepath.Join(root, ".specs", example), states, deps)
+	return root
+}
+
+// TS-13-23: rendering a pending ready task offers its claim first, whether or not
+// another task is in progress, and then the render of the task after it.
+func TestATaskRenderOfAReadyTaskOffersItsClaim_TS13_23(t *testing.T) {
+	root := exampleWith(t, []string{"pending", "pending", "in_progress"}, [][]int{{}, nil, {}})
+	env, code, _ := run(t, "--dir", root, "09", "--task", "1")
+	if code != cli.ExitOK || len(env.Next) != 2 {
+		t.Fatalf("code %d, next = %+v; want the claim and the render", code, env.Next)
+	}
+	claim, render := env.Next[0], env.Next[1]
+	if claim.Tool != "speca" || claim.Input != env.Result.SpecDir || !slices.Equal(claim.Flags, []string{"--task", "1", "--state", "in_progress"}) {
+		t.Errorf("next[0] = %+v; want the claim of task 1", claim)
+	}
+	for _, want := range []string{"claim", "task 1", "before working on it"} {
+		if !strings.Contains(claim.Why, want) {
+			t.Errorf("why = %q; want it to say %q", claim.Why, want)
+		}
+	}
+	if render.Tool != "specr" || !slices.Equal(render.Flags, []string{"--task", "2"}) {
+		t.Errorf("next[1] = %+v; want the render of task 2", render)
+	}
+}
+
+// TS-13-24: rendering a task in progress offers the call that records it done
+// first, and then the render of the task after it.
+func TestATaskRenderOfATaskInProgressOffersDone_TS13_24(t *testing.T) {
+	root := exampleWith(t, []string{"in_progress", "pending", "pending"}, nil)
+	env, _, _ := run(t, "--dir", root, "09", "--task", "1")
+	if len(env.Next) != 2 {
+		t.Fatalf("next = %+v; want the done call and the render", env.Next)
+	}
+	done := env.Next[0]
+	if done.Tool != "speca" || done.Input != env.Result.SpecDir || !slices.Equal(done.Flags, []string{"--task", "1", "--state", "done"}) {
+		t.Errorf("next[0] = %+v; want the done call of task 1", done)
+	}
+	for _, want := range []string{"done", "task 1", "finished", "tests pass"} {
+		if !strings.Contains(done.Why, want) {
+			t.Errorf("why = %q; want it to say %q", done.Why, want)
+		}
+	}
+	if !slices.Equal(env.Next[1].Flags, []string{"--task", "2"}) || env.Next[1].Tool != "specr" {
+		t.Errorf("next[1] = %+v; want the render of task 2", env.Next[1])
+	}
+}
+
+// TS-13-25: rendering a pending task that is not ready offers no call of speca.
+func TestATaskRenderOfATaskThatIsNotReadyOffersNoCall_TS13_25(t *testing.T) {
+	root := exampleWith(t, []string{"pending", "pending", "pending"}, nil)
+	env, _, _ := run(t, "--dir", root, "09", "--task", "2")
+	if len(byTool(env.Next, "speca")) != 0 || len(env.Next) != 1 || !slices.Equal(env.Next[0].Flags, []string{"--task", "3"}) {
+		t.Errorf("next = %+v; want the render of task 3 alone", env.Next)
+	}
+}
+
+// TS-13-26: rendering a task that is done or dropped offers no call of speca.
+func TestATaskRenderOfAFinishedTaskOffersNoCall_TS13_26(t *testing.T) {
+	root := exampleWith(t, []string{"done", "dropped", "pending"}, nil)
+	for _, id := range []string{"1", "2"} {
+		env, _, _ := run(t, "--dir", root, "09", "--task", id)
+		if len(byTool(env.Next, "speca")) != 0 {
+			t.Errorf("task %s: next = %+v; want no call of speca", id, env.Next)
+		}
+	}
+}
+
+// TS-13-27: for a package that cannot take a write, no task render offers a call
+// of speca, whatever the state of the task.
+func TestATaskRenderOfAPackageThatCannotTakeAWriteOffersNoCall_TS13_27(t *testing.T) {
+	for name, prepare := range map[string]func(t *testing.T, dir string){
+		"sealed":     func(t *testing.T, dir string) { setStatus(t, dir, "sealed") },
+		"superseded": func(t *testing.T, dir string) { setStatus(t, dir, "superseded") },
+		"archived":   func(t *testing.T, dir string) { setStatus(t, dir, "archived") },
+		"drifted":    func(t *testing.T, dir string) { activate(t, dir, true) },
+	} {
+		for _, state := range []string{"pending", "in_progress"} {
+			root := newRepo(t)
+			dir := filepath.Join(root, ".specs", example)
+			prepare(t, dir)
+			plan(t, dir, []string{state, "pending", "pending"}, nil)
+			env, code, _ := run(t, "--dir", root, "09", "--task", "1")
+			if code != cli.ExitOK || len(byTool(env.Next, "speca")) != 0 {
+				t.Errorf("%s, task 1 %s: code %d, next = %+v; want no call of speca", name, state, code, env.Next)
+			}
+		}
+	}
+}
+
+// TS-13-28: the render suggestion keeps its rule, flags and why, and is absent
+// when no task is left after the one rendered.
+func TestTheRenderSuggestionIsUnchanged_TS13_28(t *testing.T) {
+	root := newRepo(t)
+	env, _, _ := run(t, "--dir", root, "09")
+	title1 := env.Result.Tasks[0].Title
+	renders := byTool(env.Next, "specr")
+	if want := fmt.Sprintf("task %d (%s) is the first task not done; render the package scoped to it", 1, title1); len(renders) != 1 ||
+		renders[0].Why != want || !slices.Equal(renders[0].Flags, []string{"--task", "1"}) {
+		t.Errorf("after a whole render: %+v; want %q", renders, want)
+	}
+	env, _, _ = run(t, "--dir", root, "09", "--task", "1")
+	title2 := env.Result.Tasks[1].Title
+	if renders = byTool(env.Next, "specr"); len(renders) != 1 || renders[0].Why != fmt.Sprintf("task %d (%s) is the next task not done", 2, title2) {
+		t.Errorf("after a task: %+v", renders)
+	}
+	// After the last task there is nothing to render: only a call of speca, or nothing.
+	env, _, _ = run(t, "--dir", root, "09", "--task", "3")
+	if len(byTool(env.Next, "specr")) != 0 {
+		t.Errorf("after the last task: next = %+v; want no render", env.Next)
+	}
+	inProgress := exampleWith(t, []string{"done", "done", "in_progress"}, nil)
+	env, _, _ = run(t, "--dir", inProgress, "09", "--task", "3")
+	if len(env.Next) != 1 || !slices.Equal(env.Next[0].Flags, []string{"--task", "3", "--state", "done"}) {
+		t.Errorf("the last task in progress: next = %+v; want the done call alone", env.Next)
+	}
+}
+
+// TS-13-29: a Markdown file that cannot be written fails the call, and next is
+// what a render that succeeded would have.
+func TestAFailedMarkdownFileStillOffersNext_TS13_29(t *testing.T) {
+	root := newRepo(t)
+	good, _, _ := run(t, "--dir", root, "09")
+	blocked := filepath.Join(root, "blocked") // a file where the Markdown's directory would be
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad, code, _ := run(t, "--dir", root, "09", "--markdown-file", filepath.Join(blocked, "x.md"))
+	if code != cli.ExitFailed || bad.Error == nil || bad.Result == nil {
+		t.Fatalf("code %d, error %+v, result %v; want exit 1 with a result", code, bad.Error, bad.Result != nil)
+	}
+	if !slices.EqualFunc(bad.Next, good.Next, func(a, b envelope.Next) bool {
+		return a.Tool == b.Tool && a.Input == b.Input && a.Why == b.Why && slices.Equal(a.Flags, b.Flags)
+	}) || len(byTool(bad.Next, "speca")) != 1 {
+		t.Errorf("next = %+v after a failed write; %+v after a good one", bad.Next, good.Next)
+	}
+}
+
+// TS-13-30: a package that cannot be loaded has an error and no next: a
+// reference that names none is a usage error, and one that does not load is a
+// failure at stage load (D-9).
+func TestAPackageThatCannotBeLoadedHasNoNext_TS13_30(t *testing.T) {
+	root := newRepo(t)
+	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "malformed_json"), filepath.Join(root, ".specs", "05_broken"))
+	for name, tc := range map[string]struct {
+		ref  string
+		code int
+	}{"no such package": {"99_missing", cli.ExitUsage}, "a package that does not load": {"5", cli.ExitFailed}} {
+		env, code, _ := run(t, "--dir", root, tc.ref)
+		if code != tc.code || env.Error == nil || len(env.Next) != 0 || env.Result != nil {
+			t.Errorf("%s: code %d, error %+v, next %+v; want exit %d, an error, and no next", name, code, env.Error, env.Next, tc.code)
+		}
+	}
+}
+
+// treeOf records what every file under dir holds and when it was written.
+func treeOf(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		out[rel] = info.ModTime().String() + "\x00" + string(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TS-13-31: no render changes a file of the package, including those whose next
+// offers a call that would.
+func TestNoRenderChangesThePackage_TS13_31(t *testing.T) {
+	for _, states := range [][]string{{"pending", "pending", "pending"}, {"in_progress", "pending", "pending"}} {
+		root := exampleWith(t, states, nil)
+		dir := filepath.Join(root, ".specs", example)
+		before := treeOf(t, dir)
+		for _, argv := range [][]string{{"09"}, {"09", "--task", "1"}, {"09", "--section", "tasks"}} {
+			env, code, _ := run(t, append([]string{"--dir", root}, argv...)...)
+			// A task render offers a call whichever way task 1 stands; a whole render only
+			// when nothing is in progress.
+			wantCall := slices.Contains(argv, "--task") || states[0] == "pending"
+			if got := len(byTool(env.Next, "speca")) > 0; code != cli.ExitOK || got != wantCall {
+				t.Fatalf("%v with %v: code %d, next %+v; want a call of speca: %v", argv, states, code, env.Next, wantCall)
+			}
+		}
+		after := treeOf(t, dir)
+		if len(before) != len(after) {
+			t.Errorf("files before %d, after %d", len(before), len(after))
+		}
+		for name, was := range before {
+			if after[name] != was {
+				t.Errorf("%s changed (bytes or modification time)", name)
+			}
+		}
+	}
+}
