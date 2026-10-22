@@ -31,8 +31,12 @@ type Result struct {
     shell asks of a result.
 
 func (r *Result) Next() []cli.Next
-    Next suggests the call to make after this one.
+    Next suggests only calls that exist: rendering the task to work on with
+    specr. The verdict suggests none, and neither does a report or a list that
+    has no task to name.
 
 func (r *Result) Summary() string
-    Summary is the envelope's one sentence.
+    Summary is the envelope's one sentence. The fields a form fills say
+    which form it was: packages for the list, validation for the verdict,
+    and otherwise it is the report.
 
