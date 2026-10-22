@@ -66,3 +66,20 @@ stdout is not a terminal. The message is on stdout, not repeated on stderr after
 
 **Test of the delivered behaviour:** `TestMalformedStatusCallsAreUsageErrors_TS12_12`
 (`cmd/speca/main_test.go`, the case "with no input").
+
+## D-8: a version 1 package is refused at stage load here, as a usage error in the task form
+
+**Spec:** 12-REQ-3.2 refuses a package whose `schema_version` is neither absent
+nor 2 at stage `load`, category `input` (exit 1). Spec 11 (11-REQ-2.4) refuses
+the same package in the task form as a usage error (exit 2, stage `usage`).
+
+**Code:** each form follows its own spec. The status form refuses it in
+`checkLoaded` (`cmd/speca/status.go`), for the package and for the replacing
+package, whose message begins `the --by package`, and the task form in
+`executeTask` (`cmd/speca/task.go`). Both say that `speca` changes the state of
+(writes) format version 2 packages only and that a write would discard the
+version 1 plan; `--force` reaches neither.
+
+**Test of the delivered behaviour:**
+`TestLoadFailuresAndOtherFormatVersionsAreRefusedAtLoad_TS12_16`
+(`cmd/speca/status_test.go`).

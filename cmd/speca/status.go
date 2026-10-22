@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -34,21 +35,45 @@ func (f *givenFlag) Set(v string) error {
 	return nil
 }
 
+// statusCall is one --status call as the checks see it: what was asked, the
+// packages as they were loaded, and what the checks found out about the move.
+type statusCall struct {
+	*call
+	dir    string
+	name   string // dir, as the call shows it
+	target string // the status asked for
+	spec   *afspec.Spec
+	byDir  string       // the replacing package, or ""
+	by     *afspec.Spec // the replacing package, loaded
+
+	// under is whether the package is already under archive/. moveOnly is
+	// whether the call only moves it: the package is already at the target
+	// status, which is archived or superseded, and is not under archive/. It
+	// resumes a call that was interrupted after it wrote the status.
+	under, moveOnly bool
+}
+
+// A statusCheck looks at a call before anything is written, and refuses it, or
+// returns nil.
+type statusCheck func(*statusCall) *cli.ErrorInfo
+
+// statusChecks are the checks of every --status call, in the order they run,
+// under --dry-run too. The first one that refuses ends the call: it has no
+// result, and nothing was written.
+var statusChecks = []statusCheck{checkLoaded, checkMove}
+
 // executeStatus is the status form: speca <spec> --status S [--by <spec>].
 //
-// It resolves and loads the packages and refuses a call that cannot name two
-// different packages, as a usage error, before anything else is looked at.
+// It resolves --by, which is a usage error where it cannot name another
+// package, and then makes the checks in order.
 func executeStatus(c *call, dir string) (*Result, *cli.ErrorInfo) {
-	byDir, refusal := c.locateBy(dir)
-	if refusal != nil {
+	sc := &statusCall{call: c, dir: dir, name: specpkg.Display(dir, c.root), target: c.opts.status.value}
+	var refusal *cli.ErrorInfo
+	if sc.byDir, refusal = c.locateBy(dir); refusal != nil {
 		return nil, refusal
 	}
-	spec, failure := load(dir)
-	if failure != nil {
-		return nil, failure
-	}
-	if byDir != "" {
-		if refusal := c.checkBy(spec, byDir); refusal != nil {
+	for _, check := range statusChecks {
+		if refusal := check(sc); refusal != nil {
 			return nil, refusal
 		}
 	}
@@ -74,18 +99,137 @@ func (c *call) locateBy(dir string) (string, *cli.ErrorInfo) {
 	return byDir, nil
 }
 
-// checkBy loads the replacing package and refuses one that has the spec_id of
-// old, the package it would replace: a package is superseded by another one.
-// Its load failure is at stage load, naming --by.
-func (c *call) checkBy(old *afspec.Spec, byDir string) *cli.ErrorInfo {
-	replacing, err := afspec.LoadSpec(byDir)
+// checkLoaded loads the package, and the replacing package. One the library
+// refuses, or one in another format version, fails the call at stage load,
+// naming --by when it is the replacing package: --force does not reach it. A
+// replacing package that has the package's own spec_id is a usage error, which
+// only the loaded packages can tell.
+func checkLoaded(sc *statusCall) *cli.ErrorInfo {
+	spec, failure := load(sc.dir)
+	if failure != nil {
+		return failure
+	}
+	if specpkg.Legacy(spec) {
+		return legacyRefusal(sc.name, spec)
+	}
+	sc.spec = spec
+	if sc.byDir == "" {
+		return nil
+	}
+	byName := specpkg.Display(sc.byDir, sc.root)
+	by, err := afspec.LoadSpec(sc.byDir)
 	if err != nil {
 		return &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
-			Message: fmt.Sprintf("the --by package %s could not be read: %v", specpkg.Display(byDir, c.root), err)}
+			Message: fmt.Sprintf("the --by package %s could not be read: %v", byName, err)}
 	}
-	if replacing.SpecID == old.SpecID {
+	if specpkg.Legacy(by) {
+		return legacyRefusal("the --by package "+byName, by)
+	}
+	if by.SpecID == spec.SpecID {
 		return usageInfo(fmt.Errorf("--by: %s has spec_id %s, the same as %s: a package is superseded by another one",
-			specpkg.Display(byDir, c.root), replacing.SpecID, specpkg.Display(old.Dir, c.root)), nil)
+			byName, by.SpecID, sc.name), nil)
+	}
+	sc.by = by
+	return nil
+}
+
+// legacyRefusal is the refusal of a package in a format version other than 2.
+// A write through the version 2 types, of its status or of its supersedes
+// list, would replace its tasks and tests with what the types read of them,
+// which is nothing.
+func legacyRefusal(who string, spec *afspec.Spec) *cli.ErrorInfo {
+	return &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
+		Message: fmt.Sprintf("%s is format version %d, and speca changes the state of format version 2 packages only: "+
+			"a write would discard its tasks and tests, which the version 2 types do not read; convert it to version %d first "+
+			"(format v2 §13 maps each v1 construct to its v2 form)", who, spec.SchemaVersion, afspec.SchemaVersion)}
+}
+
+// underArchive reports whether dir is a package under archive/: the directory
+// that holds it is named archive. No spec root is involved, so a package that
+// was put in some other archive/ by hand counts too.
+func underArchive(dir string) bool {
+	return filepath.Base(filepath.Dir(dir)) == "archive"
+}
+
+// checkMove classifies the call as a move-only call, or checks that the
+// lifecycle allows the move. --force does not override a refusal.
+func checkMove(sc *statusCall) *cli.ErrorInfo {
+	status := sc.spec.Status
+	sc.under = underArchive(sc.dir)
+	sc.moveOnly = sc.target == status && !sc.under &&
+		(status == string(afspec.PrdFrontmatterV2JsonStatusArchived) || status == string(afspec.PrdFrontmatterV2JsonStatusSuperseded))
+	if sc.moveOnly || afspec.ValidTransition(status, sc.target) {
+		return nil
+	}
+	refusal := &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle, Message: refusalMessage(sc.name, status, sc.target)}
+	if allowed := allowedStatus(status); len(allowed) > 0 {
+		refusal.FixHint = &cli.FixHint{Flag: "--status", Valid: allowed}
+	}
+	return refusal
+}
+
+// moveVerbs say a move to a status as an instruction.
+var moveVerbs = map[string]string{
+	string(afspec.PrdFrontmatterV2JsonStatusActive):     "activate",
+	string(afspec.PrdFrontmatterV2JsonStatusSealed):     "seal",
+	string(afspec.PrdFrontmatterV2JsonStatusSuperseded): "supersede",
+	string(afspec.PrdFrontmatterV2JsonStatusArchived):   "archive",
+}
+
+// shortestMoves is a shortest chain of moves the lifecycle allows from one
+// status to another, by breadth-first search over ValidTransition: the statuses
+// it passes through and the target, not the one it starts from. It is nil when
+// there is none.
+func shortestMoves(from, to string) []string {
+	previous := map[string]string{from: ""}
+	queue := []string{from}
+	for len(queue) > 0 {
+		at := queue[0]
+		queue = queue[1:]
+		for _, next := range lifecycle {
+			if _, seen := previous[next]; seen || !afspec.ValidTransition(at, next) {
+				continue
+			}
+			previous[next] = at
+			if next == to {
+				var chain []string
+				for s := to; s != from; s = previous[s] {
+					chain = append([]string{s}, chain...)
+				}
+				return chain
+			}
+			queue = append(queue, next)
+		}
 	}
 	return nil
+}
+
+// refusalMessage says why the lifecycle does not allow a package named name to
+// move from current to target: that it is there already, or the shortest chain
+// of allowed moves that does lead there ("seal it first, then archive it"), or
+// that none does.
+func refusalMessage(name, current, target string) string {
+	if current == target {
+		return fmt.Sprintf("%s is already %s, so there is no move to make", name, current)
+	}
+	chain := shortestMoves(current, target)
+	if chain == nil {
+		return fmt.Sprintf("%s is %s and cannot move to %s: no sequence of allowed moves leads from %s to %s",
+			name, current, target, current, target)
+	}
+	steps := make([]string, len(chain))
+	for i, status := range chain {
+		switch {
+		case i == len(chain)-1 && status == string(afspec.PrdFrontmatterV2JsonStatusSuperseded):
+			steps[i] = fmt.Sprintf("then %s it, with --by naming the package that replaces it", moveVerbs[status])
+		case i == len(chain)-1:
+			steps[i] = fmt.Sprintf("then %s it", moveVerbs[status])
+		case i == 0:
+			steps[i] = fmt.Sprintf("%s it first (`speca %s --status %s`)", moveVerbs[status], name, status)
+		default:
+			steps[i] = fmt.Sprintf("then %s it (`speca %s --status %s`)", moveVerbs[status], name, status)
+		}
+	}
+	return fmt.Sprintf("%s is %s and cannot move to %s directly; the shortest way is %s: %s",
+		name, current, target, strings.Join(append([]string{current}, chain...), " → "), strings.Join(steps, ", "))
 }
