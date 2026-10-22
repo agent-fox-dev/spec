@@ -4,8 +4,9 @@
 spec [flags] <input>    a product idea → a validated specification package
 ```
 
-Its companion `specr`, which renders an existing package as Markdown, shares
-this interface and is documented in [specr.md](specr.md).
+Its companions `specr`, which renders an existing package as Markdown, and `speca`,
+which reports a package's state and changes it, share this interface and are
+documented in [specr.md](specr.md) and [speca.md](speca.md). `spec --help` says so.
 
 `spec` turns a product idea into a complete, validated version 2 package under
 `.specs/NN_name/`. It takes **exactly one positional input** and writes

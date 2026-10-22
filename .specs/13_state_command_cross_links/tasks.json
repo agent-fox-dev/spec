@@ -262,7 +262,7 @@
         "make test and make lint pass",
         "make doc leaves docs/generated up to date"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

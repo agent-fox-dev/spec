@@ -254,62 +254,80 @@ func TestAWholeRenderOfAFinishedPlanOffersNothing_TS13_21(t *testing.T) {
 	}
 }
 
-// The real speca command is built once for the tests that need it. Its Main is
-// in a package main, which a test cannot import.
-var specaBuild struct {
-	once sync.Once
-	dir  string
-	err  string
+// The real commands are built once for the tests that need them. Their Main is in
+// a package main, which a test cannot import.
+var builds struct {
+	mu    sync.Mutex
+	dir   string
+	paths map[string]string
 }
 
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if specaBuild.dir != "" {
-		_ = os.RemoveAll(specaBuild.dir)
+	if builds.dir != "" {
+		_ = os.RemoveAll(builds.dir)
 	}
 	os.Exit(code)
 }
 
-// buildSpeca returns the path of the real speca command, built on first use.
-// Building takes seconds, so -short skips what needs it.
-func buildSpeca(t *testing.T) string {
+// buildCommand returns the path of the real command of the given name, built on
+// first use. Building takes seconds, so -short skips what needs it.
+func buildCommand(t *testing.T, name string) string {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("-short: building speca takes seconds")
+		t.Skip("-short: building " + name + " takes seconds")
 	}
 	goTool, err := exec.LookPath("go")
 	if err != nil {
-		t.Skip("the go tool is not on the path, so speca cannot be built")
+		t.Skip("the go tool is not on the path, so " + name + " cannot be built")
 	}
-	specaBuild.once.Do(func() {
-		dir, err := os.MkdirTemp("", "speca-build")
-		if err != nil {
-			specaBuild.err = err.Error()
-			return
-		}
-		specaBuild.dir = dir
-		if out, err := exec.Command(goTool, "build", "-o", filepath.Join(dir, "speca"), "github.com/agent-fox-dev/spec/cmd/speca").CombinedOutput(); err != nil {
-			specaBuild.err = fmt.Sprintf("%v\n%s", err, out)
-		}
-	})
-	if specaBuild.err != "" {
-		t.Fatalf("building speca: %s", specaBuild.err)
+	builds.mu.Lock()
+	defer builds.mu.Unlock()
+	if path, ok := builds.paths[name]; ok {
+		return path
 	}
-	return filepath.Join(specaBuild.dir, "speca")
+	if builds.dir == "" {
+		if builds.dir, err = os.MkdirTemp("", "specr-builds"); err != nil {
+			t.Fatal(err)
+		}
+		builds.paths = map[string]string{}
+	}
+	path := filepath.Join(builds.dir, name)
+	if out, err := exec.Command(goTool, "build", "-o", path, "github.com/agent-fox-dev/spec/cmd/"+name).CombinedOutput(); err != nil {
+		t.Fatalf("building %s: %v\n%s", name, err, out)
+	}
+	builds.paths[name] = path
+	return path
 }
 
-// speca runs the built command and decodes its envelope.
-func speca(t *testing.T, bin string, argv ...string) envelope.AdminEnvelope {
+func buildSpeca(t *testing.T) string { return buildCommand(t, "speca") }
+
+// runBinary runs a built command and returns what it wrote and its exit code.
+func runBinary(t *testing.T, bin string, argv ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
+	var out, errs bytes.Buffer
 	cmd := exec.Command(bin, argv...)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	_ = cmd.Run() // a refusal exits non-zero, and says so in its envelope
-	env, err := envelope.DecodeSpeca(stdout.Bytes())
-	if err != nil {
-		t.Fatalf("speca %v: stdout is not one envelope (%v):\nstdout %s\nstderr %s", argv, err, stdout.String(), stderr.String())
+	cmd.Stdout, cmd.Stderr = &out, &errs
+	if err := cmd.Run(); err != nil {
+		exit, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("%s %v: %v", bin, argv, err)
+		}
+		code = exit.ExitCode()
 	}
-	return env
+	return out.String(), errs.String(), code
+}
+
+// speca runs the built command and decodes its envelope; a refusal exits non-zero
+// and says so in the envelope.
+func speca(t *testing.T, bin string, argv ...string) (envelope.AdminEnvelope, int) {
+	t.Helper()
+	stdout, stderr, code := runBinary(t, bin, argv...)
+	env, err := envelope.DecodeSpeca([]byte(stdout))
+	if err != nil {
+		t.Fatalf("speca %v: stdout is not one envelope (%v):\nstdout %s\nstderr %s", argv, err, stdout, stderr)
+	}
+	return env, code
 }
 
 // TS-13-22: for a package of any state, specr and speca claim the same task, or
@@ -375,7 +393,8 @@ func TestSpecrAndSpecaClaimTheSameTask_TS13_22(t *testing.T) {
 		plan(t, filepath.Join(root, ".specs", example), s.states, s.deps)
 		env, _, _ := run(t, "--dir", root, "09")
 		a := claims(env.Next)
-		b := claims(speca(t, bin, "--dir", root, "09").Next)
+		theirs, _ := speca(t, bin, "--dir", root, "09")
+		b := claims(theirs.Next)
 		checked++
 		if !equalFlags(a, b) {
 			t.Errorf("%s %v deps %v: specr claims %v, speca %v", s.status, s.states, s.deps, a, b)
@@ -420,7 +439,7 @@ func TestAWholeRenderWithAForwardDependencyClaimsNothingSpecaWouldNot(t *testing
 	if len(claims(env.Next)) != 0 || len(env.Next) != 1 || !slices.Equal(env.Next[0].Flags, []string{"--task", "2"}) {
 		t.Errorf("specr: next = %+v; want the render of task 2 alone", env.Next)
 	}
-	theirs := speca(t, bin, "--dir", root, "09")
+	theirs, _ := speca(t, bin, "--dir", root, "09")
 	if got := claims(theirs.Next); len(got) != 1 || got[0][1] != "3" {
 		t.Errorf("speca: claims %v; want the claim of the ready task 3", got)
 	}

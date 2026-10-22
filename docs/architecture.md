@@ -309,6 +309,15 @@ Readiness is not decided here: `IsReady` and `NextTask` are
 through `specpkg.TaskInfo`; and `examples/tasks` picks its task with `NextTask`.
 So the three agree on what "ready" and "next" mean.
 
+The three commands name one another. `cli.SiblingCommands` (`internal/cli/siblings.go`)
+is the one sentence that does, and each command's help and each `--schema`
+description (`spec` has none) carry it. `specr`'s `next` also suggests the `speca` call
+that claims a task or records it done, but only where that call would succeed, and
+`internal/specpkg` holds the rule both commands ask: `Writable` (a draft, or an active
+package whose intent has not drifted, `IntentDrift`). `speca` accepts a write and
+suggests a claim by it, `specr` suggests a call of `speca` by it, and it keeps the answer
+in a field of its result that is never written.
+
 ## Consumers
 
 agent-fox's tools import `afspec` as a library. Reading a package's state,
