@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
@@ -50,12 +52,77 @@ func notYet(form string) *cli.ErrorInfo {
 	return &cli.ErrorInfo{Stage: "load", Category: "input", Message: form + " form not yet implemented"}
 }
 
-// report is the form of speca <spec>: the state of the package in dir.
-func report(c *call, dir string) (*Result, *cli.ErrorInfo) { return nil, notYet("the report") }
-
 // verdict is the form of speca <spec> --validate: the format's verdict on the
 // package in dir.
 func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) { return nil, notYet("the verdict") }
 
 // list is the form of speca --list: every package under the spec root.
 func list(c *call) (*Result, *cli.ErrorInfo) { return nil, notYet("the list") }
+
+// loadPackage loads the package in dir for the report and the verdict. A
+// package the library refuses fails the call at stage load. One in another
+// format version loads, but its tests and tasks are not read, so the form
+// reports what did load and raises a high spec_invalid warning to say so.
+func (c *call) loadPackage(dir string) (*afspec.Spec, *cli.ErrorInfo) {
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil {
+		return nil, &cli.ErrorInfo{Stage: "load", Category: "input",
+			Message: fmt.Sprintf("the package %s could not be read: %v", dir, err)}
+	}
+	if specpkg.Legacy(spec) {
+		c.run.Warn(cli.WarnSpecInvalid, "high", "the package is format version %d, and speca reads version %d only: "+
+			"its tests and tasks are not read, and what is reported holds only what the two versions share — "+
+			"format v2 §13 maps each v1 construct to its v2 form", spec.SchemaVersion, afspec.SchemaVersion)
+	}
+	return spec, nil
+}
+
+// identityOf is what the report and the verdict both say about a package: where
+// it is, who it is, and whether its intent has drifted.
+func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
+	r := envelope.AdminResult{
+		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Title: spec.Title,
+		Status: spec.Status, CreatedAt: spec.CreatedAt, UpdatedAt: spec.UpdatedAt,
+		IntentDrift: intentDrift(spec),
+	}
+	if spec.IntentHash != nil && *spec.IntentHash != "" {
+		r.IntentHash = *spec.IntentHash
+	}
+	if len(spec.Supersedes) > 0 {
+		r.Supersedes = slices.Clone(spec.Supersedes)
+	}
+	if len(spec.Tags) > 0 {
+		r.Tags = slices.Clone(spec.Tags)
+	}
+	return r
+}
+
+// intentDrift reports whether an active package's intent has been changed
+// since it was activated: it has an intent_hash, and its PRD either has no
+// ## Intent section or has one that hashes to something else. The library
+// refuses every save of such a package, so a caller learns here why.
+func intentDrift(spec *afspec.Spec) bool {
+	if spec.Status != string(afspec.PrdFrontmatterV2JsonStatusActive) || spec.IntentHash == nil || *spec.IntentHash == "" {
+		return false
+	}
+	hash, err := afspec.ComputeIntentHash(spec.PRDBody)
+	return err != nil || hash != *spec.IntentHash
+}
+
+// discover lists the packages of the spec root whose PRD can be read. When the
+// root itself cannot be read (it is missing, is not a directory, or is not
+// readable) it raises a low specs_dir_unreadable warning naming the root and
+// what the form leaves out because of it, and reports ok as false. A package
+// whose PRD cannot be parsed is left out of metas without a word: the library
+// names such packages in the error, and the forms that matter list or load
+// them themselves.
+func (c *call) discover(leftOut string) (metas []afspec.SpecMeta, ok bool) {
+	metas, err := afspec.DiscoverSpecs(c.specsDir)
+	if metas == nil {
+		// DiscoverSpecs returns a list, empty at worst, once it has read the root.
+		c.run.Warn(cli.WarnSpecsDirUnreadable, "low", "the spec root %s could not be read (%v); %s",
+			specpkg.Display(c.specsDir, c.root), err, leftOut)
+		return nil, false
+	}
+	return metas, true
+}

@@ -104,3 +104,20 @@ members of each, and not their members one by one.
 **Test of the delivered behaviour:**
 `TestAdminResultDocumentsEveryFieldAndOmitsWhatAFormDoesNotProduce_TS10_51`
 (`envelope/admin_result_test.go`).
+
+## D-14: a task in no known state is in the total and in no count
+
+**Spec:** 10-REQ-4.7 and TS-10-30 have `task_counts.total` equal the length of
+`tasks` and the sum of `pending`, `in_progress`, `done` and `dropped`, for any
+loaded package.
+
+**Code:** the task states are a string in the generated types, so a package
+whose `tasks.json` names another state loads, and does not validate.
+`countTasks` (`cmd/speca/report.go`, `countTasks`) sets `total` to the number of
+tasks and counts the four states, so for such a package the two equalities
+cannot both hold. The one that ties `total` to `tasks` is kept: a caller
+iterating `tasks` finds `total` of them. The package's `valid` is false and
+`failing_rules` names the rule the state breaks.
+
+**Test of the delivered behaviour:** `TestReportCountsAddUp_TS10_30`
+(`cmd/speca/report_test.go`), over plans in the four states.
