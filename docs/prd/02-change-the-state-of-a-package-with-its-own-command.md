@@ -360,6 +360,27 @@ The resolver in `cmd/specr/locate.go` moves to a package both commands
 import (`internal/cli`, or a package of its own under `internal/`), with
 its error messages naming the calling tool.
 
+### The three commands together
+
+`speca` is the third command on one interface, and an agent that knows one
+of them should learn of the other two from the command itself, not from
+this repository:
+
+- **Each command's help names the other two**, in one line near the top:
+  `spec` writes a package from an idea, `specr` renders one, `speca` reports
+  and changes its state. `spec --help` then tells an agent that rendering
+  and state live elsewhere, and `speca --help` and `specr --help` say the
+  same of their siblings. `--schema`'s `description` carries the same
+  sentence, so a framework that declares one tool sees the other two named.
+- **`next` crosses the commands where the next call is theirs.** `speca`
+  already suggests `specr <spec> --task N` after a claim. `specr` gains the
+  other direction: after a whole render, and after a task render whose task
+  is still `pending`, it suggests `speca <spec> --task N --state
+  in_progress` for the next task not done, beside its own render
+  suggestion; after a task render whose task is `in_progress`, it suggests
+  `speca <spec> --task N --state done`. `envelope.Next.Tool` already names
+  the command a suggestion is for, so nothing in the envelope changes.
+
 ### Documentation and build
 
 - `make build` installs `speca` beside `spec` and `specr`, stamped the same
@@ -442,6 +463,17 @@ its error messages naming the calling tool.
 13. **`--dry-run` on every writing form.** An agent about to seal or archive
     a package can see the changes and the refusals first at no cost, as it
     can with `spec --dry-run`.
+14. **Three commands, not one with verbs.** Merging them would give one
+    name and one binary, and `make build` already installs the three from
+    one module with one version stamp. It would cost the interface ADR 05
+    fixed (one input, forms as flags, no verbs), make the model-calling
+    generation the default path of a tool that also has millisecond
+    read-only forms, turn three flat `--schema` documents into a union a
+    framework has to take apart, and merge the permission boundary a
+    harness draws per command: `specr` and `speca` can be allowed outright,
+    `spec` spends money and posts to a forge. The gap a merge would close is
+    discoverability between them, which the help lines and the crossing
+    `next` entries above close without it.
 
 ## Dependencies
 
