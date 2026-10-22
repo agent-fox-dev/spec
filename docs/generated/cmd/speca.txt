@@ -45,6 +45,10 @@ func (r *Result) Next() []cli.Next
     specr. The verdict suggests none, and neither does a report or a list that
     has no task to name.
 
+func (r *Result) Resumable() bool
+    Resumable says whether running the call again continues the work. The shell
+    asks the result, and reports it in the error.
+
 func (r *Result) Summary() string
     Summary is the envelope's one sentence. The fields a form fills say
     which form it was: packages for the list, validation for the verdict,

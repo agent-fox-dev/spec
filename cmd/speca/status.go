@@ -48,6 +48,10 @@ type statusCall struct {
 	byDir  string       // the replacing package, or ""
 	by     *afspec.Spec // the replacing package, loaded
 
+	// written is the package as the library returned it from the write of the
+	// status, or the package as it was loaded for a call that only moves it.
+	written *afspec.Spec
+
 	// under is whether the package is already under archive/. moveOnly is
 	// whether the call only moves it: the package is already at the target
 	// status, which is archived or superseded, and is not under archive/. It
@@ -129,14 +133,15 @@ func checkDestination(sc *statusCall) *cli.ErrorInfo {
 func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
 	var changes []envelope.Change
 	here := sc.dir
+	sc.written = sc.spec
 	superseding := sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded)
 	if !sc.moveOnly {
 		sc.spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		var err error
 		if superseding {
-			err = sc.supersede()
+			sc.written, err = sc.supersede()
 		} else {
-			_, err = transitionSpec(sc.spec, sc.target, sc.dir)
+			sc.written, err = transitionSpec(sc.spec, sc.target, sc.dir)
 		}
 		if err != nil {
 			return nil, writeFailure(sc.name, err)
@@ -152,8 +157,7 @@ func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
 	if sc.movesUnderArchive() {
 		dest, err := moveUnderArchive(sc.dir, sc.holdingDir())
 		if err != nil {
-			return nil, &cli.ErrorInfo{Stage: "archive", Category: envelope.CategoryDisk,
-				Message: fmt.Sprintf("%s was written but could not be moved under archive/: %v", sc.name, err)}
+			return sc.moveFailure(changes, err)
 		}
 		changes = append(changes, envelope.Change{Kind: "moved", From: sc.name, To: specpkg.Display(dest, sc.root)})
 		sc.raise()
@@ -162,8 +166,9 @@ func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
 
 	written, err := loadWritten(here)
 	if err != nil {
-		return nil, &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
-			Message: fmt.Sprintf("the package %s was written but could not be read back: %v", here, err)}
+		r := sc.partialResult(here, changes)
+		return r, &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
+			Message: fmt.Sprintf("the package %s was written but could not be read back: %v", specpkg.Display(here, sc.root), err)}
 	}
 	r := sc.reportOf(here, written)
 	r.Changes = changes
@@ -334,4 +339,53 @@ func refusalMessage(name, current, target string) string {
 	}
 	return fmt.Sprintf("%s is %s and cannot move to %s directly; the shortest way is %s: %s",
 		name, current, target, strings.Join(append([]string{current}, chain...), " → "), strings.Join(steps, ", "))
+}
+
+// partialResult is what a call that failed after it wrote says of the package:
+// who it is and what the call wrote, from the package as the library returned
+// it, since the report needs the package read back.
+func (sc *statusCall) partialResult(dir string, changes []envelope.Change) *Result {
+	return &Result{AdminResult: envelope.AdminResult{
+		SpecDir: specpkg.Display(dir, sc.root), SpecID: sc.written.SpecID, SpecName: sc.written.SpecName, Title: sc.written.Title,
+		Status: sc.written.Status, CreatedAt: sc.written.CreatedAt, UpdatedAt: sc.written.UpdatedAt, Changes: changes}}
+}
+
+// moveFailure is the failure of the move under archive/. The status was written
+// before it (unless the call only moves), so the package is where it was, in its
+// new status, and running the same call again moves it and changes nothing else:
+// the result says what was written and where the package is, and next is that
+// call. The failure is resumable, not retryable: a rename that was refused is not
+// made by repeating it, but the work goes on from where it stopped.
+func (sc *statusCall) moveFailure(changes []envelope.Change, cause error) (*Result, *cli.ErrorInfo) {
+	var r *Result
+	if back, err := loadWritten(sc.dir); err == nil {
+		r = sc.reportOf(sc.dir, back)
+		r.Changes = changes
+	} else {
+		r = sc.partialResult(sc.dir, changes)
+	}
+	r.resumable = true
+	r.nextSet = true
+	r.callNext = []cli.Next{sc.resumeCall()}
+
+	status := sc.written.Status
+	message := fmt.Sprintf("%s is %s and is still at %s: moving it under archive/ failed (%v); running the same call again moves it",
+		sc.name, status, sc.name, cause)
+	r.sentence = fmt.Sprintf("%s: %s is %s: the status was written and the move was not; run the same call again to move it under archive/", tool, r.dirName(), status)
+	if len(changes) == 0 {
+		r.sentence = fmt.Sprintf("%s: %s is %s and was not moved under archive/; run the same call again", tool, r.dirName(), status)
+	}
+	return r, &cli.ErrorInfo{Stage: "archive", Category: envelope.CategoryDisk, Message: message}
+}
+
+// resumeCall is the call that finishes this one, against the package where it is
+// now: the same flags, with --by for a package that is being superseded. --force
+// is not in it: a call that only moves checks nothing it overrides.
+func (sc *statusCall) resumeCall() cli.Next {
+	flags := []string{"--status", sc.target}
+	if sc.byDir != "" {
+		flags = append(flags, "--by", specpkg.Display(sc.byDir, sc.root))
+	}
+	return cli.Next{Tool: tool, Input: sc.name, Flags: flags,
+		Why: "the status was written and the move was not; the same call moves the package and changes nothing else"}
 }

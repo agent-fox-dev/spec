@@ -41,13 +41,25 @@ type Result struct {
 	// drifted, which an entry of the list does not say. The list suggests no
 	// claim for one.
 	drifted map[string]bool
+	// sentence is the status form's own summary, which it makes where it knows
+	// what it did.
+	sentence string
+	// resumable is true of the failure to move a package under archive/ after
+	// its status was written: running the same call again moves it.
+	resumable bool
 }
+
+// Resumable says whether running the call again continues the work. The shell
+// asks the result, and reports it in the error.
+func (r *Result) Resumable() bool { return r.resumable }
 
 // Summary is the envelope's one sentence. The fields a form fills say which
 // form it was: packages for the list, validation for the verdict, and
 // otherwise it is the report.
 func (r *Result) Summary() string {
 	switch {
+	case r.sentence != "":
+		return r.sentence
 	case r.taskForm:
 		return r.taskSummary()
 	case r.Packages != nil:

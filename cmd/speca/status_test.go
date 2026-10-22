@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -924,5 +926,258 @@ func TestTheOldIDIsInTheReplacingPackageExactlyOnce_TS12_39(t *testing.T) {
 				t.Errorf("interrupted %v, %d calls: the old package is not superseded under archive/", interrupted, calls)
 			}
 		}
+	}
+}
+
+// updatedAtIn is the updated_at of the prd.md in dir.
+func updatedAtIn(t *testing.T, dir string) time.Time {
+	t.Helper()
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := time.Parse(time.RFC3339, spec.UpdatedAt)
+	if err != nil || !strings.HasSuffix(spec.UpdatedAt, "Z") {
+		t.Fatalf("updated_at %q is not a UTC time in RFC 3339 (%v)", spec.UpdatedAt, err)
+	}
+	return ts
+}
+
+// TS-12-40: every package the call writes, the replacing one too, gets the time
+// of the call as its updated_at.
+func TestEveryWrittenPackageGetsTheTimeOfTheCall_TS12_40(t *testing.T) {
+	root := newRepo(t)
+	start := time.Now().UTC().Truncate(time.Second)
+	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	packageWith(t, root, "04_old", "04", "old", "sealed")
+	replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+	editFile(t, filepath.Join(replacing, "prd.md"), `updated_at: "2026-09-08T09:00:00Z"`, `updated_at: "2000-01-01T00:00:00Z"`)
+
+	succeeds(t, root, "03_a", "--status", "sealed")
+	succeeds(t, root, "04_old", "--status", "superseded", "--by", "12_new")
+	for name, dir := range map[string]string{"the sealed package": pkgDir(root, "03_a"), "the superseded package": pkgDir(root, "archive/04_old"), "the replacing package": replacing} {
+		if got := updatedAtIn(t, dir); got.Before(start) {
+			t.Errorf("%s: updated_at %s is before the call began (%s)", name, got.Format(time.RFC3339), start.Format(time.RFC3339))
+		}
+	}
+}
+
+// TS-12-41: a write the disk refuses is exit 1 at stage write, category disk,
+// with the library's message and no result; the warnings of a call that wrote
+// nothing are not raised.
+func TestAWriteTheDiskRefusesIsAWriteFailure_TS12_41(t *testing.T) {
+	root := newRepo(t)
+	dir := activePackage(t, root, "03_a", "03", "a", planWithOpenTasks()...)
+	readOnly(t, dir)
+
+	argv := []string{"03_a", "--status", "sealed", "--force"} // --force plans a tasks_open warning
+	before := snapshot(t, root)
+	env, code, _ := run(t, append([]string{"--dir", root}, argv...)...)
+	if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "write" || env.Error.Category != "disk" || env.Result != nil {
+		t.Fatalf("code %d, error %+v, result %v; want exit 1 at stage write, category disk, no result", code, env.Error, env.Result != nil)
+	}
+	if !strings.HasPrefix(env.Error.Message, "save error: cannot write temp file") {
+		t.Errorf("message %q is not the library's", env.Error.Message)
+	}
+	if len(env.Warnings) != 0 {
+		t.Errorf("warnings %v; the call wrote nothing", warningCodes(env))
+	}
+	if !mapsEqual(before, snapshot(t, root)) {
+		t.Error("the repository changed")
+	}
+}
+
+// failWith replaces a library call of the status form for the rest of the test.
+func failWith[T any](t *testing.T, call *T, replacement T) {
+	t.Helper()
+	was := *call
+	t.Cleanup(func() { *call = was })
+	*call = replacement
+}
+
+// TS-12-42: a lifecycle or intent error that reaches the write despite the
+// checks is a refusal at stage status, for the status and for the banner.
+func TestALifecycleOrIntentErrorAtTheWriteIsARefusal_TS12_42(t *testing.T) {
+	for name, writeErr := range map[string]error{
+		"lifecycle": &afspec.LifecycleError{Msg: "cannot do it"},
+		"intent":    &afspec.IntentError{Msg: "the intent drifted"},
+	} {
+		t.Run(name+" at the status", func(t *testing.T) {
+			root := newRepo(t)
+			activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+			failWith(t, &transitionSpec, func(*afspec.Spec, string, string) (*afspec.Spec, error) { return nil, writeErr })
+
+			e := refusedAt(t, root, "status", envelope.CategoryLifecycle, "03_a", "--status", "sealed")
+			if e != nil {
+				saysAll(t, nil, e.Message, "03_a", writeErr.Error())
+			}
+		})
+		t.Run(name+" at the banner", func(t *testing.T) {
+			root := newRepo(t)
+			packageWith(t, root, "03_old", "03", "old", "sealed")
+			packageWith(t, root, "12_new", "12", "new", "draft")
+			failWith(t, &supersedeSpec, func(*afspec.Spec, string, string) (*afspec.Spec, error) { return nil, writeErr })
+
+			refusedAt(t, root, "status", envelope.CategoryLifecycle, "03_old", "--status", "superseded", "--by", "12_new")
+		})
+	}
+}
+
+// interrupted runs the call with .specs made read-only, so that the status is
+// written and the move under archive/ is not, and returns the envelope.
+func interrupted(t *testing.T, root string, argv ...string) envelope.AdminEnvelope {
+	t.Helper()
+	readOnly(t, filepath.Join(root, ".specs"))
+	env, code, _ := run(t, append([]string{"--dir", root}, argv...)...)
+	if code != cli.ExitFailed {
+		t.Fatalf("%v: code %d, error %+v; want exit 1", argv, code, env.Error)
+	}
+	return env
+}
+
+// TS-12-43: a move that fails after the status was written is exit 1 at stage
+// archive, resumable, with the package as it is now, what was written, and the
+// call that finishes it.
+func TestAMoveThatFailsAfterTheStatusIsResumable_TS12_43(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv    []string
+		status  string
+		changes []string
+		flags   []string
+	}{
+		"archiving": {[]string{"03_x", "--status", "archived"}, "archived", []string{"status"}, []string{"--status", "archived"}},
+		"superseding": {[]string{"03_x", "--status", "superseded", "--by", "12_new"}, "superseded", []string{"status", "supersedes"},
+			[]string{"--status", "superseded", "--by", ".specs/12_new"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			packageWith(t, root, "03_x", "03", "x", "sealed")
+			packageWith(t, root, "12_new", "12", "new", "draft")
+
+			env := interrupted(t, root, tc.argv...)
+			e := env.Error
+			if e == nil || e.Stage != "archive" || e.Category != "disk" || !e.Resumable || e.Retryable {
+				t.Fatalf("error %+v; want stage archive, category disk, resumable and not retryable", e)
+			}
+			saysAll(t, tc.argv, e.Message, ".specs/03_x", tc.status, "again")
+			if !strings.Contains(env.Summary, "status was written") || !strings.Contains(env.Summary, "move was not") {
+				t.Errorf("summary %q does not say that the status was written and the move was not", env.Summary)
+			}
+			r := result(t, env)
+			if r.SpecDir != ".specs/03_x" || r.Status != tc.status || !slices.Equal(kinds(r.Changes), tc.changes) {
+				t.Errorf("spec_dir %q, status %q, changes %+v; want .specs/03_x, %s, %v", r.SpecDir, r.Status, r.Changes, tc.status, tc.changes)
+			}
+			if len(env.Next) != 1 || env.Next[0].Tool != "speca" || env.Next[0].Input != ".specs/03_x" || !slices.Equal(env.Next[0].Flags, tc.flags) {
+				t.Errorf("next %+v; want the same call against .specs/03_x with %v", env.Next, tc.flags)
+			}
+		})
+	}
+}
+
+// TS-12-44: the same call, run again once the cause is gone, moves the package
+// and changes nothing else.
+func TestRunningTheCallAgainOnlyMovesThePackage_TS12_44(t *testing.T) {
+	for name, argv := range map[string][]string{
+		"archiving":   {"03_x", "--status", "archived"},
+		"superseding": {"03_x", "--status", "superseded", "--by", "12_new"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			dir := packageWith(t, root, "03_x", "03", "x", "sealed")
+			replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+
+			env := interrupted(t, root, argv...)
+			if err := os.Chmod(filepath.Join(root, ".specs"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			left, replacingLeft := treeBytes(t, dir), treeBytes(t, replacing)
+			next := env.Next[0]
+
+			_, r := succeeds(t, root, append([]string{next.Input}, next.Flags...)...)
+			if !slices.Equal(kinds(r.Changes), []string{"moved"}) {
+				t.Errorf("changes %+v; want only the move", r.Changes)
+			}
+			if after := treeBytes(t, pkgDir(root, "archive/03_x")); !mapsEqual(left, after) {
+				t.Error("a file of the package differs from what the failed call left")
+			}
+			if !mapsEqual(replacingLeft, treeBytes(t, replacing)) {
+				t.Error("the replacing package was written again")
+			}
+		})
+	}
+}
+
+// TS-12-45: a package that was written but cannot be read back fails the call at
+// stage load, and the result still says what was written.
+func TestAReadBackFailureKeepsTheChanges_TS12_45(t *testing.T) {
+	root := newRepo(t)
+	dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	failWith(t, &loadWritten, func(string) (*afspec.Spec, error) { return nil, errors.New("the disk went away") })
+
+	env, code, _ := run(t, "--dir", root, "03_a", "--status", "sealed")
+	if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "load" || env.Error.Category != "input" || env.Error.Resumable {
+		t.Fatalf("code %d, error %+v; want exit 1 at stage load, category input", code, env.Error)
+	}
+	if want := []envelope.Change{{Kind: "status", From: "active", To: "sealed"}}; env.Result == nil || !slices.Equal(env.Result.Changes, want) {
+		t.Errorf("result %+v; want it to carry %+v", env.Result, want)
+	}
+	if env.Result != nil && (env.Result.Status != "sealed" || env.Result.SpecDir != ".specs/03_a") {
+		t.Errorf("result status %q, spec_dir %q; want sealed in .specs/03_a", env.Result.Status, env.Result.SpecDir)
+	}
+	if statusOnDisk(t, dir) != "sealed" {
+		t.Error("the status was not written")
+	}
+}
+
+// TS-12-46: Resumable is true for the failure to move after the status was
+// written, and for nothing else, in the result and in the envelope.
+func TestResumableIsTrueOnlyForTheArchiveStageFailure_TS12_46(t *testing.T) {
+	if (&Result{}).Resumable() || !(&Result{resumable: true}).Resumable() {
+		t.Error("Result.Resumable does not follow the field that says the failure can be resumed")
+	}
+
+	resumable := func(env envelope.AdminEnvelope) bool { return env.Error != nil && env.Error.Resumable }
+	root := newRepo(t)
+	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	packageWith(t, root, "04_s", "04", "s", "sealed")
+	packageWith(t, root, "05_s", "05", "s", "sealed")
+
+	success, _, _ := run(t, "--dir", root, "03_a", "--status", "sealed")
+	refusal, _, _ := run(t, "--dir", root, "04_s", "--status", "active")
+	if resumable(success) || resumable(refusal) {
+		t.Error("a success or a refusal is resumable")
+	}
+	func() {
+		failWith(t, &loadWritten, func(string) (*afspec.Spec, error) { return nil, errors.New("gone") })
+		if env, _, _ := run(t, "--dir", root, "04_s", "--status", "sealed"); resumable(env) {
+			t.Error("a failure to read back is resumable")
+		}
+	}()
+	if got := interrupted(t, root, "05_s", "--status", "archived"); !resumable(got) {
+		t.Error("the failure to move after the status was written is not resumable")
+	}
+}
+
+// A move-only call is the resume of an interrupted one, and its move can fail
+// again: it is reported the same way, with nothing written to say.
+func TestAMoveOnlyCallWhoseMoveFailsIsResumableToo(t *testing.T) {
+	root := newRepo(t)
+	dir := packageWith(t, root, "03_x", "03", "x", "archived")
+	before := treeBytes(t, dir)
+
+	env := interrupted(t, root, "03_x", "--status", "archived")
+	e := env.Error
+	if e == nil || e.Stage != "archive" || e.Category != "disk" || !e.Resumable || e.Retryable {
+		t.Fatalf("error %+v; want stage archive, category disk, resumable and not retryable", e)
+	}
+	r := result(t, env)
+	if r.SpecDir != ".specs/03_x" || r.Status != "archived" || len(r.Changes) != 0 {
+		t.Errorf("spec_dir %q, status %q, changes %+v; want the package where it is, with no change", r.SpecDir, r.Status, r.Changes)
+	}
+	if !strings.Contains(env.Summary, "not moved") || len(env.Next) != 1 || !slices.Equal(env.Next[0].Flags, []string{"--status", "archived"}) {
+		t.Errorf("summary %q, next %+v; want a package that was not moved, and the same call", env.Summary, env.Next)
+	}
+	if !mapsEqual(before, treeBytes(t, dir)) {
+		t.Error("the package changed")
 	}
 }

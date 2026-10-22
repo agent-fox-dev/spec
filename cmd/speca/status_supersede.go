@@ -32,11 +32,11 @@ func (sc *statusCall) checkReplacing() *cli.ErrorInfo {
 		specpkg.Display(sc.byDir, sc.root), sc.by.Status, sc.by.Status), &cli.FixHint{Flag: "--by"})
 }
 
-// supersede writes the old package's banner and its superseded status. The
-// replacing package is named in the banner by its spec id.
-func (sc *statusCall) supersede() error {
-	_, err := supersedeSpec(sc.spec, sc.by.SpecID, sc.dir)
-	return err
+// supersede writes the old package's banner and its superseded status, and
+// returns the package as written. The replacing package is named in the banner
+// by its spec id.
+func (sc *statusCall) supersede() (*afspec.Spec, error) {
+	return supersedeSpec(sc.spec, sc.by.SpecID, sc.dir)
 }
 
 // recordSupersedes adds the old package's spec_id to the end of the replacing

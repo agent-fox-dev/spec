@@ -171,3 +171,66 @@ three calls instead, all refused with no result and nothing written, also under
 **Test of the delivered behaviour:**
 `TestTheChecksRunInOrderAndTheFirstRefusalEndsTheCall_TS12_15`
 (`cmd/speca/status_test.go`).
+
+## D-9: the warnings of a call are raised once it has written
+
+**Spec:** 12-REQ-3.7, 4.4 and 5.4 have a forced call go ahead "and raise a
+warning"; 12-REQ-3.1 has a refusal end the call with no result.
+
+**Code:** the checks plan the warnings (`statusCall.warn`,
+`cmd/speca/status_checks.go`) and the call raises them after its first write
+(`statusCall.raise`, `cmd/speca/status.go`, `apply`), as spec 11's D-9 did. A
+call that is refused by a later check, or whose first write fails, raises none:
+they would say that a package was activated or sealed, or that its keys were
+dropped, when it was not. `supersedes_not_recorded` is raised at the step that
+cannot record, which is after the status was written.
+
+**Test of the delivered behaviour:**
+`TestATakenArchiveDestinationIsRefusedBeforeAnythingIsWritten_TS12_22` (a forced
+call refused at the last check) and
+`TestAWriteTheDiskRefusesIsAWriteFailure_TS12_41` (a forced call whose write
+fails) (`cmd/speca/status_test.go`).
+
+## D-11: a package written but not read back is reported by its identity and the changes
+
+**Spec:** 12-REQ-8.6 has a failure to read the package back after a successful
+write end the call at stage `load`, category `input`, with a `result` that carries
+`changes`.
+
+**Code:** the report of 12-REQ-9.1 is made of what `LoadSpec` reads, which is what
+failed. The result is the package as the library returned it from the write (its
+directory, id, name, title, status, `created_at`, `updated_at`) with the changes
+(`statusCall.partialResult`, `cmd/speca/status.go`). It has no tasks, counts or
+verdict; its `summary` is the error's message and it has no `next`.
+
+**Test of the delivered behaviour:** `TestAReadBackFailureKeepsTheChanges_TS12_45`
+(`cmd/speca/status_test.go`).
+
+## D-14: the calls in `next` name packages by their display path
+
+**Spec:** 12-REQ-8.4 has the failed move's `next` hold "the same call against the
+current spec_dir, with --by when superseding"; 12-REQ-9.5 has a dry run's `next`
+keep `--by`.
+
+**Code:** `input` is the package's display path (`specpkg.Display`), as in every
+other suggestion of `speca`, and `--by` is the replacing package's display path,
+not the reference the caller typed, so that the suggestion runs the same whatever
+the reference was (`1`, a name, a path). `--force` is left out of the call that
+finishes an interrupted one: it checks nothing that `--force` overrides.
+
+**Test of the delivered behaviour:**
+`TestAMoveThatFailsAfterTheStatusIsResumable_TS12_43` (`cmd/speca/status_test.go`).
+
+## D-16: a move-only call whose move fails is resumable too
+
+**Spec:** 12-REQ-8.4 makes the failure resumable when the move fails "after the
+status was written".
+
+**Code:** a move-only call writes no status, but it is the resume of a call that
+did, and its move can fail again for the same reason. It is reported the same way
+(stage `archive`, category `disk`, resumable, the call that finishes it in `next`),
+with changes that are empty or hold the record of the replacing package, and a
+summary that says the package was not moved.
+
+**Test of the delivered behaviour:**
+`TestAMoveOnlyCallWhoseMoveFailsIsResumableToo` (`cmd/speca/status_test.go`).

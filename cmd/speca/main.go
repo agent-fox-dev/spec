@@ -390,7 +390,7 @@ func emit(stdout io.Writer, run *cli.Run, code int, result *Result, failure *cli
 	var r any
 	switch {
 	case result == nil:
-	case failure != nil:
+	case failure != nil && !result.resumable:
 		r = refused{result}
 	default:
 		r = result
