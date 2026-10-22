@@ -36,6 +36,8 @@ const (
 	WarnSpecInvalid              = envelope.WarnSpecInvalid
 	WarnSectionAbsent            = envelope.WarnSectionAbsent
 	WarnOverBudget               = envelope.WarnOverBudget
+	WarnTaskNotReady             = envelope.WarnTaskNotReady
+	WarnTaskStateForced          = envelope.WarnTaskStateForced
 )
 
 // warnStages is the one place a code's stage is decided.
@@ -67,6 +69,8 @@ var warnStages = map[WarnCode]string{
 	WarnSpecInvalid:              "validate",
 	WarnSectionAbsent:            "render",
 	WarnOverBudget:               "render",
+	WarnTaskNotReady:             "task",
+	WarnTaskStateForced:          "task",
 }
 
 // WarnStage returns the stage a code is recorded against, and whether the

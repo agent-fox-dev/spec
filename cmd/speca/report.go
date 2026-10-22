@@ -16,11 +16,24 @@ func report(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if failure != nil {
 		return nil, failure
 	}
+	return c.reportOf(dir, spec), nil
+}
+
+// reportOf is the report on spec, which was loaded from dir. The task form
+// calls it too, on the package after a change, which may not be on disk (under
+// --dry-run it never is), so it reads nothing of the package from dir.
+func (c *call) reportOf(dir string, spec *afspec.Spec) *Result {
+	return c.reportWith(dir, spec, spec.Validate())
+}
+
+// reportWith is the report on spec with v as its verdict. The task form gives
+// the verdict on the package as written, which is not Validate's when a write
+// deletes keys the library reported.
+func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResult) *Result {
 	r := &Result{AdminResult: c.identityOf(dir, spec)}
 
 	// The package's own verdict. A version 2 package that does not validate
 	// raises no warning: valid and failing_rules are the answer.
-	v := spec.Validate()
 	valid := v.Valid
 	r.Valid = &valid
 	if !valid {
@@ -38,7 +51,7 @@ func report(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if metas, ok := c.discover("dependents is left out"); ok {
 		r.Dependents = dependentsOf(metas, c.specsDir, spec.SpecID)
 	}
-	return r, nil
+	return r
 }
 
 // countTasks counts the plan's tasks by state. Total is the number of tasks, so

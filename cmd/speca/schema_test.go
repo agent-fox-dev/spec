@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,6 +101,64 @@ func TestSchemaDocument_TS10_20(t *testing.T) {
 		if _, ok := doc.Result.Properties[name]; ok {
 			t.Errorf("envelope field %s is described, and speca never writes it", name)
 		}
+	}
+}
+
+// TS-11-53: --schema describes the task form: the new flags, with --state an
+// enum of the four states, the new result fields, and exit codes that cover the
+// refusals. It is the golden file, byte for byte.
+func TestSchemaDescribesTheTaskForm_TS11_53(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--schema", "--dir", "/nonexistent", "anything"}, &stdout, &stderr); code != cli.ExitOK {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "schema.golden.json"))
+	if err != nil || !bytes.Equal(stdout.Bytes(), golden) {
+		t.Errorf("--schema differs from the golden file (%v)", err)
+	}
+	var doc struct {
+		Description string `json:"description"`
+		Flags       struct {
+			Properties map[string]struct {
+				Type        string   `json:"type"`
+				Enum        []string `json:"enum"`
+				Description string   `json:"description"`
+			} `json:"properties"`
+		} `json:"flags"`
+		Result struct {
+			Properties map[string]struct {
+				Properties map[string]map[string]any `json:"properties"`
+			} `json:"properties"`
+		} `json:"result"`
+		ExitCodes map[string]string `json:"exit_codes"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Flags.Properties["state"].Enum; !slices.Equal(got, []string{"pending", "in_progress", "done", "dropped"}) {
+		t.Errorf("--state enum = %v; want the four states", got)
+	}
+	for _, name := range []string{"task", "state", "force", "dry-run"} {
+		if doc.Flags.Properties[name].Description == "" {
+			t.Errorf("flag %s is not described", name)
+		}
+	}
+	if doc.Flags.Properties["force"].Type != "boolean" || doc.Flags.Properties["dry-run"].Type != "boolean" {
+		t.Errorf("--force is %s, --dry-run %s; want booleans", doc.Flags.Properties["force"].Type, doc.Flags.Properties["dry-run"].Type)
+	}
+	result := doc.Result.Properties["result"].Properties
+	for _, name := range []string{"changes", "dry_run"} {
+		if d, _ := result[name]["description"].(string); d == "" {
+			t.Errorf("result.%s is not described", name)
+		}
+	}
+	for _, code := range []string{"1", "2"} {
+		if !strings.Contains(doc.ExitCodes[code], "refus") {
+			t.Errorf("exit code %s is described as %q; want it to cover the refusals", code, doc.ExitCodes[code])
+		}
+	}
+	if strings.Contains(doc.Description, "It changes nothing") || !strings.Contains(doc.Description, "task") {
+		t.Errorf("description %q still says the command changes nothing, or does not mention the task form", doc.Description)
 	}
 }
 

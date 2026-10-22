@@ -41,21 +41,33 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if err != nil {
 		return nil, usageInfo(err, nil)
 	}
+	if o.taskForm() {
+		return executeTask(c, dir)
+	}
 	if o.validate {
 		return verdict(c, dir)
 	}
 	return report(c, dir)
 }
 
-// loadPackage loads the package in dir for the report and the verdict. A
-// package the library refuses fails the call at stage load. One in another
-// format version loads, but its tests and tasks are not read, so the form
-// reports what did load and raises a high spec_invalid warning to say so.
-func (c *call) loadPackage(dir string) (*afspec.Spec, *cli.ErrorInfo) {
+// load loads the package in dir. A package the library refuses fails the call
+// at stage load, naming the directory and the library's reason.
+func load(dir string) (*afspec.Spec, *cli.ErrorInfo) {
 	spec, err := afspec.LoadSpec(dir)
 	if err != nil {
 		return nil, &cli.ErrorInfo{Stage: "load", Category: "input",
 			Message: fmt.Sprintf("the package %s could not be read: %v", dir, err)}
+	}
+	return spec, nil
+}
+
+// loadPackage loads the package in dir for the report and the verdict. One in
+// another format version loads, but its tests and tasks are not read, so the
+// form reports what did load and raises a high spec_invalid warning to say so.
+func (c *call) loadPackage(dir string) (*afspec.Spec, *cli.ErrorInfo) {
+	spec, failure := load(dir)
+	if failure != nil {
+		return nil, failure
 	}
 	if specpkg.Legacy(spec) {
 		c.run.Warn(cli.WarnSpecInvalid, "high", "the package is format version %d, and speca reads version %d only: "+

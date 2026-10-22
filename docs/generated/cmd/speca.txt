@@ -1,13 +1,18 @@
-Command speca reports the state of a version 2 specification package.
+Command speca reports the state of a version 2 specification package, and moves
+the state of its tasks.
 
     speca [flags] <spec>
+    speca <spec> --validate
     speca --list [--all]
+    speca <spec> --task T --state S [--force] [--dry-run]
 
-It takes one input, a reference to a spec package, and writes exactly one JSON
-object to stdout: the package's state, its verdict under --validate, or, with
---list and no input, every package under the spec root. It reads the packages
-and changes nothing: it writes no file, makes no model or network call and reads
-no credential.
+It takes one input, a reference to a spec package, and writes exactly one
+JSON object to stdout: the package's state, its verdict under --validate,
+with --list and no input, every package under the spec root, or, in the task
+form, the package's state after the change and the changes made. The report,
+--validate and --list read the packages and change nothing: they write no file.
+The task form saves the package through the library, which rewrites every
+artifact of it. No form makes a model or network call or reads a credential.
 
 FUNCTIONS
 
@@ -25,6 +30,8 @@ TYPES
 
 type Result struct {
 	envelope.AdminResult
+
+	// Has unexported fields.
 }
     Result is speca's result. Its fields are the envelope package's AdminResult,
     which a program reading the output decodes into; the methods are what the

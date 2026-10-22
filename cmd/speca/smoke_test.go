@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,12 +49,14 @@ func TestAnAgentReadsAPackageAndFollowsNext_TS10_57(t *testing.T) {
 	if !r.Tasks[0].Ready || r.Tasks[1].Ready || r.NextTask.ID != 1 {
 		t.Fatalf("tasks %+v next %+v", r.Tasks, r.NextTask)
 	}
-	if len(first.Next) != 1 || first.Next[0].Tool != "specr" || first.Next[0].Input != filepath.Join(".specs", "09_agent_mode") ||
-		!slices.Equal(first.Next[0].Flags, []string{"--task", "1"}) {
+	// The claim of task 1 comes first (spec 11), and the render of it after.
+	if len(first.Next) != 2 || first.Next[0].Tool != "speca" || !slices.Equal(first.Next[0].Flags, []string{"--task", "1", "--state", "in_progress"}) ||
+		first.Next[1].Tool != "specr" || first.Next[1].Input != filepath.Join(".specs", "09_agent_mode") ||
+		!slices.Equal(first.Next[1].Flags, []string{"--task", "1"}) {
 		t.Fatalf("next = %+v", first.Next)
 	}
 
-	n := first.Next[0]
+	n := first.Next[1]
 	cmd := exec.Command(bin, append([]string{n.Input}, n.Flags...)...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
@@ -155,9 +158,9 @@ func TestAnAgentListsEveryPackageWithTheArchive_TS10_59(t *testing.T) {
 	if want := "speca: 6 packages (1 draft, 2 active, 1 sealed, 1 superseded, 1 unreadable)"; env.Summary != want {
 		t.Errorf("summary = %q; want %q", env.Summary, want)
 	}
-	if len(env.Next) != 1 || env.Next[0].Tool != "specr" || env.Next[0].Input != filepath.Join(".specs", "03_c") ||
-		!slices.Equal(env.Next[0].Flags, []string{"--task", "2"}) {
-		t.Errorf("next = %+v; want specr .specs/03_c --task 2", env.Next)
+	if len(env.Next) != 2 || env.Next[0].Tool != "speca" || !slices.Equal(env.Next[0].Flags, []string{"--task", "2", "--state", "in_progress"}) ||
+		env.Next[1].Tool != "specr" || env.Next[1].Input != filepath.Join(".specs", "03_c") || !slices.Equal(env.Next[1].Flags, []string{"--task", "2"}) {
+		t.Errorf("next = %+v; want the claim of .specs/03_c's task 2, then specr .specs/03_c --task 2", env.Next)
 	}
 	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed")
@@ -184,5 +187,145 @@ func TestAMalformedCallIsRefusedBeforeAnythingIsRead_TS10_60(t *testing.T) {
 	}
 	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed")
+	}
+}
+
+// readFiles returns the bytes of the named files of the package.
+func readFiles(t *testing.T, dir string, names ...string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, name := range names {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = string(b)
+	}
+	return out
+}
+
+// TS-11-54 (11-PATH-1): an agent reads the report, takes the claim it suggests,
+// has the task rendered, and finishes it; the package on disk follows.
+func TestAnAgentClaimsTheNextTaskAndFinishesIt_TS11_54(t *testing.T) {
+	bin := specr(t)
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	t.Chdir(root)
+
+	report, code, _ := run(t, "09")
+	if code != cli.ExitOK || len(report.Next) == 0 || report.Next[0].Tool != "speca" ||
+		!slices.Equal(report.Next[0].Flags, []string{"--task", "1", "--state", "in_progress"}) {
+		t.Fatalf("code %d: next = %+v; want the claim of task 1 first", code, report.Next)
+	}
+
+	claim, code, _ := run(t, "09", "--task", "next", "--state", "in_progress")
+	if code != cli.ExitOK || !claim.OK || len(result(t, claim).Changes) != 1 {
+		t.Fatalf("code %d: %+v", code, claim.Error)
+	}
+	if c := result(t, claim).Changes[0]; c.Kind != "task" || c.ID != 1 || c.From != "pending" || c.To != "in_progress" {
+		t.Errorf("change = %+v", c)
+	}
+	if len(claim.Next) != 1 || claim.Next[0].Tool != "specr" || !slices.Equal(claim.Next[0].Flags, []string{"--task", "1"}) {
+		t.Fatalf("next = %+v; want specr --task 1", claim.Next)
+	}
+	if got := onDisk(t, dir); got[1] != "in_progress" {
+		t.Errorf("tasks.json: %v", got)
+	}
+	afterClaim := result(t, claim).UpdatedAt
+	if afterClaim == "2026-09-08T09:00:00Z" {
+		t.Errorf("updated_at = %q; want it set by the write", afterClaim)
+	}
+
+	// The call it suggested renders the task that was claimed.
+	n := claim.Next[0]
+	cmd := exec.Command(bin, append([]string{n.Input}, n.Flags...)...)
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("specr: %v\n%s", err, stderr.String())
+	}
+	rendered, err := envelope.DecodeSpecr(stdout.Bytes())
+	if err != nil || rendered.Result == nil || rendered.Result.Task == nil || rendered.Result.Task.ID != 1 || rendered.Result.Task.State != "in_progress" {
+		t.Errorf("specr rendered %+v (%v); want task 1, in progress", rendered.Result, err)
+	}
+
+	done, code, _ := run(t, "09", "--task", "1", "--state", "done")
+	if code != cli.ExitOK || onDisk(t, dir)[1] != "done" {
+		t.Fatalf("code %d: %+v; on disk %v", code, done.Error, onDisk(t, dir))
+	}
+	if len(done.Next) == 0 || !slices.Equal(done.Next[0].Flags, []string{"--task", "2", "--state", "in_progress"}) {
+		t.Errorf("after task 1 is done: next = %+v; want the claim of task 2", done.Next)
+	}
+	if result(t, done).UpdatedAt < afterClaim {
+		t.Errorf("updated_at went from %q back to %q", afterClaim, result(t, done).UpdatedAt)
+	}
+}
+
+// TS-11-55 (11-PATH-2): a second agent's claim of a task that is taken is
+// refused with the states it may move to and the package as it is on disk, and
+// the package is not touched.
+func TestASecondAgentsClaimIsRefused_TS11_55(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setTasks(t, dir, planTask(1, "in_progress", nil), planTask(2, "pending", []int{1}))
+	before := readFiles(t, dir, "tasks.json", "prd.md")
+
+	env, code, _ := run(t, "--dir", root, "09", "--task", "1", "--state", "in_progress")
+	if code != cli.ExitFailed || env.OK || env.Error == nil || env.Error.Stage != "task" || env.Error.Category != "lifecycle" {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	if env.Error.FixHint == nil || env.Error.FixHint.Flag != "--state" || !slices.Equal(env.Error.FixHint.Valid, []string{"pending", "done"}) {
+		t.Errorf("fix_hint = %+v; want --state with pending and done", env.Error.FixHint)
+	}
+	r := env.Result
+	if r == nil || len(r.Tasks) != 2 || r.Tasks[0].State != "in_progress" || r.NextTask == nil || r.NextTask.ID != 1 {
+		t.Errorf("result = %+v; want the package as it is on disk", r)
+	}
+	if r != nil && len(r.Changes) != 0 {
+		t.Errorf("changes %+v; want none", r.Changes)
+	}
+	if len(env.Next) != 0 {
+		t.Errorf("next %+v; want none", env.Next)
+	}
+	if after := readFiles(t, dir, "tasks.json", "prd.md"); !maps.Equal(before, after) {
+		t.Error("tasks.json or prd.md changed")
+	}
+}
+
+// TS-11-56 (11-PATH-3): a dry run of a forced recovery of a dropped task says
+// what it would do and writes nothing; the call it suggests then does it.
+func TestADryRunOfAForcedRecoveryThenTheRealCall_TS11_56(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setTasks(t, dir, planTask(1, "done", nil), planTask(2, "done", []int{1}), planTask(3, "dropped", nil))
+	before := snapshot(t, root)
+
+	dry, code, _ := run(t, "--dir", root, "09", "--task", "3", "--state", "pending", "--force", "--dry-run")
+	r := result(t, dry)
+	if code != cli.ExitOK || !r.DryRun || len(r.Changes) != 1 {
+		t.Fatalf("code %d: dry_run %v, changes %+v, error %+v", code, r.DryRun, r.Changes, dry.Error)
+	}
+	if c := r.Changes[0]; c.ID != 3 || c.From != "dropped" || c.To != "pending" || !c.Forced {
+		t.Errorf("change = %+v", c)
+	}
+	if ws := warningsOf(dry, "task_state_forced"); len(ws) != 1 || ws[0].Severity != "high" || ws[0].Stage != "task" {
+		t.Errorf("warnings = %+v; want one high task_state_forced", dry.Warnings)
+	}
+	if !mapsEqual(before, snapshot(t, root)) {
+		t.Error("the dry run changed the repository")
+	}
+	want := envelope.Next{Tool: "speca", Input: filepath.Join(".specs", "09_agent_mode"), Flags: []string{"--task", "3", "--state", "pending", "--force"}}
+	if len(dry.Next) != 1 || !hasCall(dry.Next, want) {
+		t.Fatalf("next = %+v; want %+v", dry.Next, want)
+	}
+
+	n := dry.Next[0]
+	real, code, _ := run(t, append([]string{"--dir", root, n.Input}, n.Flags...)...)
+	if code != cli.ExitOK || real.Result == nil || real.Result.DryRun || onDisk(t, dir)[3] != "pending" {
+		t.Errorf("code %d: %+v; on disk %v", code, real.Error, onDisk(t, dir))
+	}
+	if len(warningsOf(real, "task_state_forced")) != 1 || !real.Result.Changes[0].Forced {
+		t.Errorf("the real call's warnings %+v, changes %+v", real.Warnings, real.Result.Changes)
 	}
 }

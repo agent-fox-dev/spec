@@ -47,7 +47,7 @@
         "internal/cli/warn.go",
         "internal/cli/warn_test.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -88,7 +88,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -125,7 +125,7 @@
       "depends_on": [
         2
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -172,7 +172,7 @@
       "depends_on": [
         3
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -218,7 +218,7 @@
       "depends_on": [
         4
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -266,7 +266,7 @@
       "depends_on": [
         5
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 7,
@@ -316,7 +316,7 @@
       "depends_on": [
         6
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 8,
@@ -351,7 +351,7 @@
       "depends_on": [
         7
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 9,
@@ -378,7 +378,7 @@
       "done_when": [
         "`make test` and `make lint` pass"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

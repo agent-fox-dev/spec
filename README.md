@@ -121,10 +121,11 @@ A Go program that calls one of the commands decodes its output with the
 [`envelope`](docs/api.md#envelope) package (`envelope.DecodeSpec`,
 `envelope.DecodeSpecr`, `envelope.DecodeSpeca`) instead of writing structs of its own.
 
-Changing an existing package — activating, sealing, archiving or superseding
-it, or moving a task from one state to another — has no CLI surface; it's
-library API in [`afspec`](afspec/README.md) for an embedder to call. Rendering
-a package and reading its state have one each, below.
+Changing the lifecycle status of an existing package — activating, sealing,
+archiving or superseding it — has no CLI surface; it's library API in
+[`afspec`](afspec/README.md) for an embedder to call. Rendering a package,
+reading its state and moving its tasks from one state to another have a command
+each, below.
 
 ## Rendering a Spec Package
 
@@ -152,11 +153,10 @@ Everything is in [docs/specr.md](docs/specr.md); the decision is
 
 ## Reporting a Spec Package's State
 
-The `speca` CLI is the spec admin command. In this form it reads a package and
-changes nothing: it reports a package's state, gives the format's full verdict
-on it, or lists every package under the spec root. It takes one reference to a
-package (none with `--list`) and writes one JSON object to stdout, as `spec`
-and `specr` do:
+The `speca` CLI is the spec admin command. It reports a package's state, gives
+the format's full verdict on it, lists every package under the spec root, and
+moves the state of a package's tasks. It takes one reference to a package (none
+with `--list`) and writes one JSON object to stdout, as `spec` and `specr` do:
 
 ```bash
 speca 16                  # status, validity, every task with its state and readiness, the next task,
@@ -164,14 +164,21 @@ speca 16                  # status, validity, every task with its state and read
 speca 16 --validate       # schema errors, the cross-file rules C1–C11 and the cross-spec rules, by rule
 speca --list              # every package under the spec root, in number order
 speca --list --all        # and those under archive/
+speca 16 --task next --state in_progress   # claim the task to work on now
+speca 16 --task 4 --state done             # finish task 4 (--task 1,2 or all, --dry-run, --force)
 speca --schema            # the flags and the output, as JSON Schema
 ```
 
 `result.next_task` is the task to work on — the one in progress, else the first
 whose dependencies are done — and `next` names the `specr` call that renders
-it. A package that does not validate is reported with exit 0, in `valid`; exit
-codes `0`, `1` and `2` are those of the other two commands. It writes no file,
-makes no model or network call, and reads no credential. Everything is in
+it, after the claim of the task where it can be claimed. A package that does not
+validate is reported with exit 0, in `valid`; exit codes `0`, `1` and `2` are
+those of the other two commands. The task form moves tasks through the library's
+task state machine, every one or none, so a second claim of a task that is taken
+is refused with the states it may move to, and it writes through the library's
+`Spec.Save`, which writes every artifact of the package again; the other forms
+write no file. `speca` makes no model or
+network call and reads no credential. Everything is in
 [docs/speca.md](docs/speca.md); the decision is
 [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
 

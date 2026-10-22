@@ -36,9 +36,10 @@ drift from what is written.
 | `SpecResult`, `Package`, `ScopeReport`, `ValidationReport`, `TraceReport`, `OpenQuestion` | `spec`'s result, see [cli.md](cli.md#result) |
 | `Review`, `ReviewRound`, `ReviewFinding`, the `Severity…`, `Disposition…` and `ReviewStop…` constants | `Package.Review`, the adversarial review of a package's PRD (`--adversarial`), see [cli.md](cli.md#the-adversarial-review---adversarial) |
 | `RenderResult`, `TaskInfo` | `specr`'s result, see [specr.md](specr.md#result). `TaskInfo.Ready` is true for a pending task whose dependencies are all done, and absent otherwise; `speca` writes it too |
-| `AdminResult`, `TaskCounts`, `PackageInfo` | `speca`'s result for every form: the report, the verdict (`--validate`) and the list (`--list`). A form fills the fields it produces and the rest are absent; `Valid` is a `*bool` so that false is written. See [speca.md](speca.md) |
-| `ErrorInfo`, `FixHint`, the `Category…` constants | the failure; `*ErrorInfo` is an `error` |
-| `Warning`, `WarnCode` and the `Warn…` constants | what went differently without stopping the run |
+| `AdminResult`, `TaskCounts`, `PackageInfo` | `speca`'s result for every form: the report, the verdict (`--validate`), the list (`--list`) and the task form, which is the report after a change. A form fills the fields it produces and the rest are absent; `Valid` is a `*bool` so that false is written. See [speca.md](speca.md) |
+| `Change` | one change a call made, or under `--dry-run` would have made: `kind` (`task`, an open set), `id`, `from`, `to` and `forced`, each left out when unset. `AdminResult.Changes` lists them in plan order, and `AdminResult.DryRun` is true under `--dry-run` |
+| `ErrorInfo`, `FixHint`, the `Category…` constants | the failure; `*ErrorInfo` is an `error`. `CategoryLifecycle` (`lifecycle`, not retryable) is a call that was read and was well-formed and that the task state machine or the package's lifecycle does not allow: stages `task` and `status` of `speca`'s task form |
+| `Warning`, `WarnCode` and the `Warn…` constants | what went differently without stopping the run. `WarnTaskNotReady` (`task_not_ready`) and `WarnTaskStateForced` (`task_state_forced`) are `speca`'s task form, at stage `task` |
 | `Artifact`, `SideEffect`, `Next`, `InputInfo`, `ModelInfo`, `UsageInfo`, `PhaseInfo`, `PreflightCheck`, `Estimate` | the rest of the envelope |
 
 ```go

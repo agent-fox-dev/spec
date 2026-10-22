@@ -17,7 +17,7 @@ func ptr[T any](v T) *T { return &v }
 
 // report16 is the result of the report form for a package in .specs.
 func report16(status string, done, total int, next *envelope.TaskInfo, valid bool) *Result {
-	return &Result{envelope.AdminResult{
+	return &Result{AdminResult: envelope.AdminResult{
 		SpecDir: ".specs/16_indexed_code_search", SpecID: "16", SpecName: "indexed_code_search", Status: status,
 		Valid: ptr(valid), TaskCounts: &envelope.TaskCounts{Done: done, Total: total}, NextTask: next,
 	}}
@@ -66,13 +66,13 @@ func envelopeSummary(t *testing.T, r *Result) string {
 // TS-10-46: the verdict's sentence says whether the package validates, and if
 // not how many errors and which rules.
 func TestVerdictSummary_TS10_46(t *testing.T) {
-	valid := &Result{envelope.AdminResult{SpecDir: ".specs/16_indexed_code_search", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
+	valid := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_indexed_code_search", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
 	if got, want := valid.Summary(), "speca: 16_indexed_code_search validates"; got != want {
 		t.Errorf("Summary = %q; want %q", got, want)
 	}
 
 	errs := []envelope.ValidationItem{{Check: "C3"}, {Check: "C7"}, {Check: "cross_spec_actor"}}
-	invalid := &Result{envelope.AdminResult{SpecDir: ".specs/16_indexed_code_search", Valid: ptr(false),
+	invalid := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_indexed_code_search", Valid: ptr(false),
 		Validation: &envelope.ValidationReport{ErrorCount: 3, Errors: errs}}}
 	want := "speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)"
 	if got := invalid.Summary(); got != want {
@@ -83,12 +83,12 @@ func TestVerdictSummary_TS10_46(t *testing.T) {
 	}
 
 	// A rule is named once however many errors break it, and one error is not "1 errors".
-	twice := &Result{envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(false),
+	twice := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(false),
 		Validation: &envelope.ValidationReport{ErrorCount: 2, Errors: []envelope.ValidationItem{{Check: "C4"}, {Check: "C4"}}}}}
 	if got, want := twice.Summary(), "speca: 16_x does not validate (2 errors: C4)"; got != want {
 		t.Errorf("Summary = %q; want %q", got, want)
 	}
-	once := &Result{envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(false),
+	once := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(false),
 		Validation: &envelope.ValidationReport{ErrorCount: 1, Errors: []envelope.ValidationItem{{Check: "C4"}}}}}
 	if got, want := once.Summary(), "speca: 16_x does not validate (1 error: C4)"; got != want {
 		t.Errorf("Summary = %q; want %q", got, want)
@@ -112,40 +112,50 @@ func packages(statuses ...string) []envelope.PackageInfo {
 // TS-10-47: the list's sentence counts the packages, then each status that
 // has one, in lifecycle order, then the packages that did not load.
 func TestListSummary_TS10_47(t *testing.T) {
-	nine := &Result{envelope.AdminResult{Packages: packages("sealed", "active", "draft", "active", "active", "sealed", "draft", "active", "active")}}
+	nine := &Result{AdminResult: envelope.AdminResult{Packages: packages("sealed", "active", "draft", "active", "active", "sealed", "draft", "active", "active")}}
 	if got, want := nine.Summary(), "speca: 9 packages (2 draft, 5 active, 2 sealed)"; got != want {
 		t.Errorf("Summary = %q; want %q", got, want)
 	}
 
-	broken := &Result{envelope.AdminResult{Packages: packages("draft", "", "")}}
+	broken := &Result{AdminResult: envelope.AdminResult{Packages: packages("draft", "", "")}}
 	if got, want := broken.Summary(), "speca: 3 packages (1 draft, 2 unreadable)"; got != want {
 		t.Errorf("Summary = %q; want %q", got, want)
 	}
 
-	all := &Result{envelope.AdminResult{Packages: packages("archived", "superseded", "sealed", "active", "draft")}}
+	all := &Result{AdminResult: envelope.AdminResult{Packages: packages("archived", "superseded", "sealed", "active", "draft")}}
 	if got, want := all.Summary(), "speca: 5 packages (1 draft, 1 active, 1 sealed, 1 superseded, 1 archived)"; got != want {
 		t.Errorf("Summary = %q; want %q", got, want)
 	}
 
-	if got, want := (&Result{envelope.AdminResult{Packages: []envelope.PackageInfo{}}}).Summary(), "speca: 0 packages"; got != want {
+	if got, want := (&Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{}}}).Summary(), "speca: 0 packages"; got != want {
 		t.Errorf("an empty list: Summary = %q; want %q", got, want)
 	}
-	if got, want := (&Result{envelope.AdminResult{Packages: packages("active")}}).Summary(), "speca: 1 package (1 active)"; got != want {
+	if got, want := (&Result{AdminResult: envelope.AdminResult{Packages: packages("active")}}).Summary(), "speca: 1 package (1 active)"; got != want {
 		t.Errorf("one package: Summary = %q; want %q", got, want)
 	}
 }
 
 // TS-10-48: the report suggests rendering the next task with specr, and says
-// whether it is under way or the next ready one.
+// whether it is under way or the next ready one. Where the task is ready and the
+// package can take a write, the claim of the task (speca's task form, spec 11)
+// comes before the render, which is still there.
 func TestReportNext_TS10_48(t *testing.T) {
 	for name, tc := range map[string]struct {
-		next *envelope.TaskInfo
-		why  string
+		next  *envelope.TaskInfo
+		why   string
+		claim bool
 	}{
-		"in progress": {&envelope.TaskInfo{ID: 4, Title: "Fix it", State: "in_progress"}, "in progress"},
-		"ready":       {&envelope.TaskInfo{ID: 5, Title: "Add it", State: "pending", Ready: true}, "next ready task"},
+		"in progress": {&envelope.TaskInfo{ID: 4, Title: "Fix it", State: "in_progress"}, "in progress", false},
+		"ready":       {&envelope.TaskInfo{ID: 5, Title: "Add it", State: "pending", Ready: true}, "next ready task", true},
 	} {
 		got := report16("active", 3, 7, tc.next, true).Next()
+		if tc.claim {
+			if len(got) != 2 || got[0].Tool != "speca" || !slices.Equal(got[0].Flags, []string{"--task", "5", "--state", "in_progress"}) {
+				t.Errorf("%s: Next = %+v; want the claim of task 5 first", name, got)
+				continue
+			}
+			got = got[1:]
+		}
 		if len(got) != 1 || got[0].Tool != "specr" || got[0].Input != ".specs/16_indexed_code_search" ||
 			!slices.Equal(got[0].Flags, []string{"--task", fmt.Sprint(tc.next.ID)}) {
 			t.Errorf("%s: Next = %+v", name, got)
@@ -167,31 +177,32 @@ func TestListNext_TS10_49(t *testing.T) {
 		return envelope.PackageInfo{SpecDir: fmt.Sprintf(".specs/%02d_p", n), Status: status,
 			TaskCounts: &envelope.TaskCounts{InProgress: inProgress}, NextTask: next}
 	}
-	r := &Result{envelope.AdminResult{Packages: []envelope.PackageInfo{
+	r := &Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{
 		pkg(1, "draft", 0, task(1, "pending")),
 		pkg(2, "active", 1, task(2, "in_progress")),
 		pkg(3, "active", 0, task(3, "pending")),
 		pkg(4, "active", 0, task(1, "pending")),
 	}}}
 	got := r.Next()
-	if len(got) != 1 || got[0].Tool != "specr" || got[0].Input != ".specs/03_p" || !slices.Equal(got[0].Flags, []string{"--task", "3"}) {
-		t.Errorf("Next = %+v; want specr .specs/03_p --task 3", got)
+	if len(got) != 2 || got[0].Tool != "speca" || got[0].Input != ".specs/03_p" || !slices.Equal(got[0].Flags, []string{"--task", "3", "--state", "in_progress"}) ||
+		got[1].Tool != "specr" || got[1].Input != ".specs/03_p" || !slices.Equal(got[1].Flags, []string{"--task", "3"}) {
+		t.Errorf("Next = %+v; want the claim of .specs/03_p's task 3, then specr .specs/03_p --task 3", got)
 	}
 
 	// An archived package is not work to do, whatever its status says.
 	archived := pkg(1, "active", 0, task(1, "pending"))
 	archived.Archived = true
-	if got := (&Result{envelope.AdminResult{Packages: []envelope.PackageInfo{archived}}}).Next(); len(got) != 0 {
+	if got := (&Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{archived}}}).Next(); len(got) != 0 {
 		t.Errorf("an archived package: Next = %+v", got)
 	}
 }
 
 // TS-10-50: no call is suggested when none would help.
 func TestNoNextCall_TS10_50(t *testing.T) {
-	verdict := &Result{envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
+	verdict := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
 	// Even a verdict carrying a next_task would not suggest one: it has no tasks.
 	verdict.NextTask = &envelope.TaskInfo{ID: 1}
-	idle := &Result{envelope.AdminResult{Packages: []envelope.PackageInfo{
+	idle := &Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{
 		{SpecDir: ".specs/01_p", Status: "active", TaskCounts: &envelope.TaskCounts{InProgress: 1}, NextTask: &envelope.TaskInfo{ID: 2, State: "in_progress"}},
 		{SpecDir: ".specs/02_p", Status: "active", TaskCounts: &envelope.TaskCounts{Done: 3, Total: 3}},
 		{SpecDir: ".specs/03_p", LoadError: "cannot read prd.md"},
@@ -201,7 +212,7 @@ func TestNoNextCall_TS10_50(t *testing.T) {
 		"the verdict":              verdict,
 		"a report without a task":  report16("sealed", 7, 7, nil, true),
 		"a list without a package": idle,
-		"an empty list":            {envelope.AdminResult{Packages: []envelope.PackageInfo{}}},
+		"an empty list":            {AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{}}},
 	} {
 		if got := r.Next(); len(got) != 0 {
 			t.Errorf("%s: Next = %+v; want none", name, got)
@@ -210,11 +221,18 @@ func TestNoNextCall_TS10_50(t *testing.T) {
 }
 
 // TS-10-55: Result is an AdminResult with a sentence and a next call, and no
-// envelope speca writes is retryable or resumable.
+// envelope speca writes is retryable or resumable. Result may hold state of its
+// own beside the embedded AdminResult (the task form's marks), none of it
+// exported, so none of it written.
 func TestResultAndEnvelopeFlags_TS10_55(t *testing.T) {
 	typ := reflect.TypeFor[Result]()
-	if typ.NumField() != 1 || !typ.Field(0).Anonymous || typ.Field(0).Type != reflect.TypeFor[envelope.AdminResult]() {
-		t.Errorf("Result is %v; want a struct embedding envelope.AdminResult", typ)
+	if typ.NumField() < 1 || !typ.Field(0).Anonymous || typ.Field(0).Type != reflect.TypeFor[envelope.AdminResult]() {
+		t.Errorf("Result is %v; want a struct whose first field embeds envelope.AdminResult", typ)
+	}
+	for i := 1; i < typ.NumField(); i++ {
+		if typ.Field(i).IsExported() {
+			t.Errorf("Result.%s is exported: it would be written beside the AdminResult", typ.Field(i).Name)
+		}
 	}
 	for _, m := range []string{"Summary", "Next"} {
 		if _, ok := reflect.TypeFor[*Result]().MethodByName(m); !ok {
@@ -223,8 +241,8 @@ func TestResultAndEnvelopeFlags_TS10_55(t *testing.T) {
 	}
 
 	report := report16("active", 3, 7, &envelope.TaskInfo{ID: 4}, true)
-	verdict := &Result{envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
-	list := &Result{envelope.AdminResult{Packages: packages("active")}}
+	verdict := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
+	list := &Result{AdminResult: envelope.AdminResult{Packages: packages("active")}}
 	usage := &cli.ErrorInfo{Stage: "usage", Category: "usage", Message: "m"}
 	load := &cli.ErrorInfo{Stage: "load", Category: "input", Message: "m"}
 
