@@ -932,6 +932,21 @@ func (t *TasksV2Json) CompleteTaskStates(taskIDs []int) *TasksV2Json
 func (t *TasksV2Json) GetTask(id int) (*Task, bool)
     GetTask returns a pointer to a copy of the task with the given ID.
 
+func (t *TasksV2Json) IsReady(id int) bool
+    IsReady reports whether the task with the given id can be started now:
+    it is in the plan, it is pending, and everything it depends on is done.
+    A task's dependencies are its depends_on when the field is present,
+    where an empty list means none; when the field is absent, the task before
+    it in plan order, and the first task then has none (format v2 §8.3).
+    A dependency the plan does not have, or one that is dropped, is not done.
+    An unknown id and a nil receiver are not ready.
+
+func (t *TasksV2Json) NextTask() (*Task, bool)
+    NextTask returns a copy of the task to work on now: the first in_progress
+    task in plan order, else the first task for which IsReady is true. It
+    returns nil and false when there is none, which a nil receiver and an empty
+    plan are.
+
 func (t *TasksV2Json) Render() string
     Render renders the tasks artifact as Markdown.
 
