@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
@@ -32,13 +33,42 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 			name, spec.SchemaVersion, afspec.SchemaVersion, afspec.SchemaVersion), nil)
 	}
 
+	// A package Save would refuse is refused here, before any move is looked at,
+	// so that --dry-run reports the refusal the real call would meet.
+	if refusal := unwritable(name, spec); refusal != nil {
+		return nil, refusal
+	}
+
 	// c.opts.tasks was checked with the flags, so it parses.
 	wanted, _ := parseTaskSpec(c.opts.tasks)
 	if refusal := checkNamedTasks(name, spec.Tasks, wanted); refusal != nil {
 		return nil, refusal
 	}
 
+	if _, refusal := planMoves(name, spec.Tasks, wanted, afspec.TaskState(c.opts.state)); refusal != nil {
+		return nil, refusal
+	}
 	return nil, &cli.ErrorInfo{Stage: "load", Category: "input", Message: "the task form is not yet implemented"}
+}
+
+// unwritable refuses a package that Save would refuse to write: one that is
+// sealed, superseded or archived, and an active one whose intent has drifted.
+// --force does not bypass it, because the library has no way to write such a
+// package. It is a lifecycle refusal at stage status.
+func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
+	switch spec.Status {
+	case string(afspec.PrdFrontmatterV2JsonStatusSealed),
+		string(afspec.PrdFrontmatterV2JsonStatusSuperseded),
+		string(afspec.PrdFrontmatterV2JsonStatusArchived):
+		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
+			Message: fmt.Sprintf("%s is %s, so its tasks can no longer change: a change to it is a new package that supersedes it", name, spec.Status)}
+	}
+	if intentDrift(spec) {
+		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
+			Message: fmt.Sprintf("%s is active and its ## Intent section no longer matches its intent_hash (or is gone): "+
+				"the library refuses every write until the intent matches its hash again", name)}
+	}
+	return nil
 }
 
 // checkNamedTasks refuses a --task that names what the plan cannot supply: an
