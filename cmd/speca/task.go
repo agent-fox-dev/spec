@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,12 +52,30 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		return nil, refusal
 	}
 
-	moves, refusal := planMoves(name, spec.Tasks, wanted, afspec.TaskState(c.opts.state))
+	moves, refusal := planMoves(name, spec.Tasks, wanted, afspec.TaskState(c.opts.state), c.opts.force)
 	if refusal != nil {
 		return c.refused(dir, spec, refusal)
 	}
 
+	warnings := moves.warnings
 	if len(moves.moves) > 0 {
+		// A save re-encodes every artifact from the Go types, and the decode
+		// dropped the keys they lack: writing a package that holds any deletes them.
+		// That is data loss, and a refusal that --force overrides.
+		v := spec.Validate()
+		switch unknown := unknownKeys(v.Errors); {
+		case len(unknown) > 0 && !c.opts.force:
+			return c.refused(dir, spec, &cli.ErrorInfo{Stage: "validate", Category: envelope.CategoryInvalidSpec,
+				Message: fmt.Sprintf("%s holds keys the schema does not allow, and a save would delete them: %s; "+
+					"remove them yourself, or give --force to write over them", name, strings.Join(unknown, ", "))})
+		case len(unknown) > 0:
+			warnings = append(warnings, plannedWarning{cli.WarnSpecInvalid, "high", fmt.Sprintf(
+				"the package holds keys the schema does not allow, and this write deletes them: %s", strings.Join(unknown, ", "))})
+		case !v.Valid:
+			warnings = append(warnings, plannedWarning{cli.WarnSpecInvalid, "low", fmt.Sprintf(
+				"the package does not validate (%d errors: %s); the change went ahead", len(v.Errors), strings.Join(specpkg.Rules(v.Errors), ", "))})
+		}
+
 		spec.Tasks = moves.after
 		spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if !c.opts.dryRun {
@@ -65,11 +84,15 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 			}
 		}
 	}
+	// The call goes ahead: its warnings are true now.
+	for _, w := range warnings {
+		c.run.Warn(w.code, w.severity, "%s", w.message)
+	}
 
 	r := c.reportOf(dir, spec)
 	r.taskForm = true
 	for _, m := range moves.moves {
-		r.Changes = append(r.Changes, envelope.Change{Kind: "task", ID: m.id, From: string(m.from), To: string(m.to)})
+		r.Changes = append(r.Changes, envelope.Change{Kind: "task", ID: m.id, From: string(m.from), To: string(m.to), Forced: m.forced})
 	}
 	return r, nil
 }
@@ -183,4 +206,25 @@ func checkNamedTasks(name string, plan *afspec.TasksV2Json, wanted taskSpec) *cl
 	}
 	return usageInfo(fmt.Errorf("%s has no %s %s; its tasks are %s", name, noun, strings.Join(unknown, ", "), strings.Join(ids, ", ")),
 		&cli.FixHint{Flag: "--task", Valid: ids})
+}
+
+// unknownKey finds the key in the library's message about one it dropped.
+var unknownKey = regexp.MustCompile(`the key (\S+) is not allowed`)
+
+// unknownKeys names, as "artifact key", each key the validation says the schema
+// does not allow. The entries carry the key only in their message, so it is cut
+// out of it, and the whole message stands in if the library words it otherwise.
+func unknownKeys(entries []afspec.ValidationEntry) []string {
+	var out []string
+	for _, e := range entries {
+		if e.Check != "unknown_field" {
+			continue
+		}
+		if m := unknownKey.FindStringSubmatch(e.Message); m != nil {
+			out = append(out, e.Artifact+" "+m[1])
+		} else {
+			out = append(out, e.Message)
+		}
+	}
+	return out
 }

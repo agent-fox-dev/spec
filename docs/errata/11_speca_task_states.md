@@ -67,3 +67,75 @@ compares the file tree, is unchanged, so the read-only forms stay read-only.
 **Test of the delivered behaviour:**
 `TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` and
 `TestSpecaWritesNothingAndReadsNoCredential_TS10_22` (`cmd/speca/main_test.go`).
+
+## D-8: the unknown keys are named from the library's message
+
+**Spec:** 11-REQ-6.3 and 6.4 have the refusal list "each artifact and key" the
+write would delete, and the `--force` warning name them.
+
+**Code:** `afspec.ValidateSchema` reports such a key as an `unknown_field` error
+whose `Artifact` is the file and whose key is only in its `Message` ("…the key
+/traceability is not allowed by the schema…"). `unknownKeys`
+(`cmd/speca/task.go`, `unknownKeys`) cuts the key out of that message, and falls
+back to the whole message if the library words it otherwise. The library's
+exported `UnknownFields` would need the artifacts read a second time.
+
+**Test of the delivered behaviour:** `TestUnknownKeysRefuseTheWrite_TS11_34` and
+`TestForceWritesOverUnknownKeys_TS11_35` (`cmd/speca/task_force_test.go`).
+
+## D-9: the warnings of a call are raised when the call goes ahead
+
+**Spec:** 11-REQ-5.2 and 6.1 have `task_state_forced` and `task_not_ready` raised
+for the moves made.
+
+**Code:** `planMoves` (`cmd/speca/plan.go`) decides the warnings, and
+`executeTask` raises them after the validity check and a successful write, or
+under `--dry-run`. A call refused at stage `task`, `status` or `validate`, or
+whose write fails, raises none: they would say that a task was set through a
+bypass, or claimed, when it was not.
+
+**Test of the delivered behaviour:** `TestARefusalAtValidateCarriesTheOnDiskReport_TS11_41`
+and `TestSaveErrorsAreMapped_TS11_25` (`cmd/speca/task_force_test.go`,
+`cmd/speca/task_write_test.go`).
+
+## D-10: one `task_state_forced` warning for each task set through a bypass
+
+**Spec:** 11-REQ-5.2 says each such task is named "in one high-severity
+`task_state_forced` warning"; the goals and TS-11-28 say a warning "for each
+task".
+
+**Code:** one warning for each task (`planMoves`), each naming the task and its
+two states. Followed the goals and the test.
+
+**Test of the delivered behaviour:** `TestEachForcedTaskHasAWarning_TS11_28`
+(`cmd/speca/task_force_test.go`).
+
+## D-16: `--force` does not skip a task already in the target state unless it can set it
+
+**Spec:** 11-REQ-5.3 has `--force` on a task already in the target state produce
+neither a change nor a warning; 11-REQ-5.4 and TS-11-30 have `--force` with
+`dropped` on a dropped task refused.
+
+**Code:** the two meet for a task already in `dropped` (or `in_progress`) with
+that target. `planMoves` skips a task already in the target state under `--force`
+only when the target is `done` or `pending`, the two states `--force` can set;
+for `in_progress` and `dropped` `--force` is inert, so the machine refuses the
+move as it does without it, and the message says `--force` cannot set those
+states.
+
+**Test of the delivered behaviour:** `TestForceOnATaskAlreadyThereIsQuiet_TS11_29`
+and `TestForceCannotSetInProgressOrDropped_TS11_30`
+(`cmd/speca/task_force_test.go`).
+
+## D-17: the validity guard and its warnings apply when a write would happen
+
+**Spec:** 11-REQ-6.2 to 6.4 have the unknown-key refusal and the `spec_invalid`
+warning for a call; 11-REQ-7.3 has a call that changes nothing write nothing.
+
+**Code:** the guard and the warnings are applied when at least one task would
+change (`executeTask`, `cmd/speca/task.go`), under `--dry-run` too. A call that
+resolves to no move writes nothing, so it deletes no key, and neither refuses
+nor warns, as 11-REQ-2.7 and TS-11-16 ask of it (exit 0, nothing written).
+
+**Test of the delivered behaviour:** `TestNothingToMoveWritesNothing_TS11_16`
+(`cmd/speca/task_write_test.go`).

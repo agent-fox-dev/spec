@@ -65,7 +65,7 @@ func TestResolvingWhichTasksToMove_11REQ2(t *testing.T) {
 // one before returned, and the plan that was loaded is left as it was.
 func TestAppliedMovesAreInPlanOrderOnACopy_11REQ3_1(t *testing.T) {
 	p := plan(planTask(1, "pending", nil), planTask(2, "in_progress", nil), planTask(3, "pending", nil))
-	got, refusal := planMoves("pkg", p, taskSpec{ids: []int{3, 1}}, afspec.TaskStateInProgress)
+	got, refusal := planMoves("pkg", p, taskSpec{ids: []int{3, 1}}, afspec.TaskStateInProgress, false)
 	if refusal != nil {
 		t.Fatalf("refused: %+v", refusal)
 	}
@@ -95,7 +95,7 @@ func TestAppliedMovesAreInPlanOrderOnACopy_11REQ3_1(t *testing.T) {
 // refused task's targets.
 func TestARefusedMoveRefusesTheCall_11REQ3_2(t *testing.T) {
 	p := plan(planTask(1, "pending", nil), planTask(2, "in_progress", nil), planTask(3, "done", nil))
-	_, refusal := planMoves("pkg", p, taskSpec{ids: []int{1, 2, 3}}, afspec.TaskStateDone)
+	_, refusal := planMoves("pkg", p, taskSpec{ids: []int{1, 2, 3}}, afspec.TaskStateDone, false)
 	if refusal == nil || refusal.Stage != "task" || refusal.Category != "lifecycle" {
 		t.Fatalf("refusal = %+v", refusal)
 	}
