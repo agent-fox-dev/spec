@@ -65,13 +65,14 @@ type statusCheck func(*statusCall) *cli.ErrorInfo
 // statusChecks are the checks of every --status call, in the order they run,
 // under --dry-run too. The first one that refuses ends the call: it has no
 // result, and nothing was written.
-var statusChecks = []statusCheck{checkLoaded, checkMove, checkTarget, checkUnknownKeys}
+var statusChecks = []statusCheck{checkLoaded, checkMove, checkTarget, checkUnknownKeys, checkDestination}
 
 // The library calls the form makes and the read-back that follows them are
 // variables, so that a test can fail them.
 var (
-	transitionSpec = (*afspec.Spec).Transition
-	loadWritten    = afspec.LoadSpec
+	transitionSpec   = (*afspec.Spec).Transition
+	moveUnderArchive = afspec.MoveUnderArchive
+	loadWritten      = afspec.LoadSpec
 )
 
 // executeStatus is the status form: speca <spec> --status S [--by <spec>].
@@ -89,26 +90,75 @@ func executeStatus(c *call, dir string) (*Result, *cli.ErrorInfo) {
 			return nil, refusal
 		}
 	}
+	if c.opts.dryRun {
+		// A dry run is made in task 9; until then it must not write.
+		return nil, &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryInternal,
+			Message: "--dry-run is not implemented yet for the status form"}
+	}
 	return sc.apply()
+}
+
+// movesUnderArchive reports whether the call ends with the package under
+// archive/ and starts with it elsewhere: an archive or a supersede of a package
+// that is not there yet, which a move-only call finishes.
+func (sc *statusCall) movesUnderArchive() bool {
+	return !sc.under && (sc.target == string(afspec.PrdFrontmatterV2JsonStatusArchived) ||
+		sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded))
+}
+
+// holdingDir is the directory that holds the package: where archive/ is made.
+func (sc *statusCall) holdingDir() string { return filepath.Dir(sc.dir) }
+
+// checkDestination refuses a move under archive/ whose destination is taken,
+// before anything is written. --force does not override it. The refusal has no
+// result: nothing was written, so there is nothing to resume.
+func checkDestination(sc *statusCall) *cli.ErrorInfo {
+	if !sc.movesUnderArchive() {
+		return nil
+	}
+	if _, err := afspec.ArchiveDestination(sc.dir, sc.holdingDir()); err != nil {
+		return &cli.ErrorInfo{Stage: "archive", Category: envelope.CategoryDisk,
+			Message: fmt.Sprintf("%s cannot be moved under archive/: %v", sc.name, err)}
+	}
+	return nil
 }
 
 // apply writes what the call asks for, in order, and returns the package as it
 // is now. updated_at is set, since the library does not, on every package the
 // call writes.
 func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
-	sc.spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if _, err := transitionSpec(sc.spec, sc.target, sc.dir); err != nil {
-		return nil, writeFailure(sc.name, err)
+	var changes []envelope.Change
+	here := sc.dir
+	if !sc.moveOnly {
+		if sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded) {
+			// Superseding is made in task 7.
+			return nil, &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryInternal,
+				Message: "--status superseded is not implemented yet"}
+		}
+		sc.spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if _, err := transitionSpec(sc.spec, sc.target, sc.dir); err != nil {
+			return nil, writeFailure(sc.name, err)
+		}
+		changes = append(changes, envelope.Change{Kind: "status", From: sc.spec.Status, To: sc.target})
+		sc.raise()
 	}
-	changes := []envelope.Change{{Kind: "status", From: sc.spec.Status, To: sc.target}}
-	sc.raise()
+	if sc.movesUnderArchive() {
+		dest, err := moveUnderArchive(sc.dir, sc.holdingDir())
+		if err != nil {
+			return nil, &cli.ErrorInfo{Stage: "archive", Category: envelope.CategoryDisk,
+				Message: fmt.Sprintf("%s was written but could not be moved under archive/: %v", sc.name, err)}
+		}
+		changes = append(changes, envelope.Change{Kind: "moved", From: sc.name, To: specpkg.Display(dest, sc.root)})
+		sc.raise()
+		here = dest
+	}
 
-	written, err := loadWritten(sc.dir)
+	written, err := loadWritten(here)
 	if err != nil {
 		return nil, &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
-			Message: fmt.Sprintf("the package %s was written but could not be read back: %v", sc.dir, err)}
+			Message: fmt.Sprintf("the package %s was written but could not be read back: %v", here, err)}
 	}
-	r := sc.reportOf(sc.dir, written)
+	r := sc.reportOf(here, written)
 	r.Changes = changes
 	r.nextSet = true
 	return r, nil

@@ -144,3 +144,26 @@ forms and compares the file tree, is unchanged.
 **Test of the delivered behaviour:**
 `TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` and
 `TestSpecaWritesNothingAndReadsNoCredential_TS10_22` (`cmd/speca/main_test.go`).
+
+## D-4: TS-12-15's first case is run with `--status active`
+
+**Spec:** TS-12-15 gives "a draft package without an Intent section, with unknown
+keys, targeted at archived under a taken destination" and says it "is refused by
+the move/target check, not by the unknown-key or destination checks".
+
+**Code:** a draft may be archived (`draft → archived`), and archiving has no check
+of its own (12-REQ-6), so no check before the keys can refuse that call; the
+keys, then the destination, would. The case exercises the order it describes in
+three calls instead, all refused with no result and nothing written, also under
+`--dry-run`:
+
+- a draft with no intent and a key of its own, `--status active`: refused for the
+  intent, which is the target's check, and the message does not name the key;
+- an active package with a key of its own and a taken destination,
+  `--status archived`: refused by the move (seal it first), before either;
+- a sealed package with the same, `--status archived`: refused for the key
+  (stage `status`), and with `--force`, for the destination (stage `archive`).
+
+**Test of the delivered behaviour:**
+`TestTheChecksRunInOrderAndTheFirstRefusalEndsTheCall_TS12_15`
+(`cmd/speca/status_test.go`).
