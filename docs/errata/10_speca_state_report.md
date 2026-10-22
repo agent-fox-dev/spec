@@ -139,3 +139,50 @@ the error names no package. A package with no edge at all never has it.
 `TestVerdictKeepsTheCrossSpecFindingsOfThePackage_TS10_36`
 (`cmd/speca/verdict_test.go`): the package that is only depended on keeps the
 cycle error, and the one with no edge does not.
+
+## D-5: speca reads `$AF_SPEC_DIR`, and no other variable
+
+**Spec:** task 9, step 9.5, has the code "read no environment variable";
+10-REQ-3.7 and TS-10-22 say it reads no credential or model environment
+variable.
+
+**Code:** `afspec.ResolveSpecsDir` (`afspec/specsdir.go`, `ResolveSpecsDir`)
+reads `AF_SPEC_DIR` when `--specs-dir` is not given, as it does for `specr`,
+and the PRD names the variable as the spec root's second source. That is the
+only variable read on the call path, and it is neither a credential nor a
+model. The command's own code calls no `os.Getenv`, `os.LookupEnv` or
+`os.Environ`. The requirement is followed; the step's wording was wider than it.
+
+**Test of the delivered behaviour:**
+`TestSpecaWritesNothingAndReadsNoCredential_TS10_22` (the output does not change
+with credentials and models set) and
+`TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22` (`cmd/speca/main_test.go`).
+
+## D-15: an archived package that does not load has two fields, not three
+
+**Spec:** 10-REQ-7.3 has an entry for a package that fails to load hold only
+`spec_dir` and `load_error`; 10-REQ-7.4 has each package listed from `archive/`
+marked `archived: true`.
+
+**Code:** the two meet for a package under `archive/` that does not load. `entry`
+(`cmd/speca/list.go`, `entry`) follows the more specific rule: such an entry
+holds `spec_dir` and `load_error` and no `archived`. Its `spec_dir` still says
+`archive/`, and `PackageInfo` (`envelope/admin_result.go`) documents a failed
+entry as holding those two fields only.
+
+**Test of the delivered behaviour:** `TestListAnArchivedPackageThatDoesNotLoad`
+(`cmd/speca/list_test.go`).
+
+## D-16: an `archive/` that cannot be read raises a warning
+
+**Spec:** 10-REQ-7.5 has a missing `archive/` add nothing and raise no warning;
+it says nothing of one that exists and cannot be read.
+
+**Code:** `list` (`cmd/speca/list.go`, `list`) tells the two apart with
+`errors.Is(err, fs.ErrNotExist)`. A missing `archive/` is silent. Any other
+failure to read it (it is a file, or has no permission) adds nothing to the
+list and raises the low `specs_dir_unreadable` warning, naming it, so that the
+absence of the archived packages is not mistaken for there being none.
+
+**Test of the delivered behaviour:** `TestListAll_TS10_42` (the `archive`
+that is a file) in `cmd/speca/list_test.go`.

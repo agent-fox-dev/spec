@@ -47,14 +47,6 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	return report(c, dir)
 }
 
-// notYet is the failure a form returns until it is written.
-func notYet(form string) *cli.ErrorInfo {
-	return &cli.ErrorInfo{Stage: "load", Category: "input", Message: form + " form not yet implemented"}
-}
-
-// list is the form of speca --list: every package under the spec root.
-func list(c *call) (*Result, *cli.ErrorInfo) { return nil, notYet("the list") }
-
 // loadPackage loads the package in dir for the report and the verdict. A
 // package the library refuses fails the call at stage load. One in another
 // format version loads, but its tests and tasks are not read, so the form

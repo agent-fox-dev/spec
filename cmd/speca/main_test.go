@@ -2,8 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -149,5 +156,185 @@ func TestMalformedInvocationsAreUsageErrors_TS10_21(t *testing.T) {
 		if !strings.Contains(stderr, env.Error.Message) || env.Error.Message == "" {
 			t.Errorf("%s: stderr %q lacks the message %q", name, stderr, env.Error.Message)
 		}
+	}
+}
+
+// normalized is the stdout of a call without the two members that say when it
+// ran, so that two calls can be compared.
+func normalized(t *testing.T, stdout []byte) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(stdout, &m); err != nil {
+		t.Fatalf("%v:\n%s", err, stdout)
+	}
+	delete(m, "duration_ms")
+	delete(m, "started_at")
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TS-10-16: every form writes exactly one envelope with tool speca and an exit
+// code equal to the process's, and the flags may come on either side of the
+// input.
+func TestEveryFormWritesOneSpecaEnvelope_TS10_16(t *testing.T) {
+	root := newRepo(t)
+	for name, argv := range map[string][]string{
+		"report":              {"--dir", root, "09"},
+		"verdict, flag first": {"--dir", root, "--validate", "09"},
+		"verdict, flag last":  {"--dir", root, "09", "--validate"},
+		"list":                {"--dir", root, "--list"},
+		"list with archive":   {"--dir", root, "--list", "--all"},
+		"specs-dir given":     {"--dir", root, "--specs-dir", ".specs", "09"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := Main(argv, &stdout, &stderr)
+		env, err := envelope.DecodeSpeca(stdout.Bytes()) // refuses anything but one object
+		if err != nil {
+			t.Errorf("%s: stdout is not one envelope: %v\n%s", name, err, stdout.String())
+			continue
+		}
+		if env.Tool != "speca" || code != env.ExitCode || code != cli.ExitOK || env.Result == nil || env.Summary == "" {
+			t.Errorf("%s: tool %q, exit %d, envelope says %d, summary %q", name, env.Tool, code, env.ExitCode, env.Summary)
+		}
+	}
+
+	same := func(a, b []string) {
+		t.Helper()
+		var out1, out2 bytes.Buffer
+		Main(a, &out1, new(bytes.Buffer))
+		Main(b, &out2, new(bytes.Buffer))
+		if normalized(t, out1.Bytes()) != normalized(t, out2.Bytes()) {
+			t.Errorf("%v and %v differ", a, b)
+		}
+	}
+	same([]string{"--dir", root, "--validate", "09"}, []string{"09", "--validate", "--dir", root})
+	same([]string{"--dir", root, "--list", "--all"}, []string{"--all", "--list", "--dir", root})
+	same([]string{"--dir", root, "09"}, []string{"09", "--dir", root, "--specs-dir", ".specs"})
+}
+
+// snapshot records every file and directory under root with its size and
+// modification time.
+func snapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		out[rel] = info.Mode().String() + " " + strconv.FormatInt(info.Size(), 10) + " " + strconv.FormatInt(info.ModTime().UnixNano(), 10)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TS-10-22: speca writes nothing, and the credentials and models in the
+// environment change nothing it says.
+func TestSpecaWritesNothingAndReadsNoCredential_TS10_22(t *testing.T) {
+	root := newRepo(t)
+	addPackage(t, root, "03_third", "03", "third")
+	addPackage(t, root, "archive/05_old", "05", "old")
+	forms := map[string][]string{
+		"report":  {"--dir", root, "09"},
+		"verdict": {"--dir", root, "09", "--validate"},
+		"list":    {"--dir", root, "--list", "--all"},
+		"schema":  {"--schema"},
+	}
+	outputs := func() map[string]string {
+		out := map[string]string{}
+		for name, argv := range forms {
+			var stdout bytes.Buffer
+			Main(argv, &stdout, new(bytes.Buffer))
+			if name == "schema" {
+				out[name] = stdout.String()
+			} else {
+				out[name] = normalized(t, stdout.Bytes())
+			}
+		}
+		return out
+	}
+
+	unset := outputs()
+	before := snapshot(t, root)
+	for _, name := range []string{
+		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_VERTEX_PROJECT_ID",
+		"CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION",
+		"GOOGLE_APPLICATION_CREDENTIALS", "OPENAI_API_KEY", "GITHUB_TOKEN", "GITLAB_TOKEN",
+	} {
+		t.Setenv(name, "invalid-"+strings.ToLower(name))
+	}
+	set := outputs()
+
+	if after := snapshot(t, root); !maps_equal(before, after) {
+		t.Errorf("the file tree changed:\nbefore %v\nafter  %v", before, after)
+	}
+	for name := range forms {
+		if unset[name] != set[name] {
+			t.Errorf("%s: the output depends on the environment", name)
+		}
+	}
+}
+
+func maps_equal(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// The code of the command writes no file, reads no variable, runs no program
+// and reaches no network. The test above shows what a call does; this shows
+// the command has nothing that could.
+func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
+	forbiddenImports := []string{"net", "net/http", "os/exec"}
+	forbiddenOS := []string{"Create", "CreateTemp", "OpenFile", "WriteFile", "Mkdir", "MkdirAll", "MkdirTemp", "Rename",
+		"Remove", "RemoveAll", "Truncate", "Chmod", "Chtimes", "Symlink", "Link", "Getenv", "LookupEnv", "Environ", "Setenv"}
+	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
+
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("sources: %v, %v", files, err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			if path, _ := strconv.Unquote(imp.Path.Value); slices.Contains(forbiddenImports, path) {
+				t.Errorf("%s imports %s", file, path)
+			}
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "os" && slices.Contains(forbiddenOS, sel.Sel.Name) {
+				t.Errorf("%s calls os.%s", file, sel.Sel.Name)
+			}
+			if slices.Contains(forbiddenMethods, sel.Sel.Name) {
+				t.Errorf("%s uses %s", file, sel.Sel.Name)
+			}
+			return true
+		})
 	}
 }
