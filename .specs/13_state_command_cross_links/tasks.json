@@ -107,7 +107,7 @@
       "done_when": [
         "go test ./cmd/... ./internal/cli -count=1 passes without UPDATE_GOLDEN"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,

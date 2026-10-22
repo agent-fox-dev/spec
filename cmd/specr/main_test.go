@@ -511,3 +511,45 @@ func TestHelpDescribesNextAsNamingTheSpecaCall_TS13_5(t *testing.T) {
 		}
 	}
 }
+
+// siblingLine fails the test unless help carries the sentence naming the three
+// commands on a line of its own, after the title line and before Usage:, with a
+// blank line on each side.
+func siblingLine(t *testing.T, what, help string) {
+	t.Helper()
+	usage := strings.Index(help, "Usage:")
+	if usage < 0 {
+		t.Errorf("%s: the help has no Usage: line:\n%s", what, help)
+		return
+	}
+	before := help[:usage]
+	if !strings.Contains(before, "\n\n"+cli.SiblingCommands+"\n\n") {
+		t.Errorf("%s: the sentence is not on a line of its own, with a blank line on each side, before Usage::\n%s", what, before)
+	}
+	if title, _, _ := strings.Cut(help, "\n"); title == "" || strings.Index(before, cli.SiblingCommands) < len(title) {
+		t.Errorf("%s: the title line %q does not come before the sentence:\n%s", what, title, before)
+	}
+}
+
+// TS-13-3: -h and --help print the sentence between the title and Usage:.
+func TestHelpCarriesTheSiblingLine_TS13_3(t *testing.T) {
+	for _, flag := range []string{"-h", "--help"} {
+		var stdout, stderr bytes.Buffer
+		if code := Main([]string{flag}, &stdout, &stderr); code != cli.ExitOK || stdout.Len() != 0 {
+			t.Fatalf("%s: code %d, stdout %q", flag, code, stdout.String())
+		}
+		siblingLine(t, flag, stderr.String())
+	}
+}
+
+// TS-13-4: a bare invocation exits 2 with a usage envelope, and the help on
+// stderr carries the sentence.
+func TestBareInvocationCarriesTheSiblingLine_TS13_4(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Main(nil, &stdout, &stderr)
+	env, err := envelope.DecodeSpecr(stdout.Bytes())
+	if err != nil || code != cli.ExitUsage || env.Error == nil || env.Error.Category != "usage" {
+		t.Fatalf("code %d, envelope %+v (%v)", code, env.Error, err)
+	}
+	siblingLine(t, "a bare invocation", stderr.String())
+}

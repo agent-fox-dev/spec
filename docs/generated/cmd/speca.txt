@@ -15,7 +15,8 @@ forms, the package's state after the change and the changes made. The report,
 The task form and the status form write the package through the library,
 which rewrites every artifact of it, and the status form moves an archived or
 superseded package under archive/. No form makes a model or network call or
-reads a credential.
+reads a credential. Its siblings are spec, which writes a package from an idea,
+and specr, which renders one as Markdown.
 
 FUNCTIONS
 

@@ -18,8 +18,9 @@ same interface as `spec` and `specr`: **exactly one positional input**
 program-driven path, the help on stderr, and one exit-code table. The forms are
 flags, not subcommands.
 
-`spec` writes a package from an idea, `specr` renders one, `speca` reports its
-state.
+`spec` writes a package from an idea, `specr` renders one, `speca` reports and
+changes its state. Each command's help and each `--schema` description say so,
+in the sentence `cli.SiblingCommands`.
 
 The report, `--validate` and `--list` read the packages and change nothing.
 The task form and the status form write. The task form moves tasks through the
