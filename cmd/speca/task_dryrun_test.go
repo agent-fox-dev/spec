@@ -208,11 +208,12 @@ func TestTheReportSuggestsTheClaim_TS11_46(t *testing.T) {
 	root := newRepo(t)
 	dir := filepath.Join(".specs", "09_agent_mode")
 	env, _, _ := run(t, "--dir", root, "09")
-	if len(env.Next) != 2 || !hasCall(env.Next[:1], claim(dir, 1)) || env.Next[1].Tool != "specr" {
-		t.Errorf("a draft with a ready task: next = %+v; want the claim of task 1, then the render", env.Next)
+	// The activation of a draft that validates comes first (spec 12).
+	if len(env.Next) != 3 || !slices.Equal(env.Next[0].Flags, []string{"--status", "active"}) || !hasCall(env.Next[1:2], claim(dir, 1)) || env.Next[2].Tool != "specr" {
+		t.Errorf("a draft with a ready task: next = %+v; want the activation, the claim of task 1, then the render", env.Next)
 	}
-	if env.Next[0].Why == "" || !strings.Contains(env.Next[0].Why, "task 1") {
-		t.Errorf("why = %q", env.Next[0].Why)
+	if len(env.Next) > 1 && (env.Next[1].Why == "" || !strings.Contains(env.Next[1].Why, "task 1")) {
+		t.Errorf("why = %q", env.Next[1].Why)
 	}
 
 	busy := newRepo(t)

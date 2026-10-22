@@ -174,3 +174,56 @@ func TestSchemaThatCannotBeEncodedIsAnError_TS10_56(t *testing.T) {
 		t.Errorf("code %d: %+v", code, env.Error)
 	}
 }
+
+// TS-12-14: --schema and the help describe the status form: --status is an enum
+// of the four targets, --by is described, and the schema is the golden file.
+func TestSchemaAndHelpDescribeTheStatusForm_TS12_14(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--schema"}, &stdout, &stderr); code != cli.ExitOK {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "schema.golden.json"))
+	if err != nil || !bytes.Equal(stdout.Bytes(), golden) {
+		t.Errorf("--schema differs from the golden file (%v)", err)
+	}
+	var doc struct {
+		Flags struct {
+			Properties map[string]struct {
+				Type        string   `json:"type"`
+				Enum        []string `json:"enum"`
+				Default     any      `json:"default"`
+				Description string   `json:"description"`
+			} `json:"properties"`
+		} `json:"flags"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	status := doc.Flags.Properties["status"]
+	if status.Type != "string" || !slices.Equal(status.Enum, statusTargetsForTests) || status.Description == "" {
+		t.Errorf("--status = %+v; want a described string enum of %v", status, statusTargetsForTests)
+	}
+	if by := doc.Flags.Properties["by"]; by.Type != "string" || by.Description == "" {
+		t.Errorf("--by = %+v; want a described string", by)
+	}
+	for _, name := range []string{"force", "dry-run"} {
+		if d := doc.Flags.Properties[name].Description; !strings.Contains(d, "--status") {
+			t.Errorf("--%s is described as %q, which does not say it applies to the status form", name, d)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Main([]string{"--help"}, &stdout, &stderr); code != cli.ExitOK {
+		t.Fatalf("--help: code %d", code)
+	}
+	help := strings.Join(strings.Fields(stderr.String()), " ") // the help wraps its lines
+	for _, want := range []string{
+		"speca <spec> --status S", "--by", "active, sealed, archived or superseded", "archive/", "intent hash",
+		"tasks_open", "supersedes_not_recorded", "resum",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the help does not say %q", want)
+		}
+	}
+}

@@ -135,7 +135,9 @@ The cross-file rules, all errors:
 | `(*Spec).Transition(target, dir) (*Spec, error)` | Transition status, persist, return a new copy |
 | `(*Spec).Supersede(specID, dir) (*Spec, error)` | Mark a sealed spec superseded with a deprecation banner |
 | `ValidTransition(current, target) bool` | Whether a status transition is allowed |
-| `MoveToArchive(specDir, root) error` | Transition to archived and move under `archive/` |
+| `MoveToArchive(specDir, root) error` | Transition to archived (a superseded spec too) and move under `archive/`; a taken destination is found before anything is written |
+| `ArchiveDestination(specDir, root) (string, error)` | `<root>/archive/<name>`, or a `*SaveError` when it is taken or cannot be checked; writes nothing |
+| `MoveUnderArchive(specDir, root) (string, error)` | Move an archived or superseded package under `archive/` and rewrite no file, so its status stays; the status is written first, with `Transition` or `Supersede` |
 | `ComputeIntentHash(body) (string, error)` | SHA-256 of the `## Intent` section |
 | `HasIntent(body) bool` | Whether `ComputeIntentHash` can hash the body: `## Intent`, spelled exactly so, on a line of its own |
 

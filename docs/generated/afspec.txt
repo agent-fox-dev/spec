@@ -44,6 +44,14 @@ var GenerationSteps = []GenerationStep{StepRequirements, StepTestSpec, StepTasks
 
 FUNCTIONS
 
+func ArchiveDestination(specDir, root string) (string, error)
+    ArchiveDestination is where MoveUnderArchive puts the package at specDir:
+    <root>/archive/<base name of specDir>. It writes nothing.
+
+    Returns a SaveError when that path already exists (the message is "archive
+    conflict: <path> already exists"; a dangling symbolic link counts, since a
+    rename would replace it) or when whether it exists cannot be found out.
+
 func ArtifactFileName(step GenerationStep) string
     ArtifactFileName returns the on-disk file name for a step's artifact.
 
@@ -104,10 +112,29 @@ func MarshalJSON(v interface{}) ([]byte, error)
 
 func MoveToArchive(specDir, root string) error
     MoveToArchive transitions a spec to the archived state and moves the spec
-    directory to {root}/archive/ using an atomic rename or copy-then-delete.
+    directory to {root}/archive/ with MoveUnderArchive.
 
-    Creates the archive directory if it does not exist. Returns a SaveError if
-    the archive directory already contains a directory with the same name.
+    A spec that is not already archived is transitioned first, a superseded
+    one included (superseded to archived is a move the lifecycle allows).
+    The destination is looked at before that, so a taken destination leaves the
+    spec as it was. Creates the archive directory if it does not exist.
+
+    Returns a SaveError if the archive directory already contains a directory
+    with the same name, or the spec cannot be loaded, moved or written.
+
+func MoveUnderArchive(specDir, root string) (string, error)
+    MoveUnderArchive moves the package at specDir to ArchiveDestination(specDir,
+    root) and returns the new directory. It rewrites no file, so the package's
+    status, updated_at and content stay as they were: the caller writes the
+    status first, with Transition or Supersede, and only an archived or a
+    superseded package lives under archive/ (format v2 §9).
+
+    It creates <root>/archive/ (mode 0755 before the umask) if it is missing.
+
+    Returns the LoadError when the package does not load, a LifecycleError
+    when its status is neither archived nor superseded, and a SaveError when
+    the destination is taken or the directory cannot be created or renamed.
+    In each case the package is where it was.
 
 func NextCriterionID(r Requirement) string
     NextCriterionID returns the next free criterion ID within a requirement,

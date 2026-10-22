@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -41,13 +42,29 @@ type Result struct {
 	// drifted, which an entry of the list does not say. The list suggests no
 	// claim for one.
 	drifted map[string]bool
+	// lifecycle holds the status call the report suggests for the package, if one
+	// is, which comes before any suggestion about its tasks. Only the report form
+	// sets it.
+	lifecycle []cli.Next
+	// sentence is the status form's own summary, which it makes where it knows
+	// what it did.
+	sentence string
+	// resumable is true of the failure to move a package under archive/ after
+	// its status was written: running the same call again moves it.
+	resumable bool
 }
+
+// Resumable says whether running the call again continues the work. The shell
+// asks the result, and reports it in the error.
+func (r *Result) Resumable() bool { return r.resumable }
 
 // Summary is the envelope's one sentence. The fields a form fills say which
 // form it was: packages for the list, validation for the verdict, and
 // otherwise it is the report.
 func (r *Result) Summary() string {
 	switch {
+	case r.sentence != "":
+		return r.sentence
 	case r.taskForm:
 		return r.taskSummary()
 	case r.Packages != nil:
@@ -182,7 +199,15 @@ func (r *Result) Next() []cli.Next {
 	}
 }
 
+// reportNext is the report's suggestions: the status call, if there is one,
+// then the calls about the next task.
 func (r *Result) reportNext() []cli.Next {
+	return append(slices.Clone(r.lifecycle), r.taskNext()...)
+}
+
+// taskNext is the claim of the next task, where it can be claimed, and the
+// render of it.
+func (r *Result) taskNext() []cli.Next {
 	t := r.NextTask
 	if t == nil {
 		return nil

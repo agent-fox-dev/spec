@@ -47,14 +47,15 @@ reason: an agent that can drive one command can drive all of them.
   rules that concern the package. `speca --list` is every package under the
   spec root, with `--all` adding `archive/`. They need no write, and they
   establish what the forms that change state build on: the shared resolver, the
-  output type and the readiness rule. The forms that move a task, and the ones
-  that move a package through its lifecycle, are added under this decision by
-  the scopes that follow.
+  output type and the readiness rule. The forms that move a task (spec 11) and
+  that move a package through its lifecycle (spec 12) were added under this
+  decision by the scopes that followed.
 - **`next` only suggests calls that exist.** A suggestion made before the form
   exists would send an agent into a usage error. It began with the render,
   `specr <spec> --task N`; the task form (spec 11) added the claim before it, and
-  the lifecycle forms will add the activation and seal suggestions when they add
-  the forms.
+  the status form (spec 12) the suggestions to activate a draft that validates
+  and has an intent, and to seal an active package with no task open, whose
+  conditions are the checks of the status call, so that it is never refused.
 - **A package that does not validate is a successful call.** The question was
   whether it validates, and the answer is in `valid`. Exit 1 is for a call that
   could not do its job: the package could not be loaded, or `--list` could not
@@ -102,6 +103,34 @@ decision above made room for, and it keeps the decision's shape:
   command inherits: every artifact is written again, in the canonical encoding,
   and a YAML comment in the frontmatter is not kept.
 
+### The status form
+
+`speca <spec> --status S [--by <spec>]` moves a package through its lifecycle
+(spec 12) and keeps the shape of the task form: the library makes every change,
+and the command adds the checks an operator would make before it.
+
+- **The status and the move are two calls.** `Transition` and `Supersede` write
+  the status; `MoveUnderArchive` only moves the directory and rewrites no file.
+  That keeps a superseded package `superseded` under `archive/`, tells a failed
+  status write from a failed move, and makes the resume a plain move-only call.
+  `MoveToArchive` is built on them and looks at the destination before it writes.
+- **Checks before any write, in a fixed order,** and the first refusal ends the
+  call with no result: the load (a version 1 package is refused), the move (with
+  the shortest chain of allowed moves when it is not allowed), the target's own
+  checks, the keys a write would drop, and the archive destination. `--force`
+  reaches three of them (an activation that does not validate, a sealing with a
+  task open, keys that would be dropped) and the rules of the format it does not:
+  the lifecycle, a missing or drifted intent, the replacing package's status, a
+  taken destination.
+- **Superseding writes the step most likely to fail last:** the banner and the
+  status, then the id in the replacing package's `supersedes`, then the move. A
+  replacing package that cannot be saved is a warning, not a failure: the change
+  asked for is the old package's.
+- **A failed move is resumable, not retryable.** The envelope's `retryable` is
+  decided by the category and stays false; `resumable` is true, and `next` holds
+  the call that finishes the work. The result is the package where it is, with
+  what was written.
+
 ### Shared code
 
 What `spec`, `specr` and `speca` each need and none should copy lives in
@@ -121,7 +150,7 @@ and the later scopes add their fields to the same type.
   creates, `specr` renders, and the content of a package is not `speca`'s to
   change.
 - A lock between agents. Two agents that write one package at once get the last
-  writer's `tasks.json`, as they do with the library.
+  writer's files, as they do with the library.
 - A smaller binary. Like `specr`, `speca` links `internal/cli` and so the model
   stack (ADR 05, Consequences), and never uses it. Splitting the envelope out of
   that stack is still left for when it matters.
@@ -130,10 +159,9 @@ and the later scopes add their fields to the same type.
 
 - `make build` installs three commands. `speca` is stamped the same way as the
   other two.
-- The README's "no CLI surface" sentence is now true of changing a package's
-  lifecycle status, not of reading its state or moving its tasks; it was
-  corrected for the first, and for the second when the task form arrived, and it
-  is corrected again when the lifecycle forms do.
+- The README's "no CLI surface" sentence, which was true of reading a package's
+  state, of moving its tasks and of changing its lifecycle status, was corrected
+  for each as its form arrived, and is gone.
 - `specr`'s tasks carry `ready`, the one change to its output. A field on the
   shared `TaskInfo` never means something different depending on which command
   wrote it.

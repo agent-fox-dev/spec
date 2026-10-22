@@ -269,8 +269,8 @@ afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 breaks (`Rules`). It is a package of its own because `envelope` must stay
 standard-library only and `internal/cli` does not import `afspec`.
 
-`cmd/speca` has four forms, each in a file of its own, chosen by the flags in
-`forms.go`:
+`cmd/speca` has five forms, each in a file of its own (the status form in three),
+chosen by the flags in `forms.go`:
 
 | Form | File | Reads | Writes |
 |---|---|---|---|
@@ -278,16 +278,31 @@ standard-library only and `internal/cli` does not import `afspec`.
 | the verdict, `speca <spec> --validate` | `verdict.go` | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
 | the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | every artifact of the package, through `Spec.Save`; the content that changes is the task states and the `updated_at` of `prd.md` |
+| the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package, through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |
 
-The task form is the one that writes, and it writes only through the library:
+The forms that write do so only through the library. The task form:
 `plan.go` chooses the moves and applies them with `TransitionTask` (and, under
 `--force`, `CompleteTaskStates` and `ResetTaskStates`), so the state machine is
 `afspec`'s and not a copy; `task.go` sets `updated_at`, which `Save` does not, and
 calls `Spec.Save`, which writes every artifact through temporary files and then
 renames them, so that all of them are in the library's canonical encoding and
 have mode `0600` afterwards. A call that is refused, and a dry run, write nothing. Nothing
-outside `task.go` may call `Save`; a test of the sources checks it, and checks
-that the other forms leave the file tree as it was.
+outside the files that write may call `Save`, `Transition` or `Supersede` (`task.go`
+and the status form's files); a test of the sources checks it, and checks that the
+other forms leave the file tree as it was.
+
+The status form is a list of checks and a write (`status.go`, `statusChecks`). The
+checks run in the order the spec fixes (load, the move, the target's own, the keys
+a write would drop, the archive destination), and the first to refuse ends the
+call with no result. The writes come in the order that puts the step most likely to
+fail last: the status (`Transition` or `Supersede`), the id in the replacing
+package's `supersedes` (`Save`), then `MoveUnderArchive`. The library calls and the
+read-back are variables, as `Save` is in the task form, so that a test can fail them. A
+move that fails after the status was written returns a result and the call that
+finishes it, and `Result.Resumable` says so to the shell, which reports it in the
+error. `cmd/speca` shares `unknownKeys` and `frontmatterUnknownKeys` with the task
+form, since the library does not report the keys of the `prd.md` frontmatter that
+every write drops.
 
 Readiness is not decided here: `IsReady` and `NextTask` are
 `afspec`'s. `speca` uses both; `specr` reports `IsReady` on each task it lists,
@@ -296,7 +311,7 @@ So the three agree on what "ready" and "next" mean.
 
 ## Consumers
 
-agent-fox's tools import `afspec` as a library. Reading a package's state and
-moving its tasks have a command, `speca`; changing its lifecycle status
-(activating, sealing, archiving or superseding a package) has no CLI surface and
-is library API for an embedder to call.
+agent-fox's tools import `afspec` as a library. Reading a package's state,
+moving its tasks and changing its lifecycle status (activating, sealing,
+archiving or superseding a package) have a command, `speca`; the same moves are
+library API for an embedder to call.

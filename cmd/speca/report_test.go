@@ -466,3 +466,144 @@ func TestReportWithADanglingDependency_TS10_32(t *testing.T) {
 		t.Errorf("warnings = %v; a dangling dependency is the verdict's to report", warningCodes(env))
 	}
 }
+
+// statusCalls lists the suggestions in next that change a package's status.
+func statusCalls(next []envelope.Next) []envelope.Next {
+	var out []envelope.Next
+	for _, n := range next {
+		if slices.Contains(n.Flags, "--status") {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// TS-12-52: a draft that validates and has an intent is told to activate, before
+// anything about its tasks; one that does not is not.
+func TestTheReportSuggestsActivatingAValidDraftFirst_TS12_52(t *testing.T) {
+	root := newRepo(t)
+	env, _, _ := run(t, "--dir", root, "09")
+	want := envelope.Next{Tool: "speca", Input: ".specs/09_agent_mode", Flags: []string{"--status", "active"}}
+	if len(env.Next) < 2 || env.Next[0].Tool != want.Tool || env.Next[0].Input != want.Input || !slices.Equal(env.Next[0].Flags, want.Flags) {
+		t.Fatalf("next %+v; want the activation first, and the task after it", env.Next)
+	}
+	if len(statusCalls(env.Next)) != 1 || !slices.Equal(env.Next[1].Flags, []string{"--task", "1", "--state", "in_progress"}) {
+		t.Errorf("next %+v; want one activation, then the claim of task 1", env.Next)
+	}
+
+	for name, damage := range map[string]func(t *testing.T, dir string){
+		"it has no intent": func(t *testing.T, dir string) { editFile(t, filepath.Join(dir, "prd.md"), "## Intent", "## Purpose") },
+		"it does not validate": func(t *testing.T, dir string) {
+			editFile(t, filepath.Join(dir, "tasks.json"), `"TS-09-6"`, `"TS-09-99"`)
+		},
+		"it holds a key": withFrontmatterKey,
+	} {
+		root := newRepo(t)
+		damage(t, pkgDir(root, "09_agent_mode"))
+		if env, _, _ := run(t, "--dir", root, "09"); len(statusCalls(env.Next)) != 0 {
+			t.Errorf("%s: next %+v; want no activation", name, env.Next)
+		}
+	}
+}
+
+// TS-12-53: an active package with no task open is told to seal; one with a task
+// open is not; and the list suggests no status call.
+func TestTheReportSuggestsSealingAPackageWithNoOpenTask_TS12_53(t *testing.T) {
+	root := newRepo(t)
+	activePackage(t, root, "03_done", "03", "done", planTask(1, "done", nil), planTask(2, "dropped", []int{}))
+	activePackage(t, root, "04_open", "04", "open", planTask(1, "pending", nil))
+
+	env, _, _ := run(t, "--dir", root, "03_done")
+	if got := statusCalls(env.Next); len(got) != 1 || !slices.Equal(got[0].Flags, []string{"--status", "sealed"}) || got[0].Input != ".specs/03_done" {
+		t.Errorf("next %+v; want the sealing of .specs/03_done", env.Next)
+	}
+	env, _, _ = run(t, "--dir", root, "04_open")
+	if got := statusCalls(env.Next); len(got) != 0 {
+		t.Errorf("next %+v; a package with a task open is not sealed", env.Next)
+	}
+	env, _, _ = run(t, "--dir", root, "--list")
+	if got := statusCalls(env.Next); len(got) != 0 {
+		t.Errorf("the list suggests %+v; it suggests no status call", got)
+	}
+}
+
+// TS-12-54: for any package, a status call the report suggests is a call that
+// goes through. Packages are made in every status, and in the states that make
+// the checks refuse: no intent, an invalid package, tasks open, a drifted intent,
+// keys the schema does not allow. Each is the one package of its own repository,
+// under the name the example validates under.
+func TestASuggestedStatusCallIsNeverRefused_TS12_54(t *testing.T) {
+	keys := map[string]func(t *testing.T, dir string){
+		"no keys":                  func(*testing.T, string) {},
+		"a key in tasks.json":      addUnknownKey,
+		"a key in the frontmatter": withFrontmatterKey,
+	}
+	drifts := map[string]func(t *testing.T, dir string){
+		"no drift": func(*testing.T, string) {},
+		"the intent edited": func(t *testing.T, dir string) {
+			editFile(t, filepath.Join(dir, "prd.md"), "Coding agents drive", "Coding agents might drive")
+		},
+		"the intent removed": func(t *testing.T, dir string) { editFile(t, filepath.Join(dir, "prd.md"), "## Intent", "## Purpose") },
+	}
+	plans := map[string][]map[string]any{
+		"no tasks": {}, "all done": {planTask(1, "done", nil)}, "one pending": {planTask(1, "pending", nil)},
+		"one in progress": {planTask(1, "in_progress", nil)}, "done and an optional open one": {planTask(1, "done", nil), planWithOpenTasks()[1]},
+	}
+
+	recipes := map[string]func(t *testing.T, dir string){}
+	for _, status := range []string{"sealed", "superseded", "archived"} {
+		recipes[status] = func(t *testing.T, dir string) { setStatus(t, dir, status) }
+	}
+	for _, hasIntent := range []bool{true, false} {
+		for _, valid := range []bool{true, false} {
+			for keyName, addKey := range keys {
+				recipes[fmt.Sprintf("a draft; intent %v; valid %v; %s", hasIntent, valid, keyName)] = func(t *testing.T, dir string) {
+					if !hasIntent {
+						editFile(t, filepath.Join(dir, "prd.md"), "## Intent", "## Purpose")
+					}
+					if !valid {
+						editFile(t, filepath.Join(dir, "tasks.json"), `"TS-09-6"`, `"TS-09-99"`)
+					}
+					addKey(t, dir)
+				}
+			}
+		}
+	}
+	for planName, plan := range plans {
+		for driftName, drift := range drifts {
+			for keyName, addKey := range keys {
+				recipes[fmt.Sprintf("active; %s; %s; %s", planName, driftName, keyName)] = func(t *testing.T, dir string) {
+					activate(t, dir)
+					setTasks(t, dir, plan...)
+					drift(t, dir)
+					addKey(t, dir)
+				}
+			}
+		}
+	}
+
+	suggested := map[string]int{}
+	for name, recipe := range recipes {
+		root := newRepo(t)
+		dir := pkgDir(root, "09_agent_mode")
+		recipe(t, dir)
+		env, _, _ := run(t, "--dir", root, "09")
+		spec, err := afspec.LoadSpec(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range statusCalls(env.Next) {
+			suggested[strings.Join(call.Flags, " ")]++
+			if spec.Status != "draft" && spec.Status != "active" {
+				t.Errorf("%s: the package is %s, and the report suggests %v", name, spec.Status, call.Flags)
+			}
+			if out, code, _ := run(t, append([]string{"--dir", root, call.Input}, call.Flags...)...); code != cli.ExitOK {
+				t.Errorf("%s: the suggested call %v exits %d: %+v", name, call.Flags, code, out.Error)
+			}
+		}
+	}
+	t.Logf("%d packages; suggestions made and run: %v", len(recipes), suggested)
+	if suggested["--status active"] == 0 || suggested["--status sealed"] == 0 {
+		t.Errorf("suggestions made: %v; the property was checked of none of one kind", suggested)
+	}
+}

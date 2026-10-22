@@ -337,3 +337,94 @@ func TestChangesAndDryRunRoundTrip_TS11_51(t *testing.T) {
 		t.Errorf("a change that was not forced writes forced = %s", got["forced"])
 	}
 }
+
+// TS-12-55: a change writes spec and added only for the supersedes kind, and
+// both are tagged omitempty and described.
+func TestChangeWritesSpecAndAddedOnlyForSupersedes_TS12_55(t *testing.T) {
+	for _, c := range []Change{
+		{Kind: "status", From: "active", To: "sealed"},
+		{Kind: "moved", From: ".specs/03_x", To: ".specs/archive/03_x"},
+	} {
+		got := sortedKeys(keysOf(t, c))
+		if !slices.Equal(got, []string{"from", "kind", "to"}) {
+			t.Errorf("a %s change writes %v; want from, kind and to only", c.Kind, got)
+		}
+	}
+	supersedes := Change{Kind: "supersedes", Spec: "12", Added: "03"}
+	if got := sortedKeys(keysOf(t, supersedes)); !slices.Equal(got, []string{"added", "kind", "spec"}) {
+		t.Errorf("a supersedes change writes %v; want added, kind and spec", got)
+	}
+	if got := keysOf(t, supersedes); string(got["spec"]) != `"12"` || string(got["added"]) != `"03"` {
+		t.Errorf("a supersedes change writes spec %s and added %s; want \"12\" and \"03\"", got["spec"], got["added"])
+	}
+
+	typ := reflect.TypeOf(Change{})
+	for field, key := range map[string]string{"Spec": "spec", "Added": "added"} {
+		f, ok := typ.FieldByName(field)
+		if !ok {
+			t.Fatalf("Change has no field %s", field)
+		}
+		if tag := f.Tag.Get("json"); tag != key+",omitempty" {
+			t.Errorf("%s has json tag %q; want %q", field, tag, key+",omitempty")
+		}
+		if f.Tag.Get("description") == "" {
+			t.Errorf("%s has no description tag", field)
+		}
+	}
+	// The kinds are named where a reader of the type looks.
+	for _, kind := range []string{"status", "moved", "supersedes"} {
+		if !changeDocMentions(t, kind) {
+			t.Errorf("the documentation of Change does not name the kind %s", kind)
+		}
+	}
+}
+
+// changeDocMentions reports whether the comment on the Change type names word.
+func changeDocMentions(t *testing.T, word string) bool {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), "admin_result.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range f.Decls {
+		if g, ok := d.(*ast.GenDecl); ok && g.Doc != nil {
+			for _, spec := range g.Specs {
+				if ts, ok := spec.(*ast.TypeSpec); ok && ts.Name.Name == "Change" {
+					return strings.Contains(g.Doc.Text(), word)
+				}
+			}
+		}
+	}
+	return false
+}
+
+// TS-12-57: every import of the package's code is in the standard library.
+func TestEnvelopeImportsOnlyTheStandardLibrary_TS12_57(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			path, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checked++
+			if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
+				t.Errorf("%s imports %s, which is not in the standard library", file, path)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no import was checked")
+	}
+}

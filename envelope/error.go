@@ -65,8 +65,10 @@ type FixHint struct {
 type ErrorInfo struct {
 	// Stage is the pipeline step that failed: usage, input, preflight, prd,
 	// requirements, test_spec, tasks, plan, scaffold, write, validate, budget,
-	// load; and, for speca's task form, status (the package cannot take a
-	// write) and task (the state machine refuses a move).
+	// load; and, for speca's task and status forms, status (the package cannot
+	// take a write, or the lifecycle does not allow the move), task (the state
+	// machine refuses a move) and archive (the package cannot be moved under
+	// archive/).
 	Stage string `json:"stage" description:"the step that failed"`
 	// Category says whether re-running could help.
 	Category  string   `json:"category" description:"the kind of failure, which says whether re-running could help; an open set"`

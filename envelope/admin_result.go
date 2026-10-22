@@ -2,8 +2,8 @@ package envelope
 
 // AdminResult is speca's result, for every form of the command: the report on
 // one package, the verdict on one package (--validate), the list of every
-// package (--list) and the task form, which is the report on the package after
-// a change, with the changes it made. A form fills the fields it produces and
+// package (--list) and the task and status forms, which are the report on the
+// package after a change, with the changes they made. A form fills the fields it produces and
 // the rest are absent: Valid is a pointer so that false is written, and the slices that
 // must show as [] in their own form are omitted when nil rather than empty.
 type AdminResult struct {
@@ -32,8 +32,8 @@ type AdminResult struct {
 	Validation   *ValidationReport `json:"validation,omitempty" description:"the format's verdict: valid, error_count, warning_count, and every error and warning with its check (the rule), artifact, entity and message; the package's own findings first, then the cross-spec findings that concern it; --validate only"`
 	Traceability *TraceReport      `json:"traceability,omitempty" description:"the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and tests_unowned; --validate only"`
 
-	Changes []Change `json:"changes,omitempty" description:"the tasks the call changed, in plan order, each with the state it left and the state it entered; with --dry-run, the tasks it would have changed; absent when none changed; the task form only"`
-	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task form only"`
+	Changes []Change `json:"changes,omitempty" description:"what the call changed, each with its kind, what it left and what it entered: the tasks in plan order for the task form; status, then supersedes, then moved for the status form, in the order they were written; with --dry-run, what it would have changed; absent when nothing changed; the task and status forms only"`
+	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task and status forms only"`
 
 	Packages []PackageInfo `json:"packages,omitzero" description:"one entry for every package under the spec root in number order, then with --all those under archive/; [] when there are none; --list only"`
 }
@@ -63,11 +63,17 @@ type PackageInfo struct {
 }
 
 // Change is one change a call made to a package, or under --dry-run would have
-// made. The task form writes only kind task; the set of kinds is open.
+// made. The set of kinds is open. speca's task form writes the kind task. Its
+// status form writes status (the package's lifecycle status, from and to),
+// supersedes (the replacing package's spec, and the id added to its supersedes
+// list) and moved (the package's directory, from and to), in the order it made
+// them.
 type Change struct {
-	Kind   string `json:"kind,omitempty" description:"what changed; task is the only kind so far, and the set is open"`
-	ID     int    `json:"id,omitempty" description:"the id of the task that changed"`
-	From   string `json:"from,omitempty" description:"the state it was in: pending, in_progress, done or dropped"`
-	To     string `json:"to,omitempty" description:"the state it was set to"`
-	Forced bool   `json:"forced,omitempty" description:"true when --force set a state the task state machine would have refused; absent otherwise"`
+	Kind   string `json:"kind,omitempty" description:"what changed: task (the state of a task), status (the package's lifecycle status), supersedes (an id added to the supersedes list of the replacing package) or moved (the package's directory); the set is open"`
+	ID     int    `json:"id,omitempty" description:"task: the id of the task that changed"`
+	From   string `json:"from,omitempty" description:"task: the state it was in (pending, in_progress, done or dropped); status: the status it was in; moved: the directory it was in"`
+	To     string `json:"to,omitempty" description:"task: the state it was set to; status: the status it was set to; moved: the directory it was moved to"`
+	Forced bool   `json:"forced,omitempty" description:"task: true when --force set a state the task state machine would have refused; absent otherwise"`
+	Spec   string `json:"spec,omitempty" description:"supersedes: the spec_id of the replacing package, whose supersedes list was changed"`
+	Added  string `json:"added,omitempty" description:"supersedes: the spec_id that was added to that list, the package that was superseded"`
 }

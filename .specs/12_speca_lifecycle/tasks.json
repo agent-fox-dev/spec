@@ -50,7 +50,7 @@
       "done_when": [
         "TestMoveToArchive passes unchanged"
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -84,7 +84,7 @@
       "done_when": [
         "envelope imports only the standard library"
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -127,7 +127,7 @@
       "done_when": [
         "--schema output equals the regenerated golden file"
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -162,7 +162,7 @@
       "depends_on": [
         3
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -207,7 +207,7 @@
         1,
         4
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -244,7 +244,7 @@
       "depends_on": [
         5
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -277,7 +277,7 @@
       "depends_on": [
         6
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -319,7 +319,7 @@
       "depends_on": [
         7
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -357,7 +357,7 @@
       "depends_on": [
         8
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -394,7 +394,7 @@
       "depends_on": [
         9
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {
@@ -425,7 +425,7 @@
       "done_when": [
         "`make test` and `make lint` pass"
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     }
   ]

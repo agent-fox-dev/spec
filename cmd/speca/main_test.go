@@ -347,15 +347,17 @@ func mapsEqual(a, b map[string]string) bool {
 // The code of the command writes no file, reads no variable, runs no program
 // and reaches no network. The test above shows what a call does; this shows
 // the command has nothing that could. The one exception is the task form, which
-// writes the package it changes through the library: task.go may use Save, and
-// nothing else of this list, so the report, the verdict and the list stay as
-// they were.
+// writes the package it changes through the library: task.go may use Save,
+// status.go Transition, status_supersede.go Supersede and Save, and nothing else
+// of this list, so the report, the verdict and the list stay as they were. The
+// move of a package's directory, MoveUnderArchive, is on the list too, and
+// status.go alone may call it.
 func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
 	forbiddenImports := []string{"net", "net/http", "os/exec"}
 	forbiddenOS := []string{"Create", "CreateTemp", "OpenFile", "WriteFile", "Mkdir", "MkdirAll", "MkdirTemp", "Rename",
 		"Remove", "RemoveAll", "Truncate", "Chmod", "Chtimes", "Symlink", "Link", "Getenv", "LookupEnv", "Environ", "Setenv"}
-	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
-	allowedMethods := map[string][]string{"task.go": {"Save"}}
+	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "MoveUnderArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
+	allowedMethods := map[string][]string{"task.go": {"Save"}, "status.go": {"Transition", "MoveUnderArchive"}, "status_supersede.go": {"Supersede", "Save"}}
 
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {
@@ -388,4 +390,89 @@ func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
 			return true
 		})
 	}
+}
+
+// The four statuses the status form moves a package to, in the order of the
+// lifecycle, written out so that changing them is a change to a test.
+var statusTargetsForTests = []string{"active", "sealed", "superseded", "archived"}
+
+// TS-12-10: --status draft is a usage error that says why.
+func TestStatusDraftIsAUsageError_TS12_10(t *testing.T) {
+	root := newRepo(t)
+	e := refusedAsUsage(t, root, []string{"--dir", root, "09", "--status", "draft"},
+		"no move leads back to draft", "superseded by a new one")
+	if e == nil {
+		return
+	}
+	if h := e.FixHint; h == nil || h.Flag != "--status" || !slices.Equal(h.Valid, statusTargetsForTests) {
+		t.Errorf("fix_hint = %+v; want --status with %v", h, statusTargetsForTests)
+	}
+}
+
+// TS-12-11: a --status that is not one of the four targets is a usage error that
+// lists them. So is an empty one, which must not fall through to the report.
+func TestAnUnknownStatusIsAUsageError_TS12_11(t *testing.T) {
+	for _, value := range []string{"bogus", "Active", ""} {
+		root := newRepo(t)
+		e := refusedAsUsage(t, root, []string{"--dir", root, "09", "--status", value}, "--status", "active, sealed, superseded and archived")
+		if e == nil {
+			continue
+		}
+		if h := e.FixHint; h == nil || h.Flag != "--status" || !slices.Equal(h.Valid, statusTargetsForTests) {
+			t.Errorf("--status %q: fix_hint = %+v; want --status with %v", value, h, statusTargetsForTests)
+		}
+	}
+}
+
+// TS-12-12: calls that cannot hold are usage errors that write nothing, each
+// saying what is wrong with it.
+func TestMalformedStatusCallsAreUsageErrors_TS12_12(t *testing.T) {
+	root := newRepo(t)
+	for name, tc := range map[string]struct {
+		argv []string
+		want []string
+	}{
+		"superseded without --by":   {[]string{"09", "--status", "superseded"}, []string{"--status superseded", "--by"}},
+		"--by without --status":     {[]string{"09", "--by", "01"}, []string{"--by", "--status superseded"}},
+		"--by with --status sealed": {[]string{"09", "--status", "sealed", "--by", "01"}, []string{"--by", "--status superseded"}},
+		"an empty --by":             {[]string{"09", "--status", "superseded", "--by", ""}, []string{"--by"}},
+		"with the task form":        {[]string{"09", "--status", "sealed", "--task", "1", "--state", "done"}, []string{"--status", "--task", "two operations"}},
+		"with --validate":           {[]string{"09", "--status", "sealed", "--validate"}, []string{"--status", "--validate", "two operations"}},
+		"with --list":               {[]string{"--status", "sealed", "--list"}, []string{"--status", "--list", "two operations"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			refusedAsUsage(t, root, append([]string{"--dir", root}, tc.argv...), tc.want...)
+		})
+	}
+
+	// With no input the call is a bare invocation: the help goes to stderr, and
+	// the usage envelope to stdout.
+	t.Run("with no input", func(t *testing.T) {
+		before := snapshot(t, root)
+		env, code, stderr := run(t, "--dir", root, "--status", "sealed")
+		if code != cli.ExitUsage || env.Error == nil || env.Error.Stage != "usage" || env.Error.Category != "usage" || env.Result != nil {
+			t.Fatalf("code %d: %+v", code, env.Error)
+		}
+		if !strings.Contains(env.Error.Message, "no input") || !strings.Contains(stderr, "Usage:") {
+			t.Errorf("message %q, stderr %q; want the no-input message and the help", env.Error.Message, stderr)
+		}
+		if !mapsEqual(before, snapshot(t, root)) {
+			t.Error("the repository changed")
+		}
+	})
+}
+
+// TS-12-13: a --by that cannot be the replacing package is a usage error: one
+// the resolver refuses (the message begins --by:), the input itself, and a
+// package that has the input's spec_id.
+func TestABadByIsAUsageError_TS12_13(t *testing.T) {
+	root := newRepo(t)
+	addPackage(t, root, "09_twin", "09", "twin")
+	e := refusedAsUsage(t, root, []string{"--dir", root, "09_agent_mode", "--status", "superseded", "--by", "nonexistent"}, "--by:")
+	if e != nil && !strings.HasPrefix(e.Message, "--by:") {
+		t.Errorf("message %q does not begin --by:", e.Message)
+	}
+	refusedAsUsage(t, root, []string{"--dir", root, "09_agent_mode", "--status", "superseded", "--by", "09_agent_mode"}, "--by", "itself")
+	refusedAsUsage(t, root, []string{"--dir", root, "09_agent_mode", "--status", "superseded", "--by", ".specs/09_agent_mode/prd.md"}, "--by", "itself")
+	refusedAsUsage(t, root, []string{"--dir", root, "09_agent_mode", "--status", "superseded", "--by", "09_twin"}, "--by", "spec_id 09")
 }
