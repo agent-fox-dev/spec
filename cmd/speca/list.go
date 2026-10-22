@@ -29,8 +29,14 @@ func list(c *call) (*Result, *cli.ErrorInfo) {
 			FixHint: &cli.FixHint{Flag: "--specs-dir", Env: []string{afspec.SpecDirEnv}}}
 	}
 	packages := []envelope.PackageInfo{}
+	drifted := map[string]bool{}
+	add := func(path string, archived bool) {
+		info, drift := c.entry(path, archived)
+		packages = append(packages, info)
+		drifted[info.SpecDir] = drift
+	}
 	for _, name := range names {
-		packages = append(packages, c.entry(filepath.Join(c.specsDir, name), false))
+		add(filepath.Join(c.specsDir, name), false)
 	}
 
 	if c.opts.all {
@@ -43,22 +49,23 @@ func list(c *call) (*Result, *cli.ErrorInfo) {
 			c.warnUnreadable("the archive", archive, err, "the packages under archive/ are not listed")
 		default:
 			for _, name := range archived {
-				packages = append(packages, c.entry(filepath.Join(archive, name), true))
+				add(filepath.Join(archive, name), true)
 			}
 		}
 	}
-	return &Result{AdminResult: envelope.AdminResult{Packages: packages}}, nil
+	return &Result{AdminResult: envelope.AdminResult{Packages: packages}, drifted: drifted}, nil
 }
 
-// entry describes the package in path. One that fails to load is described by
-// its directory and the library's reason alone, whether or not it is in the
+// entry describes the package in path, and says whether its intent drifted,
+// which an entry has no field for. One that fails to load is described by its
+// directory and the library's reason alone, whether or not it is in the
 // archive: where it was is in its path.
-func (c *call) entry(path string, archived bool) envelope.PackageInfo {
-	info := envelope.PackageInfo{SpecDir: specpkg.Display(path, c.root)}
+func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, drifted bool) {
+	info = envelope.PackageInfo{SpecDir: specpkg.Display(path, c.root)}
 	spec, err := afspec.LoadSpec(path)
 	if err != nil {
 		info.LoadError = err.Error()
-		return info
+		return info, false
 	}
 	valid := spec.Validate().Valid
 	info.SpecID, info.SpecName, info.Title, info.Status = spec.SpecID, spec.SpecName, spec.Title, spec.Status
@@ -69,5 +76,5 @@ func (c *call) entry(path string, archived bool) envelope.PackageInfo {
 		info.NextTask = &task
 	}
 	info.Archived = archived
-	return info
+	return info, intentDrift(spec)
 }

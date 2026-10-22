@@ -139,3 +139,38 @@ nor warns, as 11-REQ-2.7 and TS-11-16 ask of it (exit 0, nothing written).
 
 **Test of the delivered behaviour:** `TestNothingToMoveWritesNothing_TS11_16`
 (`cmd/speca/task_write_test.go`).
+
+## D-4: the claim is added before the render in `next`, and spec 10's tests say so
+
+**Spec:** 11-REQ-9.1 and 9.2 have the report and the list "add to next" the claim.
+The pseudocode of TS-11-47 and TS-11-48 reads as if `next` were the claim alone.
+
+**Code:** `reportNext` and `listNext` (`cmd/speca/result.go`) return the claim
+first and the `specr` render of the same task after it, where the task is a
+ready pending one and the package can take a write. The criteria say "add", the
+claim is what an agent does first, and a caller that reads only `next[0]` is
+then told to claim. After a move, `next` is the report's on the new state, so
+after a claim it is the render alone, and after a `done` it is the claim of the
+next task and its render. Spec 10's tests that held `next` to the one `specr`
+entry (`TS-10-48`, `TS-10-49`, and the smoke tests `TS-10-57` and `TS-10-59`,
+the last two in `cmd/speca/smoke_test.go`, which task 9 touches, not task 7) now
+read the claim and the render.
+
+**Test of the delivered behaviour:** `TestTheReportSuggestsTheClaim_TS11_46`,
+`TestTheListSuggestsTheClaim_TS11_47` and `TestNextAfterAMove_TS11_48`
+(`cmd/speca/task_dryrun_test.go`).
+
+## D-5: the list leaves out the packages whose intent drifted, for both entries
+
+**Spec:** 11-REQ-9.2 has the list claim the first active package with no task in
+progress, a ready task and no intent drift. A list entry (`PackageInfo`) has no
+field that says a package's intent drifted, and the spec adds none.
+
+**Code:** `list` (`cmd/speca/list.go`, `entry`) records the packages that drifted in
+the `Result`, in an unexported map, and `listNext` skips them. It skips them for
+the render entry as well as the claim, so that the two name one package: spec 10
+chose the first active package with a ready task, drifted or not, and a package
+that cannot be written is not one an agent can work on.
+
+**Test of the delivered behaviour:** `TestTheListSuggestsTheClaim_TS11_47`
+(`cmd/speca/task_dryrun_test.go`).

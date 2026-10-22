@@ -91,10 +91,32 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 
 	r := c.reportOf(dir, spec)
 	r.taskForm = true
+	r.DryRun = c.opts.dryRun
 	for _, m := range moves.moves {
 		r.Changes = append(r.Changes, envelope.Change{Kind: "task", ID: m.id, From: string(m.from), To: string(m.to), Forced: m.forced})
 	}
+	if c.opts.dryRun {
+		r.nextSet = true
+		if len(moves.moves) > 0 {
+			r.callNext = []cli.Next{realCall(r.SpecDir, moves.moves, c.opts)}
+		}
+	}
 	return r, nil
+}
+
+// realCall is the call that makes what a dry run reported: the same call without
+// --dry-run, naming the ids it resolved rather than next or all, and keeping
+// --force when it was given.
+func realCall(dir string, moves []move, o *options) cli.Next {
+	ids := make([]string, len(moves))
+	for i, m := range moves {
+		ids[i] = strconv.Itoa(m.id)
+	}
+	flags := []string{"--task", strings.Join(ids, ","), "--state", o.state}
+	if o.force {
+		flags = append(flags, "--force")
+	}
+	return cli.Next{Tool: tool, Input: dir, Flags: flags, Why: "the same call without --dry-run, which makes these changes"}
 }
 
 // refused returns failure with the report of spec, the package as it is on disk:

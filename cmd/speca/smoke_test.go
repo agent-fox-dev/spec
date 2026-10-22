@@ -48,12 +48,14 @@ func TestAnAgentReadsAPackageAndFollowsNext_TS10_57(t *testing.T) {
 	if !r.Tasks[0].Ready || r.Tasks[1].Ready || r.NextTask.ID != 1 {
 		t.Fatalf("tasks %+v next %+v", r.Tasks, r.NextTask)
 	}
-	if len(first.Next) != 1 || first.Next[0].Tool != "specr" || first.Next[0].Input != filepath.Join(".specs", "09_agent_mode") ||
-		!slices.Equal(first.Next[0].Flags, []string{"--task", "1"}) {
+	// The claim of task 1 comes first (spec 11), and the render of it after.
+	if len(first.Next) != 2 || first.Next[0].Tool != "speca" || !slices.Equal(first.Next[0].Flags, []string{"--task", "1", "--state", "in_progress"}) ||
+		first.Next[1].Tool != "specr" || first.Next[1].Input != filepath.Join(".specs", "09_agent_mode") ||
+		!slices.Equal(first.Next[1].Flags, []string{"--task", "1"}) {
 		t.Fatalf("next = %+v", first.Next)
 	}
 
-	n := first.Next[0]
+	n := first.Next[1]
 	cmd := exec.Command(bin, append([]string{n.Input}, n.Flags...)...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
@@ -155,9 +157,9 @@ func TestAnAgentListsEveryPackageWithTheArchive_TS10_59(t *testing.T) {
 	if want := "speca: 6 packages (1 draft, 2 active, 1 sealed, 1 superseded, 1 unreadable)"; env.Summary != want {
 		t.Errorf("summary = %q; want %q", env.Summary, want)
 	}
-	if len(env.Next) != 1 || env.Next[0].Tool != "specr" || env.Next[0].Input != filepath.Join(".specs", "03_c") ||
-		!slices.Equal(env.Next[0].Flags, []string{"--task", "2"}) {
-		t.Errorf("next = %+v; want specr .specs/03_c --task 2", env.Next)
+	if len(env.Next) != 2 || env.Next[0].Tool != "speca" || !slices.Equal(env.Next[0].Flags, []string{"--task", "2", "--state", "in_progress"}) ||
+		env.Next[1].Tool != "specr" || env.Next[1].Input != filepath.Join(".specs", "03_c") || !slices.Equal(env.Next[1].Flags, []string{"--task", "2"}) {
+		t.Errorf("next = %+v; want the claim of .specs/03_c's task 2, then specr .specs/03_c --task 2", env.Next)
 	}
 	if after := snapshot(t, root); !mapsEqual(before, after) {
 		t.Errorf("the repository changed")

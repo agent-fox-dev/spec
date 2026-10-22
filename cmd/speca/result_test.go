@@ -136,16 +136,26 @@ func TestListSummary_TS10_47(t *testing.T) {
 }
 
 // TS-10-48: the report suggests rendering the next task with specr, and says
-// whether it is under way or the next ready one.
+// whether it is under way or the next ready one. Where the task is ready and the
+// package can take a write, the claim of the task (speca's task form, spec 11)
+// comes before the render, which is still there.
 func TestReportNext_TS10_48(t *testing.T) {
 	for name, tc := range map[string]struct {
-		next *envelope.TaskInfo
-		why  string
+		next  *envelope.TaskInfo
+		why   string
+		claim bool
 	}{
-		"in progress": {&envelope.TaskInfo{ID: 4, Title: "Fix it", State: "in_progress"}, "in progress"},
-		"ready":       {&envelope.TaskInfo{ID: 5, Title: "Add it", State: "pending", Ready: true}, "next ready task"},
+		"in progress": {&envelope.TaskInfo{ID: 4, Title: "Fix it", State: "in_progress"}, "in progress", false},
+		"ready":       {&envelope.TaskInfo{ID: 5, Title: "Add it", State: "pending", Ready: true}, "next ready task", true},
 	} {
 		got := report16("active", 3, 7, tc.next, true).Next()
+		if tc.claim {
+			if len(got) != 2 || got[0].Tool != "speca" || !slices.Equal(got[0].Flags, []string{"--task", "5", "--state", "in_progress"}) {
+				t.Errorf("%s: Next = %+v; want the claim of task 5 first", name, got)
+				continue
+			}
+			got = got[1:]
+		}
 		if len(got) != 1 || got[0].Tool != "specr" || got[0].Input != ".specs/16_indexed_code_search" ||
 			!slices.Equal(got[0].Flags, []string{"--task", fmt.Sprint(tc.next.ID)}) {
 			t.Errorf("%s: Next = %+v", name, got)
@@ -174,8 +184,9 @@ func TestListNext_TS10_49(t *testing.T) {
 		pkg(4, "active", 0, task(1, "pending")),
 	}}}
 	got := r.Next()
-	if len(got) != 1 || got[0].Tool != "specr" || got[0].Input != ".specs/03_p" || !slices.Equal(got[0].Flags, []string{"--task", "3"}) {
-		t.Errorf("Next = %+v; want specr .specs/03_p --task 3", got)
+	if len(got) != 2 || got[0].Tool != "speca" || got[0].Input != ".specs/03_p" || !slices.Equal(got[0].Flags, []string{"--task", "3", "--state", "in_progress"}) ||
+		got[1].Tool != "specr" || got[1].Input != ".specs/03_p" || !slices.Equal(got[1].Flags, []string{"--task", "3"}) {
+		t.Errorf("Next = %+v; want the claim of .specs/03_p's task 3, then specr .specs/03_p --task 3", got)
 	}
 
 	// An archived package is not work to do, whatever its status says.
