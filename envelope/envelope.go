@@ -33,7 +33,7 @@ func StatusFor(code int) string {
 
 // Envelope is the single JSON object a command writes to stdout. R is the
 // type of the command's own result: SpecResult for spec, RenderResult for
-// specr. Use a pointer type, as SpecEnvelope and RenderEnvelope do, to tell an
+// specr, AdminResult for speca. Use a pointer type, as SpecEnvelope and RenderEnvelope do, to tell an
 // absent result from an empty one; a failure that happened before there was
 // anything to report has none.
 type Envelope[R any] struct {
@@ -65,6 +65,9 @@ type SpecEnvelope = Envelope[*SpecResult]
 // RenderEnvelope is what the specr command writes.
 type RenderEnvelope = Envelope[*RenderResult]
 
+// AdminEnvelope is what the speca command writes.
+type AdminEnvelope = Envelope[*AdminResult]
+
 // Decode reads the envelope a command wrote. It fails when data is not one
 // JSON object, or when a field has the wrong type; unknown fields are
 // ignored. A command writes exactly one object, so data after it is an
@@ -88,6 +91,11 @@ func DecodeSpec(data []byte) (SpecEnvelope, error) { return Decode[*SpecResult](
 
 // DecodeSpecr reads the envelope the specr command wrote.
 func DecodeSpecr(data []byte) (RenderEnvelope, error) { return Decode[*RenderResult](data) }
+
+// DecodeSpeca reads the envelope the speca command wrote, whichever of its
+// forms it was: the report on a package, the verdict (--validate) or the
+// list (--list). Which fields of the result are set tells the forms apart.
+func DecodeSpeca(data []byte) (AdminEnvelope, error) { return Decode[*AdminResult](data) }
 
 // ArtifactKind is the closed set of shapes an Artifact can take.
 type ArtifactKind string
