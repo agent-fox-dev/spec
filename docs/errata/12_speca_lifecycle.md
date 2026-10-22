@@ -274,3 +274,37 @@ call, and a `supersedes` change in the dry run, which does not try it. The
 
 **Test of the delivered behaviour:** `TestADryRunIsTheRealCallWithoutTheWrites_TS12_48`
 (`cmd/speca/status_test.go`) for what the two do agree on.
+
+## D-10: the lifecycle suggestions are the report form's alone
+
+**Spec:** 12-REQ-9.6 and 9.7 have "the report form" list `--status active` and
+`--status sealed` in `next`. Spec 11 has the task form's `next` be the report's
+on the package as it now is (11-REQ-9.3).
+
+**Code:** the suggestions are made by `report` (`statusSuggestion`,
+`cmd/speca/report.go`) and held in the result (`Result.lifecycle`), not by the
+report builder that the task form shares. The `next` of a task call is therefore
+unchanged: after the last task is done it is nothing, not the sealing of the
+package, which `speca <spec>` suggests.
+
+**Test of the delivered behaviour:**
+`TestNextAfterAMove_TS11_48` (`cmd/speca/task_dryrun_test.go`, unchanged) and
+`TestTheReportSuggestsSealingAPackageWithNoOpenTask_TS12_53`
+(`cmd/speca/report_test.go`).
+
+## D-18: spec 10 and 11 tests that read a draft's `next` read it after the activation
+
+**Spec:** 12-REQ-9.6 lists the activation "in next before any task suggestion"
+for a draft that validates and has an intent. Spec 10 (TS-10-57) and spec 11
+(TS-11-46, TS-11-54) have the report of that package, the example, suggest the
+claim of its first task and the render of it.
+
+**Code:** the report of the example now starts with `speca <spec_dir> --status
+active`, then the claim, then the render. The three tests read `next` from the
+second entry on, and assert the activation before it: what they check of the
+claim and the render is unchanged.
+
+**Test of the delivered behaviour:**
+`TestAnAgentReadsAPackageAndFollowsNext_TS10_57`,
+`TestAnAgentClaimsTheNextTaskAndFinishesIt_TS11_54` (`cmd/speca/smoke_test.go`)
+and `TestTheReportSuggestsTheClaim_TS11_46` (`cmd/speca/task_dryrun_test.go`).

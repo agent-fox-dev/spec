@@ -468,8 +468,8 @@ func (sc *statusCall) moveFailure(changes []envelope.Change, cause error) (*Resu
 	r.callNext = []cli.Next{sc.resumeCall()}
 
 	status := sc.written.Status
-	message := fmt.Sprintf("%s is %s and is still at %s: moving it under archive/ failed (%v); running the same call again moves it",
-		sc.name, status, sc.name, cause)
+	message := fmt.Sprintf("%s is now %s, but moving it under archive/ failed (%v); it is still where it was, and running the same call again moves it",
+		sc.name, status, cause)
 	r.sentence = fmt.Sprintf("%s: %s is %s: the status was written and the move was not; run the same call again to move it under archive/", tool, r.dirName(), status)
 	if len(changes) == 0 {
 		r.sentence = fmt.Sprintf("%s: %s is %s and was not moved under archive/; run the same call again", tool, r.dirName(), status)

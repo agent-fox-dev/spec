@@ -49,14 +49,16 @@ func TestAnAgentReadsAPackageAndFollowsNext_TS10_57(t *testing.T) {
 	if !r.Tasks[0].Ready || r.Tasks[1].Ready || r.NextTask.ID != 1 {
 		t.Fatalf("tasks %+v next %+v", r.Tasks, r.NextTask)
 	}
-	// The claim of task 1 comes first (spec 11), and the render of it after.
-	if len(first.Next) != 2 || first.Next[0].Tool != "speca" || !slices.Equal(first.Next[0].Flags, []string{"--task", "1", "--state", "in_progress"}) ||
-		first.Next[1].Tool != "specr" || first.Next[1].Input != filepath.Join(".specs", "09_agent_mode") ||
-		!slices.Equal(first.Next[1].Flags, []string{"--task", "1"}) {
+	// A draft that validates is told to activate (spec 12); then comes the claim
+	// of task 1 (spec 11), and the render of it after.
+	if len(first.Next) != 3 || !slices.Equal(first.Next[0].Flags, []string{"--status", "active"}) ||
+		first.Next[1].Tool != "speca" || !slices.Equal(first.Next[1].Flags, []string{"--task", "1", "--state", "in_progress"}) ||
+		first.Next[2].Tool != "specr" || first.Next[2].Input != filepath.Join(".specs", "09_agent_mode") ||
+		!slices.Equal(first.Next[2].Flags, []string{"--task", "1"}) {
 		t.Fatalf("next = %+v", first.Next)
 	}
 
-	n := first.Next[1]
+	n := first.Next[2]
 	cmd := exec.Command(bin, append([]string{n.Input}, n.Flags...)...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
@@ -213,9 +215,10 @@ func TestAnAgentClaimsTheNextTaskAndFinishesIt_TS11_54(t *testing.T) {
 	t.Chdir(root)
 
 	report, code, _ := run(t, "09")
-	if code != cli.ExitOK || len(report.Next) == 0 || report.Next[0].Tool != "speca" ||
-		!slices.Equal(report.Next[0].Flags, []string{"--task", "1", "--state", "in_progress"}) {
-		t.Fatalf("code %d: next = %+v; want the claim of task 1 first", code, report.Next)
+	// The activation of a draft comes before the tasks (spec 12), then the claim.
+	if code != cli.ExitOK || len(report.Next) < 2 || !slices.Equal(report.Next[0].Flags, []string{"--status", "active"}) ||
+		report.Next[1].Tool != "speca" || !slices.Equal(report.Next[1].Flags, []string{"--task", "1", "--state", "in_progress"}) {
+		t.Fatalf("code %d: next = %+v; want the claim of task 1 after the activation", code, report.Next)
 	}
 
 	claim, code, _ := run(t, "09", "--task", "next", "--state", "in_progress")

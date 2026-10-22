@@ -16,7 +16,36 @@ func report(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if failure != nil {
 		return nil, failure
 	}
-	return c.reportOf(dir, spec), nil
+	r := c.reportOf(dir, spec)
+	r.lifecycle = statusSuggestion(r, spec)
+	return r, nil
+}
+
+// statusSuggestion is the status call the report suggests for the package: to
+// activate a draft that validates and has an intent, and to seal an active
+// package that has no task open. The conditions are the checks of the status
+// form, the refusals that --force does not override and the ones it does, so that
+// a suggestion never comes back as a refusal; a package for which any of them
+// fails is not told to make the call. A package in another format version is
+// told nothing: the status form does not change it.
+func statusSuggestion(r *Result, spec *afspec.Spec) []cli.Next {
+	if specpkg.Legacy(spec) {
+		return nil
+	}
+	holdsKeys := slices.Contains(r.FailingRules, "unknown_field") || len(frontmatterUnknownKeys(spec.Dir)) > 0
+	switch spec.Status {
+	case string(afspec.PrdFrontmatterV2JsonStatusDraft):
+		if r.Valid != nil && *r.Valid && afspec.HasIntent(spec.PRDBody) && !holdsKeys {
+			return []cli.Next{{Tool: tool, Input: r.SpecDir, Flags: []string{"--status", "active"},
+				Why: "the package validates and has an intent; activating it records the hash of its ## Intent"}}
+		}
+	case string(afspec.PrdFrontmatterV2JsonStatusActive):
+		if len(openTasks(spec.Tasks)) == 0 && !r.IntentDrift && !holdsKeys {
+			return []cli.Next{{Tool: tool, Input: r.SpecDir, Flags: []string{"--status", "sealed"},
+				Why: "no task is open and the intent is as it was activated; sealing the package ends its work"}}
+		}
+	}
+	return nil
 }
 
 // reportOf is the report on spec, which was loaded from dir. The task form

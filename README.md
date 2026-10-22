@@ -121,11 +121,10 @@ A Go program that calls one of the commands decodes its output with the
 [`envelope`](docs/api.md#envelope) package (`envelope.DecodeSpec`,
 `envelope.DecodeSpecr`, `envelope.DecodeSpeca`) instead of writing structs of its own.
 
-Changing the lifecycle status of an existing package — activating, sealing,
-archiving or superseding it — has no CLI surface; it's library API in
-[`afspec`](afspec/README.md) for an embedder to call. Rendering a package,
-reading its state and moving its tasks from one state to another have a command
-each, below.
+Rendering a package, reading its state, moving its tasks from one state to
+another and changing its lifecycle status — activating, sealing, archiving or
+superseding it — have a command each, below. The lifecycle moves are also library
+API in [`afspec`](afspec/README.md) for an embedder to call.
 
 ## Rendering a Spec Package
 
@@ -166,6 +165,7 @@ speca --list              # every package under the spec root, in number order
 speca --list --all        # and those under archive/
 speca 16 --task next --state in_progress   # claim the task to work on now
 speca 16 --task 4 --state done             # finish task 4 (--task 1,2 or all, --dry-run, --force)
+speca 16 --status active                   # activate a draft; also sealed, archived, or superseded --by 12
 speca --schema            # the flags and the output, as JSON Schema
 ```
 
@@ -176,9 +176,13 @@ validate is reported with exit 0, in `valid`; exit codes `0`, `1` and `2` are
 those of the other two commands. The task form moves tasks through the library's
 task state machine, every one or none, so a second claim of a task that is taken
 is refused with the states it may move to, and it writes through the library's
-`Spec.Save`, which writes every artifact of the package again; the other forms
-write no file. `speca` makes no model or
-network call and reads no credential. Everything is in
+`Spec.Save`, which writes every artifact of the package again. The status form
+moves a package through its lifecycle with the library's `Transition` and
+`Supersede`, refuses a move the lifecycle does not allow with the way to get
+there, moves an archived or superseded package under `archive/`, and, when that
+move fails after the status was written, says so and is resumable: the same call
+moves the package and changes nothing else. The other forms write no file. `speca`
+makes no model or network call and reads no credential. Everything is in
 [docs/speca.md](docs/speca.md); the decision is
 [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
 
