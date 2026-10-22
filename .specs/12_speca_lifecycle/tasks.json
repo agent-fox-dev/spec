@@ -84,7 +84,7 @@
       "done_when": [
         "envelope imports only the standard library"
       ],
-      "state": "pending",
+      "state": "done",
       "optional": false
     },
     {

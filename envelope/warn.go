@@ -33,6 +33,9 @@ const (
 	// speca's task form.
 	WarnTaskNotReady    WarnCode = "task_not_ready"
 	WarnTaskStateForced WarnCode = "task_state_forced"
+	// speca's status form.
+	WarnTasksOpen             WarnCode = "tasks_open"
+	WarnSupersedesNotRecorded WarnCode = "supersedes_not_recorded"
 	// specr's codes.
 	WarnSpecInvalid   WarnCode = "spec_invalid"
 	WarnSectionAbsent WarnCode = "section_absent"

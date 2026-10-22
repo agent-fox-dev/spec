@@ -38,6 +38,8 @@ const (
 	WarnOverBudget               = envelope.WarnOverBudget
 	WarnTaskNotReady             = envelope.WarnTaskNotReady
 	WarnTaskStateForced          = envelope.WarnTaskStateForced
+	WarnTasksOpen                = envelope.WarnTasksOpen
+	WarnSupersedesNotRecorded    = envelope.WarnSupersedesNotRecorded
 )
 
 // warnStages is the one place a code's stage is decided.
@@ -71,6 +73,8 @@ var warnStages = map[WarnCode]string{
 	WarnOverBudget:               "render",
 	WarnTaskNotReady:             "task",
 	WarnTaskStateForced:          "task",
+	WarnTasksOpen:                "status",
+	WarnSupersedesNotRecorded:    "status",
 }
 
 // WarnStage returns the stage a code is recorded against, and whether the

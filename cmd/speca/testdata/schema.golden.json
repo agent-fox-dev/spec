@@ -506,29 +506,37 @@
           },
           "changes": {
             "type": "array",
-            "description": "the tasks the call changed, in plan order, each with the state it left and the state it entered; with --dry-run, the tasks it would have changed; absent when none changed; the task form only",
+            "description": "what the call changed, each with its kind, what it left and what it entered: the tasks in plan order for the task form; status, then supersedes, then moved for the status form, in the order they were written; with --dry-run, what it would have changed; absent when nothing changed; the task and status forms only",
             "items": {
               "type": "object",
               "properties": {
                 "kind": {
                   "type": "string",
-                  "description": "what changed; task is the only kind so far, and the set is open"
+                  "description": "what changed: task (the state of a task), status (the package's lifecycle status), supersedes (an id added to the supersedes list of the replacing package) or moved (the package's directory); the set is open"
                 },
                 "id": {
                   "type": "integer",
-                  "description": "the id of the task that changed"
+                  "description": "task: the id of the task that changed"
                 },
                 "from": {
                   "type": "string",
-                  "description": "the state it was in: pending, in_progress, done or dropped"
+                  "description": "task: the state it was in (pending, in_progress, done or dropped); status: the status it was in; moved: the directory it was in"
                 },
                 "to": {
                   "type": "string",
-                  "description": "the state it was set to"
+                  "description": "task: the state it was set to; status: the status it was set to; moved: the directory it was moved to"
                 },
                 "forced": {
                   "type": "boolean",
-                  "description": "true when --force set a state the task state machine would have refused; absent otherwise"
+                  "description": "task: true when --force set a state the task state machine would have refused; absent otherwise"
+                },
+                "spec": {
+                  "type": "string",
+                  "description": "supersedes: the spec_id of the replacing package, whose supersedes list was changed"
+                },
+                "added": {
+                  "type": "string",
+                  "description": "supersedes: the spec_id that was added to that list, the package that was superseded"
                 }
               },
               "required": []
@@ -536,7 +544,7 @@
           },
           "dry_run": {
             "type": "boolean",
-            "description": "true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task form only"
+            "description": "true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task and status forms only"
           },
           "packages": {
             "type": "array",
