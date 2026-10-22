@@ -95,9 +95,7 @@ func executeStatus(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		}
 	}
 	if c.opts.dryRun {
-		// A dry run is made in task 9; until then it must not write.
-		return nil, &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryInternal,
-			Message: "--dry-run is not implemented yet for the status form"}
+		return sc.preview(), nil
 	}
 	return sc.apply()
 }
@@ -170,10 +168,111 @@ func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
 		return r, &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
 			Message: fmt.Sprintf("the package %s was written but could not be read back: %v", specpkg.Display(here, sc.root), err)}
 	}
-	r := sc.reportOf(here, written)
+	return sc.finish(sc.reportOf(here, written), changes), nil
+}
+
+// preview is the call under --dry-run: every check has been made and every
+// warning planned, and now the changes the writes would make are listed, and the
+// package they would leave is held in memory and reported, as the real call
+// reports the package it reads back. Nothing is written or moved.
+func (sc *statusCall) preview() *Result {
+	after := *sc.spec
+	here := sc.dir
+	var changes []envelope.Change
+	if !sc.moveOnly {
+		after.Status = sc.target
+		after.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive) {
+			hash, _ := afspec.ComputeIntentHash(after.PRDBody) // the check found the intent
+			after.IntentHash = &hash
+		}
+		changes = append(changes, envelope.Change{Kind: "status", From: sc.spec.Status, To: sc.target})
+	}
+	sc.raise()
+	if sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded) {
+		if change := sc.recordSupersedes(); change != nil {
+			changes = append(changes, *change)
+		}
+	}
+	if sc.movesUnderArchive() {
+		dest, _ := afspec.ArchiveDestination(sc.dir, sc.holdingDir()) // the check found it free
+		changes = append(changes, envelope.Change{Kind: "moved", From: sc.name, To: specpkg.Display(dest, sc.root)})
+		here = dest
+	}
+	// The write drops the keys the library reported, so the package it leaves
+	// validates without them: the verdict is on the package as written.
+	return sc.finish(sc.reportWith(here, &after, validateWritten(&after)), changes)
+}
+
+// finish gives the result of a call that went through, or would have, what only
+// the status form says: the changes, whether it was a dry run, the sentence, and
+// what to do next. After a dry run that is the same call without --dry-run; after
+// an activation, the claim of the next task when it is ready; after anything
+// else there is nothing to suggest.
+func (sc *statusCall) finish(r *Result, changes []envelope.Change) *Result {
 	r.Changes = changes
+	r.DryRun = sc.opts.dryRun
+	r.sentence = sc.sentence(changes)
 	r.nextSet = true
-	return r, nil
+	switch t := r.NextTask; {
+	case sc.opts.dryRun:
+		r.callNext = []cli.Next{sc.confirmCall()}
+	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive) && t != nil &&
+		t.State == string(afspec.TaskStatePending) && t.Ready:
+		r.callNext = []cli.Next{claimOf(r.SpecDir, *t)}
+	}
+	return r
+}
+
+// confirmCall is the call that makes the changes a dry run listed: the same call
+// without --dry-run, keeping --by and --force.
+func (sc *statusCall) confirmCall() cli.Next {
+	flags := []string{"--status", sc.target}
+	if sc.byDir != "" {
+		flags = append(flags, "--by", specpkg.Display(sc.byDir, sc.root))
+	}
+	if sc.opts.force {
+		flags = append(flags, "--force")
+	}
+	return cli.Next{Tool: tool, Input: sc.name, Flags: flags, Why: "the same call without --dry-run, which makes these changes"}
+}
+
+// sentence is the one sentence of the call: what it did to the package, named by
+// its directory, where it moved it, and under --dry-run that nothing was written.
+func (sc *statusCall) sentence(changes []envelope.Change) string {
+	name := filepath.Base(sc.dir)
+	var moved *envelope.Change
+	wrote := false
+	for i, c := range changes {
+		switch c.Kind {
+		case "moved":
+			moved = &changes[i]
+		case "status":
+			wrote = true
+		}
+	}
+	movedTo := ""
+	if moved != nil {
+		movedTo = ", moved to " + moved.To
+	}
+	var s string
+	switch {
+	case !wrote && moved != nil:
+		s = fmt.Sprintf("moved %s to %s", name, moved.To)
+	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive):
+		s = "activated " + name
+	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusSealed):
+		s = "sealed " + name
+	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded):
+		s = fmt.Sprintf("superseded %s by %s%s", name, sc.by.SpecID, movedTo)
+	default:
+		s = "archived " + name + movedTo
+	}
+	s = tool + ": " + s
+	if sc.opts.dryRun {
+		s += " (dry run; nothing written)"
+	}
+	return s
 }
 
 // writeFailure says how a write of the status failed. What the lifecycle or the

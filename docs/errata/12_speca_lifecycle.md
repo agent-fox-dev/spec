@@ -234,3 +234,43 @@ summary that says the package was not moved.
 
 **Test of the delivered behaviour:**
 `TestAMoveOnlyCallWhoseMoveFailsIsResumableToo` (`cmd/speca/status_test.go`).
+
+## D-6: the dry-run suffix has a semicolon here and a comma in the task form
+
+**Spec:** 12-REQ-9.3 ends the summary of a dry run with ` (dry run; nothing
+written)`. Spec 11 (11-REQ-7.5, merged) ends the task form's with ` (dry run,
+nothing written)`.
+
+**Code:** each form follows its own spec (`statusCall.sentence`,
+`cmd/speca/status.go`; `Result.taskSummary`, `cmd/speca/result.go`). A reader of
+the summary sees both; they are not made the same, since spec 11 is merged and its
+tests pin the comma.
+
+**Test of the delivered behaviour:** `TestTheSummaryHasTheFormOfTheMoveMade_TS12_49`
+(`cmd/speca/status_test.go`).
+
+## D-7: an archive or a supersede that needs no move has no "moved to" clause
+
+**Spec:** 12-REQ-9.3 gives `archived <name>, moved to <display path>` and
+`superseded <name> by <spec_id>, moved to <display path>`. A package already under
+`archive/` is archived or superseded without a move (12-REQ-6.2).
+
+**Code:** with no `moved` change there is no destination to name: the sentences are
+`speca: archived <name>` and `speca: superseded <name> by <spec_id>`.
+
+**Test of the delivered behaviour:** `TestTheSummaryHasTheFormOfTheMoveMade_TS12_49`
+(the case "archiving under archive/") (`cmd/speca/status_test.go`).
+
+## D-17: a dry run cannot know that the disk will refuse the replacing package's save
+
+**Spec:** 12-REQ-9.2 has `--dry-run` produce "the same exit code, refusals,
+warnings, changes and result as the real call".
+
+**Code:** every check, every plan and every warning is the real call's. What is
+decided by trying is not: a `Save` of the replacing package that the disk refuses
+(a read-only directory) is a low `supersedes_not_recorded` warning in the real
+call, and a `supersedes` change in the dry run, which does not try it. The
+`updated_at` of a dry run is the time it was made.
+
+**Test of the delivered behaviour:** `TestADryRunIsTheRealCallWithoutTheWrites_TS12_48`
+(`cmd/speca/status_test.go`) for what the two do agree on.

@@ -1181,3 +1181,245 @@ func TestAMoveOnlyCallWhoseMoveFailsIsResumableToo(t *testing.T) {
 		t.Error("the package changed")
 	}
 }
+
+// TS-12-9: a status call reaches the status form, whose result has changes and
+// not only a report, honours --dry-run, and accepts --force.
+func TestStatusCallsReachTheStatusFormAndHonourDryRunAndForce_TS12_9(t *testing.T) {
+	root := newRepo(t)
+	activePackage(t, root, "04_a", "04", "a", planTask(1, "done", nil))
+	packageWith(t, root, "03_old", "03", "old", "sealed")
+	packageWith(t, root, "12_new", "12", "new", "draft")
+
+	before := snapshot(t, root)
+	_, r := succeeds(t, root, "09", "--status", "active", "--dry-run")
+	if !r.DryRun || len(r.Changes) != 1 {
+		t.Errorf("dry_run %v, changes %+v; want a dry run with one change", r.DryRun, r.Changes)
+	}
+	if !mapsEqual(before, snapshot(t, root)) {
+		t.Error("the dry run wrote")
+	}
+	if _, r = succeeds(t, root, "04_a", "--status", "sealed", "--force"); len(r.Changes) != 1 || r.DryRun {
+		t.Errorf("sealing with --force: changes %+v, dry_run %v", r.Changes, r.DryRun)
+	}
+	if _, r = succeeds(t, root, "03_old", "--status", "superseded", "--by", "12_new"); len(r.Changes) == 0 {
+		t.Error("superseding has no changes")
+	}
+}
+
+// TS-12-27: a dry-run activation reports the hash the library would compute and
+// leaves prd.md as it was.
+func TestADryRunActivationReportsTheHashAndWritesNothing_TS12_27(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := afspec.ComputeIntentHash(spec.PRDBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := treeBytes(t, dir)
+
+	_, r := succeeds(t, root, "09", "--status", "active", "--dry-run")
+	if r.IntentHash != want || r.Status != "active" || !r.DryRun {
+		t.Errorf("intent_hash %q, status %q, dry_run %v; want %q, active, true", r.IntentHash, r.Status, r.DryRun, want)
+	}
+	if !mapsEqual(before, treeBytes(t, dir)) {
+		t.Error("prd.md, or another file, changed (bytes or modification time)")
+	}
+}
+
+// sameOutcome fails the test unless the dry run and the real call agree on
+// everything the spec says they agree on.
+func sameOutcome(t *testing.T, name string, dry envelope.AdminEnvelope, dryCode int, real envelope.AdminEnvelope, realCode int) {
+	t.Helper()
+	if dryCode != realCode {
+		t.Errorf("%s: exit %d under --dry-run, %d without", name, dryCode, realCode)
+	}
+	if (dry.Error == nil) != (real.Error == nil) || dry.Error != nil && (dry.Error.Stage != real.Error.Stage ||
+		dry.Error.Category != real.Error.Category || dry.Error.Message != real.Error.Message) {
+		t.Errorf("%s: error %+v under --dry-run, %+v without", name, dry.Error, real.Error)
+	}
+	if !slices.Equal(dry.Warnings, real.Warnings) {
+		t.Errorf("%s: warnings %+v under --dry-run, %+v without", name, dry.Warnings, real.Warnings)
+	}
+	if (dry.Result == nil) != (real.Result == nil) {
+		t.Errorf("%s: a result under --dry-run: %v, without: %v", name, dry.Result != nil, real.Result != nil)
+		return
+	}
+	if dry.Result == nil {
+		return
+	}
+	d, r := dry.Result, real.Result
+	if !slices.Equal(d.Changes, r.Changes) || d.SpecDir != r.SpecDir || d.Status != r.Status || d.IntentHash != r.IntentHash ||
+		d.IntentDrift != r.IntentDrift || !slices.Equal(d.AllowedStatus, r.AllowedStatus) || !slices.Equal(d.FailingRules, r.FailingRules) ||
+		(d.Valid == nil) != (r.Valid == nil) || d.Valid != nil && *d.Valid != *r.Valid {
+		t.Errorf("%s: the result under --dry-run is %+v; without it %+v", name, d, r)
+	}
+	if !d.DryRun || r.DryRun {
+		t.Errorf("%s: dry_run is %v under --dry-run and %v without", name, d.DryRun, r.DryRun)
+	}
+}
+
+// TS-12-48: a dry run gives the exit code, the refusal, the warnings, the
+// changes and the result of the real call, and writes nothing.
+func TestADryRunIsTheRealCallWithoutTheWrites_TS12_48(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, root string)
+		argv  []string
+	}{
+		"activation": {func(*testing.T, string) {}, []string{"09", "--status", "active"}},
+		"sealing with open tasks, forced": {func(t *testing.T, root string) {
+			activePackage(t, root, "03_a", "03", "a", planWithOpenTasks()...)
+		}, []string{"03_a", "--status", "sealed", "--force"}},
+		"archiving": {func(t *testing.T, root string) { packageWith(t, root, "03_x", "03", "x", "sealed") },
+			[]string{"03_x", "--status", "archived"}},
+		"archiving a draft with a key, forced": {func(t *testing.T, root string) {
+			addUnknownKey(t, packageWith(t, root, "03_x", "03", "x", "draft"))
+		}, []string{"03_x", "--status", "archived", "--force"}},
+		"superseding": {func(t *testing.T, root string) {
+			packageWith(t, root, "03_old", "03", "old", "sealed")
+			packageWith(t, root, "12_new", "12", "new", "draft")
+		}, []string{"03_old", "--status", "superseded", "--by", "12_new"}},
+		"superseding with a replacement that is sealed": {func(t *testing.T, root string) {
+			packageWith(t, root, "03_old", "03", "old", "sealed")
+			packageWith(t, root, "12_new", "12", "new", "sealed")
+		}, []string{"03_old", "--status", "superseded", "--by", "12_new"}},
+		"a move only": {func(t *testing.T, root string) { packageWith(t, root, "03_x", "03", "x", "archived") },
+			[]string{"03_x", "--status", "archived"}},
+		"a refusal": {func(t *testing.T, root string) { packageWith(t, root, "03_x", "03", "x", "sealed") },
+			[]string{"03_x", "--status", "sealed"}},
+		"a taken destination": {func(t *testing.T, root string) {
+			packageWith(t, root, "03_x", "03", "x", "sealed")
+			mustMkdir(t, pkgDir(root, "archive/03_x"))
+		}, []string{"03_x", "--status", "archived"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			tc.setup(t, root)
+			before := snapshot(t, root)
+			argv := append([]string{"--dir", root}, tc.argv...)
+
+			dry, dryCode, _ := run(t, append(argv, "--dry-run")...)
+			if !mapsEqual(before, snapshot(t, root)) {
+				t.Fatal("the dry run changed the repository (a file, a directory or a modification time)")
+			}
+			real, realCode, _ := run(t, argv...)
+			sameOutcome(t, name, dry, dryCode, real, realCode)
+		})
+	}
+}
+
+// TS-12-49: the summary is one sentence of the form the spec gives for each move,
+// and under --dry-run ends by saying nothing was written.
+func TestTheSummaryHasTheFormOfTheMoveMade_TS12_49(t *testing.T) {
+	const dryRun = " (dry run; nothing written)"
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, root string)
+		argv  []string
+		want  string
+	}{
+		"activating": {func(*testing.T, string) {}, []string{"09", "--status", "active"}, "speca: activated 09_agent_mode"},
+		"sealing": {func(t *testing.T, root string) { activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)) },
+			[]string{"03_a", "--status", "sealed"}, "speca: sealed 03_a"},
+		"archiving": {func(t *testing.T, root string) { packageWith(t, root, "04_s", "04", "s", "sealed") },
+			[]string{"04_s", "--status", "archived"}, "speca: archived 04_s, moved to .specs/archive/04_s"},
+		"archiving under archive/": {func(t *testing.T, root string) { packageWith(t, root, "archive/04_s", "04", "s", "sealed") },
+			[]string{".specs/archive/04_s", "--status", "archived"}, "speca: archived 04_s"},
+		"superseding": {func(t *testing.T, root string) {
+			packageWith(t, root, "05_old", "05", "old", "sealed")
+			packageWith(t, root, "12_new", "12", "new", "draft")
+		}, []string{"05_old", "--status", "superseded", "--by", "12_new"}, "speca: superseded 05_old by 12, moved to .specs/archive/05_old"},
+		"a move only": {func(t *testing.T, root string) { packageWith(t, root, "06_m", "06", "m", "archived") },
+			[]string{"06_m", "--status", "archived"}, "speca: moved 06_m to .specs/archive/06_m"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			tc.setup(t, root)
+			argv := append([]string{"--dir", root}, tc.argv...)
+			dry, _, _ := run(t, append(argv, "--dry-run")...)
+			if dry.Summary != tc.want+dryRun {
+				t.Errorf("under --dry-run: summary %q; want %q", dry.Summary, tc.want+dryRun)
+			}
+			real, _, _ := run(t, argv...)
+			if real.Summary != tc.want {
+				t.Errorf("summary %q; want %q", real.Summary, tc.want)
+			}
+		})
+	}
+}
+
+// TS-12-50: after activation next is the claim of the next task when it is
+// ready; after any other call, and after a refusal, there is nothing to suggest.
+func TestAfterACallNextIsTheClaimAfterActivationAndNothingElse_TS12_50(t *testing.T) {
+	root := newRepo(t)
+	_, _, _ = run(t, "--dir", root, "09", "--status", "active")
+	env, _, _ := run(t, "--dir", root, "09", "--status", "active") // active now: a refusal
+	if len(env.Next) != 0 {
+		t.Errorf("a refusal suggests %+v", env.Next)
+	}
+
+	root = newRepo(t)
+	env, _ = succeeds(t, root, "09", "--status", "active")
+	want := []envelope.Next{{Tool: "speca", Input: ".specs/09_agent_mode", Flags: []string{"--task", "1", "--state", "in_progress"}}}
+	if len(env.Next) != 1 || env.Next[0].Tool != want[0].Tool || env.Next[0].Input != want[0].Input || !slices.Equal(env.Next[0].Flags, want[0].Flags) {
+		t.Errorf("after activation next is %+v; want the claim of task 1: %+v", env.Next, want)
+	}
+
+	// Not ready, or none: there is nothing to claim.
+	for name, tasks := range map[string][]map[string]any{
+		"the next task is already in progress": {planTask(1, "in_progress", nil)},
+		"there is no task":                     {},
+	} {
+		root := newRepo(t)
+		setTasks(t, pkgDir(root, "09_agent_mode"), tasks...)
+		// The plan does not validate, which is not what is looked at here.
+		if env, _ = succeeds(t, root, "09", "--status", "active", "--force"); len(env.Next) != 0 {
+			t.Errorf("%s: next is %+v; want none", name, env.Next)
+		}
+	}
+
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, root string)
+		argv  []string
+	}{
+		"sealing":   {func(t *testing.T, root string) { activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)) }, []string{"03_a", "--status", "sealed"}},
+		"archiving": {func(t *testing.T, root string) { packageWith(t, root, "04_s", "04", "s", "sealed") }, []string{"04_s", "--status", "archived"}},
+		"superseding": {func(t *testing.T, root string) {
+			packageWith(t, root, "05_old", "05", "old", "sealed")
+			packageWith(t, root, "12_new", "12", "new", "draft")
+		}, []string{"05_old", "--status", "superseded", "--by", "12_new"}},
+		"a move only": {func(t *testing.T, root string) { packageWith(t, root, "06_m", "06", "m", "archived") }, []string{"06_m", "--status", "archived"}},
+	} {
+		root := newRepo(t)
+		tc.setup(t, root)
+		if env, _ = succeeds(t, root, tc.argv...); len(env.Next) != 0 {
+			t.Errorf("%s: next is %+v; want none", name, env.Next)
+		}
+	}
+}
+
+// TS-12-51: a dry run that passes its checks suggests the same call without
+// --dry-run, keeping --force and --by.
+func TestADryRunSuggestsTheSameCallWithoutDryRun_TS12_51(t *testing.T) {
+	root := newRepo(t)
+	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	packageWith(t, root, "05_old", "05", "old", "sealed")
+	packageWith(t, root, "12_new", "12", "new", "draft")
+
+	for _, tc := range []struct {
+		argv  []string
+		input string
+		flags []string
+	}{
+		{[]string{"03_a", "--status", "sealed"}, ".specs/03_a", []string{"--status", "sealed"}},
+		{[]string{"03_a", "--status", "sealed", "--force"}, ".specs/03_a", []string{"--status", "sealed", "--force"}},
+		{[]string{"05_old", "--status", "superseded", "--by", "12"}, ".specs/05_old", []string{"--status", "superseded", "--by", ".specs/12_new"}},
+	} {
+		env, _ := succeeds(t, root, append(tc.argv, "--dry-run")...)
+		if len(env.Next) != 1 || env.Next[0].Tool != "speca" || env.Next[0].Input != tc.input || !slices.Equal(env.Next[0].Flags, tc.flags) {
+			t.Errorf("%v: next %+v; want speca %s %v", tc.argv, env.Next, tc.input, tc.flags)
+		}
+	}
+}

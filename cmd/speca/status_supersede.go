@@ -68,10 +68,15 @@ func (sc *statusCall) recordSupersedes() *envelope.Change {
 	if keys := append(unknownKeys(by.Validate().Errors), frontmatterUnknownKeys(sc.byDir)...); len(keys) > 0 {
 		return notRecorded("it holds keys the schema does not allow, which a save would drop: " + strings.Join(keys, ", "))
 	}
+	change := &envelope.Change{Kind: "supersedes", Spec: by.SpecID, Added: oldID}
+	if sc.opts.dryRun {
+		// Whether the disk would take the save is not known without trying it.
+		return change
+	}
 	by.Supersedes = append(slices.Clone(by.Supersedes), oldID)
 	by.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := saveReplacing(by, sc.byDir); err != nil {
 		return notRecorded("it could not be saved: " + err.Error())
 	}
-	return &envelope.Change{Kind: "supersedes", Spec: by.SpecID, Added: oldID}
+	return change
 }
