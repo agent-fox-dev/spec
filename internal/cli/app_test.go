@@ -430,3 +430,16 @@ func TestTS09_64_TheReviewPhasesAreListedWithoutAdversarial(t *testing.T) {
 		t.Errorf("effort_clamped = %q", clamped)
 	}
 }
+
+// TS-13-1: SiblingCommands is an untyped string constant with the exact sentence,
+// so a help text built of raw-string constants can carry it.
+func TestSiblingCommandsIsAnUntypedConstantWithTheSentence_TS13_1(t *testing.T) {
+	const probe = "a\n" + SiblingCommands // does not compile unless it is a constant string
+	const want = "spec writes a package from an idea, specr renders one, speca reports and changes its state."
+	if SiblingCommands != want {
+		t.Errorf("SiblingCommands = %q; want %q", SiblingCommands, want)
+	}
+	if probe != "a\n"+want {
+		t.Errorf("the constant does not concatenate: %q", probe)
+	}
+}

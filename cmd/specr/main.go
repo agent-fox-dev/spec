@@ -6,7 +6,8 @@
 // It takes exactly one input, a reference to a spec package, and writes
 // exactly one JSON object to stdout, whose result.markdown is the render. It
 // reads the package and changes nothing; the one file it can write is
-// --markdown-file.
+// --markdown-file. Its siblings are spec, which writes a package from an idea,
+// and speca, which reports a package's state and changes it.
 package main
 
 import (
@@ -30,7 +31,7 @@ const tool = "specr"
 
 // description is the one sentence --schema gives.
 const description = "Renders a specification package as Markdown: the whole package, or the package " +
-	"scoped to one task, with what the task owns in full and everything else by id."
+	"scoped to one task, with what the task owns in full and everything else by id. " + cli.SiblingCommands
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
@@ -38,6 +39,8 @@ const inputDescription = "Exactly one reference to a spec package: a path to its
 	"(16_indexed_code_search, 16, indexed_code_search)."
 
 const usage = `specr — render a specification package as Markdown
+
+` + cli.SiblingCommands + `
 
 Usage:
   specr [flags] <spec>
@@ -59,8 +62,10 @@ Forms:
 
 Output is one JSON object on stdout. The Markdown is result.markdown; the rest
 of result says what was rendered and lists the plan's tasks, and next names
-the task to render after this one. --markdown-file also writes the Markdown to
-a file. --schema prints the flags and the shape of the output as JSON Schema.
+the task to render after this one and, when the package can take the change,
+the speca call that claims the rendered task or records it done.
+--markdown-file also writes the Markdown to a file. --schema prints the flags
+and the shape of the output as JSON Schema.
 
 specr changes nothing: it reads the package, and the only file it writes is
 --markdown-file.

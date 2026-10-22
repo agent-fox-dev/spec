@@ -483,3 +483,31 @@ func TestTasksCarryReady_TS10_15(t *testing.T) {
 		t.Errorf("the schema golden does not describe ready (%v)", err)
 	}
 }
+
+// TS-13-5: the help says, where it describes next, that it names the task to
+// render after this one and the speca call that claims the rendered task or
+// records it done.
+func TestHelpDescribesNextAsNamingTheSpecaCall_TS13_5(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--help"}, &stdout, &stderr); code != cli.ExitOK || stdout.Len() != 0 {
+		t.Fatalf("code %d, stdout %q", code, stdout.String())
+	}
+	help := stderr.String()
+	if !strings.Contains(help, "specr <spec> --task N") {
+		t.Errorf("the help lost the form %q", "specr <spec> --task N")
+	}
+	var para string
+	for _, p := range strings.Split(help, "\n\n") {
+		if flat := strings.Join(strings.Fields(p), " "); strings.Contains(flat, "next names") {
+			para = flat
+		}
+	}
+	if para == "" {
+		t.Fatalf("no paragraph of the help describes next:\n%s", help)
+	}
+	for _, want := range []string{"the task to render after this one", "speca", "claims the rendered task", "records it done", "can take the change"} {
+		if !strings.Contains(para, want) {
+			t.Errorf("the paragraph on next does not say %q:\n%s", want, para)
+		}
+	}
+}
