@@ -41,6 +41,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if err != nil {
 		return nil, usageInfo(err, nil)
 	}
+	if o.taskForm() {
+		return executeTask(c, dir)
+	}
 	if o.validate {
 		return verdict(c, dir)
 	}

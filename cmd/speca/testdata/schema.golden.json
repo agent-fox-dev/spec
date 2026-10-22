@@ -24,6 +24,16 @@
         "default": ".",
         "description": "the repository the spec root and a relative reference are resolved against"
       },
+      "dry-run": {
+        "type": "boolean",
+        "default": false,
+        "description": "with the task form, run every check and report what would change, and write nothing"
+      },
+      "force": {
+        "type": "boolean",
+        "default": false,
+        "description": "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; it skips nothing else, and a high task_state_forced warning names each task set that way"
+      },
       "list": {
         "type": "boolean",
         "default": false,
@@ -33,6 +43,16 @@
         "type": "string",
         "default": "",
         "description": "where NN_name packages live; default <dir>/.specs or $AF_SPEC_DIR"
+      },
+      "state": {
+        "type": "string",
+        "default": "",
+        "description": "the task form: the state to move the tasks to: pending, in_progress, done or dropped"
+      },
+      "task": {
+        "type": "string",
+        "default": "",
+        "description": "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)"
       },
       "validate": {
         "type": "boolean",

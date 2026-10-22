@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/agent-fox-dev/spec"
@@ -101,14 +102,25 @@ type options struct {
 	validate bool
 	list     bool
 	all      bool
+	tasks    taskFlag
+	state    string
+	force    bool
+	dryRun   bool
 	schema   bool
 	version  bool
 }
+
+// taskForm reports whether the call asks for the form that changes tasks.
+func (o *options) taskForm() bool { return len(o.tasks) > 0 || o.state != "" }
 
 func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C11 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
 	fs.BoolVar(&o.list, "list", false, "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input")
 	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived")
+	fs.Var(&o.tasks, "task", "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)")
+	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped")
+	fs.BoolVar(&o.force, "force", false, "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; it skips nothing else, and a high task_state_forced warning names each task set that way")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, run every check and report what would change, and write nothing")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
 	fs.StringVar(&o.dir, "dir", ".", "the repository the spec root and a relative reference are resolved against")
 	fs.BoolVar(&o.schema, "schema", false, "print the flags, the input and the output's JSON Schema as one JSON object, and exit")
@@ -116,9 +128,10 @@ func (o *options) register(fs *flag.FlagSet) {
 }
 
 // check refuses the flag combinations that cannot hold, before anything is
-// read. ref is the one positional input, or empty.
-func (o *options) check(ref string) error {
+// read, as a usage error. ref is the one positional input, or empty.
+func (o *options) check(ref string) *cli.ErrorInfo {
 	var errs []error
+	var hint *cli.FixHint
 	if o.list && ref != "" {
 		errs = append(errs, fmt.Errorf("--list takes no input, got %q: it lists every package under the spec root", ref))
 	}
@@ -128,7 +141,35 @@ func (o *options) check(ref string) error {
 	if o.all && !o.list {
 		errs = append(errs, errors.New("--all adds the packages under archive/ to --list, and means nothing without it"))
 	}
-	return errors.Join(errs...)
+	if o.taskForm() {
+		for flagName, given := range map[string]bool{"--validate": o.validate, "--list": o.list} {
+			if given {
+				errs = append(errs, fmt.Errorf("the task form (--task, --state) and %s are two operations: give one", flagName))
+			}
+		}
+		if len(o.tasks) == 0 {
+			errs = append(errs, errors.New("--state needs --task: say which task to move (an id, several ids, next or all)"))
+		} else if _, err := parseTaskSpec(o.tasks); err != nil {
+			errs = append(errs, err)
+		}
+		switch {
+		case o.state == "":
+			errs = append(errs, errors.New("--task needs --state: say which state to move the tasks to ("+strings.Join(taskStates, ", ")+")"))
+		case !slices.Contains(taskStates, o.state):
+			errs = append(errs, fmt.Errorf("--state %q is not a task state: the states are %s", o.state, strings.Join(taskStates, ", ")))
+			hint = &cli.FixHint{Flag: "--state", Valid: slices.Clone(taskStates)}
+		}
+	} else {
+		for flagName, given := range map[string]bool{"--force": o.force, "--dry-run": o.dryRun} {
+			if given {
+				errs = append(errs, fmt.Errorf("%s has no effect without --task: it applies to the task form", flagName))
+			}
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return usageInfo(errors.Join(errs...), hint)
 }
 
 // encodeJSON writes the --schema document. It is a variable so that a test can
@@ -184,9 +225,9 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		}
 		return emit(stdout, run, cli.ExitUsage, nil, usageInfo(errors.New(noInputMessage), nil))
 	}
-	if verr := o.check(ref); verr != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", tool, verr)
-		return emit(stdout, run, cli.ExitUsage, nil, usageInfo(verr, nil))
+	if refusal := o.check(ref); refusal != nil {
+		fmt.Fprintf(stderr, "%s: %s\n", tool, refusal.Message)
+		return emit(stdout, run, cli.ExitUsage, nil, refusal)
 	}
 
 	result, failure := execute(ref, &o, run)
