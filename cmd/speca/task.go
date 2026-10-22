@@ -164,10 +164,12 @@ func writeSpec(spec *afspec.Spec, name string) *cli.ErrorInfo {
 			"a failure during the final renames may leave some files updated, so run `speca %s` to see the state", name, err, name)}
 }
 
-// unwritable refuses a package that Save would refuse to write: one that is
-// sealed, superseded or archived, and an active one whose intent has drifted.
-// --force does not bypass it, because the library has no way to write such a
-// package. It is a lifecycle refusal at stage status.
+// unwritable refuses a package that cannot take a write: one that is sealed,
+// superseded or archived, which Save would refuse, and an active one whose intent
+// has drifted. So is one whose status the format does not define, which is
+// neither a draft nor an active package, and is refused by name. --force does
+// not bypass it, because the library has no way to write such a package. It is a
+// lifecycle refusal at stage status.
 func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
 	switch {
 	case specpkg.Writable(spec):
@@ -177,8 +179,15 @@ func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
 			Message: fmt.Sprintf("%s is active and its ## Intent section no longer matches its intent_hash (or is gone): "+
 				"the library refuses every write until the intent matches its hash again", name)}
 	}
+	switch spec.Status {
+	case string(afspec.PrdFrontmatterV2JsonStatusSealed),
+		string(afspec.PrdFrontmatterV2JsonStatusSuperseded),
+		string(afspec.PrdFrontmatterV2JsonStatusArchived):
+		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
+			Message: fmt.Sprintf("%s is %s, so its tasks can no longer change: a change to it is a new package that supersedes it", name, spec.Status)}
+	}
 	return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
-		Message: fmt.Sprintf("%s is %s, so its tasks can no longer change: a change to it is a new package that supersedes it", name, spec.Status)}
+		Message: fmt.Sprintf("%s has the status %q, which the format does not define: only a draft, or an active package whose intent has not drifted, takes a change", name, spec.Status)}
 }
 
 // checkNamedTasks refuses a --task that names what the plan cannot supply: an

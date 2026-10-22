@@ -343,6 +343,8 @@ func TestSpecrAndSpecaClaimTheSameTask_TS13_22(t *testing.T) {
 		{{}, {}, {}},       // none depends on any
 		{nil, {1}, {1, 2}}, // as the example is written
 		{{}, {1}, nil},     // mixed
+		{nil, nil, {}},     // the last depends on none, behind two that depend on the one before
+		{{}, nil, {}},      // the first and the last depend on none, the second on the first
 	}
 	type state struct {
 		status string
@@ -361,7 +363,13 @@ func TestSpecrAndSpecaClaimTheSameTask_TS13_22(t *testing.T) {
 			}
 		}
 	}
-	for _, status := range []string{"active", "drifted", "sealed", "superseded", "archived"} {
+	// A package whose first task is dropped, so that the next depends on a task that
+	// is never done, while the last is ready (see the invariant below).
+	all = append(all,
+		state{"draft", []string{"dropped", "pending", "pending"}, depVariants[4]},
+		state{"draft", []string{"dropped", "pending", "pending"}, depVariants[5]},
+		state{"active", []string{"dropped", "pending", "pending"}, depVariants[4]})
+	for _, status := range []string{"active", "unhashed", "drifted", "sealed", "superseded", "archived"} {
 		for i := 0; i < 6; i++ {
 			s := all[rng.IntN(64)]
 			all = append(all, state{status, s.states, depVariants[rng.IntN(len(depVariants))]})
@@ -378,6 +386,10 @@ func TestSpecrAndSpecaClaimTheSameTask_TS13_22(t *testing.T) {
 		switch status {
 		case "active":
 			activate(t, dir, false)
+		case "unhashed":
+			// An active package that records no hash has no intent to drift from.
+			activate(t, dir, false)
+			unsetHash(t, dir)
 		case "drifted":
 			activate(t, dir, true)
 		case "sealed", "superseded", "archived":
@@ -387,7 +399,7 @@ func TestSpecrAndSpecaClaimTheSameTask_TS13_22(t *testing.T) {
 		return root
 	}
 
-	claimed, checked := 0, 0
+	claimed, checked, stuck := 0, 0, 0
 	for _, s := range all {
 		root := rootFor(s.status)
 		plan(t, filepath.Join(root, ".specs", example), s.states, s.deps)
@@ -396,22 +408,61 @@ func TestSpecrAndSpecaClaimTheSameTask_TS13_22(t *testing.T) {
 		theirs, _ := speca(t, bin, "--dir", root, "09")
 		b := claims(theirs.Next)
 		checked++
-		if !equalFlags(a, b) {
-			t.Errorf("%s %v deps %v: specr claims %v, speca %v", s.status, s.states, s.deps, a, b)
-			continue
-		}
-		if len(a) > 0 {
+		where := fmt.Sprintf("%s %v deps %v", s.status, s.states, s.deps)
+		renders := byTool(env.Next, "specr")
+		switch {
+		case len(a) > 0:
+			// specr never claims what speca would not, and names the task it renders.
 			claimed++
-			renders := byTool(env.Next, "specr")
-			if len(renders) != 1 || renders[0].Flags[1] != a[0][1] {
-				t.Errorf("%s %v deps %v: the claim names task %s, the render suggestion %+v", s.status, s.states, s.deps, a[0][1], renders)
+			if !equalFlags(a, b) {
+				t.Errorf("%s: specr claims %v, speca %v", where, a, b)
+			} else if len(renders) != 1 || renders[0].Flags[1] != a[0][1] {
+				t.Errorf("%s: the claim names task %s, the render suggestion %+v", where, a[0][1], renders)
+			}
+		case len(b) > 0:
+			// speca claims the first ready task, specr the first unfinished one: they
+			// differ only when that task is stuck, behind a dependency that is never done,
+			// and a task dropped is such a dependency. Without a dropped task they agree.
+			stuck++
+			if !slices.Contains(s.states, "dropped") {
+				t.Errorf("%s: speca claims %v and specr nothing, though no task is dropped", where, b)
+				continue
+			}
+			first := env.Result.Tasks
+			if len(renders) != 1 {
+				t.Errorf("%s: specr suggests %+v", where, env.Next)
+				continue
+			}
+			var m int
+			fmt.Sscan(renders[0].Flags[1], &m)
+			if task := first[m-1]; task.State != "pending" || task.Ready {
+				t.Errorf("%s: speca claims %v and specr nothing, yet its task %d is %+v", where, b, m, task)
 			}
 		}
 	}
-	if claimed == 0 || claimed == checked {
-		t.Errorf("%d of %d states were claimed; the property was checked of one kind only", claimed, checked)
+	if claimed == 0 || stuck == 0 || claimed == checked {
+		t.Errorf("%d of %d states were claimed and %d were stuck; the property was checked of one kind only", claimed, checked, stuck)
 	}
-	t.Logf("%d states, %d of them claimed", checked, claimed)
+	t.Logf("%d states, %d claimed by both, %d where only speca claims", checked, claimed, stuck)
+}
+
+// unsetHash makes the active package record no intent hash.
+func unsetHash(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, "prd.md")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(b), "\n")
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "intent_hash:") })
+	if i < 0 {
+		t.Fatalf("no intent_hash in prd.md:\n%s", b)
+	}
+	lines[i] = "intent_hash: null"
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func equalFlags(a, b [][]string) bool {
@@ -426,25 +477,43 @@ func equalFlags(a, b [][]string) bool {
 	return true
 }
 
-// D-3: with a task that depends on a later one, which makes the package fail
-// validation, the first unfinished task is not ready while a later one is. specr
-// offers no claim, as 13-REQ-5.4 says, where speca claims the later ready task;
-// specr never claims what speca would not.
-func TestAWholeRenderWithAForwardDependencyClaimsNothingSpecaWouldNot(t *testing.T) {
+// D-3: when the first unfinished task is stuck, behind a dependency that is never
+// done, while a later task is ready, specr offers no claim, as 13-REQ-5.4 says, and
+// speca claims the later ready task; specr never claims what speca would not. A task
+// that depends on a later one is such a stuck task, and the package fails validation;
+// so is one that depends on a task dropped, and that package validates.
+func TestAWholeRenderWhoseFirstTaskIsStuckClaimsNothingSpecaWouldNot(t *testing.T) {
 	bin := buildSpeca(t)
-	root := newRepo(t)
-	plan(t, filepath.Join(root, ".specs", example), []string{"done", "pending", "pending"}, [][]int{nil, {3}, {1}})
+	for name, tc := range map[string]struct {
+		states []string
+		deps   [][]int
+		valid  bool
+	}{
+		"a dependency on a later task":   {[]string{"done", "pending", "pending"}, [][]int{nil, {3}, {1}}, false},
+		"a dependency on a dropped task": {[]string{"dropped", "pending", "pending"}, [][]int{nil, nil, {}}, true},
+	} {
+		root := exampleWith(t, tc.states, tc.deps)
+		env, _, _ := run(t, "--dir", root, "09")
+		if len(claims(env.Next)) != 0 || len(env.Next) != 1 || !slices.Equal(env.Next[0].Flags, []string{"--task", "2"}) {
+			t.Errorf("%s: specr: next = %+v; want the render of task 2 alone", name, env.Next)
+		}
+		theirs, _ := speca(t, bin, "--dir", root, "09")
+		if got := claims(theirs.Next); len(got) != 1 || got[0][1] != "3" {
+			t.Errorf("%s: speca: claims %v; want the claim of the ready task 3", name, got)
+		}
+		if theirs.Result == nil || theirs.Result.Valid == nil || *theirs.Result.Valid != tc.valid {
+			t.Errorf("%s: the package validates: %v; want %v", name, theirs.Result != nil && theirs.Result.Valid != nil && *theirs.Result.Valid, tc.valid)
+		}
+	}
+}
 
+// 13-REQ-7.2: the render suggestion is the first task not done or dropped, whatever
+// its state: a task in progress is the one to render, and no claim is offered.
+func TestAWholeRenderSuggestsTheRenderOfAnUnfinishedTaskInProgress(t *testing.T) {
+	root := exampleWith(t, []string{"in_progress", "pending", "pending"}, nil)
 	env, _, _ := run(t, "--dir", root, "09")
-	if len(claims(env.Next)) != 0 || len(env.Next) != 1 || !slices.Equal(env.Next[0].Flags, []string{"--task", "2"}) {
-		t.Errorf("specr: next = %+v; want the render of task 2 alone", env.Next)
-	}
-	theirs, _ := speca(t, bin, "--dir", root, "09")
-	if got := claims(theirs.Next); len(got) != 1 || got[0][1] != "3" {
-		t.Errorf("speca: claims %v; want the claim of the ready task 3", got)
-	}
-	if theirs.Result == nil || theirs.Result.Valid == nil || *theirs.Result.Valid {
-		t.Error("a package that depends on a later task validates")
+	if len(env.Next) != 1 || env.Next[0].Tool != "specr" || !slices.Equal(env.Next[0].Flags, []string{"--task", "1"}) {
+		t.Errorf("next = %+v; want the render of task 1 alone", env.Next)
 	}
 }
 

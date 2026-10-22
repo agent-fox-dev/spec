@@ -81,24 +81,31 @@ it used to report no drift and fail at the write.
 (`internal/specpkg/writable_test.go`) and
 `TestAnActivePackageWithAnEmptyHashHasDrifted` (`cmd/speca/writable_test.go`).
 
-## D-3: the two commands claim the same task, except for a package that does not validate
+## D-3: the two commands claim the same task, except where the first unfinished task is stuck
 
 **Spec:** 13-REQ-5.7 has `specr` and `speca` hold a claim "exactly when" the other
-does, for any package state; 13-REQ-5.4 has `specr` offer none when the first
-unfinished task is not ready.
+does, for any package state, both naming the task of `specr`'s render suggestion;
+13-REQ-5.4 has `specr` offer none when the first unfinished task is not ready.
 
-**Code:** the two rules agree whenever a task depends only on earlier ones. They
-differ when one depends on a later task, which fails validation (rule C6): with
-task 1 done, task 2 depending on 3 and task 3 on 1, the first unfinished task (2) is
-not ready while a later one (3) is. `speca`'s `next_task` is the first *ready* task,
-so it suggests the claim of 3; `specr` follows 13-REQ-5.4 and suggests the render of
-2 alone (reproduced with both built commands). I followed 5.1 to 5.4, whose cases are
-each tested, and kept the safe direction of 5.7: `specr` never offers a claim that
-`speca` would not. The property test draws states whose dependencies point at earlier
-tasks, and a second test pins the corner.
+**Code:** `specr` claims the first task that is not done or dropped (M), when it is
+ready; `speca`'s `next_task` is the first *ready* task. With no task in progress the
+two are the same task whenever M is ready, and when no task is dropped (every earlier
+task is then done, so M is stuck only behind a task that cannot be done). They differ
+when M is pending and not ready while a later task is ready, which needs M to depend
+on something that is never done: a task that is **dropped** (a package that
+validates), a later task or an id the plan does not have (packages that do not). With
+task 1 dropped, task 2 depending on it and task 3 depending on none, `speca` claims 3
+and `specr`, following 5.4, offers the render of 2 alone (reproduced with both built
+commands). The two readings of the spec cannot both hold there; I followed 5.1 to 5.4,
+whose cases are each tested, and kept the safe direction of 5.7: `specr` never offers a
+claim that `speca` would not, and its claim always names its render target. An earlier
+version of this entry named only the dependency on a later task; the reviewer found
+the dropped one.
 
-**Test of the delivered behaviour:** `TestSpecrAndSpecaClaimTheSameTask_TS13_22` and
-`TestAWholeRenderWithAForwardDependencyClaimsNothingSpecaWouldNot`
+**Test of the delivered behaviour:** `TestSpecrAndSpecaClaimTheSameTask_TS13_22`
+(equal wherever no task is dropped; where only `speca` claims, the first unfinished task
+is pending and not ready) and
+`TestAWholeRenderWhoseFirstTaskIsStuckClaimsNothingSpecaWouldNot` (both causes)
 (`cmd/specr/next_test.go`), which run the built `speca` beside `specr`.
 
 ## D-9: a reference that names no package is a usage error, not exit 1
@@ -115,3 +122,39 @@ error and no next. The test asserts each its own code.
 
 **Test of the delivered behaviour:** `TestAPackageThatCannotBeLoadedHasNoNext_TS13_30`
 (`cmd/specr/next_test.go`).
+
+## D-10: a package with a status the format does not define is refused by name
+
+**Spec:** 13-REQ-4.4 has `speca`'s envelopes for the report, list and task form
+unchanged by the move to `specpkg.Writable`.
+
+**Code:** the old check refused the task form for a sealed, superseded or archived
+package and for drift, and let any other status through to `Save`, which accepts it.
+`Writable` is true only for a draft and an active package without drift, so a package
+whose status is none of the five (`weird`, `Draft`) is refused at stage `status`, as the
+glossary of the spec has it ("the only packages speca's task and status writes
+accept"). It is a change of the task form's envelope for that one case, and the message
+says what it found: `<dir> has the status "weird", which the format does not define:
+only a draft, or an active package whose intent has not drifted, takes a change`. The
+report and the list are unchanged.
+
+**Test of the delivered behaviour:**
+`TestAStatusTheFormatDoesNotDefineIsRefusedByName` (`cmd/speca/writable_test.go`).
+
+## D-11: a package that holds keys, or is in another format version, is offered the call
+
+**Spec:** the PRD says `specr` suggests the `speca` call "wherever that call would
+succeed", and 13-REQ-5.7 has the claim agree with `speca <spec>`'s.
+
+**Code:** "can take a write" is the status and the intent (`Writable`). A package that
+holds a key the schema does not allow, or declares a format version other than 2, is
+writable by that rule, so `specr` offers its claim, as `speca <spec>` does; `speca`
+then refuses the call with the reason (stage `validate` for the keys, a usage error for
+the version). The two commands agree, as 5.7 requires; the phrase "wherever it would
+succeed" is true of the writability rule and not of those two checks, which
+`speca`'s own `next` rules (not to be changed here) do not apply to a claim. The
+documents say so.
+
+**Test of the delivered behaviour:** `TestSpecrAndSpecaClaimTheSameTask_TS13_22`
+(`cmd/specr/next_test.go`) for the agreement.
+

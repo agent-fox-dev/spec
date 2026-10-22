@@ -878,7 +878,9 @@ render of a package that can take a write, and after `specr <package> --task N` 
 claim of a ready `N` or, once `N` is in progress, the call that records it done (see
 [specr.md](specr.md#artifacts-and-next)). `speca` and `specr` agree on whether a
 package can take a write (`specpkg.Writable`: a draft, or an active package whose
-intent has not drifted), so neither suggests a call the other would refuse.
+intent has not drifted), so neither suggests a claim for one the other would refuse
+for that reason. Both still offer it for a package that holds a key the schema does not
+allow, or is in another format version, and `speca` refuses the call with the reason.
 
 Reading the state of a package is the first half of working through it; the
 second, recording a task as claimed, finished or released, is the task form. The

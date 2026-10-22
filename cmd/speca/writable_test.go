@@ -27,16 +27,15 @@ func claimsIn(next []envelope.Next) []string {
 
 // TS-13-14: speca decides drift and writability only through specpkg. Its
 // envelopes say what they said: drift only for the package that drifted, the
-// task form refused at stage status for it and for a sealed package, and the
-// claim suggested only for a package that can take it. No source of the command
-// declares a drift check of its own.
+// task form refused at stage status for it and for a sealed package and taken by
+// the packages that can take it, and the claim suggested only for a package that
+// can take it. No source of the command declares a drift check of its own.
 func TestSpecaDecidesDriftAndWritabilityThroughSpecpkg_TS13_14(t *testing.T) {
 	root := newRepo(t)
 	activePackage(t, root, "03_drift", "03", "drift", planTask(1, "pending", nil))
 	editFile(t, filepath.Join(pkgDir(root, "03_drift"), "prd.md"), "Coding agents drive", "Coding agents might drive")
 	activePackage(t, root, "04_ok", "04", "ok", planTask(1, "pending", nil))
-	sealed := packageWith(t, root, "05_sealed", "05", "sealed", "sealed")
-	_ = sealed
+	packageWith(t, root, "05_sealed", "05", "sealed", "sealed")
 
 	for _, tc := range []struct {
 		dir      string
@@ -44,19 +43,19 @@ func TestSpecaDecidesDriftAndWritabilityThroughSpecpkg_TS13_14(t *testing.T) {
 		writable bool
 	}{{"09_agent_mode", false, true}, {"04_ok", false, true}, {"03_drift", true, false}, {"05_sealed", false, false}} {
 		env, _, _ := run(t, "--dir", root, tc.dir)
-		r := result(t, env)
-		if r.IntentDrift != tc.drift {
+		if r := result(t, env); r.IntentDrift != tc.drift {
 			t.Errorf("%s: intent_drift = %v; want %v", tc.dir, r.IntentDrift, tc.drift)
 		}
-		if got := len(claimsIn(env.Next)) > 0; got != (tc.writable && tc.dir != "05_sealed") {
+		if got := len(claimsIn(env.Next)) > 0; got != tc.writable {
 			t.Errorf("%s: the report suggests a claim: %v; want %v", tc.dir, got, tc.writable)
 		}
-		refused := tc.dir != "09_agent_mode" && tc.dir != "04_ok"
-		if tc.dir == "09_agent_mode" || tc.dir == "04_ok" {
-			continue
+		// The task form takes the packages that can take a write and refuses the others at
+		// stage status; a dry run changes nothing.
+		e, code, _ := run(t, "--dir", root, tc.dir, "--task", "1", "--state", "in_progress", "--dry-run")
+		if tc.writable && (code != cli.ExitOK || e.Error != nil) {
+			t.Errorf("%s: the task form: code %d, error %+v; want it taken", tc.dir, code, e.Error)
 		}
-		e, code, _ := run(t, "--dir", root, tc.dir, "--task", "1", "--state", "in_progress")
-		if refused && (code != cli.ExitFailed || e.Error == nil || e.Error.Stage != "status" || e.Error.Category != "lifecycle") {
+		if !tc.writable && (code != cli.ExitFailed || e.Error == nil || e.Error.Stage != "status" || e.Error.Category != "lifecycle") {
 			t.Errorf("%s: the task form: code %d, error %+v; want it refused at stage status", tc.dir, code, e.Error)
 		}
 	}
@@ -73,6 +72,7 @@ func TestSpecaDecidesDriftAndWritabilityThroughSpecpkg_TS13_14(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	statusUses := 0
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
@@ -90,10 +90,15 @@ func TestSpecaDecidesDriftAndWritabilityThroughSpecpkg_TS13_14(t *testing.T) {
 			case *ast.SelectorExpr:
 				if n.Sel.Name == "ComputeIntentHash" && file != "status.go" {
 					t.Errorf("%s calls ComputeIntentHash", file)
+				} else if n.Sel.Name == "ComputeIntentHash" {
+					statusUses++
 				}
 			}
 			return true
 		})
+	}
+	if statusUses != 1 {
+		t.Errorf("status.go calls ComputeIntentHash %d times; want the one use, the hash a dry-run activation records", statusUses)
 	}
 }
 
@@ -124,5 +129,23 @@ func TestAnActivePackageWithAnEmptyHashHasDrifted(t *testing.T) {
 	e, code, _ := run(t, "--dir", root, "03_a", "--task", "1", "--state", "in_progress")
 	if code != cli.ExitFailed || e.Error == nil || e.Error.Stage != "status" {
 		t.Errorf("the task form: code %d, error %+v; want it refused at stage status", code, e.Error)
+	}
+}
+
+// A status the format does not define is not one a write accepts, and the refusal
+// says what it found: the package is not sealed, superseded or archived, and
+// nothing supersedes it.
+func TestAStatusTheFormatDoesNotDefineIsRefusedByName(t *testing.T) {
+	for _, status := range []string{"weird", "Draft"} {
+		root := newRepo(t)
+		setStatus(t, pkgDir(root, "09_agent_mode"), status)
+		e, code, _ := run(t, "--dir", root, "09", "--task", "1", "--state", "in_progress", "--dry-run")
+		if code != cli.ExitFailed || e.Error == nil || e.Error.Stage != "status" || e.Error.Category != "lifecycle" {
+			t.Errorf("%q: code %d, error %+v; want it refused at stage status", status, code, e.Error)
+			continue
+		}
+		if !strings.Contains(e.Error.Message, `"`+status+`"`) || strings.Contains(e.Error.Message, "supersedes it") {
+			t.Errorf("%q: message %q; want it to name the status, and not to say a new package supersedes it", status, e.Error.Message)
+		}
 	}
 }

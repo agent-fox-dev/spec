@@ -101,7 +101,7 @@ construct to its v2 form.
               "state": "pending", "depends_on": [1] },
     "sections": ["prd", "requirements", "test_spec", "tasks"],
     "tokens": 1191,
-    "tasks": [ { "id": 1, "title": "Detect agent mode and keep stdout JSON-only", "kind": "implement", "state": "pending" }, … ],
+    "tasks": [ { "id": 1, "title": "Detect agent mode and keep stdout JSON-only", "kind": "implement", "state": "pending", "ready": true }, … ],
     "markdown": "> The package `09_agent_mode`, scoped to task 2: …"
   },
   "next": [ { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "3"],
@@ -173,9 +173,15 @@ active with a drifted `## Intent`), a whole render with a task in progress, or w
 no task is left. `specr` suggests no release (`--state pending`), which it cannot
 know an agent wants, and no lifecycle call: those are `speca`'s own `next`. The
 `speca` entry comes first, with the same `input` as the render suggestion and four
-`flags`. A `next` is present whenever a result is, a failed `--markdown-file`
-included, and absent when the package could not be loaded. The writability behind it is
-kept in a field of `specr`'s result that is never written.
+`flags`. `next` is absent when there is no task left to render and no call to make,
+and when the package could not be loaded; it is there after a failed
+`--markdown-file` write, as after a good one. The writability behind it is kept in a
+field of `specr`'s result that is never written.
+
+A call of `speca` is offered where `speca` would take the package: a draft, or an
+active package whose intent has not drifted. A package that holds a key the schema does
+not allow, or is in another format version, is offered the call all the same, as
+`speca <spec>` offers its claim, and `speca` refuses it with the reason.
 
 A whole render of the example, where no task is claimed and task 1 is ready:
 

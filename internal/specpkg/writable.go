@@ -17,9 +17,11 @@ func IntentDrift(spec *afspec.Spec) bool {
 
 // Writable reports whether a package can take a write: it is a draft, or it is
 // active and its intent has not drifted. A sealed, superseded or archived package
-// cannot, and neither can an active one whose intent drifted. speca's task and
-// status writes accept only a writable package, and specr suggests a call of
-// speca only for one, so the two ask this one question. A nil package cannot.
+// cannot, and neither can an active one whose intent drifted. speca's task form
+// accepts only a writable package, and its report and specr's next suggest a
+// claim only for one, so the two ask this one question. (The status form moves a
+// package through the lifecycle, which includes the ones that cannot take a task
+// change.) A nil package cannot.
 func Writable(spec *afspec.Spec) bool {
 	if spec == nil {
 		return false
