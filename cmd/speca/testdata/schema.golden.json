@@ -1,6 +1,6 @@
 {
   "tool": "speca",
-  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and saves the package through the library, which rewrites all of its artifacts. Without them it changes nothing. spec writes a package from an idea, specr renders one, speca reports its state.",
+  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and saves the package through the library, which rewrites all of its artifacts. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports its state.",
   "input": {
     "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list.",
     "examples": [
@@ -19,6 +19,11 @@
         "default": false,
         "description": "with --list, also list the packages under archive/, marked archived"
       },
+      "by": {
+        "type": "string",
+        "default": "",
+        "description": "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and its supersedes list gets this package's id"
+      },
       "dir": {
         "type": "string",
         "default": ".",
@@ -27,12 +32,12 @@
       "dry-run": {
         "type": "boolean",
         "default": false,
-        "description": "with the task form, run every check and report what would change, and write nothing"
+        "description": "with the task form or the status form (--status), run every check and report what would change, and write nothing"
       },
       "force": {
         "type": "boolean",
         "default": false,
-        "description": "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; it skips nothing else, and a high task_state_forced warning names each task set that way"
+        "description": "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; with the status form (--status), skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not know would be dropped; it skips nothing else, and a high task_state_forced, spec_invalid or tasks_open warning says what it skipped"
       },
       "list": {
         "type": "boolean",
@@ -54,6 +59,17 @@
         ],
         "default": "",
         "description": "the task form: the state to move the tasks to: pending, in_progress, done or dropped"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "sealed",
+          "superseded",
+          "archived"
+        ],
+        "default": "",
+        "description": "the status form: move the package to this lifecycle status: active (computes the intent hash), sealed, archived or superseded (which needs --by); archived and superseded packages are moved under archive/. A move the lifecycle does not allow is refused, with the moves that are allowed"
       },
       "task": {
         "type": "string",
@@ -769,8 +785,8 @@
     ]
   },
   "exit_codes": {
-    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, or the tasks moved",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk",
-    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, or an id the plan does not have; nothing was written"
+    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, or the status changed",
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable",
+    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that cannot replace the package; nothing was written"
   }
 }
