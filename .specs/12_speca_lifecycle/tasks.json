@@ -1,0 +1,432 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "12",
+  "spec_name": "speca_lifecycle",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./envelope/... ./internal/cli/... ./internal/specpkg/... ./cmd/speca/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "10",
+      "reason": "Provides the speca command shell (cmd/speca), the shared resolver and display rule in internal/specpkg, the report builder whose fields the status form returns, envelope.AdminResult, DecodeSpeca and TaskCounts"
+    },
+    {
+      "spec": "11",
+      "reason": "Provides the --force and --dry-run flags, envelope.Change with changes and dry_run on AdminResult, envelope.CategoryLifecycle, the unknown-key guard pattern and the task claim form that next suggests after activation"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Add ArchiveDestination and MoveUnderArchive to afspec and rebuild MoveToArchive on them",
+      "criteria": [
+        "12-REQ-1"
+      ],
+      "tests": [
+        "TS-12-1",
+        "TS-12-2",
+        "TS-12-3",
+        "TS-12-4",
+        "TS-12-5",
+        "TS-12-6",
+        "TS-12-7",
+        "TS-12-8"
+      ],
+      "steps": [
+        "Write TS-12-1..TS-12-8 in afspec/lifecycle_test.go (use copyFixture and Transition on copies to make active/sealed/archived/superseded packages at <root>/NN_name; skip the read-only cases when os.Geteuid()==0) and confirm they fail",
+        "Add ArchiveDestination(specDir, root string) (string, error): compute filepath.Join(root,\"archive\",filepath.Base(specDir)); os.Lstat it; exists → &SaveError{Msg: \"archive conflict: <path> already exists\"}; any other stat error except IsNotExist (e.g. ENOTDIR) → *SaveError wrapping it; write nothing",
+        "Add MoveUnderArchive(specDir, root string) (string, error): LoadSpec and return a load failure unchanged (*LoadError); refuse a status other than archived/superseded with *LifecycleError; call ArchiveDestination and return its *SaveError; MkdirAll(<root>/archive, 0o755) and os.Rename, each failure a *SaveError; rewrite no file",
+        "Rebuild MoveToArchive(specDir, root): LoadSpec (wrap failure as *SaveError as today), call ArchiveDestination first and return its error before any write, Transition(\"archived\", specDir) when not already archived (a superseded package included), then MoveUnderArchive; remove the copy-then-delete claim from the doc comment",
+        "Run the existing TestMoveToArchive unchanged and confirm it passes"
+      ],
+      "touches": [
+        "afspec/lifecycle.go",
+        "afspec/lifecycle_test.go"
+      ],
+      "done_when": [
+        "TestMoveToArchive passes unchanged"
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Extend envelope Change, warning codes and ErrorInfo stage docs",
+      "criteria": [
+        "12-REQ-10"
+      ],
+      "tests": [
+        "TS-12-55",
+        "TS-12-56",
+        "TS-12-57"
+      ],
+      "steps": [
+        "Write TS-12-55 (envelope), TS-12-56 (internal/cli, through Run.Warn and Run.Warnings) and TS-12-57 (go/parser import check over non-test envelope/*.go) and confirm they fail",
+        "Add Spec and Added string fields to envelope.Change (where spec 11 declares it) with `json:\"spec,omitempty\"`/`json:\"added,omitempty\"` and description tags; document the kinds status, moved and supersedes on the type",
+        "Add WarnTasksOpen = \"tasks_open\" and WarnSupersedesNotRecorded = \"supersedes_not_recorded\" in envelope/warn.go",
+        "Add aliases for both in internal/cli/warn.go and warnStages entries of \"status\" for each",
+        "Extend the ErrorInfo.Stage doc comment in envelope/error.go to list `status` and `archive`; keep envelope stdlib-only"
+      ],
+      "touches": [
+        "envelope/envelope.go",
+        "envelope/admin_result.go",
+        "envelope/warn.go",
+        "envelope/error.go",
+        "envelope/envelope_test.go",
+        "internal/cli/warn.go",
+        "internal/cli/warn_test.go"
+      ],
+      "done_when": [
+        "envelope imports only the standard library"
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Add the --status and --by flags, usage errors and schema",
+      "criteria": [
+        "12-REQ-2.2",
+        "12-REQ-2.3",
+        "12-REQ-2.4",
+        "12-REQ-2.5",
+        "12-REQ-2.6"
+      ],
+      "tests": [
+        "TS-12-10",
+        "TS-12-11",
+        "TS-12-12",
+        "TS-12-13",
+        "TS-12-14"
+      ],
+      "steps": [
+        "Write TS-12-10..TS-12-14 in cmd/speca tests (using Main against a temp spec root) and confirm they fail",
+        "Register --status and --by in cmd/speca/main.go options; extend options.validate: --status draft → usage error (message: no move leads back to draft; a package whose intent must change is superseded by a new one) with fix_hint {flag:\"--status\", valid:[active,sealed,superseded,archived]}; any other unknown value → same fix_hint",
+        "Usage errors (exit 2, stage usage, category usage, no result): superseded without --by; --by without --status superseded; --status with --task/--state, --validate or --list; --status with no positional input",
+        "Resolve --by with the shared internal/specpkg resolver (Locate) and prefix its refusals with `--by:`; refuse a --by resolving to the same directory as the input; the same-spec_id check after loading is added in task 4 (leave a clearly named hook)",
+        "Add a dispatch case in forms.go routing --status calls to a new status form function in cmd/speca/status.go (a minimal runStatus returning the correct shape for now, to be filled by later tasks; it must not write anything)",
+        "Update help text and flag descriptions, add `status` as an enum of the four values in the --schema enums, and regenerate cmd/speca/testdata/schema.golden.json with UPDATE_GOLDEN=1"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/status.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json"
+      ],
+      "depends_on": [
+        2
+      ],
+      "done_when": [
+        "--schema output equals the regenerated golden file"
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Status form core: load checks, move classification and lifecycle refusals",
+      "criteria": [
+        "12-REQ-2.1",
+        "12-REQ-3.2",
+        "12-REQ-3.3",
+        "12-REQ-3.4",
+        "12-REQ-3.5"
+      ],
+      "tests": [
+        "TS-12-16",
+        "TS-12-18",
+        "TS-12-19"
+      ],
+      "steps": [
+        "Write TS-12-16, TS-12-18 and TS-12-19 (property: a pure refusalMessage(current,target) function checked over all ordered status pairs against an independent BFS) and confirm they fail",
+        "In cmd/speca/status.go implement the load step: LoadSpec of the input and of the --by package; failure → exit 1, stage load, category input, naming the directory (and --by for the replacing package); schema_version neither 0/absent nor 2 → same stage/category with a message that speca changes the state of format version 2 packages only; --force never overrides; refuse a --by package whose spec_id equals the input's as a usage error (stage usage)",
+        "Add the `underArchive` helper (filepath.Base(filepath.Dir(abs dir)) == \"archive\") and classify a move-only call (target==status, status archived or superseded, not under archive/)",
+        "For other calls where afspec.ValidTransition(status,target) is false, refuse at stage status, category lifecycle naming package, status and target: `already <status>` when equal, else the shortest allowed chain found by breadth-first search over ValidTransition (e.g. active → archived: seal it first (`speca <spec> --status sealed`), then archive it), none when no chain exists; fix_hint {flag:\"--status\", valid: allowed_status} only when allowed_status is non-empty",
+        "Establish the pre-write check pipeline as an ordered list of check functions (load, move, target checks, unknown keys, archive destination) returning a *cli.ErrorInfo, so later tasks add their checks in order; nil result and empty next on every refusal",
+        "Use the report builder of spec 10 for allowed_status"
+      ],
+      "touches": [
+        "cmd/speca/status.go",
+        "cmd/speca/status_test.go",
+        "cmd/speca/result.go"
+      ],
+      "depends_on": [
+        3
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Activation and sealing with the unknown-key guard and the status write",
+      "criteria": [
+        "12-REQ-3.6",
+        "12-REQ-3.7",
+        "12-REQ-4.1",
+        "12-REQ-4.2",
+        "12-REQ-4.3",
+        "12-REQ-4.4",
+        "12-REQ-5"
+      ],
+      "tests": [
+        "TS-12-20",
+        "TS-12-21",
+        "TS-12-23",
+        "TS-12-24",
+        "TS-12-25",
+        "TS-12-26",
+        "TS-12-28",
+        "TS-12-29",
+        "TS-12-30",
+        "TS-12-31"
+      ],
+      "steps": [
+        "Write the ten tests (build active/sealed packages with Transition on fixture copies; add unknown keys to prd.md frontmatter or tasks.json) and confirm they fail",
+        "Activation checks: !afspec.HasIntent(PRDBody) → stage status/lifecycle, message telling the caller to add a `## Intent` section to prd.md, with `## Intent` on a line of its own, no --force override; Validate not valid → stage validate/invalid_spec naming failing rules, fix_hint.flag --force; under --force raise a high spec_invalid warning naming the rules",
+        "Sealing checks: intent drift (IntentHash set and body hash differs or no Intent) → stage status/lifecycle, no fix_hint, message says restore the activated intent or write a new package that supersedes this one; open tasks (pending/in_progress, optionals included) → stage status/lifecycle naming each task and state, fix_hint.flag --force; under --force raise a high tasks_open warning listing them",
+        "Unknown-key check (sealing, archiving, superseding, not move-only, not activation): from Validate entries with Check \"unknown_field\" refuse at stage status/lifecycle naming file and key, fix_hint.flag --force; under --force a high spec_invalid warning naming the dropped keys",
+        "Write step: set spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339) then Transition(target, dir); read the package back with LoadSpec and build the success result (report-builder fields from spec 10, intent_hash, changes [{kind:status,from,to}]) with a seam (package-level function variables) for the library calls and read-back so later tasks can stub them",
+        "Map errors: *SaveError → exit 1 stage write/disk with the library message and no result; *LifecycleError/*IntentError → stage status/lifecycle"
+      ],
+      "touches": [
+        "cmd/speca/status.go",
+        "cmd/speca/status_checks.go",
+        "cmd/speca/status_test.go"
+      ],
+      "depends_on": [
+        1,
+        4
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 6,
+      "kind": "implement",
+      "title": "Archiving, move-only calls and the archive destination check",
+      "criteria": [
+        "12-REQ-3.1",
+        "12-REQ-3.8",
+        "12-REQ-6",
+        "12-REQ-9.1"
+      ],
+      "tests": [
+        "TS-12-15",
+        "TS-12-17",
+        "TS-12-22",
+        "TS-12-32",
+        "TS-12-33",
+        "TS-12-34",
+        "TS-12-47"
+      ],
+      "steps": [
+        "Write the seven tests and confirm they fail",
+        "Add the archive destination check (last in the check order): for a move ending under archive/ from a package not under archive/, call afspec.ArchiveDestination(dir, filepath.Dir(dir)); a taken destination → stage archive, category disk, resumable false, naming the existing directory, no result",
+        "Archiving: not under archive/ → set updated_at, Transition(\"archived\"), then MoveUnderArchive(dir, holding dir); already under archive/ → Transition only; move-only → MoveUnderArchive only with no file rewritten and updated_at unchanged",
+        "Build changes in write order: {kind:status,from,to} then {kind:moved,from,to} with display paths (internal/specpkg Display); read the package back with LoadSpec from the post-move directory so spec_dir is shown by the display rule",
+        "Assert the full check order in TS-12-15 (move/target checks before unknown keys before destination), also under --dry-run (dry-run behaviour completed in task 9)"
+      ],
+      "touches": [
+        "cmd/speca/status.go",
+        "cmd/speca/status_checks.go",
+        "cmd/speca/status_test.go"
+      ],
+      "depends_on": [
+        5
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 7,
+      "kind": "implement",
+      "title": "Superseding with --by and the supersedes record",
+      "criteria": [
+        "12-REQ-7"
+      ],
+      "tests": [
+        "TS-12-35",
+        "TS-12-36",
+        "TS-12-37",
+        "TS-12-38",
+        "TS-12-39"
+      ],
+      "steps": [
+        "Write TS-12-35..TS-12-39 (TS-12-39 as a property over 1-5 repeated calls, including resumed moves) and confirm they fail",
+        "Target check: the --by package must be draft, active or sealed, else stage status/lifecycle with fix_hint.flag --by; --force never overrides",
+        "Write sequence for a sealed package: set updated_at, Supersede(<R spec_id>, dir); then add the old spec_id to the end of R.Supersedes unless present, set R.UpdatedAt and Save; then MoveUnderArchive unless already under archive/",
+        "Save of R is attempted only when R is draft, or active without drift, and has no unknown_field errors; otherwise (or on Save failure) continue and raise a low supersedes_not_recorded warning naming R's directory, the id not recorded and the reason; --force never extends to R",
+        "Move-only call (status superseded, outside archive/, --by given): skip Supersede, add the id if still missing, then move; changes in order status, supersedes, moved omitting steps that did not run, with {kind:supersedes,spec:<R id>,added:<old id>}",
+        "Reuse the unknown-key check and destination check for the old package"
+      ],
+      "touches": [
+        "cmd/speca/status.go",
+        "cmd/speca/status_supersede.go",
+        "cmd/speca/status_test.go"
+      ],
+      "depends_on": [
+        6
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 8,
+      "kind": "implement",
+      "title": "Write failures, updated_at and the resumable archive failure",
+      "criteria": [
+        "12-REQ-8.1",
+        "12-REQ-8.2",
+        "12-REQ-8.3",
+        "12-REQ-8.4",
+        "12-REQ-8.5",
+        "12-REQ-8.6",
+        "12-REQ-8.7"
+      ],
+      "tests": [
+        "TS-12-40",
+        "TS-12-41",
+        "TS-12-42",
+        "TS-12-43",
+        "TS-12-44",
+        "TS-12-45",
+        "TS-12-46"
+      ],
+      "steps": [
+        "Write the seven tests, using the seams from task 5 to stub the library call and the read-back (skip permission-based cases when uid is 0) and confirm they fail",
+        "Confirm updated_at is set (RFC 3339, UTC) on every package written, including the replacing package",
+        "Map write errors: *SaveError from Transition/Supersede/Save of the target → stage write/disk, library message, no result; *LifecycleError/*IntentError → stage status/lifecycle",
+        "MoveUnderArchive failure after a status write: exit 1, stage archive, category disk; message names the directory the package is in now, its new status and that running the same call again moves it; return a result (spec_dir at current location, new status, changes written so far) and next holding the same call against the current spec_dir with --by when superseding; summary says the status was written and the move was not",
+        "Implement Result.Resumable() bool in cmd/speca/result.go, true only for the archive-stage failure after a status write (retryable stays as RetryableFor gives)",
+        "Read-back failure after a successful write: stage load, category input, result present carrying changes",
+        "Verify the same call re-run is a move-only call changing nothing else"
+      ],
+      "touches": [
+        "cmd/speca/status.go",
+        "cmd/speca/result.go",
+        "cmd/speca/status_test.go"
+      ],
+      "depends_on": [
+        7
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 9,
+      "kind": "implement",
+      "title": "Dry run, summary sentences and next after a status call",
+      "criteria": [
+        "12-REQ-2.1",
+        "12-REQ-4.5",
+        "12-REQ-9.2",
+        "12-REQ-9.3",
+        "12-REQ-9.4",
+        "12-REQ-9.5"
+      ],
+      "tests": [
+        "TS-12-9",
+        "TS-12-27",
+        "TS-12-48",
+        "TS-12-49",
+        "TS-12-50",
+        "TS-12-51"
+      ],
+      "steps": [
+        "Write the six tests and confirm they fail",
+        "Implement --dry-run for the status form: run every check and warning as in a real call, skip every write and directory move, compute the post-write package in memory (Transition/Supersede result without saving; intent_hash from afspec.ComputeIntentHash), report result.dry_run true and the same changes; no file or modification time changes",
+        "Summaries: `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <display path>`, `speca: superseded <name> by <spec_id>, moved to <display path>`, `speca: moved <name> to <display path>`; suffix ` (dry run; nothing written)` under --dry-run",
+        "next after a call: after active, the claim `speca <spec_dir> --task N --state in_progress` for next_task when ready; after sealed, archived, superseded, move-only and refusals, nothing; under --dry-run, the same call without --dry-run keeping --force and --by",
+        "Confirm --force is accepted on the form without usage error (TS-12-9)"
+      ],
+      "touches": [
+        "cmd/speca/status.go",
+        "cmd/speca/result.go",
+        "cmd/speca/status_test.go"
+      ],
+      "depends_on": [
+        8
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 10,
+      "kind": "implement",
+      "title": "Report-form lifecycle suggestions and documentation",
+      "criteria": [
+        "12-REQ-9.6",
+        "12-REQ-9.7",
+        "12-REQ-9.8"
+      ],
+      "tests": [
+        "TS-12-52",
+        "TS-12-53",
+        "TS-12-54"
+      ],
+      "steps": [
+        "Write TS-12-52, TS-12-53 and TS-12-54 (property over generated packages: run the suggested --status call and require exit 0) and confirm they fail",
+        "In the report form's next (cmd/speca/report.go), for a draft whose Validate is valid and body has HasIntent, add `speca <spec_dir> --status active` before any task suggestion; for an active package with no pending/in_progress task add `speca <spec_dir> --status sealed`; leave the --list form unchanged",
+        "Copy the checks' own conditions (including drift and unknown keys for sealing) so a suggestion never leads to a refusal; if drift or unknown keys exist, do not suggest",
+        "Update docs: docs/speca.md (--status form, checks, errors, warnings, --by, resuming), README.md and docs/architecture.md (lifecycle changes now have a command), docs/api.md (ArchiveDestination, MoveUnderArchive, Change fields, warning codes), afspec/README.md lifecycle table (add the two functions, update MoveToArchive row)",
+        "Run make doc and commit docs/generated/; run make lint and make test"
+      ],
+      "touches": [
+        "cmd/speca/report.go",
+        "cmd/speca/report_test.go",
+        "docs/speca.md",
+        "docs/api.md",
+        "docs/architecture.md",
+        "README.md",
+        "afspec/README.md",
+        "docs/generated/"
+      ],
+      "depends_on": [
+        9
+      ],
+      "state": "pending",
+      "optional": false
+    },
+    {
+      "id": 11,
+      "kind": "integration",
+      "title": "Verify the lifecycle paths end to end",
+      "tests": [
+        "TS-12-58",
+        "TS-12-59",
+        "TS-12-60",
+        "TS-12-61",
+        "TS-12-62"
+      ],
+      "steps": [
+        "Write the five smoke tests against the real Main, internal/specpkg, afspec, internal/cli and envelope (skip TS-12-62 as uid 0)",
+        "Trace 12-PATH-1..12-PATH-5 through the real code (resolver → load → checks → afspec call → read-back → envelope); confirm each step calls the next and no stub remains",
+        "Confirm each contract result is consumed in production code: MoveUnderArchive and ArchiveDestination by cmd/speca, Change.Spec/Added by the status form, WarnTasksOpen and WarnSupersedesNotRecorded by Run.Warn, Result.Resumable by Run.Envelope",
+        "Confirm the entry points owned by specs 10 and 11 (Main dispatch, resolver, --force/--dry-run flags, task claim form) are called from production code",
+        "Search every file in the touches of all tasks for panic(\"not implemented\"), TODO, and bare return nil on non-trivial paths and remove any that remain",
+        "Run make test and make lint"
+      ],
+      "touches": [
+        "cmd/speca/smoke_test.go"
+      ],
+      "depends_on": [
+        10
+      ],
+      "done_when": [
+        "`make test` and `make lint` pass"
+      ],
+      "state": "pending",
+      "optional": false
+    }
+  ]
+}

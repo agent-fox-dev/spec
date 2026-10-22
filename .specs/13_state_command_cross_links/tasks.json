@@ -1,0 +1,268 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "13",
+  "spec_name": "state_command_cross_links",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./internal/cli/... ./internal/specpkg/... ./cmd/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "10_speca_state_report",
+      "reason": "provides cmd/speca with its help, description, schema golden and docs/speca.md, internal/specpkg where IntentDrift and Writable go, and TaskInfo.ready"
+    },
+    {
+      "spec": "11_speca_task_states",
+      "reason": "provides the claim and done calls specr suggests, the writable-package rule and the private intentDrift helper moved into internal/specpkg"
+    },
+    {
+      "spec": "12_speca_lifecycle",
+      "reason": "edits speca's help, schema golden and docs/speca.md before this spec; this spec's changes apply on top and the golden is regenerated after them"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Add cli.SiblingCommands and name the siblings in spec and specr help, doc comments and specr --schema",
+      "criteria": [
+        "13-REQ-1",
+        "13-REQ-2.3",
+        "13-REQ-3.1"
+      ],
+      "tests": [
+        "TS-13-1",
+        "TS-13-5",
+        "TS-13-8"
+      ],
+      "steps": [
+        "Write TS-13-1, TS-13-5 and TS-13-8 and confirm they fail",
+        "Add to internal/cli an untyped const SiblingCommands = \"spec writes a package from an idea, specr renders one, speca reports and changes its state.\" (new file internal/cli/siblings.go), the only place the sentence is written in non-test Go",
+        "In cmd/spec/main.go build the usage const by concatenation so that the constant sits on its own line, blank line before and after, between the title line and `Usage:`; leave the rest of the help unchanged",
+        "Do the same in cmd/specr/main.go, and reword the help paragraph on the output so `next` names the task to render after this one and, when the package can take the change, the speca call that claims the rendered task or records it done; keep the text `specr <spec> --task N`",
+        "Set specr's description for --schema to existing sentence + \" \" + cli.SiblingCommands",
+        "Add one sentence to the package doc comments of cmd/spec and cmd/specr naming the other two commands",
+        "Regenerate cmd/specr/testdata/schema.golden.json with UPDATE_GOLDEN=1 go test -run '^TestSchemaGolden$' ./cmd/specr and confirm only the description value changed"
+      ],
+      "touches": [
+        "internal/cli/siblings.go",
+        "cmd/spec/main.go",
+        "cmd/specr/main.go",
+        "cmd/specr/testdata/schema.golden.json",
+        "cmd/spec/main_test.go",
+        "cmd/specr/main_test.go",
+        "cmd/specr/schema_test.go",
+        "internal/cli/app_test.go"
+      ],
+      "done_when": [
+        "go test ./cmd/spec ./cmd/specr ./internal/cli -count=1 passes"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Name the siblings in speca help, doc comment and --schema; verify all three commands and both goldens",
+      "criteria": [
+        "13-REQ-2.1",
+        "13-REQ-2.2",
+        "13-REQ-2.4",
+        "13-REQ-2.5",
+        "13-REQ-3.2",
+        "13-REQ-3.3"
+      ],
+      "tests": [
+        "TS-13-2",
+        "TS-13-3",
+        "TS-13-4",
+        "TS-13-6",
+        "TS-13-7",
+        "TS-13-9",
+        "TS-13-10"
+      ],
+      "steps": [
+        "Write TS-13-2, TS-13-3, TS-13-4, TS-13-6, TS-13-7, TS-13-9 and TS-13-10 and confirm they fail",
+        "In cmd/speca/main.go replace the literal sibling line in the help with cli.SiblingCommands placed between the title line and `Usage:` with blank lines on each side; drop any wording 'speca reports its state'",
+        "Set speca's --schema description to its own sentence + \" \" + cli.SiblingCommands, replacing the literal sibling sentence",
+        "Add one sentence to the cmd/speca package doc comment naming spec and specr",
+        "Change any existing speca test that asserts 'speca reports its state' to assert cli.SiblingCommands",
+        "Write the sentence-scan test (TS-13-2) walking the repo for non-test .go files; the package-doc test (TS-13-7) uses go/parser with doc sentence splitting for cmd/spec, cmd/specr and cmd/speca",
+        "Write the -h/--help and bare-invocation tests (TS-13-3, TS-13-4) running spec, specr and speca Main in process with captured stdout/stderr",
+        "Regenerate cmd/speca/testdata/schema.golden.json with UPDATE_GOLDEN=1 after spec 12's changes; confirm only description differs; TS-13-10 compares both goldens, checks the description suffix and that no writable key appears"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "cmd/spec/main_test.go",
+        "cmd/specr/main_test.go",
+        "internal/cli/siblings_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "done_when": [
+        "go test ./cmd/... ./internal/cli -count=1 passes without UPDATE_GOLDEN"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Add specpkg.IntentDrift and Writable and make speca use them",
+      "criteria": [
+        "13-REQ-4.1",
+        "13-REQ-4.2",
+        "13-REQ-4.3",
+        "13-REQ-4.4"
+      ],
+      "tests": [
+        "TS-13-11",
+        "TS-13-12",
+        "TS-13-13",
+        "TS-13-14"
+      ],
+      "steps": [
+        "Write TS-13-11, TS-13-12 (property over statuses x hash set/unset x body match/mismatch/no ## Intent), TS-13-13 and TS-13-14 and confirm they fail",
+        "In internal/specpkg add writable.go with IntentDrift(spec *afspec.Spec) bool: false for nil; true exactly when Status is active, IntentHash non-nil and afspec.ComputeIntentHash(spec.PRDBody) errors or differs",
+        "Add Writable(spec *afspec.Spec) bool: false for nil; draft, or active with !IntentDrift",
+        "Replace every use of the private intentDrift helper in cmd/speca (report intent_drift, task form status refusal, report and list claim suggestions) with specpkg.IntentDrift / specpkg.Writable and delete the helper",
+        "Confirm no non-test file in cmd/speca calls afspec.ComputeIntentHash or declares intentDrift, and speca's existing tests still pass unchanged"
+      ],
+      "touches": [
+        "internal/specpkg/writable.go",
+        "internal/specpkg/writable_test.go",
+        "cmd/speca/report.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/list.go",
+        "cmd/speca/verdict.go",
+        "cmd/speca/writable_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "done_when": [
+        "go test ./internal/specpkg ./cmd/speca -count=1 passes"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Keep writability in specr's Result and add the speca claim to next after a whole render",
+      "criteria": [
+        "13-REQ-4.5",
+        "13-REQ-5"
+      ],
+      "tests": [
+        "TS-13-15",
+        "TS-13-16",
+        "TS-13-17",
+        "TS-13-18",
+        "TS-13-19",
+        "TS-13-20",
+        "TS-13-21",
+        "TS-13-22"
+      ],
+      "steps": [
+        "Write TS-13-15 to TS-13-22 and confirm they fail; TS-13-22 is a property test comparing specr's whole-render claim with speca's report claim over generated package states",
+        "Add an unexported field writable bool to Result in cmd/specr/render.go and set it in execute() in cmd/specr/main.go once, after afspec.LoadSpec succeeds, from specpkg.Writable(spec); confirm schema golden and JSON are unaffected",
+        "In (*Result).Next, for a whole render (r.Task nil), find the first unfinished task M as today; when writable, no task in r.Tasks is in_progress, and M is pending with Ready, prepend cli.Next{Tool: \"speca\", Input: r.SpecDir, Flags: [\"--task\",id,\"--state\",\"in_progress\"], Why} naming the task id and title, saying it is the next ready task and to claim it before working on it so that no other agent takes it",
+        "Leave the render suggestion rule, flags and why unchanged and second in the list; no speca entry when nothing unfinished remains",
+        "Update existing tests TestWholePackageIsRenderCombined and TestNextSkipsDoneTasks in cmd/specr/main_test.go for the new [claim, render] result; confirm TestTaskScopedRender still holds"
+      ],
+      "touches": [
+        "cmd/specr/render.go",
+        "cmd/specr/main.go",
+        "cmd/specr/main_test.go",
+        "cmd/specr/next_test.go"
+      ],
+      "depends_on": [
+        3
+      ],
+      "done_when": [
+        "go test ./cmd/specr -count=1 passes"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Add the claim and done suggestions after a task render and verify next's shape",
+      "criteria": [
+        "13-REQ-6",
+        "13-REQ-7"
+      ],
+      "tests": [
+        "TS-13-23",
+        "TS-13-24",
+        "TS-13-25",
+        "TS-13-26",
+        "TS-13-27",
+        "TS-13-28",
+        "TS-13-29",
+        "TS-13-30",
+        "TS-13-31"
+      ],
+      "steps": [
+        "Write TS-13-23 to TS-13-31 and confirm those not already satisfied fail",
+        "In (*Result).Next, for a task render of N on a writable package: when N is pending and Ready, prepend the claim for N (Flags --task N --state in_progress, why says to claim task N before working on it) regardless of other tasks in progress; when N is in_progress, prepend the done call (--state done, why says to record task N done once its work is finished and its tests pass); add nothing for pending-not-ready, done or dropped N",
+        "Add no speca entry when the package is not writable, for any state of N",
+        "Keep the render suggestion unchanged and second, input equal to r.SpecDir, speca flags exactly four elements",
+        "Test the --markdown-file write failure (exit 1, same next as a successful render), a package that cannot load (error, no next), and byte-identical package files after whole and task renders",
+        "Test the render suggestion why strings and absence when no unfinished task follows N"
+      ],
+      "touches": [
+        "cmd/specr/render.go",
+        "cmd/specr/next_test.go",
+        "cmd/specr/main_test.go"
+      ],
+      "depends_on": [
+        4
+      ],
+      "done_when": [
+        "go test ./cmd/specr -count=1 passes"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "integration",
+      "title": "Verify the claim, done and help paths end to end and update the docs",
+      "tests": [
+        "TS-13-32",
+        "TS-13-33",
+        "TS-13-34"
+      ],
+      "steps": [
+        "Write TS-13-32, TS-13-33 and TS-13-34 against real specr and speca Main entry points and a temp repository on disk and confirm they pass",
+        "Trace 13-PATH-1, 13-PATH-2 and 13-PATH-3 through the real code: specr loads the package, calls specpkg.Writable, emits next from Result.Next(); speca consumes the same flags and accepts the call; confirm each step calls the next and no stub remains",
+        "Confirm specpkg.Writable and IntentDrift results are consumed by both cmd/specr and cmd/speca in production code, not only tests, and cli.SiblingCommands is referenced by all three commands",
+        "Search every touched file for panic(\"not implemented\"), TODO, and bare return nil on non-trivial paths and remove any",
+        "Update docs: docs/specr.md (introduction names spec and speca, `artifacts` and `next` section describes the speca entries, JSON example's next matches what its render produces, 'Calling it from an agent' uses the af-impl block from the PRD); docs/speca.md (same af-impl block, says specr's next suggests the claim and done calls); docs/cli.md companion paragraph naming specr and speca with both links; README.md sentence on specr's next; docs/architecture.md sentence on cli.SiblingCommands and internal/specpkg writability; docs/api.md unchanged",
+        "Run make doc and commit docs/generated/, then make check"
+      ],
+      "touches": [
+        "cmd/specr/smoke_test.go",
+        "docs/specr.md",
+        "docs/speca.md",
+        "docs/cli.md",
+        "README.md",
+        "docs/architecture.md",
+        "docs/generated/"
+      ],
+      "depends_on": [
+        2,
+        5
+      ],
+      "done_when": [
+        "make test and make lint pass",
+        "make doc leaves docs/generated up to date"
+      ],
+      "state": "pending"
+    }
+  ]
+}

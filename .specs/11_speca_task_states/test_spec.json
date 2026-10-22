@@ -1,0 +1,1051 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "11",
+  "spec_name": "speca_task_states",
+  "schema_version": 2,
+  "tests": [
+    {
+      "id": "TS-11-1",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.1"
+      ],
+      "title": "A valid task form resolves the input, splits comma lists and collapses duplicate ids",
+      "given": [
+        "a repo with a draft v2 package 09_agent_mode having tasks 1, 2, 3"
+      ],
+      "when": "speca 09 --task 1,2 --task 2 --state pending --dry-run is run",
+      "then": [
+        "exit code is 0",
+        "the change set and resolved ids contain 1 and 2 once each",
+        "the package was resolved as the report form resolves it"
+      ],
+      "pseudocode": "parse(['09','--task','1,2','--task','2','--state','in_progress']); assert ids == [1,2]"
+    },
+    {
+      "id": "TS-11-2",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.2"
+      ],
+      "title": "--task without --state and --state without --task are usage errors",
+      "given": [
+        "a repo with a draft package"
+      ],
+      "when": "speca 09 --task 1 and speca 09 --state done are each run",
+      "then": [
+        "both exit 2",
+        "error stage is usage and category is usage",
+        "no result is carried",
+        "tasks.json is unchanged"
+      ],
+      "pseudocode": "for argv in [['09','--task','1'],['09','--state','done']]: env=run(argv); assert env.exit==2 and env.error.stage=='usage' and env.result==nil"
+    },
+    {
+      "id": "TS-11-3",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.3"
+      ],
+      "title": "A --state outside the four states is refused with the valid states as fix_hint",
+      "given": [
+        "a repo with a draft package"
+      ],
+      "when": "speca 09 --task 1 --state finished is run",
+      "then": [
+        "exit 2, stage usage, category usage",
+        "fix_hint.flag is --state",
+        "fix_hint.valid is [pending, in_progress, done, dropped]",
+        "nothing is written"
+      ],
+      "pseudocode": "env=run(['09','--task','1','--state','finished']); assert env.error.fix_hint == {flag:'--state', valid:[four]}"
+    },
+    {
+      "id": "TS-11-4",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.4"
+      ],
+      "title": "Invalid --task values and next/all mixed with other values are usage errors",
+      "given": [
+        "a repo with a draft package"
+      ],
+      "when": "--task is given as 0, -1, abc, an empty item (1,,2), next,1, all,2, and next together with all",
+      "then": [
+        "every call exits 2 at stage usage, category usage",
+        "nothing is written"
+      ],
+      "pseudocode": "for v in ['0','-1','abc','1,,2','next,1','all,2','next,all']: assert run(['09','--task',v,'--state','done']).exit==2"
+    },
+    {
+      "id": "TS-11-5",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.5"
+      ],
+      "title": "The task form combined with --validate or --list names two operations and is refused",
+      "given": [
+        "a repo with a draft package"
+      ],
+      "when": "speca 09 --task 1 --state in_progress --validate and speca --list --task 1 --state done are run",
+      "then": [
+        "both exit 2 at stage usage, category usage",
+        "nothing is written"
+      ],
+      "pseudocode": "assert run(['09','--task','1','--state','done','--validate']).exit==2"
+    },
+    {
+      "id": "TS-11-6",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.6"
+      ],
+      "title": "No positional, two positionals, `-`, a URL or a multi-line input are usage errors in the task form",
+      "given": [
+        "a repo with a draft package"
+      ],
+      "when": "the task form is run with no input, with two inputs, with `-`, with https://example.com/x/issues/1, and with an input containing a newline",
+      "then": [
+        "each exits 2 at stage usage, category usage",
+        "nothing is written"
+      ],
+      "pseudocode": "for inp in [[],['a','b'],['-'],['https://example.com/x/issues/1'],['a\\nb']]: assert run(inp+['--task','1','--state','done']).exit==2"
+    },
+    {
+      "id": "TS-11-7",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.7"
+      ],
+      "title": "--force or --dry-run without --task is a usage error",
+      "given": [
+        "a repo with a draft package"
+      ],
+      "when": "speca 09 --force and speca 09 --dry-run are run",
+      "then": [
+        "both exit 2 at stage usage, category usage"
+      ],
+      "pseudocode": "assert run(['09','--force']).exit==2; assert run(['09','--dry-run']).exit==2"
+    },
+    {
+      "id": "TS-11-8",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-1.8"
+      ],
+      "title": "A package that fails to load stops the task form as in the report form",
+      "given": [
+        "a repo whose package 09 has malformed tasks.json"
+      ],
+      "when": "speca 09 --task 1 --state in_progress is run",
+      "then": [
+        "exit 1",
+        "error stage is load and category is input",
+        "no result is carried"
+      ],
+      "pseudocode": "env=run(...); assert env.exit==1 and env.error.stage=='load' and env.error.category=='input' and env.result==nil"
+    },
+    {
+      "id": "TS-11-9",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-2.1"
+      ],
+      "title": "Unknown task ids are refused, all named, with every plan id as fix_hint",
+      "given": [
+        "a package with tasks 1, 2, 3"
+      ],
+      "when": "speca 09 --task 2,7,9 --state done is run",
+      "then": [
+        "exit 2, stage usage, category usage",
+        "message names the package and ids 7 and 9",
+        "fix_hint is {flag: --task, valid: [1,2,3]}",
+        "tasks.json is unchanged"
+      ],
+      "pseudocode": "env=run(...); assert '7' in msg and '9' in msg; assert fix_hint.valid==['1','2','3']"
+    },
+    {
+      "id": "TS-11-10",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-2.1"
+      ],
+      "title": "An unknown id on a plan with no tasks says so and has no fix_hint",
+      "given": [
+        "a package whose tasks array is empty"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run",
+      "then": [
+        "exit 2, stage usage, category usage",
+        "message says the plan has no tasks",
+        "fix_hint is absent"
+      ],
+      "pseudocode": "env=run(...); assert env.exit==2 and env.error.fix_hint==nil"
+    },
+    {
+      "id": "TS-11-11",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-2.2"
+      ],
+      "title": "--task next with no next task is refused with a reason matching the plan",
+      "given": [
+        "plan A where every task is done or dropped",
+        "plan B where pending task 2 depends on task 1 that is dropped, and no task is in progress"
+      ],
+      "when": "speca <spec> --task next --state in_progress is run on each",
+      "then": [
+        "both exit 2 at stage usage, category usage",
+        "plan A message says every task is done or dropped and has no fix_hint",
+        "plan B message says no pending task has its dependencies done and fix_hint is {flag: --task, valid: [pending ids]}"
+      ],
+      "pseudocode": "assert A.fix_hint==nil; assert B.fix_hint.valid==['2']"
+    },
+    {
+      "id": "TS-11-12",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-2.3"
+      ],
+      "title": "--task all on a plan with no tasks is refused naming the package",
+      "given": [
+        "a package whose tasks array is empty"
+      ],
+      "when": "speca <spec> --task all --state done is run",
+      "then": [
+        "exit 2, stage usage, category usage",
+        "message names the package"
+      ],
+      "pseudocode": "env=run(['<spec>','--task','all','--state','done']); assert env.exit==2"
+    },
+    {
+      "id": "TS-11-13",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-2.4"
+      ],
+      "title": "A package of format version other than 2 is refused with or without --force",
+      "given": [
+        "a package whose schema_version is 1"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run, then again with --force",
+      "then": [
+        "both exit 2 at stage usage, category usage",
+        "message says speca writes format version 2 only and a save would discard the v1 plan",
+        "all package files are byte-identical"
+      ],
+      "pseudocode": "for extra in [[],['--force']]: assert run(base+extra).exit==2; assert bytes_unchanged()"
+    },
+    {
+      "id": "TS-11-14",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-2.5"
+      ],
+      "title": "--task next resolves to the id NextTask returns, the report's next_task",
+      "given": [
+        "a draft package with task 1 pending and task 2 pending depending on 1"
+      ],
+      "when": "speca <spec> --task next --state in_progress is run",
+      "then": [
+        "exit 0",
+        "changes holds task 1 only",
+        "the report's next_task before the call was task 1"
+      ],
+      "pseudocode": "assert report.next_task==1; env=run(next form); assert env.result.changes[0].id==1"
+    },
+    {
+      "id": "TS-11-15",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-2.6"
+      ],
+      "title": "--task all skips tasks already in the target state and dropped tasks, in plan order",
+      "given": [
+        "tasks 1 done, 2 in_progress, 3 dropped, 4 in_progress",
+        "target state is done"
+      ],
+      "when": "speca <spec> --task all --state done is run",
+      "then": [
+        "exit 0",
+        "changes are task 2 and task 4 in_progress → done, in plan order",
+        "tasks 1 (already done) and 3 (dropped) are not in changes"
+      ],
+      "pseudocode": "run('all','done'); assert [c.id for c in changes]==[2,4]"
+    },
+    {
+      "id": "TS-11-16",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-2.7",
+        "11-REQ-7.3"
+      ],
+      "title": "--task all resolving to nothing succeeds with no changes and writes nothing",
+      "given": [
+        "every task is done or dropped",
+        "package files recorded byte-for-byte"
+      ],
+      "when": "speca <spec> --task all --state done is run",
+      "then": [
+        "exit 0",
+        "changes is empty",
+        "summary is `speca: <dir name> no task changed`",
+        "files and updated_at are byte-identical"
+      ],
+      "pseudocode": "before=snapshot(dir); env=run(...); assert env.exit==0 and env.result.changes==[] and snapshot(dir)==before"
+    },
+    {
+      "id": "TS-11-17",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-2.8",
+        "11-REQ-3.5"
+      ],
+      "title": "An explicit id already in the target state is judged by the machine and refused",
+      "given": [
+        "task 1 is in_progress"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run",
+      "then": [
+        "exit 1, stage task, category lifecycle",
+        "tasks.json is unchanged"
+      ],
+      "pseudocode": "env=run(...); assert env.exit==1 and env.error.stage=='task' and env.error.category=='lifecycle'"
+    },
+    {
+      "id": "TS-11-18",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-3.1"
+      ],
+      "title": "Allowed moves of several tasks are checked together and applied in plan order",
+      "given": [
+        "tasks 1 and 3 pending, 2 in_progress"
+      ],
+      "when": "speca <spec> --task 3,1 --state in_progress is run",
+      "then": [
+        "exit 0",
+        "changes list task 1 then task 3 (plan order)",
+        "tasks.json holds both in_progress"
+      ],
+      "pseudocode": "assert [c.id for c in changes]==[1,3]; assert disk states[1],[3]=='in_progress'"
+    },
+    {
+      "id": "TS-11-19",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-3.2",
+        "11-REQ-3.3"
+      ],
+      "title": "A refused move refuses the whole call, names every refused task and carries the first refused task's targets",
+      "given": [
+        "task 1 pending, task 2 in_progress, task 3 done"
+      ],
+      "when": "speca <spec> --task 1,2,3 --state done is run",
+      "then": [
+        "exit 1, stage task, category lifecycle",
+        "message names tasks 1 and 3 with current state and target, cites §8.3.1, and lists each one's allowed targets",
+        "fix_hint is {flag: --state, valid: [in_progress, dropped]}",
+        "tasks.json is unchanged, so task 2 stays in_progress"
+      ],
+      "pseudocode": "assert fix_hint.valid==['in_progress','dropped']; assert disk_state(2)=='in_progress'"
+    },
+    {
+      "id": "TS-11-20",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-3.4"
+      ],
+      "title": "A refused dropped task has no fix_hint and the message names --force as the way out",
+      "given": [
+        "task 3 is dropped"
+      ],
+      "when": "speca <spec> --task 3 --state in_progress is run",
+      "then": [
+        "exit 1, stage task, category lifecycle",
+        "fix_hint is absent",
+        "message says --force with done or pending is the only way out"
+      ],
+      "pseudocode": "assert env.error.fix_hint==nil and '--force' in env.error.message"
+    },
+    {
+      "id": "TS-11-21",
+      "kind": "property",
+      "verifies": [
+        "11-REQ-3.6"
+      ],
+      "title": "A call applies every named move or none, never a subset",
+      "given": [
+        "a temp package per generated plan"
+      ],
+      "when": "for any plan of 1-8 tasks with arbitrary states and dependencies, any non-empty set of existing ids and any target state, with and without --force",
+      "then": [
+        "either every named task not already skipped has changed to its target, or tasks.json is byte-identical to before",
+        "a refused call changes no task"
+      ],
+      "pseudocode": "for plan,ids,target,force in gen(): before=snap(); env=run(); assert env.exit==0 or snap()==before; if env.exit==0: assert all(disk[i] in (target, before_state[i]) for i in ids) and all(disk[i]==target for i in changed)"
+    },
+    {
+      "id": "TS-11-22",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-4.1"
+      ],
+      "title": "Sealed, superseded and archived packages are refused at stage status",
+      "given": [
+        "three packages with status sealed, superseded, archived and a pending task each"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run on each",
+      "then": [
+        "each exits 1, stage status, category lifecycle",
+        "no fix_hint",
+        "message says tasks can no longer change and a change is a new package that supersedes it",
+        "files are unchanged"
+      ],
+      "pseudocode": "for st in [sealed,superseded,archived]: env=run(); assert env.error.stage=='status' and env.error.fix_hint==nil"
+    },
+    {
+      "id": "TS-11-23",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-4.2"
+      ],
+      "title": "An active package with intent drift, or with a body lacking ## Intent, is refused at stage status before moves are checked",
+      "given": [
+        "an active package whose PRD intent was edited after activation",
+        "an active package whose body lost its ## Intent while intent_hash is set",
+        "the call also names an unknown id"
+      ],
+      "when": "speca <spec> --task 99 --state done is run on each",
+      "then": [
+        "each exits 1, stage status, category lifecycle (not the usage error for the unknown id)",
+        "no fix_hint",
+        "message says the library refuses every write until the intent matches its hash again"
+      ],
+      "pseudocode": "assert env.exit==1 and env.error.stage=='status'"
+    },
+    {
+      "id": "TS-11-24",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-4.3"
+      ],
+      "title": "Status refusals are identical with --dry-run and with --force",
+      "given": [
+        "a sealed package and an active package with intent drift"
+      ],
+      "when": "the task form is run on each plain, with --dry-run and with --force",
+      "then": [
+        "exit code, stage, category and message are the same in all three variants",
+        "files are unchanged"
+      ],
+      "pseudocode": "base=run(a); for extra in ['--dry-run','--force']: assert same(base, run(a+[extra]))"
+    },
+    {
+      "id": "TS-11-25",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-4.4",
+        "11-REQ-7.2"
+      ],
+      "title": "Save errors are mapped: *LifecycleError/*IntentError to status, *SaveError to write with its guidance",
+      "given": [
+        "the save step is stubbed to return a *LifecycleError, an *IntentError, then a *SaveError"
+      ],
+      "when": "the task form runs a change that would be written",
+      "then": [
+        "lifecycle and intent errors give exit 1, stage status, category lifecycle",
+        "the save error gives exit 1, stage write, category disk, retryable false",
+        "write message says failure on temp files leaves the package unchanged, a failure during renames may leave some files updated, and to run `speca <spec>`"
+      ],
+      "pseudocode": "stub.save=err; env=run(); assert (env.error.stage,env.error.category)==expected; assert env.retryable==false for SaveError"
+    },
+    {
+      "id": "TS-11-26",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-4.5"
+      ],
+      "title": "Drafts and active packages without drift take task changes",
+      "given": [
+        "a draft package",
+        "an active package whose intent matches its hash"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run on each",
+      "then": [
+        "both exit 0",
+        "tasks.json holds task 1 in_progress in each"
+      ],
+      "pseudocode": "for p in [draft, active]: assert run(p).exit==0 and disk_state(p,1)=='in_progress'"
+    },
+    {
+      "id": "TS-11-27",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-5.1"
+      ],
+      "title": "--force makes refused moves to done or pending with the bypasses and allowed moves with the machine",
+      "given": [
+        "task 1 pending, task 2 dropped, target pending, then task 3 pending and task 4 in_progress with target done"
+      ],
+      "when": "speca <spec> --task 1,2 --state pending --force and speca <spec> --task 3,4 --state done --force are run",
+      "then": [
+        "task 2 dropped → pending is made",
+        "task 4 in_progress → done is made as an ordinary move without forced flag",
+        "task 3 pending → done is made through the bypass",
+        "tasks.json holds the new states"
+      ],
+      "pseudocode": "assert states after == expected; assert change(4).forced is absent"
+    },
+    {
+      "id": "TS-11-28",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-5.2"
+      ],
+      "title": "Each bypassed task has a high task_state_forced warning and a forced change entry",
+      "given": [
+        "tasks 2 and 3 are dropped, task 1 pending"
+      ],
+      "when": "speca <spec> --task 1,2,3 --state pending --force is run",
+      "then": [
+        "warnings contain one task_state_forced per bypassed task (2 and 3), severity high, stage task, with from and to states",
+        "changes for tasks 2 and 3 carry forced true",
+        "task 1 has no warning"
+      ],
+      "pseudocode": "assert count(w.code=='task_state_forced')==2 and all(w.severity=='high' and w.stage=='task')"
+    },
+    {
+      "id": "TS-11-29",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-5.3"
+      ],
+      "title": "--force on a task already in the target state produces neither change nor warning",
+      "given": [
+        "task 1 is done"
+      ],
+      "when": "speca <spec> --task 1 --state done --force is run",
+      "then": [
+        "exit 0",
+        "changes is empty",
+        "no task_state_forced warning"
+      ],
+      "pseudocode": "assert env.result.changes==[] and no warning with that code"
+    },
+    {
+      "id": "TS-11-30",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-5.4"
+      ],
+      "title": "--force does not bypass the machine for in_progress or dropped",
+      "given": [
+        "task 1 is done and task 2 is dropped"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress --force and speca <spec> --task 2 --state dropped --force are run",
+      "then": [
+        "both exit 1, stage task, category lifecycle",
+        "message says --force cannot set in_progress or dropped",
+        "tasks.json is unchanged"
+      ],
+      "pseudocode": "assert 'cannot set in_progress or dropped' in msg"
+    },
+    {
+      "id": "TS-11-31",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-5.5"
+      ],
+      "title": "--force skips no usage error, status refusal or legacy-version refusal",
+      "given": [
+        "a draft package, a sealed package and a v1 package"
+      ],
+      "when": "each is run with --force: an unknown id on the draft, a valid task on the sealed, a valid task on the v1",
+      "then": [
+        "the draft call exits 2 at stage usage",
+        "the sealed call exits 1 at stage status",
+        "the v1 call exits 2 at stage usage",
+        "nothing is written in any"
+      ],
+      "pseudocode": "assert exits == [2,1,2] and stages == ['usage','status','usage']"
+    },
+    {
+      "id": "TS-11-32",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-6.1"
+      ],
+      "title": "Claiming a not-ready task goes ahead with a low task_not_ready warning naming the open dependencies",
+      "given": [
+        "task 2 pending depends on task 1 which is pending"
+      ],
+      "when": "speca <spec> --task 2 --state in_progress is run",
+      "then": [
+        "exit 0",
+        "task 2 is in_progress on disk",
+        "a warning task_not_ready, severity low, stage task, names task 2 and dependency 1"
+      ],
+      "pseudocode": "w=find(warnings,'task_not_ready'); assert w.severity=='low' and '1' in w.message"
+    },
+    {
+      "id": "TS-11-33",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-6.2"
+      ],
+      "title": "An invalid package still takes the change with one low spec_invalid warning naming the rules",
+      "given": [
+        "a package with a dangling depends_on id and no unknown keys"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run",
+      "then": [
+        "exit 0 and the change is written",
+        "one spec_invalid warning, severity low, stage validate, naming the distinct Check (else Category) values"
+      ],
+      "pseudocode": "assert count(spec_invalid)==1 and severity=='low' and stage=='validate'"
+    },
+    {
+      "id": "TS-11-34",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-6.3"
+      ],
+      "title": "Unknown keys that the write would delete refuse the call at stage validate",
+      "given": [
+        "tasks.json has an extra key `traceability` not allowed by the schema"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run without --force",
+      "then": [
+        "exit 1, stage validate, category invalid_spec",
+        "no fix_hint",
+        "message lists the artifact and key",
+        "files are byte-identical"
+      ],
+      "pseudocode": "assert env.error.stage=='validate' and 'tasks.json' in msg and 'traceability' in msg and snap==before"
+    },
+    {
+      "id": "TS-11-35",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-6.4"
+      ],
+      "title": "--force writes over unknown keys with one high spec_invalid warning naming the removed keys",
+      "given": [
+        "tasks.json has an extra unknown key"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress --force is run",
+      "then": [
+        "exit 0",
+        "the write happened and the key is gone from tasks.json",
+        "one spec_invalid warning, severity high, stage validate, naming the removed key"
+      ],
+      "pseudocode": "assert warning.severity=='high' and key in warning.message and key not in read(tasks.json)"
+    },
+    {
+      "id": "TS-11-36",
+      "kind": "property",
+      "verifies": [
+        "11-REQ-6.5"
+      ],
+      "title": "A call raises at most one spec_invalid warning",
+      "given": [
+        "packages generated with arbitrary validation failures, with or without unknown keys"
+      ],
+      "when": "for any package and any valid task call, with and without --force",
+      "then": [
+        "the warnings contain at most one with code spec_invalid"
+      ],
+      "pseudocode": "for pkg,force in gen(): env=run(); assert count(w.code=='spec_invalid')<=1"
+    },
+    {
+      "id": "TS-11-37",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-7.1"
+      ],
+      "title": "A change sets updated_at in UTC RFC 3339 and saves the package",
+      "given": [
+        "a draft package with an old updated_at"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run",
+      "then": [
+        "tasks.json holds task 1 in_progress",
+        "prd.md frontmatter updated_at parses as RFC 3339 in UTC and is within the call's time window"
+      ],
+      "pseudocode": "t0=now(); run(); ts=parse(frontmatter.updated_at); assert t0<=ts<=now() and ts.utc"
+    },
+    {
+      "id": "TS-11-38",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-7.4"
+      ],
+      "title": "A success returns the full report on the written state plus changes in plan order",
+      "given": [
+        "tasks 1 and 3 pending with no dependencies"
+      ],
+      "when": "speca <spec> --task 3,1 --state in_progress is run",
+      "then": [
+        "exit 0",
+        "result carries every report-form field computed on the state written (task counts reflect the change)",
+        "changes are [{kind task, id 1, from pending, to in_progress}, {kind task, id 3, ...}]"
+      ],
+      "pseudocode": "assert result.tasks.in_progress==2 and changes==[c1,c3]"
+    },
+    {
+      "id": "TS-11-39",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-7.5"
+      ],
+      "title": "The summary names one change, several changes or none, with the dry-run suffix",
+      "given": [
+        "a result with one change 2 pending → in_progress, one with changes 2 and 3 → done, and one with no changes"
+      ],
+      "when": "the summary is built for the dir name 11_x, with and without dry run",
+      "then": [
+        "`speca: 11_x task 2 pending → in_progress`",
+        "`speca: 11_x tasks 2, 3 → done`",
+        "`speca: 11_x no task changed`",
+        "each with ` (dry run, nothing written)` appended under --dry-run"
+      ],
+      "pseudocode": "assert summary(...)==expected"
+    },
+    {
+      "id": "TS-11-40",
+      "kind": "property",
+      "verifies": [
+        "11-REQ-7.5"
+      ],
+      "title": "The summary always starts with the speca prefix and dir name and carries the dry-run suffix iff dry run",
+      "given": [
+        "generated change lists"
+      ],
+      "when": "for any list of 0-6 distinct task ids, any target state and any dry-run flag, the summary is built",
+      "then": [
+        "it begins `speca: <dir name> `",
+        "it ends with ` (dry run, nothing written)` exactly when dry run is set",
+        "it contains `no task changed` exactly when the list is empty"
+      ],
+      "pseudocode": "for ids,to,dry in gen(): s=summary(); assert s.startswith('speca: d ') and s.endswith(SUFFIX)==dry and ('no task changed' in s)==(ids==[])"
+    },
+    {
+      "id": "TS-11-41",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-7.6",
+        "11-REQ-9.4"
+      ],
+      "title": "A refusal at status, task or validate returns the on-disk report with no changes and no next",
+      "given": [
+        "a refused claim of an in_progress task",
+        "a sealed package",
+        "a package with unknown keys without --force"
+      ],
+      "when": "each call is run",
+      "then": [
+        "each exits 1",
+        "result is present with current task states",
+        "changes is absent and the envelope next is absent"
+      ],
+      "pseudocode": "for env in refusals: assert env.result.tasks!=nil and env.result.changes==nil and env.next==nil"
+    },
+    {
+      "id": "TS-11-42",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-8.1"
+      ],
+      "title": "--dry-run runs all checks and leaves the package byte-identical",
+      "given": [
+        "a draft package with pending tasks"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress --dry-run is run",
+      "then": [
+        "exit 0",
+        "every file in the package is byte-identical afterwards, updated_at included"
+      ],
+      "pseudocode": "before=snap(); run(+'--dry-run'); assert snap()==before"
+    },
+    {
+      "id": "TS-11-43",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-8.2"
+      ],
+      "title": "--dry-run returns the would-be result with dry_run true, changes and updated_at",
+      "given": [
+        "a draft package with task 1 pending"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress --dry-run is run",
+      "then": [
+        "exit 0",
+        "result.dry_run is true",
+        "result.changes is [{task 1 pending → in_progress}]",
+        "result.updated_at is the would-be new time, not the on-disk one",
+        "summary ends with ` (dry run, nothing written)`"
+      ],
+      "pseudocode": "assert r.dry_run and r.changes[0].to=='in_progress' and r.updated_at != disk.updated_at"
+    },
+    {
+      "id": "TS-11-44",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-8.3"
+      ],
+      "title": "--dry-run returns the same refusal as the real call",
+      "given": [
+        "a refused claim (task in_progress), a sealed package, and an unknown-key package"
+      ],
+      "when": "each is run with and without --dry-run",
+      "then": [
+        "exit code, stage, category, message and fix_hint are the same in each pair"
+      ],
+      "pseudocode": "for c in cases: assert same(run(c), run(c+['--dry-run']))"
+    },
+    {
+      "id": "TS-11-45",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-8.4"
+      ],
+      "title": "A dry run suggests the same call without --dry-run, naming resolved ids and keeping --force",
+      "given": [
+        "tasks 1 and 2 pending, no dependencies"
+      ],
+      "when": "speca <spec> --task all --state in_progress --force --dry-run is run, and again on a plan with no changes",
+      "then": [
+        "next has one entry {tool speca, input spec_dir, flags [--task, 1,2, --state, in_progress, --force]}",
+        "with no changes next is empty"
+      ],
+      "pseudocode": "assert next==[{tool:'speca',flags:['--task','1,2','--state','in_progress','--force']}]"
+    },
+    {
+      "id": "TS-11-46",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-9.1"
+      ],
+      "title": "The report form suggests the claim of a ready next_task on a writable package with nothing in progress",
+      "given": [
+        "a draft package with task 1 pending and ready",
+        "an otherwise identical package with a task in_progress",
+        "a sealed package with a ready task"
+      ],
+      "when": "speca <spec> is run on each",
+      "then": [
+        "the first has next containing {tool speca, input spec_dir, flags [--task,1,--state,in_progress]}",
+        "the second and the sealed one do not contain a claim"
+      ],
+      "pseudocode": "assert claim in next(a); assert claim not in next(b) and not in next(c)"
+    },
+    {
+      "id": "TS-11-47",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-9.2"
+      ],
+      "title": "The list form suggests the claim for the first active package that is claimable",
+      "given": [
+        "active package 05 with a task in_progress",
+        "active package 07 with intent drift",
+        "active package 08 with a ready pending task and no drift",
+        "active package 09 also claimable"
+      ],
+      "when": "speca --list is run",
+      "then": [
+        "next contains the claim of package 08's ready task and none for 09"
+      ],
+      "pseudocode": "assert next==[claim('08', task)]"
+    },
+    {
+      "id": "TS-11-48",
+      "kind": "integration",
+      "verifies": [
+        "11-REQ-9.3"
+      ],
+      "title": "After a move next is the report's next on the new state",
+      "given": [
+        "task 1 pending then done-able, task 2 pending depends on 1"
+      ],
+      "when": "task 1 is claimed, then task 1 is set done",
+      "then": [
+        "after the claim next is `specr <spec_dir> --task 1`",
+        "after the done next is the claim of task 2",
+        "after the last task is done next is empty"
+      ],
+      "pseudocode": "assert next1[0].tool=='specr'; assert next2==claim(2); assert next3==[]"
+    },
+    {
+      "id": "TS-11-49",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-10.1"
+      ],
+      "title": "CategoryLifecycle is \"lifecycle\" and not retryable",
+      "given": [
+        "the envelope package"
+      ],
+      "when": "CategoryLifecycle and RetryableFor(CategoryLifecycle) are read, with RetryableFor of api and usage",
+      "then": [
+        "CategoryLifecycle == \"lifecycle\"",
+        "RetryableFor(CategoryLifecycle) is false",
+        "existing categories keep their retryability"
+      ],
+      "pseudocode": "assert CategoryLifecycle=='lifecycle' and !RetryableFor(CategoryLifecycle) and RetryableFor(CategoryAPI)"
+    },
+    {
+      "id": "TS-11-50",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-10.2"
+      ],
+      "title": "The task warning codes have their values and stage task",
+      "given": [
+        "internal/cli and envelope packages"
+      ],
+      "when": "WarnStage is asked for the two codes and the aliases are compared with the envelope constants",
+      "then": [
+        "WarnTaskNotReady == \"task_not_ready\" and WarnTaskStateForced == \"task_state_forced\"",
+        "WarnStage of each is \"task\"",
+        "the internal/cli aliases equal the envelope constants"
+      ],
+      "pseudocode": "assert cli.WarnStage(cli.WarnTaskNotReady)=='task' and cli.WarnTaskStateForced==envelope.WarnTaskStateForced"
+    },
+    {
+      "id": "TS-11-51",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-10.3"
+      ],
+      "title": "Change, changes and dry_run round-trip through DecodeSpeca and are omitted when empty",
+      "given": [
+        "an AdminResult with two changes (one forced) and dry_run true, and one without either"
+      ],
+      "when": "each is encoded to an envelope and decoded with DecodeSpeca",
+      "then": [
+        "changes and dry_run round-trip equal",
+        "the second encodes neither a changes nor a dry_run key",
+        "a Change with kind task omits unset from/to/forced fields"
+      ],
+      "pseudocode": "b=json(env); assert decode(b).changes==changes; assert 'changes' not in json(env2)"
+    },
+    {
+      "id": "TS-11-52",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-10.4"
+      ],
+      "title": "speca --help describes the task form and its flags",
+      "given": [
+        "the speca command"
+      ],
+      "when": "speca --help is run",
+      "then": [
+        "the help text mentions the task form, --task, --state, --force and --dry-run"
+      ],
+      "pseudocode": "out=run(['--help']); for k in ['--task','--state','--force','--dry-run']: assert k in out"
+    },
+    {
+      "id": "TS-11-53",
+      "kind": "unit",
+      "verifies": [
+        "11-REQ-10.5"
+      ],
+      "title": "speca --schema equals the regenerated golden file and describes the new flags, fields and exit codes",
+      "given": [
+        "cmd/speca/testdata/schema.golden.json regenerated"
+      ],
+      "when": "speca --schema --dir /nonexistent anything is run",
+      "then": [
+        "output equals the golden file byte for byte",
+        "--state is an enum of the four states",
+        "flags --task, --force, --dry-run and result fields changes and dry_run are described",
+        "exit codes 1 and 2 mention refusals"
+      ],
+      "pseudocode": "assert Main(['--schema','--dir','/nonexistent','anything']) == read(golden)"
+    },
+    {
+      "id": "TS-11-54",
+      "kind": "smoke",
+      "verifies": [
+        "11-PATH-1",
+        "11-REQ-9.1",
+        "11-REQ-9.3"
+      ],
+      "title": "An agent claims the next ready task through the report's suggestion, then finishes it",
+      "given": [
+        "a copy of a draft v2 package with task 1 pending and ready, on disk under .specs/"
+      ],
+      "when": "speca <spec> is run, then speca <spec> --task next --state in_progress, then speca <spec> --task 1 --state done",
+      "then": [
+        "the report's next holds the claim for task 1",
+        "the claim exits 0 with changes [{task 1 pending → in_progress}] and next `specr <spec_dir> --task 1`",
+        "tasks.json holds task 1 in_progress, then done",
+        "updated_at is set after each write",
+        "the done call's next is the next ready task's claim or empty"
+      ],
+      "real_components": [
+        "afspec",
+        "cmd/speca",
+        "internal/specpkg",
+        "envelope",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-11-55",
+      "kind": "smoke",
+      "verifies": [
+        "11-PATH-2",
+        "11-REQ-3.5",
+        "11-REQ-7.6"
+      ],
+      "title": "A second agent's claim of a taken task is refused with the allowed states and the on-disk report",
+      "given": [
+        "a package with task 1 in_progress on disk"
+      ],
+      "when": "speca <spec> --task 1 --state in_progress is run",
+      "then": [
+        "exit 1, stage task, category lifecycle",
+        "fix_hint is {flag: --state, valid: [pending, done]}",
+        "result carries the on-disk report without changes or next",
+        "tasks.json and prd.md are byte-identical"
+      ],
+      "real_components": [
+        "afspec",
+        "cmd/speca",
+        "internal/specpkg",
+        "envelope",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-11-56",
+      "kind": "smoke",
+      "verifies": [
+        "11-PATH-3",
+        "11-REQ-8.2",
+        "11-REQ-5.2"
+      ],
+      "title": "A dry run of a forced recovery of a dropped task, then the suggested real call",
+      "given": [
+        "a package with task 3 dropped on disk"
+      ],
+      "when": "speca <spec> --task 3 --state pending --force --dry-run is run, then the suggested call from next is run",
+      "then": [
+        "the dry run exits 0 with dry_run true, changes [{task 3 dropped → pending, forced true}], a high task_state_forced warning and files unchanged",
+        "next is `speca <spec_dir> --task 3 --state pending --force`",
+        "the real call writes the package so tasks.json holds task 3 pending"
+      ],
+      "real_components": [
+        "afspec",
+        "cmd/speca",
+        "internal/specpkg",
+        "envelope",
+        "filesystem"
+      ]
+    }
+  ]
+}

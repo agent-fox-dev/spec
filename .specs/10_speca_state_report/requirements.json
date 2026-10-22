@@ -1,0 +1,630 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "10",
+  "spec_name": "speca_state_report",
+  "schema_version": 2,
+  "introduction": "This spec adds `speca`, the read-only spec admin command, which reports a package's lifecycle and task state, gives the format's full verdict on a package, and lists every package under the spec root. It adds readiness and next-task rules to `afspec`, a shared `internal/specpkg` package used by `specr`, `speca` and `specgen`, and the public `AdminResult` output type in `envelope`.",
+  "glossary": {
+    "cross-spec rules": "The rules of afspec.ValidateCrossSpec (format v2 §10.4): unknown dependency, dependency cycle, actor, and glossary conflict.",
+    "display rule": "A package path is shown relative to --dir when it lies inside it, and absolute otherwise.",
+    "form": "One operation of speca: the report (speca <spec>), the verdict (--validate), or the list (--list).",
+    "intent drift": "An active package with an intent_hash whose PRD body no longer hashes to that value, or no longer has a ## Intent section.",
+    "next task": "The first in_progress task in plan order, otherwise the first ready task, as returned by (*TasksV2Json).NextTask.",
+    "package reference": "The single positional input of specr and speca: a path to a package directory or a file in it, or a directory name, number or name under the spec root.",
+    "program-driven path": "Any invocation other than -h/--help, --version and a bare invocation on a terminal; each writes exactly one JSON envelope to stdout.",
+    "ready task": "A pending task whose dependencies are all done; dependencies come from depends_on when present, otherwise the previous task in plan order (format v2 §8.3).",
+    "rule name": "The Check of a validation entry, or its Category when Check is empty.",
+    "spec root": "The directory holding the NN_name spec packages, resolved by afspec.ResolveSpecsDir from --specs-dir and --dir (default .specs)."
+  },
+  "requirements": [
+    {
+      "id": "10-REQ-1",
+      "title": "Readiness and the next task in afspec",
+      "rationale": "\"Ready\" and \"next\" must mean the same thing in every command and follow format v2 §8.3, not the example's shortcut.",
+      "criteria": [
+        {
+          "id": "10-REQ-1.1",
+          "pattern": "ubiquitous",
+          "system": "(*TasksV2Json).IsReady",
+          "action": "return true exactly when the task with the given id exists, its state is pending, and every one of its dependencies is done, where the dependencies are its depends_on list when the field is present (an explicitly empty list meaning none) and otherwise the task immediately before it in plan order (none for the first task)",
+          "contract": "IsReady(id int) bool"
+        },
+        {
+          "id": "10-REQ-1.2",
+          "pattern": "unwanted",
+          "condition": "a dependency id is not in the plan, or the dependency's state is dropped",
+          "system": "(*TasksV2Json).IsReady",
+          "action": "treat that dependency as not done",
+          "contract": "IsReady returns false for the dependent task"
+        },
+        {
+          "id": "10-REQ-1.3",
+          "pattern": "unwanted",
+          "condition": "the task id is not in the plan or the receiver is nil",
+          "system": "(*TasksV2Json).IsReady",
+          "action": "report the task as not ready without panicking",
+          "contract": "IsReady returns false"
+        },
+        {
+          "id": "10-REQ-1.4",
+          "pattern": "event_driven",
+          "condition": "NextTask is called on a plan that has at least one in_progress task",
+          "system": "(*TasksV2Json).NextTask",
+          "action": "return a copy of the first in_progress task in plan order, so that mutating the copy leaves the plan unchanged",
+          "contract": "(*Task, true)"
+        },
+        {
+          "id": "10-REQ-1.5",
+          "pattern": "event_driven",
+          "condition": "NextTask is called on a plan that has no in_progress task",
+          "system": "(*TasksV2Json).NextTask",
+          "action": "return a copy of the first task in plan order for which IsReady is true",
+          "contract": "(*Task, true) when such a task exists"
+        },
+        {
+          "id": "10-REQ-1.6",
+          "pattern": "unwanted",
+          "condition": "the receiver is nil, the plan is empty, or the plan has neither an in_progress task nor a ready task",
+          "system": "(*TasksV2Json).NextTask",
+          "action": "return no task without panicking",
+          "contract": "(nil, false)"
+        },
+        {
+          "id": "10-REQ-1.7",
+          "pattern": "event_driven",
+          "condition": "examples/tasks pick is called with id 0",
+          "system": "examples/tasks",
+          "action": "select the task with NextTask, and when there is none, fail with \"every task is done or dropped\" if every task is done or dropped and with \"no pending task has all its dependencies done\" otherwise",
+          "contract": "the existing examples/tasks tests pass unchanged"
+        },
+        {
+          "id": "10-REQ-1.8",
+          "pattern": "ubiquitous",
+          "system": "(*TasksV2Json).NextTask",
+          "action": "for any task plan, when NextTask returns (t, true), t is the first in_progress task in plan order, or, when no task is in progress, IsReady(t.Id) is true and no earlier task in plan order is ready"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-2",
+      "title": "Shared internal/specpkg package",
+      "rationale": "specr, speca and specgen need one copy of the resolver, task summary and report converters instead of three.",
+      "criteria": [
+        {
+          "id": "10-REQ-2.1",
+          "pattern": "ubiquitous",
+          "system": "internal/specpkg resolver",
+          "action": "resolve a package reference first as a path to a package directory or a file in it (relative to the working directory, then to --dir), then as a directory name, number or name under the spec root, reaching an archived package only by its path, with the same results specr's former locate gave",
+          "contract": "the absolute package directory, or an error"
+        },
+        {
+          "id": "10-REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "the reference is -, a URL, or multi-line, or it names no package or more than one",
+          "system": "internal/specpkg resolver",
+          "action": "refuse the reference with a usage error whose message names the caller-supplied tool, and when no live package matches but an archived one does, name that archived package in the message",
+          "contract": "*cli.UsageError with Category() \"usage\"; the message begins with the tool name passed in (specr or speca)"
+        },
+        {
+          "id": "10-REQ-2.3",
+          "pattern": "ubiquitous",
+          "system": "internal/specpkg",
+          "action": "list the NN_name directories under a root and format a package path by the display rule (relative to --dir when inside it, absolute otherwise)"
+        },
+        {
+          "id": "10-REQ-2.4",
+          "pattern": "ubiquitous",
+          "system": "internal/specpkg task summary",
+          "action": "produce one envelope.TaskInfo per task in plan order carrying id, title, kind, state, optional, a copy of depends_on, and ready set from IsReady",
+          "contract": "[]envelope.TaskInfo"
+        },
+        {
+          "id": "10-REQ-2.5",
+          "pattern": "ubiquitous",
+          "system": "internal/specpkg",
+          "action": "convert an afspec.ValidationResult into an envelope.ValidationReport and a spec's derived traceability into an envelope.TraceReport, and specgen uses these converters so that spec's result for the same package is byte-for-byte unchanged"
+        },
+        {
+          "id": "10-REQ-2.6",
+          "pattern": "ubiquitous",
+          "system": "internal/specpkg",
+          "action": "return the rule names of a set of validation entries as the distinct Check of each entry (its Category when Check is empty) in order of first appearance"
+        },
+        {
+          "id": "10-REQ-2.7",
+          "pattern": "event_driven",
+          "condition": "specr resolves and renders a package",
+          "system": "specr",
+          "action": "use the shared resolver, display rule and task summary, producing the same output as before except that each entry of result.tasks and result.task carries ready, and its regenerated schema golden file includes ready",
+          "contract": "cmd/specr tests and the regenerated cmd/specr/testdata/schema.golden.json pass"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-3",
+      "title": "The speca command and its interface",
+      "rationale": "speca must follow the single-input, single-envelope interface of spec and specr so an agent can call it the same way.",
+      "criteria": [
+        {
+          "id": "10-REQ-3.1",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "accept speca [flags] <spec> and speca --list [--all], with the flags --validate, --list, --all, --specs-dir, --dir, --schema and --version given before or after the input, and write exactly one JSON envelope with tool \"speca\" to stdout on every program-driven path",
+          "contract": "stdout decodes with envelope.DecodeSpeca; process exit code equals the envelope's exit_code"
+        },
+        {
+          "id": "10-REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "speca is invoked with -h or --help",
+          "system": "speca",
+          "action": "print help naming the forms and examples, with one line near the top saying that spec writes a package from an idea, specr renders one and speca reports its state, to stderr",
+          "contract": "exit 0; stdout empty"
+        },
+        {
+          "id": "10-REQ-3.3",
+          "pattern": "event_driven",
+          "condition": "speca is invoked with no positional input and without --list",
+          "system": "speca",
+          "action": "print the help to stderr and, when stdout is not a terminal, also write a usage envelope to stdout",
+          "contract": "exit 2"
+        },
+        {
+          "id": "10-REQ-3.4",
+          "pattern": "event_driven",
+          "condition": "speca is invoked with --version",
+          "system": "speca",
+          "action": "print speca followed by the build identity",
+          "contract": "stdout is \"speca <identity>\"; exit 0"
+        },
+        {
+          "id": "10-REQ-3.5",
+          "pattern": "event_driven",
+          "condition": "speca is invoked with --schema",
+          "system": "speca",
+          "action": "print a self-description holding tool, description (containing the sibling sentence), input with examples, flags from cli.FlagsDocument, result from cli.EnvelopeDocument without side_effects, input, model and usage, and exit_codes, without reading any package or directory",
+          "contract": "exit 0; stdout equals cmd/speca/testdata/schema.golden.json, which UPDATE_GOLDEN=1 regenerates"
+        },
+        {
+          "id": "10-REQ-3.6",
+          "pattern": "unwanted",
+          "condition": "the invocation has more than one positional input, a positional input with --list, --validate with --list, --all without --list, an input that is -, a URL or multi-line, a --dir that is not a directory, a reference naming no package or two, or an undefined flag",
+          "system": "speca",
+          "action": "refuse the call before reading any package, print the message to stderr, and write a usage envelope",
+          "contract": "exit 2; error.stage \"usage\", error.category \"usage\"; result absent"
+        },
+        {
+          "id": "10-REQ-3.7",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "write no file, make no model or network call, and read no credential or model environment variable in any form",
+          "contract": "the spec root's file tree and modification times are identical before and after any speca call"
+        },
+        {
+          "id": "10-REQ-3.8",
+          "pattern": "ubiquitous",
+          "system": "Makefile build target",
+          "action": "install ./cmd/speca with the same $(LDFLAGS) as ./cmd/spec and ./cmd/specr, and name all three commands in the build target's help line"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-4",
+      "title": "The report: speca <spec>",
+      "rationale": "An agent needs one call that tells it a package's status, validity and which task to work on.",
+      "criteria": [
+        {
+          "id": "10-REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "speca <spec> resolves and loads a package",
+          "system": "speca",
+          "action": "return in result spec_dir by the display rule, spec_id, spec_name, title, status, created_at and updated_at, plus intent_hash when set and supersedes and tags when not empty",
+          "contract": "exit 0; error absent"
+        },
+        {
+          "id": "10-REQ-4.2",
+          "pattern": "event_driven",
+          "condition": "speca <spec> reports a package",
+          "system": "speca",
+          "action": "set valid from (*Spec).Validate and, when it is false, set failing_rules to the rule names of the errors",
+          "contract": "result.valid always present; result.failing_rules present only when valid is false"
+        },
+        {
+          "id": "10-REQ-4.3",
+          "pattern": "event_driven",
+          "condition": "speca <spec> or speca <spec> --validate reports a package",
+          "system": "speca",
+          "action": "set intent_drift to true when the package is active, has an intent_hash, and its PRD body either hashes to a different value with afspec.ComputeIntentHash or has no ## Intent section, and omit intent_drift otherwise"
+        },
+        {
+          "id": "10-REQ-4.4",
+          "pattern": "event_driven",
+          "condition": "speca <spec> reports a package",
+          "system": "speca",
+          "action": "return tasks as every task in plan order in TaskInfo form (an empty list when the plan has no tasks) and task_counts with pending, in_progress, done, dropped and total, and next_task as the TaskInfo of the task NextTask returns, omitted when there is none"
+        },
+        {
+          "id": "10-REQ-4.5",
+          "pattern": "event_driven",
+          "condition": "speca <spec> reports a package",
+          "system": "speca",
+          "action": "return allowed_status as each of draft, active, sealed, superseded and archived, in that order, for which afspec.ValidTransition(status, target) holds",
+          "contract": "an empty list for a terminal status"
+        },
+        {
+          "id": "10-REQ-4.6",
+          "pattern": "event_driven",
+          "condition": "speca <spec> reports a package",
+          "system": "speca",
+          "action": "return depends_on as the spec_ids in the package's own tasks.json dependencies in file order with duplicates removed (an empty list when none), and dependents as the spec_ids of other packages under the spec root whose dependencies name this package, found with afspec.DiscoverSpecs and afspec.BuildDependencyGraph, sorted with duplicates removed"
+        },
+        {
+          "id": "10-REQ-4.7",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "for any loaded package, task_counts.total equals the length of tasks and equals the sum of pending, in_progress, done and dropped"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-5",
+      "title": "Report and verdict edge cases",
+      "rationale": "A partial answer with a warning is more useful to an agent than a failed call, except when the package itself cannot be read.",
+      "criteria": [
+        {
+          "id": "10-REQ-5.1",
+          "pattern": "unwanted",
+          "condition": "the spec root is missing, not a directory, or unreadable during speca <spec>",
+          "system": "speca",
+          "action": "omit dependents and raise a low specs_dir_unreadable warning naming the root, reporting every other field",
+          "contract": "exit 0; warnings contains code specs_dir_unreadable, severity low, stage preflight"
+        },
+        {
+          "id": "10-REQ-5.2",
+          "pattern": "unwanted",
+          "condition": "afspec.BuildDependencyGraph reports a dangling dependency",
+          "system": "speca",
+          "action": "use the partial graph it returned to compute dependents",
+          "contract": "exit 0; dependents lists the packages the partial graph names"
+        },
+        {
+          "id": "10-REQ-5.3",
+          "pattern": "unwanted",
+          "condition": "afspec.LoadSpec refuses the resolved package in the report or the verdict form",
+          "system": "speca",
+          "action": "fail the call with a message naming the package directory and the library's reason",
+          "contract": "exit 1; error.stage \"load\", error.category \"input\"; result absent"
+        },
+        {
+          "id": "10-REQ-5.4",
+          "pattern": "unwanted",
+          "condition": "the package's PRD schema_version is neither absent nor 2, in the report or the verdict form",
+          "system": "speca",
+          "action": "report whatever loaded and raise a high spec_invalid warning saying the package's tests and tasks are not read",
+          "contract": "exit 0; warnings contains code spec_invalid, severity high"
+        },
+        {
+          "id": "10-REQ-5.5",
+          "pattern": "state_driven",
+          "condition": "a format version 2 package is invalid",
+          "system": "speca",
+          "action": "raise no spec_invalid warning in the report or the verdict form, leaving the answer to valid, failing_rules and validation",
+          "contract": "warnings contains no spec_invalid entry"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-6",
+      "title": "The verdict: speca <spec> --validate",
+      "rationale": "Only a call that loads every package under the root can apply the cross-spec rules, so the full verdict is its own form.",
+      "criteria": [
+        {
+          "id": "10-REQ-6.1",
+          "pattern": "event_driven",
+          "condition": "speca <spec> --validate resolves and loads a package",
+          "system": "speca",
+          "action": "return the identity fields of the report, intent_drift, valid, validation as an envelope.ValidationReport (valid, error_count, warning_count, and each error and warning with check, artifact, entity and message) and traceability as an envelope.TraceReport (criteria_covered, criteria_uncovered, paths_covered, paths_uncovered, tests_unowned), and omit tasks, task_counts, next_task, allowed_status, depends_on, dependents and failing_rules",
+          "contract": "exit 0"
+        },
+        {
+          "id": "10-REQ-6.2",
+          "pattern": "event_driven",
+          "condition": "speca <spec> --validate runs",
+          "system": "speca",
+          "action": "combine (*Spec).Validate with afspec.ValidateCrossSpec run over every package under the spec root that loads, plus the target package when it is not among them, and a dependency graph built from those packages"
+        },
+        {
+          "id": "10-REQ-6.3",
+          "pattern": "event_driven",
+          "condition": "afspec.ValidateCrossSpec returns findings",
+          "system": "speca",
+          "action": "keep only the errors whose entity is the package's spec_id, the errors that name no entity when the package has at least one edge in the graph, and the warnings whose entity is a term defined in the package's own glossary",
+          "contract": "validation lists exactly the kept cross-spec findings after the package's own findings"
+        },
+        {
+          "id": "10-REQ-6.4",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "set result.valid and validation.valid to true exactly when no error was kept from either source, with error_count and warning_count equal to the numbers of errors and warnings listed",
+          "contract": "result.valid == validation.valid == (validation.error_count == 0)"
+        },
+        {
+          "id": "10-REQ-6.5",
+          "pattern": "unwanted",
+          "condition": "the spec root cannot be read during --validate",
+          "system": "speca",
+          "action": "skip the cross-spec rules, raise a low specs_dir_unreadable warning naming the root, and report the per-package verdict on its own",
+          "contract": "exit 0; warnings contains specs_dir_unreadable with severity low"
+        },
+        {
+          "id": "10-REQ-6.6",
+          "pattern": "unwanted",
+          "condition": "a package under the spec root other than the target fails to load during --validate",
+          "system": "speca",
+          "action": "leave that package out of the cross-spec rules and continue",
+          "contract": "exit 0; error absent"
+        },
+        {
+          "id": "10-REQ-6.7",
+          "pattern": "unwanted",
+          "condition": "the target package is invalid",
+          "system": "speca",
+          "action": "report the verdict as a successful call",
+          "contract": "exit 0; result.valid false; error absent"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-7",
+      "title": "The list: speca --list [--all]",
+      "rationale": "An agent needs an overview of every package, including those that no longer load.",
+      "criteria": [
+        {
+          "id": "10-REQ-7.1",
+          "pattern": "event_driven",
+          "condition": "speca --list runs on a readable spec root",
+          "system": "speca",
+          "action": "list the NN_name directories under the root itself (not through DiscoverSpecs), sort them by numeric prefix compared as a number with ties broken by full name, and load each with LoadSpec",
+          "contract": "exit 0; result.packages in that order (100_x after 99_x)"
+        },
+        {
+          "id": "10-REQ-7.2",
+          "pattern": "event_driven",
+          "condition": "a listed package loads",
+          "system": "speca",
+          "action": "emit an entry with spec_dir, spec_id, spec_name, title, status, valid from Validate, task_counts, and next_task when NextTask returns one"
+        },
+        {
+          "id": "10-REQ-7.3",
+          "pattern": "unwanted",
+          "condition": "a listed package fails to load, including a missing or malformed prd.md",
+          "system": "speca",
+          "action": "emit an entry holding only spec_dir and load_error with the library's message, and continue with the next package",
+          "contract": "exit 0; the entry has no other fields"
+        },
+        {
+          "id": "10-REQ-7.4",
+          "pattern": "optional",
+          "condition": "--all is given with --list",
+          "system": "speca",
+          "action": "append the package directories under <root>/archive/ in the same order, each marked archived: true regardless of its status",
+          "contract": "a superseded package under archive/ appears with archived: true and status: superseded"
+        },
+        {
+          "id": "10-REQ-7.5",
+          "pattern": "unwanted",
+          "condition": "--all is given and <root>/archive/ does not exist",
+          "system": "speca",
+          "action": "add no entries and raise no warning",
+          "contract": "exit 0; warnings empty"
+        },
+        {
+          "id": "10-REQ-7.6",
+          "pattern": "unwanted",
+          "condition": "the spec root does not exist or cannot be read during --list",
+          "system": "speca",
+          "action": "fail the call with a message naming the root",
+          "contract": "exit 1; error.stage \"load\", error.category \"input\", error.fix_hint.flag \"--specs-dir\""
+        },
+        {
+          "id": "10-REQ-7.7",
+          "pattern": "event_driven",
+          "condition": "speca --list runs on a spec root that exists and holds no package directories",
+          "system": "speca",
+          "action": "return an empty packages list",
+          "contract": "exit 0; result.packages is []"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-8",
+      "title": "summary and next",
+      "rationale": "An agent reading only summary and next must learn the answer and the one useful follow-up call that exists today.",
+      "criteria": [
+        {
+          "id": "10-REQ-8.1",
+          "pattern": "event_driven",
+          "condition": "the report form succeeds",
+          "system": "speca",
+          "action": "set summary to one sentence naming the package directory, its status, done tasks out of the total, the next task when there is one, and that the package does not validate when valid is false",
+          "contract": "e.g. \"speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4\"; at most 200 characters"
+        },
+        {
+          "id": "10-REQ-8.2",
+          "pattern": "event_driven",
+          "condition": "the --validate form succeeds",
+          "system": "speca",
+          "action": "set summary to one sentence saying whether the package validates and, when it does not, the error count and the rule names",
+          "contract": "e.g. \"speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)\"; at most 200 characters"
+        },
+        {
+          "id": "10-REQ-8.3",
+          "pattern": "event_driven",
+          "condition": "the --list form succeeds",
+          "system": "speca",
+          "action": "set summary to one sentence with the number of packages, the non-zero counts per status in lifecycle order, and the number unreadable when non-zero",
+          "contract": "e.g. \"speca: 9 packages (2 draft, 5 active, 2 sealed)\"; at most 200 characters"
+        },
+        {
+          "id": "10-REQ-8.4",
+          "pattern": "event_driven",
+          "condition": "the report form has a next_task N",
+          "system": "speca",
+          "action": "suggest specr <spec_dir> --task N with a why saying whether the task is in progress or is the next ready task",
+          "contract": "next contains exactly one entry with tool \"specr\""
+        },
+        {
+          "id": "10-REQ-8.5",
+          "pattern": "event_driven",
+          "condition": "the --list form contains an active package with no task in progress and a ready task",
+          "system": "speca",
+          "action": "suggest specr <spec_dir> --task N for the first such package in list order, where N is its next task",
+          "contract": "next contains exactly one entry with tool \"specr\""
+        },
+        {
+          "id": "10-REQ-8.6",
+          "pattern": "unwanted",
+          "condition": "the form is --validate, or the report has no next_task, or the list has no qualifying package",
+          "system": "speca",
+          "action": "suggest no call",
+          "contract": "next is absent or empty"
+        }
+      ]
+    },
+    {
+      "id": "10-REQ-9",
+      "title": "Public output types and error envelopes",
+      "rationale": "Callers decode every speca form with one standard-library-only type.",
+      "criteria": [
+        {
+          "id": "10-REQ-9.1",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "provide AdminResult as the single result type of every speca form, with valid as a pointer, the slices that must show as empty in their own form tagged omitzero, every field documented with a description tag, and every field a form does not produce absent from its JSON"
+        },
+        {
+          "id": "10-REQ-9.2",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "provide AdminEnvelope = Envelope[*AdminResult] and DecodeSpeca(data []byte) (AdminEnvelope, error), which decodes the envelope of every speca form",
+          "contract": "DecodeSpeca returns the decoded AdminEnvelope for any speca output, and a non-nil error for input that is not a JSON envelope"
+        },
+        {
+          "id": "10-REQ-9.3",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "provide TaskCounts and PackageInfo, and add ready to TaskInfo, true for a pending task whose dependencies are all done and absent otherwise"
+        },
+        {
+          "id": "10-REQ-9.4",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "import only the standard library and keep every existing exported name and JSON field with its meaning"
+        },
+        {
+          "id": "10-REQ-9.5",
+          "pattern": "ubiquitous",
+          "system": "cmd/speca",
+          "action": "define Result embedding envelope.AdminResult with Summary() and Next() methods, and set retryable and resumable to false on every envelope it writes"
+        },
+        {
+          "id": "10-REQ-9.6",
+          "pattern": "unwanted",
+          "condition": "the --schema document cannot be encoded",
+          "system": "speca",
+          "action": "fail the call with an error envelope",
+          "contract": "exit 1; error.stage \"schema\", error.category \"internal\""
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "10-PATH-1",
+      "title": "An agent reads a package's state and follows the suggested next call",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs speca 09 from the repository root"
+        },
+        {
+          "actor": "speca",
+          "action": "resolves the reference through internal/specpkg to .specs/09_agent_mode and loads it with afspec.LoadSpec"
+        },
+        {
+          "actor": "speca",
+          "action": "computes valid with Validate, tasks with ready via IsReady, next_task via NextTask, allowed_status via ValidTransition, and dependents via DiscoverSpecs and BuildDependencyGraph"
+        },
+        {
+          "actor": "speca",
+          "action": "writes one AdminEnvelope to stdout with summary and a next entry specr <spec_dir> --task N, and exits 0"
+        },
+        {
+          "actor": "agent",
+          "action": "runs specr <spec_dir> --task N and receives a RenderResult whose task carries ready"
+        }
+      ]
+    },
+    {
+      "id": "10-PATH-2",
+      "title": "An agent asks for the full verdict on a package",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs speca 09 --validate"
+        },
+        {
+          "actor": "speca",
+          "action": "loads the target package and every loadable package under the spec root, builds a dependency graph and runs Validate and ValidateCrossSpec"
+        },
+        {
+          "actor": "speca",
+          "action": "keeps the cross-spec findings attributed to the package and converts them through internal/specpkg into validation and traceability"
+        },
+        {
+          "actor": "speca",
+          "action": "writes one envelope with valid, validation, traceability and a summary naming the failing rules, and exits 0"
+        }
+      ]
+    },
+    {
+      "id": "10-PATH-3",
+      "title": "An agent lists every package including the archive",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs speca --list --all"
+        },
+        {
+          "actor": "speca",
+          "action": "lists NN_name directories under the spec root and under archive/, sorted numerically, and loads each with LoadSpec"
+        },
+        {
+          "actor": "speca",
+          "action": "builds one PackageInfo per directory, with load_error for packages that fail to load and archived: true for those under archive/"
+        },
+        {
+          "actor": "speca",
+          "action": "writes one envelope with packages, a per-status summary and the first claimable task as next, and exits 0"
+        }
+      ]
+    },
+    {
+      "id": "10-PATH-4",
+      "title": "A malformed invocation is refused before anything is read",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs speca --list 09"
+        },
+        {
+          "actor": "speca",
+          "action": "parses the flags with cli.SplitArgs and detects a positional input together with --list"
+        },
+        {
+          "actor": "speca",
+          "action": "prints the message to stderr, writes one usage envelope with stage usage and category usage to stdout, and exits 2"
+        }
+      ]
+    }
+  ]
+}

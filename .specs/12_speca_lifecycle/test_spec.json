@@ -1,0 +1,1165 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "12",
+  "spec_name": "speca_lifecycle",
+  "schema_version": 2,
+  "tests": [
+    {
+      "id": "TS-12-1",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.1"
+      ],
+      "title": "ArchiveDestination returns the free archive path and writes nothing",
+      "given": [
+        "a root holding package 03_x and no archive/03_x"
+      ],
+      "when": "afspec.ArchiveDestination(root/03_x, root) is called",
+      "then": [
+        "it returns filepath.Join(root, \"archive\", \"03_x\") and a nil error",
+        "no directory named archive is created",
+        "the directory tree of root is unchanged"
+      ],
+      "pseudocode": "p, err = ArchiveDestination(dir, root); assert err == nil; assert p == join(root,'archive','03_x'); assert !exists(join(root,'archive'))"
+    },
+    {
+      "id": "TS-12-2",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.2"
+      ],
+      "title": "ArchiveDestination returns a *SaveError for a taken or unreadable destination",
+      "given": [
+        "case A: root/archive/03_x already exists",
+        "case B: root/archive is a regular file, so the destination cannot be checked (ENOTDIR)"
+      ],
+      "when": "ArchiveDestination(root/03_x, root) is called in each case",
+      "then": [
+        "both return an empty path and an error for which errors.As(*SaveError) is true",
+        "in case A the message contains `archive conflict: <path> already exists`",
+        "nothing is written in either case"
+      ],
+      "pseudocode": "p, err = ArchiveDestination(dir, root); assert p == ''; assert errors.As(err,&se); assert contains(se.Msg,'archive conflict: '+dest+' already exists')"
+    },
+    {
+      "id": "TS-12-3",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.3"
+      ],
+      "title": "MoveUnderArchive moves an archived or superseded package without rewriting any file",
+      "given": [
+        "a package copy at root/03_x with status archived, another with status superseded, no root/archive directory",
+        "a snapshot of every file's bytes and the modification times"
+      ],
+      "when": "MoveUnderArchive(dir, root) is called for each package",
+      "then": [
+        "it returns root/archive/03_x and a nil error",
+        "root/archive has mode 0755",
+        "the source directory no longer exists",
+        "every file at the destination is byte-identical to the snapshot, so status and updated_at are unchanged"
+      ],
+      "pseudocode": "dest, err = MoveUnderArchive(dir, root); assert err==nil; assert !exists(dir); assert mode(root/archive)==0755; assert bytes(dest/*) == snapshot"
+    },
+    {
+      "id": "TS-12-4",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.4"
+      ],
+      "title": "MoveUnderArchive returns the LoadError and moves nothing when the package does not load",
+      "given": [
+        "a directory root/03_x whose requirements.json is malformed JSON"
+      ],
+      "when": "MoveUnderArchive(dir, root) is called",
+      "then": [
+        "it returns an empty path and an error for which errors.As(*LoadError) is true",
+        "root/03_x is unchanged and root/archive does not exist"
+      ],
+      "pseudocode": "p, err = MoveUnderArchive(dir, root); assert p==''; assert errors.As(err,&le); assert exists(dir); assert !exists(root/archive)"
+    },
+    {
+      "id": "TS-12-5",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.5"
+      ],
+      "title": "MoveUnderArchive refuses draft, active and sealed packages with a *LifecycleError",
+      "given": [
+        "packages with status draft, active and sealed at root/NN_x"
+      ],
+      "when": "MoveUnderArchive is called on each",
+      "then": [
+        "each returns an empty path and a *LifecycleError",
+        "no archive directory is created and no directory is renamed"
+      ],
+      "pseudocode": "for st in [draft,active,sealed]: p, err = MoveUnderArchive(pkg(st), root); assert errors.As(err,&lce); assert !exists(root/archive)"
+    },
+    {
+      "id": "TS-12-6",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.6"
+      ],
+      "title": "MoveUnderArchive leaves the package in place when the destination is taken or the filesystem refuses",
+      "given": [
+        "case A: archived package with root/archive/03_x existing",
+        "case B: archived package in a root made read-only (mode 0555), so creating archive/ fails (skipped when running as uid 0)"
+      ],
+      "when": "MoveUnderArchive(dir, root) is called in each case",
+      "then": [
+        "both return an empty path and a *SaveError",
+        "in case A the error is the one ArchiveDestination returns (archive conflict message)",
+        "the package is still at dir with byte-identical files"
+      ],
+      "pseudocode": "p, err = MoveUnderArchive(dir, root); assert p==''; assert errors.As(err,&se); assert bytes(dir/*)==snapshot"
+    },
+    {
+      "id": "TS-12-7",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.7"
+      ],
+      "title": "MoveToArchive transitions any non-archived package, a superseded one included, and moves it",
+      "given": [
+        "a sealed package, a superseded package and an already-archived package, each at root/NN_x with a free destination",
+        "the existing TestMoveToArchive is kept unchanged"
+      ],
+      "when": "MoveToArchive(dir, root) is called on each",
+      "then": [
+        "each call returns nil",
+        "each package is at root/archive/NN_x with status archived",
+        "TestMoveToArchive passes unchanged"
+      ],
+      "pseudocode": "assert MoveToArchive(dir,root)==nil; s=LoadSpec(root/archive/NN_x); assert s.Status=='archived'"
+    },
+    {
+      "id": "TS-12-8",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-1.8"
+      ],
+      "title": "MoveToArchive with a taken destination returns a *SaveError and writes nothing",
+      "given": [
+        "a sealed package at root/03_x and a directory root/archive/03_x"
+      ],
+      "when": "MoveToArchive(dir, root) is called",
+      "then": [
+        "it returns a *SaveError",
+        "the status at dir is still sealed",
+        "every file at dir is byte-identical to the snapshot taken before the call"
+      ],
+      "pseudocode": "err = MoveToArchive(dir,root); assert errors.As(err,&se); assert LoadSpec(dir).Status=='sealed'; assert bytes(dir/*)==snapshot"
+    },
+    {
+      "id": "TS-12-9",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-2.1"
+      ],
+      "title": "speca dispatches --status calls to the status form and honours --dry-run and --force",
+      "given": [
+        "a spec root with a draft package that has an intent and validates, and a sealed package plus a replacing draft package"
+      ],
+      "when": "Main is run with `<spec> --status active --dry-run`, `<spec> --status sealed`, and `<old> --status superseded --by <new>`",
+      "then": [
+        "each call reaches the status form (the envelope carries changes, not a report)",
+        "the dry-run call has result.dry_run true and writes nothing",
+        "--force is accepted on the form without a usage error"
+      ],
+      "pseudocode": "code = Main(['12_x','--status','active','--dry-run']); assert code==0; assert env.result.dry_run && len(env.result.changes)==1"
+    },
+    {
+      "id": "TS-12-10",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-2.2"
+      ],
+      "title": "--status draft is a usage error that explains there is no way back to draft",
+      "given": [
+        "a valid package directory"
+      ],
+      "when": "Main is run with `<spec> --status draft`",
+      "then": [
+        "exit code is 2, stage usage, category usage",
+        "the message says that no move leads back to draft and that a package whose intent must change is superseded by a new one",
+        "fix_hint is {flag: \"--status\", valid: [\"active\",\"sealed\",\"superseded\",\"archived\"]}",
+        "no file is modified and there is no result"
+      ],
+      "pseudocode": "code=Main([dir,'--status','draft']); assert code==2; assert env.error.fix_hint == {flag:'--status',valid:[...four]}"
+    },
+    {
+      "id": "TS-12-11",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-2.3"
+      ],
+      "title": "An unknown --status value is a usage error with the four valid targets",
+      "given": [
+        "a valid package directory"
+      ],
+      "when": "Main is run with `<spec> --status bogus`",
+      "then": [
+        "exit code is 2, stage usage, category usage",
+        "fix_hint is {flag: \"--status\", valid: the four targets}",
+        "nothing is written"
+      ],
+      "pseudocode": "code=Main([dir,'--status','bogus']); assert code==2; assert env.error.fix_hint.valid==four"
+    },
+    {
+      "id": "TS-12-12",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-2.4"
+      ],
+      "title": "Malformed flag combinations are usage errors that write nothing",
+      "given": [
+        "a valid package directory and a replacing package"
+      ],
+      "when": "Main is run with: `--status superseded` without --by; `--by <spec>` without --status; `--by` with `--status sealed`; `--status sealed --task 1 --state done`; `--status sealed --validate`; `--status sealed --list`; `--status sealed` with no positional input",
+      "then": [
+        "every call exits 2 with stage usage and category usage",
+        "no envelope result is present",
+        "the file tree is unchanged"
+      ],
+      "pseudocode": "for args in cases: code=Main(args); assert code==2; assert env.error.stage=='usage'; assert env.result==nil"
+    },
+    {
+      "id": "TS-12-13",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-2.5"
+      ],
+      "title": "A bad --by reference is a usage error, resolver failures prefixed with `--by:`",
+      "given": [
+        "a sealed package 03_old and a replacing package 12_new",
+        "a second package whose spec_id equals 03_old's"
+      ],
+      "when": "Main is run with `--by nonexistent`, `--by` naming the input's own directory, and `--by` naming the package with the same spec_id",
+      "then": [
+        "each exits 2, stage usage, category usage",
+        "the resolver-failure message starts with `--by:`",
+        "nothing is written"
+      ],
+      "pseudocode": "code=Main([old,'--status','superseded','--by','nope']); assert code==2; assert startsWith(env.error.message,'--by:')"
+    },
+    {
+      "id": "TS-12-14",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-2.6"
+      ],
+      "title": "--schema and --help describe the --status form and match the golden file",
+      "given": [
+        "cmd/speca/testdata/schema.golden.json regenerated"
+      ],
+      "when": "Main is run with --schema and with --help",
+      "then": [
+        "the --schema output equals the golden file",
+        "the schema gives status as an enum of active, sealed, superseded, archived",
+        "help text and flag descriptions mention --status and --by"
+      ],
+      "pseudocode": "out=Main(['--schema']); assert out==readFile(golden); assert schema.properties.status.enum==four"
+    },
+    {
+      "id": "TS-12-15",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-3.1"
+      ],
+      "title": "Checks run in the specified order and the first refusal ends the call with no result",
+      "given": [
+        "a draft package without an Intent section, with unknown keys, targeted at archived under a taken destination",
+        "a sealed package with an unknown key and a taken destination"
+      ],
+      "when": "Main is run with --status for each, with and without --dry-run",
+      "then": [
+        "the first package is refused by the move/target check, not by the unknown-key or destination checks",
+        "the sealed package is refused at the unknown-key check (stage status) before the destination check (stage archive)",
+        "the envelope has no result and the tree and modification times are unchanged, also under --dry-run"
+      ],
+      "pseudocode": "for dry in [false,true]: code=Main(args+dry); assert env.error.stage==expected; assert env.result==nil; assert tree==snapshot"
+    },
+    {
+      "id": "TS-12-16",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-3.2"
+      ],
+      "title": "Load failures and non-v2 packages are refused at stage load, also under --force",
+      "given": [
+        "a malformed input package, a malformed --by package, and a package with schema_version 1"
+      ],
+      "when": "Main is run with --status sealed --force on each",
+      "then": [
+        "each exits 1, stage load, category input, and has no result",
+        "the message names the directory, and names --by when the replacing package is at fault",
+        "for the version-1 package the message says speca changes the state of format version 2 packages only"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed','--force']); assert code==1; assert env.error.stage=='load' && env.error.category=='input'"
+    },
+    {
+      "id": "TS-12-17",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-3.3"
+      ],
+      "title": "A package already at the target status outside archive/ becomes a move-only call",
+      "given": [
+        "an archived package and a superseded package at root/NN_x, neither under archive/"
+      ],
+      "when": "Main is run with `--status archived` and `--status superseded --by <new>` respectively",
+      "then": [
+        "neither call is refused as a disallowed transition",
+        "each exits 0 with changes containing a moved entry and no status entry"
+      ],
+      "pseudocode": "code=Main([dir,'--status','archived']); assert code==0; assert kinds(env.result.changes)==['moved']"
+    },
+    {
+      "id": "TS-12-18",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-3.4"
+      ],
+      "title": "A disallowed transition is refused at stage status with the path and the allowed targets",
+      "given": [
+        "an active package, a draft package, an archived package inside archive/, and a sealed package"
+      ],
+      "when": "Main is run with: active --status archived; sealed --status sealed; archived(in archive/) --status active; draft --status sealed, all with --force",
+      "then": [
+        "each exits 1, stage status, category lifecycle, and writes nothing",
+        "the message names the package, its status and the target",
+        "active → archived says to seal it first with `speca <spec> --status sealed`, then archive it",
+        "a same-status call says `already <status>`",
+        "fix_hint is {flag: --status, valid: allowed_status} when the allowed list is non-empty, and absent for the archived package"
+      ],
+      "pseudocode": "code=Main([active,'--status','archived','--force']); assert code==1; assert contains(msg,'--status sealed'); assert fix_hint.valid==['sealed']"
+    },
+    {
+      "id": "TS-12-19",
+      "kind": "property",
+      "verifies": [
+        "12-REQ-3.5"
+      ],
+      "title": "The refusal names a shortest chain of ValidTransition steps, or none when none exists",
+      "given": [
+        "the five statuses draft, active, sealed, superseded, archived"
+      ],
+      "when": "for any ordered pair of distinct statuses (current, target) where ValidTransition(current, target) is false",
+      "then": [
+        "when a chain of ValidTransition steps exists, the message names a chain whose length equals the breadth-first shortest length",
+        "when no chain exists, the message names no sequence of moves"
+      ],
+      "pseudocode": "for (c,t) in pairs where !ValidTransition(c,t): msg=refusalMessage(c,t); sp=bfs(c,t); if sp!=nil: assert chainIn(msg)==sp-length else assert chainIn(msg)==none"
+    },
+    {
+      "id": "TS-12-20",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-3.6"
+      ],
+      "title": "Sealing, archiving and superseding refuse a package with unknown keys without --force",
+      "given": [
+        "an active package whose prd.md frontmatter has a key the schema does not allow, and a sealed package with an unknown key in tasks.json"
+      ],
+      "when": "Main is run with --status sealed, and --status archived, without --force",
+      "then": [
+        "each exits 1, stage status, category lifecycle",
+        "fix_hint.flag is --force",
+        "the message names each file and unknown key",
+        "no file is modified"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed']); assert code==1; assert env.error.fix_hint.flag=='--force'; assert contains(msg,'prd.md') && contains(msg,'badkey'); assert tree==snapshot"
+    },
+    {
+      "id": "TS-12-21",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-3.7"
+      ],
+      "title": "--force proceeds past unknown keys with a high spec_invalid warning naming the keys",
+      "given": [
+        "an active package with no open task whose prd.md has an unknown key"
+      ],
+      "when": "Main is run with `--status sealed --force`",
+      "then": [
+        "exit code is 0 and the package is sealed",
+        "the envelope has a warning with code spec_invalid and severity high naming the dropped key",
+        "the written package no longer contains the unknown key"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed','--force']); assert code==0; w=warning('spec_invalid'); assert w.severity=='high' && contains(w.message,'badkey')"
+    },
+    {
+      "id": "TS-12-22",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-3.8"
+      ],
+      "title": "A taken archive destination is refused at stage archive before anything is written",
+      "given": [
+        "a sealed package at root/03_x and a directory root/archive/03_x"
+      ],
+      "when": "Main is run with `--status archived`, also with --force",
+      "then": [
+        "exit code is 1, stage archive, category disk, resumable false",
+        "the message names the existing directory",
+        "there is no result and the package files are byte-identical, status still sealed"
+      ],
+      "pseudocode": "code=Main([dir,'--status','archived','--force']); assert code==1; assert env.error.stage=='archive'; assert env.resumable==false; assert env.result==nil; assert bytes(dir/*)==snapshot"
+    },
+    {
+      "id": "TS-12-23",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-4.1"
+      ],
+      "title": "Activating a valid draft with an intent writes the status and intent hash",
+      "given": [
+        "a draft package that validates and has a `## Intent` section"
+      ],
+      "when": "Main is run with `<spec> --status active`",
+      "then": [
+        "exit code is 0",
+        "result status is active and intent_hash is set",
+        "changes is [{kind: status, from: draft, to: active}]",
+        "the package is still in its original directory"
+      ],
+      "pseudocode": "code=Main([dir,'--status','active']); assert code==0; assert env.result.status=='active'; assert env.result.intent_hash!=''; assert env.result.changes==[{kind:'status',from:'draft',to:'active'}]"
+    },
+    {
+      "id": "TS-12-24",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-4.2"
+      ],
+      "title": "Activation without an Intent section is refused even under --force",
+      "given": [
+        "a draft package whose prd.md has no `## Intent` section"
+      ],
+      "when": "Main is run with `--status active --force`",
+      "then": [
+        "exit 1, stage status, category lifecycle",
+        "the message tells the caller to add `## Intent` to prd.md on a line of its own",
+        "no file is modified"
+      ],
+      "pseudocode": "code=Main([dir,'--status','active','--force']); assert code==1; assert contains(msg,'\\n## Intent\\n') ; assert tree==snapshot"
+    },
+    {
+      "id": "TS-12-25",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-4.3"
+      ],
+      "title": "Activation of a package that does not validate is refused at stage validate",
+      "given": [
+        "a draft package with an intent that fails Validate"
+      ],
+      "when": "Main is run with `--status active` without --force",
+      "then": [
+        "exit 1, stage validate, category invalid_spec",
+        "the message names the failing rules",
+        "fix_hint.flag is --force",
+        "no file is modified"
+      ],
+      "pseudocode": "code=Main([dir,'--status','active']); assert code==1; assert env.error.category=='invalid_spec'; assert env.error.fix_hint.flag=='--force'"
+    },
+    {
+      "id": "TS-12-26",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-4.4"
+      ],
+      "title": "--force activates an invalid package with a high spec_invalid warning",
+      "given": [
+        "a draft package with an intent that fails Validate"
+      ],
+      "when": "Main is run with `--status active --force`",
+      "then": [
+        "exit 0 and the package is active",
+        "a warning with code spec_invalid and severity high names the failing rules"
+      ],
+      "pseudocode": "code=Main([dir,'--status','active','--force']); assert code==0; assert warning('spec_invalid').severity=='high'"
+    },
+    {
+      "id": "TS-12-27",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-4.5"
+      ],
+      "title": "Dry-run activation reports the hash ComputeIntentHash gives and leaves prd.md unchanged",
+      "given": [
+        "a draft package that validates and has an intent"
+      ],
+      "when": "Main is run with `--status active --dry-run`",
+      "then": [
+        "result.intent_hash equals ComputeIntentHash(PRDBody)",
+        "prd.md bytes and modification time are unchanged"
+      ],
+      "pseudocode": "h,_=ComputeIntentHash(body); Main([dir,'--status','active','--dry-run']); assert env.result.intent_hash==h; assert bytes(prd.md)==snapshot"
+    },
+    {
+      "id": "TS-12-28",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-5.1"
+      ],
+      "title": "Sealing an active package with no drift and no open task writes the sealed status",
+      "given": [
+        "an active package, all tasks done or dropped, intent unchanged"
+      ],
+      "when": "Main is run with `--status sealed`",
+      "then": [
+        "exit 0",
+        "result status is sealed",
+        "changes is [{kind: status, from: active, to: sealed}]",
+        "the package stays in its directory"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed']); assert code==0; assert env.result.status=='sealed'; assert env.result.changes==[{kind:'status',from:'active',to:'sealed'}]"
+    },
+    {
+      "id": "TS-12-29",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-5.2"
+      ],
+      "title": "Sealing a package with intent drift is refused even under --force",
+      "given": [
+        "an active package whose prd.md Intent section was edited after activation, and another whose Intent section was removed"
+      ],
+      "when": "Main is run with `--status sealed --force`",
+      "then": [
+        "exit 1, stage status, category lifecycle",
+        "the message says to restore the activated intent or write a new package that supersedes this one",
+        "there is no fix_hint",
+        "no file is modified"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed','--force']); assert code==1; assert env.error.fix_hint==nil; assert tree==snapshot"
+    },
+    {
+      "id": "TS-12-30",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-5.3"
+      ],
+      "title": "Sealing with open tasks (optional ones included) is refused naming each task and state",
+      "given": [
+        "an active package with one pending task and one optional in_progress task"
+      ],
+      "when": "Main is run with `--status sealed` without --force",
+      "then": [
+        "exit 1, stage status, category lifecycle",
+        "the message names each open task with its state and says to finish or drop it",
+        "fix_hint.flag is --force",
+        "no file is modified"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed']); assert contains(msg,'pending') && contains(msg,'in_progress'); assert env.error.fix_hint.flag=='--force'"
+    },
+    {
+      "id": "TS-12-31",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-5.4"
+      ],
+      "title": "--force seals despite open tasks with a high tasks_open warning",
+      "given": [
+        "an active package with a pending task and an in_progress task and no drift"
+      ],
+      "when": "Main is run with `--status sealed --force`",
+      "then": [
+        "exit 0, package sealed",
+        "a warning with code tasks_open and severity high lists each open task and its state"
+      ],
+      "pseudocode": "code=Main([dir,'--status','sealed','--force']); assert code==0; w=warning('tasks_open'); assert w.severity=='high' && contains(w.message,'in_progress')"
+    },
+    {
+      "id": "TS-12-32",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-6.1"
+      ],
+      "title": "Archiving a package outside archive/ writes the status then moves it",
+      "given": [
+        "a sealed package at root/03_x; also a draft package at root/04_y and a superseded package at root/05_z"
+      ],
+      "when": "Main is run with `--status archived` on each",
+      "then": [
+        "exit 0 for each",
+        "the package is at root/archive/NN_x with status archived and the old directory is gone",
+        "changes are [status, moved] in that order",
+        "the moved change uses display paths"
+      ],
+      "pseudocode": "code=Main([dir,'--status','archived']); assert kinds(changes)==['status','moved']; assert LoadSpec(root/archive/03_x).Status=='archived'"
+    },
+    {
+      "id": "TS-12-33",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-6.2"
+      ],
+      "title": "Archiving a package already under archive/ writes only the status",
+      "given": [
+        "a sealed package at root/archive/03_x"
+      ],
+      "when": "Main is run with `--status archived` on that path",
+      "then": [
+        "exit 0",
+        "changes is [{kind: status}] only",
+        "the directory stays at root/archive/03_x"
+      ],
+      "pseudocode": "code=Main([root+'/archive/03_x','--status','archived']); assert kinds(changes)==['status']; assert exists(root/archive/03_x)"
+    },
+    {
+      "id": "TS-12-34",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-6.3"
+      ],
+      "title": "A move-only archive call rewrites no file and leaves updated_at alone",
+      "given": [
+        "an archived package at root/03_x outside archive/, files snapshotted"
+      ],
+      "when": "Main is run with `--status archived`",
+      "then": [
+        "exit 0",
+        "changes is [{kind: moved}] only",
+        "files at root/archive/03_x are byte-identical, updated_at unchanged"
+      ],
+      "pseudocode": "code=Main([dir,'--status','archived']); assert kinds(changes)==['moved']; assert bytes(root/archive/03_x/*)==snapshot"
+    },
+    {
+      "id": "TS-12-35",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-7.1"
+      ],
+      "title": "A replacing package that is superseded or archived is refused even under --force",
+      "given": [
+        "a sealed old package and replacing packages with status superseded and archived"
+      ],
+      "when": "Main is run with `--status superseded --by <replacing> --force`",
+      "then": [
+        "exit 1, stage status, category lifecycle",
+        "fix_hint.flag is --by",
+        "no file is modified"
+      ],
+      "pseudocode": "code=Main([old,'--status','superseded','--by',rep,'--force']); assert code==1; assert env.error.fix_hint.flag=='--by'; assert tree==snapshot"
+    },
+    {
+      "id": "TS-12-36",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-7.2"
+      ],
+      "title": "Superseding writes banner and status, records supersedes, then moves the package",
+      "given": [
+        "a sealed package 03_old and a draft replacing package 12_new with an empty supersedes"
+      ],
+      "when": "Main is run with `03_old --status superseded --by 12_new`",
+      "then": [
+        "exit 0",
+        "03_old sits at root/archive/03_old with status superseded and the DEPRECATED banner naming spec 12",
+        "12_new's supersedes ends with 03's spec_id",
+        "changes are [status, supersedes, moved] in that order",
+        "the supersedes change is {kind: supersedes, spec: <replacing id>, added: <old id>}"
+      ],
+      "pseudocode": "code=Main([old,'--status','superseded','--by',new]); assert kinds(changes)==['status','supersedes','moved']; assert LoadSpec(new).Supersedes contains oldID"
+    },
+    {
+      "id": "TS-12-37",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-7.3"
+      ],
+      "title": "A replacing package that cannot be saved yields a low supersedes_not_recorded warning and success",
+      "given": [
+        "replacing packages that are: sealed; active with intent drift; carrying an unknown_field error; and a draft whose Save fails (directory made read-only)"
+      ],
+      "when": "Main is run with `--status superseded --by <replacing> --force` for each",
+      "then": [
+        "each exits 0 and the old package is superseded and under archive/",
+        "a warning code supersedes_not_recorded severity low names the replacing directory, the id not recorded and the reason",
+        "changes contain no supersedes entry",
+        "the replacing package's files are unchanged"
+      ],
+      "pseudocode": "code=Main(args); assert code==0; w=warning('supersedes_not_recorded'); assert w.severity=='low'; assert kinds(changes)==['status','moved']"
+    },
+    {
+      "id": "TS-12-38",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-7.4"
+      ],
+      "title": "A move-only supersede call skips Supersede, adds the missing id and moves",
+      "given": [
+        "a superseded package at root/03_old outside archive/, and a replacing package whose supersedes lacks the old id"
+      ],
+      "when": "Main is run with `03_old --status superseded --by <new>`",
+      "then": [
+        "exit 0",
+        "changes are [supersedes, moved]",
+        "the old package's files are byte-identical at the new location",
+        "the replacing package's supersedes now contains the old id"
+      ],
+      "pseudocode": "code=Main([old,'--status','superseded','--by',new]); assert kinds(changes)==['supersedes','moved']; assert bytes(root/archive/03_old/*)==snapshot"
+    },
+    {
+      "id": "TS-12-39",
+      "kind": "property",
+      "verifies": [
+        "12-REQ-7.5"
+      ],
+      "title": "The old spec_id appears exactly once in the replacing package's supersedes",
+      "given": [
+        "a sealed old package and a draft replacing package with an arbitrary existing supersedes list"
+      ],
+      "when": "for any sequence of one to five superseding calls naming the same old and replacing packages (including calls resuming after an interrupted move)",
+      "then": [
+        "the old spec_id occurs exactly once in the replacing package's supersedes",
+        "entries that were already there keep their order"
+      ],
+      "pseudocode": "for n in 1..5: repeat n times Main([oldPathNow,'--status','superseded','--by',new]); assert count(LoadSpec(new).Supersedes, oldID)==1"
+    },
+    {
+      "id": "TS-12-40",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-8.1"
+      ],
+      "title": "Every written package gets updated_at set to the current UTC time in RFC 3339",
+      "given": [
+        "a start time truncated to the second",
+        "an active package to seal, and a sealed one to supersede with a draft replacing package"
+      ],
+      "when": "Main is run for sealing and for superseding",
+      "then": [
+        "updated_at in each written prd.md (including the replacing package) parses with time.RFC3339 and is in UTC",
+        "it is not earlier than the start time truncated to the second"
+      ],
+      "pseudocode": "t=parse(RFC3339, LoadSpec(dir).UpdatedAt); assert t.Location()==UTC; assert !t.Before(start.Truncate(second))"
+    },
+    {
+      "id": "TS-12-41",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-8.2"
+      ],
+      "title": "A SaveError from the status write exits at stage write, category disk with the library message",
+      "given": [
+        "an active package whose directory is read-only (mode 0555) so the temporary file cannot be created (skipped as uid 0)"
+      ],
+      "when": "Main is run with `--status sealed`",
+      "then": [
+        "exit 1, stage write, category disk",
+        "the message is the library's save error message",
+        "there is no result"
+      ],
+      "pseudocode": "chmod(dir,0555); code=Main([dir,'--status','sealed']); assert code==1; assert env.error.stage=='write' && env.error.category=='disk'; assert env.result==nil"
+    },
+    {
+      "id": "TS-12-42",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-8.3"
+      ],
+      "title": "A LifecycleError or IntentError that reaches the write is reported at stage status, category lifecycle",
+      "given": [
+        "the status form with a stubbed library call that returns *LifecycleError, then *IntentError"
+      ],
+      "when": "the write step runs",
+      "then": [
+        "each exit is 1, stage status, category lifecycle"
+      ],
+      "pseudocode": "for e in [&LifecycleError{}, &IntentError{}]: stub.transition=e; code=run(); assert code==1; assert stage=='status' && category=='lifecycle'"
+    },
+    {
+      "id": "TS-12-43",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-8.4"
+      ],
+      "title": "A move failure after the status write exits at stage archive, resumable, with result and next",
+      "given": [
+        "a sealed package at root/03_x in a read-only root (mode 0555 on root, package directory writable) so the status write succeeds and the rename fails; skipped as uid 0",
+        "the same case for superseding with --by"
+      ],
+      "when": "Main is run with `--status archived`, and with `--status superseded --by <new>`",
+      "then": [
+        "exit 1, stage archive, category disk, resumable true, retryable false",
+        "the message names the directory the package is in now and its new status and says that running the same call again moves it",
+        "the summary says the status was written and the move was not",
+        "result is present with spec_dir at the current location, the new status, and changes listing what was written",
+        "next holds the same call against the current spec_dir, with --by when superseding"
+      ],
+      "pseudocode": "code=Main([dir,'--status','archived']); assert code==1; assert env.resumable && !env.retryable; assert env.result.changes==[status]; assert env.next[0].flags==['--status','archived']"
+    },
+    {
+      "id": "TS-12-44",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-8.5"
+      ],
+      "title": "Re-running the same call after an archive-stage failure only moves the package",
+      "given": [
+        "a package left after a failed archive call, with its files snapshotted, and the cause (read-only root) cleared"
+      ],
+      "when": "the same call is run again",
+      "then": [
+        "exit 0",
+        "changes contain only moved (and supersedes if it was still missing)",
+        "the files at the new location are byte-identical to the snapshot taken after the failed call"
+      ],
+      "pseudocode": "fail=Main(args); chmod(root,0755); snap=snapshot(dir); code=Main(args); assert code==0; assert kinds(changes)==['moved']; assert bytes(dest/*)==snap"
+    },
+    {
+      "id": "TS-12-45",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-8.6"
+      ],
+      "title": "A read-back failure after a successful write exits at stage load and keeps the changes",
+      "given": [
+        "the status form with a stubbed read-back loader that fails after Transition succeeded"
+      ],
+      "when": "the call runs with `--status sealed`",
+      "then": [
+        "exit 1, stage load, category input",
+        "the result is present and carries changes [{kind: status, from: active, to: sealed}]"
+      ],
+      "pseudocode": "stub.loadAfterWrite=fail; code=run(); assert env.error.stage=='load'; assert len(env.result.changes)==1"
+    },
+    {
+      "id": "TS-12-46",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-8.7"
+      ],
+      "title": "Result.Resumable is true only for the archive-stage failure",
+      "given": [
+        "Result values for: success, refusal, write-stage failure, load-stage failure after write, archive-stage failure after a status write"
+      ],
+      "when": "Resumable() is called on each, and each is passed through Run.Envelope",
+      "then": [
+        "only the archive-stage failure returns true and has envelope resumable true",
+        "all others return false"
+      ],
+      "pseudocode": "assert Result{archiveFail}.Resumable()==true; for r in others: assert !r.Resumable()"
+    },
+    {
+      "id": "TS-12-47",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-9.1"
+      ],
+      "title": "The success result is read back from where the package now is, in report-form shape",
+      "given": [
+        "a sealed package at root/03_x"
+      ],
+      "when": "Main is run with `--status archived`",
+      "then": [
+        "result.spec_dir is the display path of root/archive/03_x",
+        "the result has the report-form fields (status, tasks, allowed_status, valid and so on) from a fresh LoadSpec",
+        "changes are ordered status, supersedes, moved with the specified shapes"
+      ],
+      "pseudocode": "Main([dir,'--status','archived']); assert result.spec_dir==display(root/archive/03_x); assert result.status=='archived'"
+    },
+    {
+      "id": "TS-12-48",
+      "kind": "integration",
+      "verifies": [
+        "12-REQ-9.2"
+      ],
+      "title": "--dry-run gives the same exit, refusals, warnings, changes and result and writes nothing",
+      "given": [
+        "a set of calls: activation, sealing with --force and open tasks, archiving, superseding with a replacing package, a refusal, each with a snapshot of tree and modification times"
+      ],
+      "when": "each is run with --dry-run and then without",
+      "then": [
+        "exit codes, error stage/category, warnings and changes match between the two runs",
+        "result.dry_run is true only in the dry-run run",
+        "the tree and every modification time are unchanged after the dry run"
+      ],
+      "pseudocode": "d=Main(args+['--dry-run']); assert tree==snapshot; r=Main(args); assert d.changes==r.changes && d.exit==r.exit; assert d.result.dry_run"
+    },
+    {
+      "id": "TS-12-49",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-9.3"
+      ],
+      "title": "The summary sentence has the specified form for each move and under --dry-run",
+      "given": [
+        "successful calls for activate, seal, archive, supersede and move-only"
+      ],
+      "when": "each call is run, with and without --dry-run",
+      "then": [
+        "summaries equal `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <display path>`, `speca: superseded <name> by <spec_id>, moved to <display path>`, `speca: moved <name> to <display path>`",
+        "under --dry-run each ends with ` (dry run; nothing written)`"
+      ],
+      "pseudocode": "assert env.summary=='speca: sealed 09_x'; assert dry.summary==env.summary+' (dry run; nothing written)'"
+    },
+    {
+      "id": "TS-12-50",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-9.4"
+      ],
+      "title": "After a call, next is the task claim after activation and empty otherwise",
+      "given": [
+        "a draft package whose next_task is ready; sealed, archived, superseded and move-only calls; a refusal"
+      ],
+      "when": "each call is run without --dry-run",
+      "then": [
+        "after activation next is [`speca <spec_dir> --task N --state in_progress`] for next_task",
+        "after sealing, archiving, superseding, move-only calls and refusals next is empty"
+      ],
+      "pseudocode": "Main([dir,'--status','active']); assert env.next[0].flags==['--task',N,'--state','in_progress']; Main([dir,'--status','sealed']); assert len(env.next)==0"
+    },
+    {
+      "id": "TS-12-51",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-9.5"
+      ],
+      "title": "A passing --dry-run call suggests the same call without --dry-run",
+      "given": [
+        "a call that passes its checks"
+      ],
+      "when": "it is run with --dry-run",
+      "then": [
+        "next[0] has the same input and flags minus --dry-run (and keeps --force and --by)"
+      ],
+      "pseudocode": "d=Main([dir,'--status','sealed','--dry-run']); assert d.next[0].flags==['--status','sealed']"
+    },
+    {
+      "id": "TS-12-52",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-9.6"
+      ],
+      "title": "The report form suggests --status active first for a valid draft with an intent",
+      "given": [
+        "a draft package that validates and whose body has `## Intent`, with a task ready"
+      ],
+      "when": "Main is run with `<spec>` only",
+      "then": [
+        "next[0].flags are [\"--status\", \"active\"] with input the spec_dir",
+        "the activation suggestion comes before any task suggestion"
+      ],
+      "pseudocode": "Main([dir]); assert env.next[0].flags==['--status','active']"
+    },
+    {
+      "id": "TS-12-53",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-9.7"
+      ],
+      "title": "The report form suggests --status sealed for an active package with no open task and --list is unchanged",
+      "given": [
+        "an active package with all tasks done or dropped",
+        "an active package with a pending task"
+      ],
+      "when": "Main is run with `<spec>`, and with `--list`",
+      "then": [
+        "the first package's next contains an entry with flags [\"--status\", \"sealed\"]",
+        "the second package's next contains none",
+        "the --list form's next is the same as before this spec"
+      ],
+      "pseudocode": "Main([done]); assert any(n.flags==['--status','sealed']); Main([open]); assert none"
+    },
+    {
+      "id": "TS-12-54",
+      "kind": "property",
+      "verifies": [
+        "12-REQ-9.8"
+      ],
+      "title": "A --status call suggested by the report form never comes back as a refusal",
+      "given": [
+        "generated packages: draft, active, sealed, superseded or archived; with or without Intent; valid or invalid; with arbitrary task states; with or without intent drift and unknown keys"
+      ],
+      "when": "for any generated package whose report form suggests a --status call, that suggested call is run",
+      "then": [
+        "the suggested call exits 0"
+      ],
+      "pseudocode": "for pkg in gen(): r=Main([pkg]); for n in r.next where '--status' in n.flags: assert Main([n.input]+n.flags)==0"
+    },
+    {
+      "id": "TS-12-55",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-10.1"
+      ],
+      "title": "Change marshals spec and added only for the supersedes kind",
+      "given": [
+        "envelope.Change values of kind status, moved and supersedes"
+      ],
+      "when": "each is marshalled to JSON and the struct tags are inspected",
+      "then": [
+        "the status change has no spec and added keys",
+        "the supersedes change contains spec and added",
+        "both fields carry omitempty and description tags"
+      ],
+      "pseudocode": "b=json.Marshal(Change{Kind:'status',From:'a',To:'b'}); assert !has(b,'spec') && !has(b,'added'); assert has(json.Marshal(Change{Kind:'supersedes',Spec:'12',Added:'03'}),'added')"
+    },
+    {
+      "id": "TS-12-56",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-10.2"
+      ],
+      "title": "The new warning codes exist and carry stage status",
+      "given": [
+        "envelope.WarnTasksOpen and envelope.WarnSupersedesNotRecorded with internal/cli aliases"
+      ],
+      "when": "a warning is raised through Run.Warn with each code",
+      "then": [
+        "the codes equal tasks_open and supersedes_not_recorded",
+        "each warning carries stage status"
+      ],
+      "pseudocode": "assert WarnTasksOpen=='tasks_open'; run.Warn(WarnTasksOpen,'high','x'); assert run.Warnings()[0].Stage=='status'"
+    },
+    {
+      "id": "TS-12-57",
+      "kind": "unit",
+      "verifies": [
+        "12-REQ-10.3"
+      ],
+      "title": "The envelope package imports only the standard library",
+      "given": [
+        "all non-test Go files of package envelope"
+      ],
+      "when": "their imports are parsed with go/parser",
+      "then": [
+        "every import path has no dot in its first path element (standard library)"
+      ],
+      "pseudocode": "for imp in imports(envelope/*.go): assert !contains(first(imp,'/'),'.')"
+    },
+    {
+      "id": "TS-12-58",
+      "kind": "smoke",
+      "verifies": [
+        "12-PATH-1",
+        "12-REQ-4.1"
+      ],
+      "title": "An agent activates a draft package end to end",
+      "given": [
+        "a spec root with draft package 10_x that validates and has a `## Intent` section and a ready first task"
+      ],
+      "when": "`speca 10_x --status active` is run through Main",
+      "then": [
+        "exit 0",
+        "prd.md has status active and an intent_hash",
+        "result status is active with intent_hash and changes [status]",
+        "next carries the claim of the ready next_task"
+      ],
+      "real_components": [
+        "cmd/speca Main",
+        "internal/specpkg",
+        "afspec",
+        "internal/cli",
+        "envelope"
+      ]
+    },
+    {
+      "id": "TS-12-59",
+      "kind": "smoke",
+      "verifies": [
+        "12-PATH-2",
+        "12-REQ-9.7"
+      ],
+      "title": "The report form suggests sealing and the agent seals",
+      "given": [
+        "a spec root with an active package 09_x whose tasks are all done"
+      ],
+      "when": "`speca 09_x` is run, then the suggested `speca <spec_dir> --status sealed` is run",
+      "then": [
+        "the report next contains the sealing suggestion",
+        "the second call exits 0 with result status sealed and summary `speca: sealed 09_x`",
+        "tasks.json and prd.md on disk show the sealed status"
+      ],
+      "real_components": [
+        "cmd/speca Main",
+        "internal/specpkg",
+        "afspec",
+        "internal/cli",
+        "envelope"
+      ]
+    },
+    {
+      "id": "TS-12-60",
+      "kind": "smoke",
+      "verifies": [
+        "12-PATH-3",
+        "12-REQ-6.1"
+      ],
+      "title": "An agent archives a sealed package end to end",
+      "given": [
+        "a spec root with sealed package 03_x and no archive directory"
+      ],
+      "when": "`speca 03_x --status archived` is run through Main",
+      "then": [
+        "exit 0",
+        "03_x no longer exists in the root and root/archive/03_x holds the package with status archived",
+        "changes are [status, moved]"
+      ],
+      "real_components": [
+        "cmd/speca Main",
+        "internal/specpkg",
+        "afspec",
+        "internal/cli",
+        "envelope"
+      ]
+    },
+    {
+      "id": "TS-12-61",
+      "kind": "smoke",
+      "verifies": [
+        "12-PATH-4",
+        "12-REQ-7.2"
+      ],
+      "title": "An agent supersedes a sealed package with a replacing package end to end",
+      "given": [
+        "a spec root with sealed package 03_old and draft package 12_new"
+      ],
+      "when": "`speca 03_old --status superseded --by 12_new` is run through Main",
+      "then": [
+        "exit 0",
+        "root/archive/03_old has status superseded and the DEPRECATED banner",
+        "12_new's supersedes contains 03_old's spec_id",
+        "changes are [status, supersedes, moved] and summary names the old package, spec 12 and the archive path"
+      ],
+      "real_components": [
+        "cmd/speca Main",
+        "internal/specpkg",
+        "afspec",
+        "internal/cli",
+        "envelope"
+      ]
+    },
+    {
+      "id": "TS-12-62",
+      "kind": "smoke",
+      "verifies": [
+        "12-PATH-5",
+        "12-REQ-8.4",
+        "12-REQ-8.5"
+      ],
+      "title": "An interrupted archive is resumed by running the same call again",
+      "given": [
+        "a sealed package 03_x in a root made read-only after the package directory stays writable (skipped as uid 0)"
+      ],
+      "when": "`speca 03_x --status archived` is run and fails, the root is made writable again, and the suggested call from next is run",
+      "then": [
+        "the first call exits 1 at stage archive, category disk, resumable true, with changes [status] and next holding the same call",
+        "the second call exits 0 with changes [moved] only",
+        "root/archive/03_x holds the package with status archived and files unchanged since the failed call"
+      ],
+      "real_components": [
+        "cmd/speca Main",
+        "internal/specpkg",
+        "afspec",
+        "internal/cli",
+        "envelope"
+      ]
+    }
+  ]
+}

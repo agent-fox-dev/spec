@@ -1,0 +1,407 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "10",
+  "spec_name": "speca_state_report",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./envelope/... ./internal/specpkg/... ./cmd/speca/... ./cmd/specr/... ./specgen/... ./examples/tasks/... -count=1"
+  },
+  "dependencies": [],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Add IsReady and NextTask to afspec and use NextTask in examples/tasks",
+      "criteria": [
+        "10-REQ-1"
+      ],
+      "tests": [
+        "TS-10-1",
+        "TS-10-2",
+        "TS-10-3",
+        "TS-10-4",
+        "TS-10-5",
+        "TS-10-6",
+        "TS-10-7",
+        "TS-10-8"
+      ],
+      "steps": [
+        "Write TS-10-1..TS-10-8 (unit tests in afspec/task_test.go, a property test for TS-10-8 using math/rand or testing/quick over generated plans with random states and present/absent/empty/dangling depends_on, and the pick test in examples/tasks/main_test.go) and confirm they fail",
+        "Add (*TasksV2Json).IsReady(id int) bool to afspec/task.go: nil receiver or unknown id gives false; task must be pending; dependencies are DependsOn when non-nil (an explicit empty slice means none), otherwise the task immediately before it in plan order (none for the first task); each dependency must exist in the plan and be done (dropped or missing counts as not done)",
+        "Add (*TasksV2Json).NextTask() (*Task, bool) beside GetTask: nil receiver or empty plan gives nil,false; return a deep copy (copy DependsOn and other slices and pointers, as GetTask does) of the first in_progress task, otherwise of the first task with IsReady true, otherwise nil,false",
+        "Rewrite pick in examples/tasks/main.go so that id 0 uses NextTask; when it returns false keep the two distinct errors: \"every task is done or dropped\" if every task is done or dropped, else \"no pending task has all its dependencies done\"; keep the explicit-id path unchanged",
+        "Run the existing examples/tasks tests and confirm they pass unchanged"
+      ],
+      "touches": [
+        "afspec/task.go",
+        "afspec/task_test.go",
+        "examples/tasks/main.go",
+        "examples/tasks/main_test.go"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Add AdminResult, AdminEnvelope, DecodeSpeca, TaskCounts, PackageInfo and TaskInfo.ready to envelope",
+      "criteria": [
+        "10-REQ-9.1",
+        "10-REQ-9.2",
+        "10-REQ-9.3",
+        "10-REQ-9.4"
+      ],
+      "tests": [
+        "TS-10-51",
+        "TS-10-52",
+        "TS-10-53",
+        "TS-10-54"
+      ],
+      "steps": [
+        "Write TS-10-51..TS-10-54 in envelope/ (marshal each form of AdminResult, reflect over struct tags for description, DecodeSpeca on captured outputs and on \"not json\", an import check that parses envelope/*.go with go/parser and asserts only standard-library imports) and confirm they fail",
+        "Add `Ready bool` to TaskInfo in envelope/render_result.go with json tag `ready,omitempty` and a description tag",
+        "Add TaskCounts{Pending, InProgress, Done, Dropped, Total} (json pending, in_progress, done, dropped, total) and PackageInfo{SpecDir, SpecID, SpecName, Title, Status, Valid *bool, TaskCounts *TaskCounts, NextTask *TaskInfo, Archived bool, LoadError string} with omitempty tags so a failed entry holds only spec_dir and load_error, in a new envelope/admin_result.go",
+        "Add AdminResult in the same file: identity fields (spec_dir, spec_id, spec_name, title, status, created_at, updated_at, intent_hash, supersedes, tags), Valid *bool, FailingRules, IntentDrift bool omitempty, Tasks/AllowedStatus/DependsOn/Packages with omitzero (so they show as [] only when non-nil empty in their own form), TaskCounts *TaskCounts, NextTask *TaskInfo, Dependents with omitzero, Validation *ValidationReport, Traceability *TraceReport; every field gets a description tag",
+        "Make sure empty non-nil slices still marshal as [] with omitzero and nil slices are omitted",
+        "Add `type AdminEnvelope = Envelope[*AdminResult]` and `func DecodeSpeca(data []byte) (AdminEnvelope, error)` in envelope/envelope.go modelled on DecodeSpecr",
+        "Run the existing envelope tests and confirm they pass unchanged"
+      ],
+      "touches": [
+        "envelope/render_result.go",
+        "envelope/admin_result.go",
+        "envelope/envelope.go",
+        "envelope/admin_result_test.go"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Create internal/specpkg with the resolver, listing, display rule, task summary and report converters",
+      "criteria": [
+        "10-REQ-2.1",
+        "10-REQ-2.2",
+        "10-REQ-2.3",
+        "10-REQ-2.4",
+        "10-REQ-2.5",
+        "10-REQ-2.6"
+      ],
+      "tests": [
+        "TS-10-9",
+        "TS-10-10",
+        "TS-10-11",
+        "TS-10-12",
+        "TS-10-13",
+        "TS-10-14"
+      ],
+      "steps": [
+        "Before moving anything, capture the JSON of spec's validation and traceability report for a fixture package (errors, warnings, uncovered criteria, an unowned test) as a golden file under internal/specpkg/testdata",
+        "Write TS-10-9..TS-10-14 in internal/specpkg and confirm they fail",
+        "Create internal/specpkg/locate.go by moving locate, pathCandidates, isSpecDir, specDirs, matching, sameNumber and listed from cmd/specr/locate.go; export Locate(tool, ref, root, specsDir string) (string, error) and List(root string) ([]string, error); keep behaviour identical but build the three refusal messages for -, a URL and a multi-line reference with the tool name passed in (message begins with the tool name); all errors stay cli.Usagef",
+        "Add Display(dir, root string) string (the displayPath rule from cmd/specr/main.go) and Rules([]afspec.ValidationEntry) []string-compatible helper (the distinct Check or Category in first-appearance order; keep the string-joining variant that specr needs as a thin wrapper if useful)",
+        "Add TaskInfos(spec *afspec.Spec) []envelope.TaskInfo and TaskInfo(plan, task) moved from cmd/specr/render.go: one entry per task in plan order, DependsOn copied, Optional via IsOptional, Ready from plan.IsReady(id); a spec without tasks gives an empty non-nil slice",
+        "Move reportOf, itemOf, traceOf and unownedTests from specgen/pipeline.go into internal/specpkg as exported ReportOf, TraceOf (and unexported helpers) returning envelope.ValidationReport and envelope.TraceReport; update specgen/pipeline.go (~lines 897-899) to call them and delete the private copies",
+        "Run the specgen tests and confirm spec's result JSON is byte-for-byte equal to the golden",
+        "Do not touch cmd/specr yet; it keeps compiling against its own copies until the next task"
+      ],
+      "touches": [
+        "internal/specpkg/locate.go",
+        "internal/specpkg/specpkg.go",
+        "internal/specpkg/report.go",
+        "internal/specpkg/specpkg_test.go",
+        "internal/specpkg/testdata",
+        "specgen/pipeline.go"
+      ],
+      "depends_on": [
+        1,
+        2
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Switch specr to the shared specpkg code and regenerate its schema golden",
+      "criteria": [
+        "10-REQ-2.7"
+      ],
+      "tests": [
+        "TS-10-15"
+      ],
+      "steps": [
+        "Write TS-10-15 in cmd/specr/main_test.go: render package 09 and --task N and assert every pending, ready-dependency task carries ready, and other fields are unchanged; confirm it fails",
+        "Delete cmd/specr/locate.go and call specpkg.Locate(\"specr\", ...) from specr's main",
+        "Replace specr's displayPath, rules and taskInfos/taskInfo with the specpkg equivalents, keeping the output otherwise identical",
+        "Regenerate cmd/specr/testdata/schema.golden.json with UPDATE_GOLEN=1 (UPDATE_GOLDEN=1 go test ./cmd/specr -run Schema) and review that the only diff is `ready` on TaskInfo",
+        "Run all cmd/specr tests and confirm they pass; remove any specr tests that tested the deleted private functions by moving their cases into internal/specpkg"
+      ],
+      "touches": [
+        "cmd/specr/main.go",
+        "cmd/specr/locate.go",
+        "cmd/specr/render.go",
+        "cmd/specr/main_test.go",
+        "cmd/specr/testdata/schema.golden.json"
+      ],
+      "depends_on": [
+        3
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Build the speca command shell: flags, help, version, schema and usage errors",
+      "criteria": [
+        "10-REQ-3.2",
+        "10-REQ-3.3",
+        "10-REQ-3.4",
+        "10-REQ-3.5",
+        "10-REQ-3.6",
+        "10-REQ-9.6"
+      ],
+      "tests": [
+        "TS-10-17",
+        "TS-10-18",
+        "TS-10-19",
+        "TS-10-20",
+        "TS-10-21",
+        "TS-10-56"
+      ],
+      "steps": [
+        "Write TS-10-17..TS-10-21 and TS-10-56 in cmd/speca (main_test.go, schema_test.go modelled on cmd/specr) with a newRepo helper copying afspec/testdata/v2_example to .specs/09_agent_mode and valid_spec_with_arch to .specs/01_test_feature, and a run helper decoding with envelope.DecodeSpeca; confirm they fail",
+        "Create cmd/speca/main.go modelled on cmd/specr/main.go: const tool = \"speca\", Main(argv, stdout, stderr) int, a flag set with --validate, --list, --all, --specs-dir, --dir, --schema, --version, help on stderr whose first lines include the sentence \"spec writes a package from an idea, specr renders one, speca reports its state\" plus the forms and examples",
+        "Parse with cli.SplitArgs; implement -h/--help (exit 0, stdout empty), --version (\"speca \"+identity), bare invocation (no positional and not --list: print help, exit 2, and emit a usage envelope when stdout is not a terminal)",
+        "Implement the usage-error checks before reading anything: more than one input, input with --list, --validate with --list, --all without --list, `-`/URL/multi-line input, --dir not a directory, undefined flag; resolve the reference with specpkg.Locate(\"speca\", ...); print the message to stderr and emit an envelope with stage usage, category usage via a usageInfo helper",
+        "Implement the --schema self-description (tool, description containing the sibling sentence, input with examples, flags from cli.FlagsDocument, result from cli.EnvelopeDocument(Result{}, \"side_effects\",\"input\",\"model\",\"usage\"), exit_codes) behind an injectable encoder variable; on encode failure emit an envelope with stage schema, category internal, exit 1; add the golden test with UPDATE_GOLDEN=1 and check in cmd/speca/testdata/schema.golden.json",
+        "Create cmd/speca/result.go with `type Result struct{ envelope.AdminResult }` and Summary() string and Next() []cli.Next methods that for now return \"\" and nil (implemented in the next task)",
+        "Add a dispatch function execute that selects the report, verdict or list form and calls form functions (report, verdict, list) in separate files; give each a minimal implementation that returns a load-stage failure \"form not yet implemented\" so the package compiles; tasks 7-9 replace them",
+        "Run the tests and confirm they pass"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/result.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json"
+      ],
+      "depends_on": [
+        3
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "implement",
+      "title": "Implement speca's summary and next suggestions",
+      "criteria": [
+        "10-REQ-8",
+        "10-REQ-9.5"
+      ],
+      "tests": [
+        "TS-10-45",
+        "TS-10-46",
+        "TS-10-47",
+        "TS-10-48",
+        "TS-10-49",
+        "TS-10-50",
+        "TS-10-55"
+      ],
+      "steps": [
+        "Write TS-10-45..TS-10-50 and TS-10-55 in cmd/speca/result_test.go and confirm they fail; the TS-10-55 test builds Run.Envelope envelopes for each form and error stage and asserts retryable and resumable are false and that Result embeds envelope.AdminResult",
+        "Implement Result.Summary(): report form \"speca: <dir name> <status>, D of T tasks done[; next task N]\" with a does-not-validate clause when valid is false; validate form \"speca: <dir> validates\" or \"speca: <dir> does not validate (N errors: rule, rule)\" using the rule names of validation errors; list form \"speca: N packages (2 draft, 5 active, ...)\" with non-zero status counts in lifecycle order and an \"unreadable\" count when non-zero; detect the form from which fields are set (Packages non-nil means list, Validation non-nil means validate)",
+        "Implement Result.Next(): report with NextTask N gives one cli.Next{Tool: \"specr\", Input: spec_dir, Flags: --task N, Why: in progress or next ready task}; list gives one entry for the first active package (list order, not archived) with no in_progress task and a ready task, using its next_task id; validate and every other case return nil",
+        "Make sure nothing in the result sets Resumable/Retryable true, and the 200-rune cap is applied by Run.Envelope"
+      ],
+      "touches": [
+        "cmd/speca/result.go",
+        "cmd/speca/result_test.go"
+      ],
+      "depends_on": [
+        5
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 7,
+      "kind": "implement",
+      "title": "Implement the speca report form",
+      "criteria": [
+        "10-REQ-4",
+        "10-REQ-5.1",
+        "10-REQ-5.2",
+        "10-REQ-5.3",
+        "10-REQ-5.4",
+        "10-REQ-5.5"
+      ],
+      "tests": [
+        "TS-10-24",
+        "TS-10-25",
+        "TS-10-26",
+        "TS-10-27",
+        "TS-10-28",
+        "TS-10-29",
+        "TS-10-30",
+        "TS-10-31",
+        "TS-10-32"
+      ],
+      "steps": [
+        "Write TS-10-24..TS-10-32 in cmd/speca (integration tests over Main with fixture repos built in t.TempDir; TS-10-30 as a property test over generated task plans) and confirm they fail",
+        "Implement report in cmd/speca: afspec.LoadSpec on the resolved dir; on error return a failure at stage load, category input, message naming the directory and the library's reason, result absent",
+        "Fill identity fields (spec_dir via specpkg.Display, spec_id, spec_name, title, status, created_at, updated_at, intent_hash when set, supersedes and tags when non-empty), valid from Validate always present and failing_rules via specpkg rule names only when invalid",
+        "Add a shared helper intentDrift(spec) used by report and verdict: true when status is active, IntentHash set, and ComputeIntentHash(PRDBody) errors or differs; otherwise leave false so the field is omitted",
+        "Fill tasks via specpkg.TaskInfos (empty non-nil list for no tasks), task_counts (total equal to len(tasks)), next_task via NextTask converted to TaskInfo, allowed_status from afspec.ValidTransition over draft, active, sealed, superseded, archived in that order (non-nil empty for terminal status)",
+        "Fill depends_on from the package's own tasks.json dependencies (file order, de-duplicated, non-nil empty) and dependents via afspec.DiscoverSpecs and BuildDependencyGraph over the spec root (sorted, de-duplicated; use the partial graph despite a dangling dependency error); when the root cannot be read leave dependents nil and call run.Warn(cli.WarnSpecsDirUnreadable, \"low\", ...) naming the root",
+        "Add the legacy-format check shared with specr: when SchemaVersion is neither 0 nor afspec.SchemaVersion raise run.Warn(cli.WarnSpecInvalid, \"high\", ...) saying tests and tasks are not read; raise no spec_invalid warning for an invalid v2 package",
+        "Run the tests and confirm they pass"
+      ],
+      "touches": [
+        "cmd/speca/report.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/report_test.go"
+      ],
+      "depends_on": [
+        6,
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 8,
+      "kind": "implement",
+      "title": "Implement the speca --validate verdict form",
+      "criteria": [
+        "10-REQ-6",
+        "10-REQ-5.3",
+        "10-REQ-5.4"
+      ],
+      "tests": [
+        "TS-10-33",
+        "TS-10-34",
+        "TS-10-35",
+        "TS-10-36",
+        "TS-10-37",
+        "TS-10-38",
+        "TS-10-39"
+      ],
+      "steps": [
+        "Write TS-10-33..TS-10-39 in cmd/speca/verdict_test.go (fixture roots with packages A, B, C, D, an archived target, a malformed sibling, a v1 package) and confirm they fail",
+        "Implement verdict in cmd/speca/verdict.go: load the target (same load failure and legacy-format warning as the report), fill identity fields and intent_drift, and omit tasks, task_counts, next_task, allowed_status, depends_on, dependents and failing_rules",
+        "Compute the package's own result with Validate; list the spec root with afspec.DiscoverSpecs semantics but load every NN_name directory with LoadSpec (skip those that fail), and add the target when it is not among them (compare Dir after absolutising, e.g. an archived package); build metas, BuildDependencyGraph (ignore its dangling-reference error) and call afspec.ValidateCrossSpec",
+        "Keep from the cross-spec result only errors whose EntityID is the package's spec_id, errors with no entity when the graph has at least one edge from or to the package, and warnings whose EntityID is a term in the package's glossary; append them after the package's own errors and warnings",
+        "Convert with specpkg.ReportOf (valid false when any error kept), set result.valid from the same value, and set traceability via specpkg.TraceOf; an invalid package exits 0",
+        "When the spec root cannot be read skip the cross-spec rules, raise the low specs_dir_unreadable warning naming the root, and report the own verdict alone",
+        "Run the tests and confirm they pass"
+      ],
+      "touches": [
+        "cmd/speca/verdict.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/verdict_test.go"
+      ],
+      "depends_on": [
+        7
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 9,
+      "kind": "implement",
+      "title": "Implement the speca --list form and its no-write guarantee",
+      "criteria": [
+        "10-REQ-7",
+        "10-REQ-3.1",
+        "10-REQ-3.7"
+      ],
+      "tests": [
+        "TS-10-16",
+        "TS-10-22",
+        "TS-10-40",
+        "TS-10-41",
+        "TS-10-42",
+        "TS-10-43",
+        "TS-10-44"
+      ],
+      "steps": [
+        "Write TS-10-16, TS-10-22 and TS-10-40..TS-10-44 in cmd/speca/list_test.go and main_test.go and confirm they fail; TS-10-22 snapshots the file tree and modification times, sets invalid credential and model environment variables with t.Setenv, and runs every form",
+        "Implement list in cmd/speca/list.go: read the root with specpkg.List (not DiscoverSpecs); when the root is missing or unreadable fail at stage load, category input, with a message naming the root and fix hint flag --specs-dir; an existing empty root gives a non-nil empty packages list",
+        "Sort directories by numeric prefix compared as a number, ties by full name; load each with LoadSpec; a loaded package gives PackageInfo with spec_dir, spec_id, spec_name, title, status, valid from Validate, task_counts and next_task; a failure gives an entry with only spec_dir and load_error and the call continues",
+        "With --all append the directories under <root>/archive/ in the same order each with archived true regardless of status; a missing archive/ adds nothing and no warning",
+        "Confirm speca's code calls no os.Create/WriteFile/Mkdir/Rename and reads no environment variable, and that nothing in the call path touches the network",
+        "Run the tests, including TS-10-16 across all forms and flag orders, and confirm they pass"
+      ],
+      "touches": [
+        "cmd/speca/list.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/list_test.go",
+        "cmd/speca/main_test.go"
+      ],
+      "depends_on": [
+        8
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 10,
+      "kind": "implement",
+      "title": "Install speca in the build and update documentation and the ADR",
+      "criteria": [
+        "10-REQ-3.8"
+      ],
+      "tests": [
+        "TS-10-23"
+      ],
+      "steps": [
+        "Write TS-10-23 (a test that runs `make -n build` with os/exec and counts the three -ldflags installs, the ./cmd/speca path and the help line) and confirm it fails",
+        "Update the Makefile build target to install ./cmd/speca with $(LDFLAGS) beside ./cmd/spec and ./cmd/specr, and its help line to name all three",
+        "Create docs/speca.md modelled on docs/specr.md: forms, input, report, output, errors, warnings, flags, --schema and calling it from an agent",
+        "Update README.md (a speca section; correct the \"no CLI surface\" sentence to say reading state has a command while changing it is still library API), docs/architecture.md (layout with cmd/speca and internal/specpkg, a section on the speca command with its package graph, the Consumers paragraph), docs/api.md (AdminResult, AdminEnvelope, DecodeSpeca, PackageInfo, TaskCounts, TaskInfo.ready), docs/specr.md (ready in task fields), afspec/README.md (IsReady and NextTask)",
+        "Write docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md recording the decision to build speca, modelled on ADR 05",
+        "Run `make doc` to regenerate docs/generated (including docs/generated/cmd/speca.txt); write no test that checks doc content"
+      ],
+      "touches": [
+        "Makefile",
+        "docs/speca.md",
+        "README.md",
+        "docs/architecture.md",
+        "docs/api.md",
+        "docs/specr.md",
+        "afspec/README.md",
+        "docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md",
+        "docs/generated"
+      ],
+      "depends_on": [
+        9
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 11,
+      "kind": "integration",
+      "title": "Verify the speca execution paths end to end",
+      "tests": [
+        "TS-10-57",
+        "TS-10-58",
+        "TS-10-59",
+        "TS-10-60"
+      ],
+      "steps": [
+        "Write TS-10-57..TS-10-60 as smoke tests in cmd/speca/smoke_test.go against the real speca and specr Main entry points and real fixtures on disk, and confirm they pass",
+        "Trace 10-PATH-1 to 10-PATH-4 through the real code: Main, cli.SplitArgs, specpkg.Locate, afspec.LoadSpec, Validate, IsReady, NextTask, ValidTransition, DiscoverSpecs, BuildDependencyGraph, ValidateCrossSpec, specpkg converters, Run.Envelope and Emit; confirm each step calls the next and no placeholder form function remains in cmd/speca/forms.go",
+        "Confirm producers are consumed in production code: IsReady and NextTask by specpkg.TaskInfos, specr, speca and examples/tasks; specpkg.Locate, Display and TaskInfos by specr and speca; specpkg.ReportOf and TraceOf by specgen and speca; envelope.DecodeSpeca by tests only is acceptable as a public API",
+        "Search every file listed in the tasks' touches (afspec/task.go, examples/tasks, envelope, internal/specpkg, specgen/pipeline.go, cmd/specr, cmd/speca) for TODO, panic(\"not implemented\"), \"not yet implemented\" and bare `return nil` on non-trivial paths, and remove any that remain",
+        "Run make test and make lint, and run make doc so docs/generated is current"
+      ],
+      "touches": [
+        "cmd/speca/smoke_test.go"
+      ],
+      "depends_on": [
+        10
+      ],
+      "done_when": [
+        "`make test` and `make lint` pass"
+      ],
+      "state": "pending"
+    }
+  ]
+}

@@ -1,0 +1,650 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "12",
+  "spec_name": "speca_lifecycle",
+  "schema_version": 2,
+  "introduction": "This spec adds the `--status` form to the `speca` command. The form moves a format v2 spec package through its lifecycle (activate, seal, archive, supersede) by calling `afspec`. Before it writes anything, it makes the checks an operator would make. It moves archived and superseded packages under `archive/`. It also adds `ArchiveDestination` and `MoveUnderArchive` to `afspec`, so the status write and the directory move are separate library calls.",
+  "glossary": {
+    "allowed_status": "The list of statuses that `afspec.ValidTransition` allows from a package's current status, as the report form of 10_speca_state_report reports it.",
+    "display rule": "The rule in internal/specpkg (from 10_speca_state_report) that renders a package directory as a path relative to the working directory or the spec root.",
+    "holding directory": "The directory that directly contains a package directory (filepath.Dir of the package path). Archived and superseded packages move to `<holding directory>/archive/<name>`.",
+    "intent drift": "The state of a package whose `intent_hash` is set while its PRD body hashes to a different value or has no `## Intent` section.",
+    "move-only call": "A `--status` call where the target equals the current status, that status is `archived` or `superseded`, and the package is not under archive/. It resumes an interrupted call by moving the directory without rewriting any file.",
+    "open task": "A task in tasks.json whose state is `pending` or `in_progress`. Optional tasks count.",
+    "replacing package": "The package named by `--by` when a package is superseded. The old package's spec_id is recorded in its `supersedes` list.",
+    "under archive/": "Describes a package whose holding directory is named `archive`. No spec-root resolution is involved."
+  },
+  "requirements": [
+    {
+      "id": "12-REQ-1",
+      "title": "A library move under archive/ that keeps the status",
+      "rationale": "Writing the status and moving the directory must be separate calls, so that superseded packages keep their status and an interrupted call can be resumed by moving only.",
+      "criteria": [
+        {
+          "id": "12-REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "ArchiveDestination(specDir, root) is called and `<root>/archive/<base name of specDir>` does not exist",
+          "system": "afspec",
+          "action": "return that path and create, rename or modify no file or directory",
+          "contract": "returns (filepath.Join(root, \"archive\", filepath.Base(specDir)), nil)"
+        },
+        {
+          "id": "12-REQ-1.2",
+          "pattern": "unwanted",
+          "condition": "the destination path ArchiveDestination computes already exists or its existence cannot be checked",
+          "system": "afspec",
+          "action": "return an error and write nothing",
+          "contract": "returns (\"\", *SaveError); when the path exists, the message contains `archive conflict: <path> already exists`"
+        },
+        {
+          "id": "12-REQ-1.3",
+          "pattern": "event_driven",
+          "condition": "MoveUnderArchive(specDir, root) is called on a package that loads, has status `archived` or `superseded`, and has a free destination",
+          "system": "afspec",
+          "action": "create `<root>/archive/` with mode 0755 if it is missing, rename the package directory to the destination, and rewrite no file, so that the status, updated_at and the bytes of every file stay the same",
+          "contract": "returns (destination path, nil); specDir no longer exists and the destination holds the identical files"
+        },
+        {
+          "id": "12-REQ-1.4",
+          "pattern": "unwanted",
+          "condition": "LoadSpec fails on the package passed to MoveUnderArchive",
+          "system": "afspec",
+          "action": "move nothing and return the load failure unchanged",
+          "contract": "returns (\"\", err) where errors.As(err, *LoadError) is true; the package directory is unchanged"
+        },
+        {
+          "id": "12-REQ-1.5",
+          "pattern": "unwanted",
+          "condition": "MoveUnderArchive is called on a package whose status is neither `archived` nor `superseded`",
+          "system": "afspec",
+          "action": "refuse the move and leave the package in place",
+          "contract": "returns (\"\", *LifecycleError); no directory is created or renamed"
+        },
+        {
+          "id": "12-REQ-1.6",
+          "pattern": "unwanted",
+          "condition": "MoveUnderArchive finds the destination taken, or creating `<root>/archive/` or the rename fails",
+          "system": "afspec",
+          "action": "leave the package at specDir with its files unchanged",
+          "contract": "returns (\"\", *SaveError); for a taken destination, the error is the one ArchiveDestination returns"
+        },
+        {
+          "id": "12-REQ-1.7",
+          "pattern": "event_driven",
+          "condition": "MoveToArchive(specDir, root) is called with a free destination",
+          "system": "afspec",
+          "action": "transition any package that is not already `archived` (a superseded one included) to `archived`, then move it with MoveUnderArchive. The existing TestMoveToArchive passes unchanged",
+          "contract": "returns nil; the package is at `<root>/archive/<name>` with status `archived`"
+        },
+        {
+          "id": "12-REQ-1.8",
+          "pattern": "unwanted",
+          "condition": "MoveToArchive is called and ArchiveDestination reports the destination taken",
+          "system": "afspec",
+          "action": "return before the transition writes anything",
+          "contract": "returns *SaveError; the package's status and the bytes of every file at specDir are unchanged"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-2",
+      "title": "The --status form and its usage errors",
+      "rationale": "Malformed calls must fail as usage errors before any package is loaded or written.",
+      "criteria": [
+        {
+          "id": "12-REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "speca is invoked as `speca <spec> --status S` with S one of `active`, `sealed`, `archived`, or `superseded` together with `--by <spec>`",
+          "system": "speca",
+          "action": "dispatch the call to the status form, which honours the `--dry-run` and `--force` flags from 11_speca_task_states"
+        },
+        {
+          "id": "12-REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "`--status draft` is given",
+          "system": "speca",
+          "action": "refuse the call with a message saying that no move leads back to draft and that a package whose intent must change is superseded by a new one, and write nothing",
+          "contract": "exit 2; error stage `usage`, category `usage`; fix_hint {flag: \"--status\", valid: [\"active\",\"sealed\",\"superseded\",\"archived\"]}"
+        },
+        {
+          "id": "12-REQ-2.3",
+          "pattern": "unwanted",
+          "condition": "`--status` is given a value other than draft that is not one of the four targets",
+          "system": "speca",
+          "action": "refuse the call and write nothing",
+          "contract": "exit 2; stage `usage`, category `usage`; fix_hint {flag: \"--status\", valid: [the four targets]}"
+        },
+        {
+          "id": "12-REQ-2.4",
+          "pattern": "unwanted",
+          "condition": "`--status superseded` is given without `--by`, `--by` is given without `--status superseded`, `--status` is combined with `--task`/`--state`, `--validate` or `--list`, or `--status` is given with no positional input",
+          "system": "speca",
+          "action": "refuse the call and write nothing",
+          "contract": "exit 2; stage `usage`, category `usage`; no result"
+        },
+        {
+          "id": "12-REQ-2.5",
+          "pattern": "unwanted",
+          "condition": "the shared resolver refuses the `--by` reference, or `--by` resolves to the same directory as the input, or the loaded `--by` package has the same spec_id as the input",
+          "system": "speca",
+          "action": "refuse the call and write nothing",
+          "contract": "exit 2; stage `usage`, category `usage`; when the resolver refuses, the message starts with `--by:`"
+        },
+        {
+          "id": "12-REQ-2.6",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "describe the --status form and the --by flag in the help text, the flag descriptions and the `--schema` document. The schema gives `status` as an enum of the four targets, and `cmd/speca/testdata/schema.golden.json` matches the output",
+          "contract": "the `--schema` output equals the regenerated golden file"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-3",
+      "title": "Checks made before any write",
+      "rationale": "A move the format forbids, or one that would silently drop data, must be refused before any file changes.",
+      "criteria": [
+        {
+          "id": "12-REQ-3.1",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "run the checks of every --status call in this order: load, the move, the target's own checks (activation, sealing, superseding), unknown keys, then the archive destination. The checks also run under --dry-run, and the first check that refuses ends the call",
+          "contract": "on a refusal, no file or directory is modified and the envelope has no result"
+        },
+        {
+          "id": "12-REQ-3.2",
+          "pattern": "unwanted",
+          "condition": "LoadSpec fails on the input or the --by package, or a loaded package has a schema_version that is neither absent nor 2",
+          "system": "speca",
+          "action": "refuse the call, naming the directory and naming --by when the replacing package is at fault. The message says that speca changes the state of format version 2 packages only when the version is the cause. --force does not override this",
+          "contract": "exit 1; stage `load`, category `input`; no result"
+        },
+        {
+          "id": "12-REQ-3.3",
+          "pattern": "event_driven",
+          "condition": "the target equals the current status, that status is `archived` or `superseded`, and the package is not under archive/",
+          "system": "speca",
+          "action": "treat the call as a move-only call instead of refusing it as a disallowed transition"
+        },
+        {
+          "id": "12-REQ-3.4",
+          "pattern": "unwanted",
+          "condition": "the call is not move-only and afspec.ValidTransition(status, target) is false",
+          "system": "speca",
+          "action": "refuse the call with a message naming the package, its status and the target. The message says `already <status>` when target equals status; otherwise it names the shortest sequence of allowed moves to the target when one exists (for active → archived: seal it first with `speca <spec> --status sealed`, then archive it). --force does not override this",
+          "contract": "exit 1; stage `status`, category `lifecycle`; fix_hint {flag: \"--status\", valid: allowed_status} when allowed_status is non-empty, and no fix_hint when it is empty"
+        },
+        {
+          "id": "12-REQ-3.5",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "for any pair of distinct statuses (current, target) where ValidTransition is false, name in the refusal message a sequence of moves that is a shortest chain of ValidTransition steps from current to target when such a chain exists, and name no sequence when none exists"
+        },
+        {
+          "id": "12-REQ-3.6",
+          "pattern": "unwanted",
+          "condition": "a call that rewrites package files (sealing, archiving or superseding, not move-only) is made without --force on a package for which Validate reports one or more `unknown_field` errors",
+          "system": "speca",
+          "action": "refuse the call, naming each file and unknown key",
+          "contract": "exit 1; stage `status`, category `lifecycle`; fix_hint.flag `--force`; no file modified"
+        },
+        {
+          "id": "12-REQ-3.7",
+          "pattern": "optional",
+          "condition": "--force is given on a sealing, archiving or superseding call whose package has `unknown_field` errors",
+          "system": "speca",
+          "action": "go ahead with the call and raise a warning naming the keys the write drops",
+          "contract": "envelope warning with code `spec_invalid` and severity `high`"
+        },
+        {
+          "id": "12-REQ-3.8",
+          "pattern": "unwanted",
+          "condition": "a move that ends under archive/ starts from a package not under archive/, and afspec.ArchiveDestination(dir, holding directory) reports the destination taken",
+          "system": "speca",
+          "action": "refuse the call, naming the existing directory, and write nothing",
+          "contract": "exit 1; stage `archive`, category `disk`, resumable false; no result"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-4",
+      "title": "Activation",
+      "rationale": "An active package must have an intent to hash and should validate, which is the verdict `spec` uses before it activates.",
+      "criteria": [
+        {
+          "id": "12-REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "`--status active` is given for a draft package whose body has a `## Intent` section and whose Validate result is valid",
+          "system": "speca",
+          "action": "set updated_at and call Transition(\"active\", dir), leaving the package in its directory",
+          "contract": "exit 0; result status `active` with the new intent_hash; changes [{kind: status, from: draft, to: active}]"
+        },
+        {
+          "id": "12-REQ-4.2",
+          "pattern": "unwanted",
+          "condition": "afspec.HasIntent(PRDBody) is false for the package being activated",
+          "system": "speca",
+          "action": "refuse the call with a message telling the caller to add a `## Intent` section to prd.md, spelled exactly so on a line of its own. --force does not override this",
+          "contract": "exit 1; stage `status`, category `lifecycle`; no file modified"
+        },
+        {
+          "id": "12-REQ-4.3",
+          "pattern": "unwanted",
+          "condition": "the package being activated has a Validate result that is not valid and --force is not given",
+          "system": "speca",
+          "action": "refuse the call with a message naming the failing rules",
+          "contract": "exit 1; stage `validate`, category `invalid_spec`; fix_hint.flag `--force`; no file modified"
+        },
+        {
+          "id": "12-REQ-4.4",
+          "pattern": "optional",
+          "condition": "--force is given on an activation whose package does not validate",
+          "system": "speca",
+          "action": "activate the package and raise a warning naming the failing rules",
+          "contract": "exit 0; envelope warning code `spec_invalid`, severity `high`"
+        },
+        {
+          "id": "12-REQ-4.5",
+          "pattern": "optional",
+          "condition": "--dry-run is given on an activation that passes its checks",
+          "system": "speca",
+          "action": "report in the result the intent_hash that ComputeIntentHash gives for the body, without writing",
+          "contract": "result.intent_hash equals ComputeIntentHash(PRDBody); prd.md is unchanged"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-5",
+      "title": "Sealing",
+      "rationale": "A sealed package must be finished and must not make an intent drift permanent.",
+      "criteria": [
+        {
+          "id": "12-REQ-5.1",
+          "pattern": "event_driven",
+          "condition": "`--status sealed` is given for an active package with no intent drift and no open task",
+          "system": "speca",
+          "action": "set updated_at and call Transition(\"sealed\", dir), leaving the package in its directory",
+          "contract": "exit 0; result status `sealed`; changes [{kind: status, from: active, to: sealed}]"
+        },
+        {
+          "id": "12-REQ-5.2",
+          "pattern": "unwanted",
+          "condition": "the package being sealed has intent drift",
+          "system": "speca",
+          "action": "refuse the call with a message telling the caller to restore the intent that was activated or to write a new package that supersedes this one. --force does not override this",
+          "contract": "exit 1; stage `status`, category `lifecycle`; no fix_hint; no file modified"
+        },
+        {
+          "id": "12-REQ-5.3",
+          "pattern": "unwanted",
+          "condition": "the package being sealed has one or more open tasks and --force is not given",
+          "system": "speca",
+          "action": "refuse the call with a message naming each open task with its state and telling the caller to finish or drop it",
+          "contract": "exit 1; stage `status`, category `lifecycle`; fix_hint.flag `--force`; no file modified"
+        },
+        {
+          "id": "12-REQ-5.4",
+          "pattern": "optional",
+          "condition": "--force is given on a sealing call whose package has open tasks and no intent drift",
+          "system": "speca",
+          "action": "seal the package and raise a warning listing each open task and its state",
+          "contract": "exit 0; envelope warning code `tasks_open`, severity `high`"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-6",
+      "title": "Archiving",
+      "rationale": "Format §9.2 requires an archived package to sit under archive/.",
+      "criteria": [
+        {
+          "id": "12-REQ-6.1",
+          "pattern": "event_driven",
+          "condition": "`--status archived` is given for a draft, sealed or superseded package that is not under archive/",
+          "system": "speca",
+          "action": "set updated_at, call Transition(\"archived\", dir), then call MoveUnderArchive(dir, holding directory)",
+          "contract": "exit 0; the package is at `<holding>/archive/<name>` with status `archived`; changes [status, moved] in that order"
+        },
+        {
+          "id": "12-REQ-6.2",
+          "pattern": "event_driven",
+          "condition": "`--status archived` is given for a draft, sealed or superseded package already under archive/",
+          "system": "speca",
+          "action": "call Transition(\"archived\", dir) only and leave the directory where it is",
+          "contract": "exit 0; changes [{kind: status}] only"
+        },
+        {
+          "id": "12-REQ-6.3",
+          "pattern": "event_driven",
+          "condition": "a move-only call is made with `--status archived`",
+          "system": "speca",
+          "action": "call MoveUnderArchive only, rewriting no file and leaving updated_at unchanged",
+          "contract": "exit 0; changes [{kind: moved}] only; the package files are byte-identical at the new location"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-7",
+      "title": "Superseding",
+      "rationale": "Format §9.1 requires the banner and the superseded status on the old package, the old id in the new package's supersedes, and the old folder under archive/.",
+      "criteria": [
+        {
+          "id": "12-REQ-7.1",
+          "pattern": "unwanted",
+          "condition": "the --by package has a status other than draft, active or sealed",
+          "system": "speca",
+          "action": "refuse the call. --force does not override this",
+          "contract": "exit 1; stage `status`, category `lifecycle`; fix_hint.flag `--by`; no file modified"
+        },
+        {
+          "id": "12-REQ-7.2",
+          "pattern": "event_driven",
+          "condition": "`--status superseded --by R` is given for a sealed package that passes every check",
+          "system": "speca",
+          "action": "in this order: call Supersede(R's spec_id, dir); append the old spec_id to the end of R's supersedes with Save, unless it is already there; then call MoveUnderArchive(dir, holding directory) unless the package is already under archive/. The status stays `superseded`",
+          "contract": "exit 0; the package sits under archive/ with status `superseded` and the DEPRECATED banner; changes [status, supersedes, moved] in that order, omitting the steps that did not run"
+        },
+        {
+          "id": "12-REQ-7.3",
+          "pattern": "unwanted",
+          "condition": "the replacing package is sealed, is active with intent drift, has `unknown_field` errors, or its Save fails",
+          "system": "speca",
+          "action": "skip or abandon the supersedes record and complete the rest of the call. --force does not extend to the replacing package",
+          "contract": "exit 0; envelope warning code `supersedes_not_recorded`, severity `low`, naming the replacing package's directory, the id not recorded and the reason; no supersedes change"
+        },
+        {
+          "id": "12-REQ-7.4",
+          "pattern": "event_driven",
+          "condition": "a move-only call is made with `--status superseded --by R`",
+          "system": "speca",
+          "action": "skip Supersede, add the old spec_id to R's supersedes only if it is still missing, and move the package with MoveUnderArchive",
+          "contract": "exit 0; changes [supersedes (when added), moved]; the old package's files are unchanged"
+        },
+        {
+          "id": "12-REQ-7.5",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "for any sequence of superseding calls naming the same old package and the same replacing package, leave the old spec_id in the replacing package's supersedes exactly once"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-8",
+      "title": "Writing, failures while writing, and resuming",
+      "rationale": "A failure part way through must say what was written and how to finish it.",
+      "criteria": [
+        {
+          "id": "12-REQ-8.1",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "set updated_at to the current UTC time in RFC 3339 on every package it writes, before writing it",
+          "contract": "updated_at in the written prd.md parses with time.RFC3339, is in UTC, and is not earlier than the call's start time truncated to the second"
+        },
+        {
+          "id": "12-REQ-8.2",
+          "pattern": "unwanted",
+          "condition": "Transition or Supersede returns a *SaveError",
+          "system": "speca",
+          "action": "end the call with the library's message",
+          "contract": "exit 1; stage `write`, category `disk`; no result"
+        },
+        {
+          "id": "12-REQ-8.3",
+          "pattern": "unwanted",
+          "condition": "a *LifecycleError or *IntentError reaches the write despite the checks",
+          "system": "speca",
+          "action": "end the call",
+          "contract": "exit 1; stage `status`, category `lifecycle`"
+        },
+        {
+          "id": "12-REQ-8.4",
+          "pattern": "unwanted",
+          "condition": "MoveUnderArchive fails after the status was written",
+          "system": "speca",
+          "action": "end the call with a message naming the directory the package is in now and its new status, and saying that running the same call again moves it. The summary says that the status was written and the move was not",
+          "contract": "exit 1; stage `archive`, category `disk`, resumable true, retryable false; result present with spec_dir at the current location, the new status, and changes listing what was written; next holds the same call against the current spec_dir, with --by when superseding"
+        },
+        {
+          "id": "12-REQ-8.5",
+          "pattern": "event_driven",
+          "condition": "the same call is run again after an archive-stage failure",
+          "system": "speca",
+          "action": "move the package under archive/ as a move-only call and change nothing else",
+          "contract": "exit 0; changes contain only `moved` (and `supersedes` if it was still missing); the files are byte-identical to the ones left by the failed call"
+        },
+        {
+          "id": "12-REQ-8.6",
+          "pattern": "unwanted",
+          "condition": "reading the package back with LoadSpec after a successful write fails",
+          "system": "speca",
+          "action": "end the call and report the writes that were made",
+          "contract": "exit 1; stage `load`, category `input`; result carries changes"
+        },
+        {
+          "id": "12-REQ-8.7",
+          "pattern": "ubiquitous",
+          "system": "cmd/speca Result",
+          "action": "implement Resumable() bool, returning true only for the archive-stage failure",
+          "contract": "envelope `resumable` is true only for exit 1 at stage `archive` after a status write"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-9",
+      "title": "Result, summary, dry run and next",
+      "rationale": "An agent must see what changed, and must be offered only calls that will succeed.",
+      "criteria": [
+        {
+          "id": "12-REQ-9.1",
+          "pattern": "event_driven",
+          "condition": "a --status call succeeds without --dry-run",
+          "system": "speca",
+          "action": "return the package as the report form of 10_speca_state_report reports it, read back with LoadSpec from where the package now is, with spec_dir shown by the display rule. Changes are listed in write order using the shapes {kind: status, from, to}, {kind: supersedes, spec, added} and {kind: moved, from, to} with display paths",
+          "contract": "result.spec_dir is the post-move directory; result.changes is ordered status, supersedes, moved"
+        },
+        {
+          "id": "12-REQ-9.2",
+          "pattern": "optional",
+          "condition": "--dry-run is given",
+          "system": "speca",
+          "action": "produce the same exit code, refusals, warnings, changes and result as the real call, computing the result from the state held in memory, and modify no file or directory",
+          "contract": "result.dry_run is true; the file tree and every modification time are unchanged"
+        },
+        {
+          "id": "12-REQ-9.3",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "emit one summary sentence per call in the forms `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <display path>`, `speca: superseded <name> by <spec_id>, moved to <display path>` and `speca: moved <name> to <display path>`. Under --dry-run the sentence ends with ` (dry run; nothing written)`",
+          "contract": "envelope summary matches the form for the move made"
+        },
+        {
+          "id": "12-REQ-9.4",
+          "pattern": "event_driven",
+          "condition": "a --status call ends without --dry-run",
+          "system": "speca",
+          "action": "suggest in next, after activation, the claim `speca <spec_dir> --task N --state in_progress` for next_task when that task is ready. After sealing, archiving, superseding, a move-only call or a refusal, suggest nothing",
+          "contract": "envelope next has one entry or is empty, as described"
+        },
+        {
+          "id": "12-REQ-9.5",
+          "pattern": "optional",
+          "condition": "--dry-run is given on a call that passes its checks",
+          "system": "speca",
+          "action": "suggest in next the same call without --dry-run",
+          "contract": "next[0] carries the same input and flags minus `--dry-run`"
+        },
+        {
+          "id": "12-REQ-9.6",
+          "pattern": "event_driven",
+          "condition": "the report form `speca <spec>` reports a draft package whose Validate is valid and whose body has a `## Intent` section",
+          "system": "speca",
+          "action": "list `speca <spec_dir> --status active` in next before any task suggestion",
+          "contract": "next[0].flags are [\"--status\", \"active\"]"
+        },
+        {
+          "id": "12-REQ-9.7",
+          "pattern": "event_driven",
+          "condition": "the report form reports an active package with no open task",
+          "system": "speca",
+          "action": "list `speca <spec_dir> --status sealed` in next, and leave the --list form's next unchanged",
+          "contract": "next contains an entry with flags [\"--status\", \"sealed\"]"
+        },
+        {
+          "id": "12-REQ-9.8",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "for any package for which the report form suggests a --status call, run that suggested call without a refusal",
+          "contract": "the suggested call exits 0"
+        }
+      ]
+    },
+    {
+      "id": "12-REQ-10",
+      "title": "Output types and warning codes",
+      "rationale": "Agents decode the envelope by type and by warning code, so the new fields and codes must exist in the public package.",
+      "criteria": [
+        {
+          "id": "12-REQ-10.1",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "give Change the fields `spec` and `added`, both tagged `omitempty` and both carrying `description` tags",
+          "contract": "a Change of kind `status` marshals without the keys spec and added; a Change of kind `supersedes` marshals with them"
+        },
+        {
+          "id": "12-REQ-10.2",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "declare WarnTasksOpen = \"tasks_open\" and WarnSupersedesNotRecorded = \"supersedes_not_recorded\", and have internal/cli/warn.go declare aliases for both with warnStages entries of \"status\"",
+          "contract": "a warning raised with either code carries stage `status`"
+        },
+        {
+          "id": "12-REQ-10.3",
+          "pattern": "ubiquitous",
+          "system": "envelope",
+          "action": "import only standard library packages",
+          "contract": "every import in the envelope package resolves to a standard library package"
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "12-PATH-1",
+      "title": "An agent activates a draft package",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `speca 12_x --status active` on a draft package that validates and has a ## Intent section"
+        },
+        {
+          "actor": "speca",
+          "action": "resolves and loads the package, checks the move with ValidTransition, HasIntent and Validate"
+        },
+        {
+          "actor": "speca",
+          "action": "sets updated_at and calls afspec Transition(\"active\", dir), which writes the status and intent_hash"
+        },
+        {
+          "actor": "speca",
+          "action": "reads the package back with LoadSpec and emits exit 0 with result status active, intent_hash and changes [status], plus a next claim for the ready next_task"
+        }
+      ]
+    },
+    {
+      "id": "12-PATH-2",
+      "title": "The report form suggests sealing and the agent seals",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `speca 09_x` on an active package whose tasks are all done"
+        },
+        {
+          "actor": "speca report form",
+          "action": "emits a report whose next contains `speca <spec_dir> --status sealed`"
+        },
+        {
+          "actor": "agent",
+          "action": "runs the suggested `speca <spec_dir> --status sealed`"
+        },
+        {
+          "actor": "speca",
+          "action": "checks for intent drift, open tasks and unknown keys, sets updated_at and calls Transition(\"sealed\", dir)"
+        },
+        {
+          "actor": "speca",
+          "action": "emits exit 0 with result status sealed and summary `speca: sealed 09_x`"
+        }
+      ]
+    },
+    {
+      "id": "12-PATH-3",
+      "title": "An agent archives a sealed package",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `speca 03_x --status archived` on a sealed package in the spec root"
+        },
+        {
+          "actor": "speca",
+          "action": "checks the move and confirms with afspec ArchiveDestination that `<root>/archive/03_x` is free"
+        },
+        {
+          "actor": "speca",
+          "action": "calls Transition(\"archived\", dir) and then afspec MoveUnderArchive(dir, root)"
+        },
+        {
+          "actor": "speca",
+          "action": "reads the package back from `<root>/archive/03_x` and emits exit 0 with changes [status, moved]"
+        }
+      ]
+    },
+    {
+      "id": "12-PATH-4",
+      "title": "An agent supersedes a sealed package with a replacing package",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `speca 03_old --status superseded --by 12_new`"
+        },
+        {
+          "actor": "speca",
+          "action": "loads both packages and checks the replacing package's status, unknown keys and the archive destination"
+        },
+        {
+          "actor": "speca",
+          "action": "calls Supersede(\"12\", dir), which writes the banner and the superseded status"
+        },
+        {
+          "actor": "speca",
+          "action": "appends the old spec_id to 12_new's supersedes and saves it with Save"
+        },
+        {
+          "actor": "speca",
+          "action": "moves 03_old with MoveUnderArchive and emits exit 0 with changes [status, supersedes, moved] and status superseded"
+        }
+      ]
+    },
+    {
+      "id": "12-PATH-5",
+      "title": "An interrupted archive is resumed by running the same call again",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `speca 03_x --status archived` and the directory rename fails after the status write"
+        },
+        {
+          "actor": "speca",
+          "action": "emits exit 1 at stage archive, category disk, resumable true, with result changes [status] and next holding the same call"
+        },
+        {
+          "actor": "agent",
+          "action": "runs the suggested call again once the cause is cleared"
+        },
+        {
+          "actor": "speca",
+          "action": "recognises a move-only call, calls MoveUnderArchive without rewriting any file, and emits exit 0 with changes [moved]"
+        }
+      ]
+    }
+  ]
+}

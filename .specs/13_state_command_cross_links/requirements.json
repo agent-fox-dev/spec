@@ -1,0 +1,386 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "13",
+  "spec_name": "state_command_cross_links",
+  "schema_version": 2,
+  "introduction": "The three commands built on one interface — `spec` (writes a package), `specr` (renders one) and `speca` (reports and changes its state) — name one another in their help, package doc comments and `--schema` descriptions through one shared constant. `specr`'s `next` suggests the `speca` call that claims a task or records it done whenever that call would succeed, as decided by one writability rule in `internal/specpkg` that `specr` and `speca` both call.",
+  "glossary": {
+    "claim": "The call `speca <spec_dir> --task N --state in_progress`, which moves a pending task to in_progress as a compare-and-set.",
+    "done call": "The call `speca <spec_dir> --task N --state done`, which records an in-progress task as finished.",
+    "intent drift": "An active package whose recorded IntentHash is set and whose PRD body's intent hash cannot be computed or differs from it.",
+    "ready task": "A pending task whose dependencies are all done, reported as TaskInfo.ready.",
+    "render suggestion": "specr's existing `next` element `{tool: specr, input: <spec_dir>, flags: [--task, M]}` naming the next unfinished task.",
+    "sibling sentence": "The value of the constant cli.SiblingCommands: \"spec writes a package from an idea, specr renders one, speca reports and changes its state.\"",
+    "speca entry": "A `next` element whose tool is \"speca\": a claim or a done call.",
+    "task render": "A specr call with --task N.",
+    "unfinished task": "A task whose state is neither done nor dropped.",
+    "whole render": "A specr call without --task, with or without --section or --max-tokens.",
+    "writable package": "A package with status draft, or with status active and no intent drift; the only packages speca's task and status writes accept."
+  },
+  "requirements": [
+    {
+      "id": "13-REQ-1",
+      "title": "One constant holds the sibling sentence",
+      "rationale": "Three literal copies of one sentence would drift apart.",
+      "criteria": [
+        {
+          "id": "13-REQ-1.1",
+          "pattern": "ubiquitous",
+          "system": "internal/cli package",
+          "action": "export an untyped string constant SiblingCommands whose value is exactly \"spec writes a package from an idea, specr renders one, speca reports and changes its state.\"",
+          "contract": "cli.SiblingCommands compiles in a const expression concatenated with a raw-string constant"
+        },
+        {
+          "id": "13-REQ-1.2",
+          "pattern": "ubiquitous",
+          "system": "repository Go sources",
+          "action": "hold the literal sibling sentence only in the declaration of cli.SiblingCommands, so that every non-test .go file under cmd/spec, cmd/specr and cmd/speca obtains it by referencing cli.SiblingCommands",
+          "contract": "a scan of non-test .go files finds the sentence text in exactly one file, internal/cli"
+        }
+      ]
+    },
+    {
+      "id": "13-REQ-2",
+      "title": "Every command's help names the other two",
+      "rationale": "An agent that finds one command learns about the other two from the command itself.",
+      "criteria": [
+        {
+          "id": "13-REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "spec, specr or speca is invoked with -h or --help",
+          "system": "each command",
+          "action": "print its help to stderr with a line equal to cli.SiblingCommands placed after the title line and before the `Usage:` line, with a blank line directly before it and directly after it",
+          "contract": "exit code 0; stdout is empty; stderr contains \"\\n\\n\" + cli.SiblingCommands + \"\\n\\n\" before the first \"Usage:\""
+        },
+        {
+          "id": "13-REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "spec, specr or speca is invoked with no arguments while stdout is not a terminal",
+          "system": "each command",
+          "action": "print the same help, including the sibling line, to stderr and write a usage envelope to stdout",
+          "contract": "exit code 2; stdout holds an envelope with error category usage; stderr contains cli.SiblingCommands"
+        },
+        {
+          "id": "13-REQ-2.3",
+          "pattern": "ubiquitous",
+          "system": "specr help",
+          "action": "say in its output paragraph that `next` names the task to render after this one and, when the package can take the change, the speca call that claims the rendered task or records it done",
+          "contract": "specr --help stderr contains \"speca\" within the paragraph describing next, and still contains \"specr <spec> --task N\""
+        },
+        {
+          "id": "13-REQ-2.4",
+          "pattern": "ubiquitous",
+          "system": "speca help",
+          "action": "carry the sibling sentence from cli.SiblingCommands in place of the literal line written by 10_speca_state_report, and contain no occurrence of the old wording \"speca reports its state\"",
+          "contract": "speca --help stderr contains cli.SiblingCommands and does not contain \"speca reports its state\""
+        },
+        {
+          "id": "13-REQ-2.5",
+          "pattern": "ubiquitous",
+          "system": "package doc comments of cmd/spec, cmd/specr and cmd/speca",
+          "action": "each contain one sentence that names the other two commands of the three",
+          "contract": "the parsed package doc of each command contains the names of both other commands within a single sentence"
+        }
+      ]
+    },
+    {
+      "id": "13-REQ-3",
+      "title": "Every --schema description names the other two",
+      "rationale": "A framework that declares one tool reads what it does first, then that two siblings exist.",
+      "criteria": [
+        {
+          "id": "13-REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "specr is invoked with --schema",
+          "system": "specr",
+          "action": "emit a description equal to its existing description sentence followed by one space and cli.SiblingCommands",
+          "contract": "exit code 0; the JSON document's description field ends with \" \" + cli.SiblingCommands and starts with specr's own sentence"
+        },
+        {
+          "id": "13-REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "speca is invoked with --schema",
+          "system": "speca",
+          "action": "emit a description equal to its own description sentence followed by one space and cli.SiblingCommands, replacing the literal sibling sentence written by 10_speca_state_report",
+          "contract": "exit code 0; the description field ends with \" \" + cli.SiblingCommands and contains no other copy of a sibling sentence"
+        },
+        {
+          "id": "13-REQ-3.3",
+          "pattern": "ubiquitous",
+          "system": "schema golden files",
+          "action": "match cmd/specr/testdata/schema.golden.json and cmd/speca/testdata/schema.golden.json byte for byte against the regenerated --schema output, with the description value as the only change: no flag, result field or exit code is added, removed or altered",
+          "contract": "TestSchemaGolden passes for both commands without UPDATE_GOLDEN set; the flags, result and exit_codes members equal those before this change"
+        }
+      ]
+    },
+    {
+      "id": "13-REQ-4",
+      "title": "One answer to whether a package can take a write",
+      "rationale": "specr and speca must agree on writability, and a rule written twice drifts.",
+      "criteria": [
+        {
+          "id": "13-REQ-4.1",
+          "pattern": "ubiquitous",
+          "system": "specpkg.IntentDrift(spec *afspec.Spec) bool",
+          "action": "return true exactly when spec.Status is active, spec.IntentHash is non-nil, and afspec.ComputeIntentHash(spec.PRDBody) either returns an error or returns a hash different from *spec.IntentHash",
+          "contract": "bool result; false for draft, sealed, superseded or archived packages and for an active package with no IntentHash"
+        },
+        {
+          "id": "13-REQ-4.2",
+          "pattern": "ubiquitous",
+          "system": "specpkg.Writable(spec *afspec.Spec) bool",
+          "action": "for any spec with status in {draft, active, sealed, superseded, archived}, IntentHash set or unset, and a PRD body that matches, mismatches or lacks `## Intent`, return exactly (status == draft) || (status == active && !IntentDrift(spec))",
+          "contract": "bool result equal to the formula for every generated combination"
+        },
+        {
+          "id": "13-REQ-4.3",
+          "pattern": "unwanted",
+          "condition": "IntentDrift or Writable is called with a nil spec",
+          "system": "internal/specpkg",
+          "action": "return false without dereferencing the spec",
+          "contract": "both functions return false; no panic"
+        },
+        {
+          "id": "13-REQ-4.4",
+          "pattern": "ubiquitous",
+          "system": "speca",
+          "action": "decide intent drift and writability for the report's intent_drift, the task form's status refusal and the report's and list's claim suggestions only by calling specpkg.IntentDrift and specpkg.Writable, with no private drift helper left in cmd/speca",
+          "contract": "speca's envelopes for report, list and task forms are unchanged from before this change; cmd/speca declares no function computing intent drift"
+        },
+        {
+          "id": "13-REQ-4.5",
+          "pattern": "event_driven",
+          "condition": "specr has loaded a package",
+          "system": "specr",
+          "action": "call specpkg.Writable once for that call and keep the answer in an unexported field of its Result",
+          "contract": "the specr JSON result and the --schema result description contain no writable or intent_drift key"
+        }
+      ]
+    },
+    {
+      "id": "13-REQ-5",
+      "title": "specr's next after a whole render",
+      "rationale": "After a whole render, the claim follows speca's report rule so the two commands never suggest different claims.",
+      "criteria": [
+        {
+          "id": "13-REQ-5.1",
+          "pattern": "complex_event",
+          "condition": "specr completes a whole render",
+          "guard": "the package is writable, no task is in_progress, and the first unfinished task M in plan order is pending and ready",
+          "system": "specr",
+          "action": "add to next the entry {tool: \"speca\", input: result.spec_dir, flags: [\"--task\", \"M\", \"--state\", \"in_progress\"]}",
+          "contract": "next[0] is the claim of M and next[1] is the render suggestion naming M"
+        },
+        {
+          "id": "13-REQ-5.2",
+          "pattern": "event_driven",
+          "condition": "specr adds a claim entry after a whole render",
+          "system": "specr",
+          "action": "set the entry's why to name task M and its title, state that it is the next ready task, and state that it is to be claimed before working on it so that no other agent takes it",
+          "contract": "why contains the task id, the task title and the word \"claim\""
+        },
+        {
+          "id": "13-REQ-5.3",
+          "pattern": "unwanted",
+          "condition": "after a whole render any task in the plan is in_progress",
+          "system": "specr",
+          "action": "add no speca entry to next",
+          "contract": "next holds no element with tool \"speca\"; the render suggestion is unchanged"
+        },
+        {
+          "id": "13-REQ-5.4",
+          "pattern": "unwanted",
+          "condition": "after a whole render the first unfinished task is not ready",
+          "system": "specr",
+          "action": "add no speca entry to next",
+          "contract": "next holds no element with tool \"speca\""
+        },
+        {
+          "id": "13-REQ-5.5",
+          "pattern": "unwanted",
+          "condition": "after a whole render the package is not writable (sealed, superseded, archived, or active with intent drift)",
+          "system": "specr",
+          "action": "add no speca entry to next",
+          "contract": "next holds no element with tool \"speca\""
+        },
+        {
+          "id": "13-REQ-5.6",
+          "pattern": "unwanted",
+          "condition": "after a whole render no unfinished task remains in the plan",
+          "system": "specr",
+          "action": "produce no next entries",
+          "contract": "next is empty or absent in the envelope"
+        },
+        {
+          "id": "13-REQ-5.7",
+          "pattern": "ubiquitous",
+          "system": "specr and speca",
+          "action": "for any package state (status, intent hash, task states and dependencies), hold a claim in specr's whole-render next exactly when `speca <spec>`'s report next holds a claim, with both naming the same task, and that task equal to the one named by specr's render suggestion",
+          "contract": "the claim entries of both envelopes are equal element by element, or both absent"
+        }
+      ]
+    },
+    {
+      "id": "13-REQ-6",
+      "title": "specr's next after a task render",
+      "rationale": "An explicit --task is the caller's choice; the claim or done call is suggested only where it would succeed.",
+      "criteria": [
+        {
+          "id": "13-REQ-6.1",
+          "pattern": "complex_event",
+          "condition": "specr completes a task render of task N",
+          "guard": "the package is writable and N is pending and ready",
+          "system": "specr",
+          "action": "add to next {tool: \"speca\", input: result.spec_dir, flags: [\"--task\", \"N\", \"--state\", \"in_progress\"]} with a why saying to claim task N before working on it, whether or not another task is in_progress",
+          "contract": "next[0] is the claim of N"
+        },
+        {
+          "id": "13-REQ-6.2",
+          "pattern": "complex_event",
+          "condition": "specr completes a task render of task N",
+          "guard": "the package is writable and N is in_progress",
+          "system": "specr",
+          "action": "add to next {tool: \"speca\", input: result.spec_dir, flags: [\"--task\", \"N\", \"--state\", \"done\"]} with a why saying to record task N done once its work is finished and its tests pass",
+          "contract": "next[0] is the done call of N"
+        },
+        {
+          "id": "13-REQ-6.3",
+          "pattern": "unwanted",
+          "condition": "specr renders task N while N is pending and not ready",
+          "system": "specr",
+          "action": "add no speca entry to next",
+          "contract": "next holds no element with tool \"speca\""
+        },
+        {
+          "id": "13-REQ-6.4",
+          "pattern": "unwanted",
+          "condition": "specr renders task N while N is done or dropped",
+          "system": "specr",
+          "action": "add no speca entry to next",
+          "contract": "next holds no element with tool \"speca\""
+        },
+        {
+          "id": "13-REQ-6.5",
+          "pattern": "unwanted",
+          "condition": "specr renders task N of a package that is not writable (sealed, superseded, archived, or active with intent drift)",
+          "system": "specr",
+          "action": "add no speca entry to next for any state of N",
+          "contract": "next holds no element with tool \"speca\""
+        }
+      ]
+    },
+    {
+      "id": "13-REQ-7",
+      "title": "Shape and order of specr's next",
+      "rationale": "next lists calls in the order an agent makes them, and programs filtering next by tool see no change to the render suggestion.",
+      "criteria": [
+        {
+          "id": "13-REQ-7.1",
+          "pattern": "complex_event",
+          "condition": "specr's next holds a speca entry",
+          "guard": "a render suggestion is also present",
+          "system": "specr",
+          "action": "place the speca entry first and the render suggestion second",
+          "contract": "len(next) == 2; next[0].tool == \"speca\"; next[1].tool == \"specr\""
+        },
+        {
+          "id": "13-REQ-7.2",
+          "pattern": "ubiquitous",
+          "system": "specr",
+          "action": "keep the render suggestion's selection rule, flags and why identical to those before this change, and when no render suggestion exists emit only the speca entry or nothing",
+          "contract": "the specr element of next equals the pre-change element for the same package and flags"
+        },
+        {
+          "id": "13-REQ-7.3",
+          "pattern": "ubiquitous",
+          "system": "specr",
+          "action": "set each speca entry's input to result.spec_dir and its flags to four separate elements: \"--task\", the task id, \"--state\", and the target state",
+          "contract": "speca entry input equals the render suggestion's input; len(flags) == 4"
+        },
+        {
+          "id": "13-REQ-7.4",
+          "pattern": "unwanted",
+          "condition": "specr fails to write its --markdown-file after rendering",
+          "system": "specr",
+          "action": "still emit next, including any speca entry, by the same rules from Result.Next()",
+          "contract": "exit code 1; the envelope holds result and next with the same entries as a successful render of the same package"
+        },
+        {
+          "id": "13-REQ-7.5",
+          "pattern": "unwanted",
+          "condition": "specr cannot load the package",
+          "system": "specr",
+          "action": "emit no next entries",
+          "contract": "exit code 1; the envelope has an error and no next"
+        },
+        {
+          "id": "13-REQ-7.6",
+          "pattern": "ubiquitous",
+          "system": "specr",
+          "action": "leave every file of the package unchanged on disk for any render, including those whose next holds a speca entry",
+          "contract": "tasks.json and the other package files are byte-identical before and after the call"
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "13-PATH-1",
+      "title": "An agent renders a package, claims the suggested task with speca, and the plan records it in progress",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `specr <spec>` on a draft package with no task in progress and task 1 pending and ready"
+        },
+        {
+          "actor": "specr",
+          "action": "loads the package, calls specpkg.Writable, renders the Markdown and emits next = [speca claim of task 1, specr --task 1]"
+        },
+        {
+          "actor": "agent",
+          "action": "runs next[0]: `speca <spec_dir> --task 1 --state in_progress`"
+        },
+        {
+          "actor": "speca",
+          "action": "checks specpkg.Writable, accepts the claim and saves tasks.json with task 1 in_progress"
+        }
+      ]
+    },
+    {
+      "id": "13-PATH-2",
+      "title": "An agent renders its in-progress task and records it done through speca",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `specr <spec> --task 1` on a writable package where task 1 is in_progress"
+        },
+        {
+          "actor": "specr",
+          "action": "renders the package scoped to task 1 and emits next with `speca <spec_dir> --task 1 --state done` first and `specr <spec_dir> --task 2` second"
+        },
+        {
+          "actor": "agent",
+          "action": "runs next[0]: `speca <spec_dir> --task 1 --state done`"
+        },
+        {
+          "actor": "speca",
+          "action": "accepts the transition and saves tasks.json with task 1 done"
+        }
+      ]
+    },
+    {
+      "id": "13-PATH-3",
+      "title": "A reader of any command's help or schema learns of the other two",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `spec --help`, `specr --help`, `speca --help`, `specr --schema` and `speca --schema`"
+        },
+        {
+          "actor": "each command",
+          "action": "writes its help to stderr with the cli.SiblingCommands line before `Usage:`, or its schema document to stdout with a description ending in cli.SiblingCommands, and exits 0"
+        }
+      ]
+    }
+  ]
+}

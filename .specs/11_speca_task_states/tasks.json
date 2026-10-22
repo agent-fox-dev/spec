@@ -1,0 +1,384 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "11",
+  "spec_name": "speca_task_states",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/speca/... ./envelope/... ./internal/cli/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "10",
+      "reason": "Provides cmd/speca (Main, report/list forms, Result, schema golden), envelope.AdminResult/DecodeSpeca, internal/specpkg (Locate, TaskInfos, ReportOf, TraceOf) and afspec IsReady/NextTask, which the task form builds on."
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Add the envelope types, lifecycle category and task warning codes",
+      "criteria": [
+        "11-REQ-10.1",
+        "11-REQ-10.2",
+        "11-REQ-10.3"
+      ],
+      "tests": [
+        "TS-11-49",
+        "TS-11-50",
+        "TS-11-51"
+      ],
+      "steps": [
+        "Write TS-11-49 (envelope/error_test.go), TS-11-50 (internal/cli/warn_test.go) and TS-11-51 (envelope/admin_result_test.go) and confirm they fail",
+        "Add CategoryLifecycle = \"lifecycle\" with a doc comment in envelope/error.go; leave RetryableFor unchanged (false for it); extend the ErrorInfo.Stage comment with task and status",
+        "Add WarnTaskNotReady = \"task_not_ready\" and WarnTaskStateForced = \"task_state_forced\" to envelope/warn.go",
+        "Add the aliases to the const block of internal/cli/warn.go and warnStages entries mapping both to \"task\"",
+        "Add type Change struct{Kind string `json:\"kind,omitempty\"`; ID int `json:\"id,omitempty\"`; From string; To string; Forced bool} with omitempty tags and description tags, in envelope/admin_result.go",
+        "Add Changes []Change `json:\"changes,omitempty\"` and DryRun bool `json:\"dry_run,omitempty\"` with description tags to AdminResult",
+        "Keep envelope stdlib-only; run the envelope and internal/cli tests"
+      ],
+      "touches": [
+        "envelope/error.go",
+        "envelope/warn.go",
+        "envelope/admin_result.go",
+        "envelope/admin_result_test.go",
+        "envelope/error_test.go",
+        "internal/cli/warn.go",
+        "internal/cli/warn_test.go"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Parse the task form flags and refuse bad combinations before loading",
+      "criteria": [
+        "11-REQ-1.1",
+        "11-REQ-1.2",
+        "11-REQ-1.3",
+        "11-REQ-1.4",
+        "11-REQ-1.5",
+        "11-REQ-1.6",
+        "11-REQ-1.7"
+      ],
+      "tests": [
+        "TS-11-2",
+        "TS-11-3",
+        "TS-11-4",
+        "TS-11-5",
+        "TS-11-6",
+        "TS-11-7"
+      ],
+      "steps": [
+        "Write TS-11-2..TS-11-7 in cmd/speca/task_flags_test.go using the existing Main/run helpers and confirm they fail",
+        "In cmd/speca/main.go register --task (repeatable custom flag.Value that splits on commas), --state, --force and --dry-run on the flag set; parse with cli.SplitArgs as the other forms do",
+        "Add cmd/speca/taskflags.go with parseTaskSpec: each item is a positive integer, `next` or `all`; reject 0, negatives, empty items and `next`/`all` mixed with other items; collapse duplicate ids preserving first appearance",
+        "Validate --state against the four states; on failure return usageInfo with fix_hint {flag: --state, valid: [pending,in_progress,done,dropped]}",
+        "Refuse --task without --state and --state without --task; --task with --validate or --list; --force or --dry-run without --task; zero or two positionals; `-`, URL or multi-line input (reuse the report form's input checks) — all exit 2, stage usage, category usage, nothing written",
+        "Dispatch a valid task form to executeTask(run, opts) in cmd/speca/task.go; leave it as a minimal placeholder returning a load-stage failure \"task form not yet implemented\" that the next tasks replace",
+        "Run the cmd/speca tests"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/taskflags.go",
+        "cmd/speca/task.go",
+        "cmd/speca/task_flags_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Load the package and refuse post-load usage errors",
+      "criteria": [
+        "11-REQ-1.8",
+        "11-REQ-2.1",
+        "11-REQ-2.2",
+        "11-REQ-2.3",
+        "11-REQ-2.4"
+      ],
+      "tests": [
+        "TS-11-8",
+        "TS-11-9",
+        "TS-11-10",
+        "TS-11-11",
+        "TS-11-12",
+        "TS-11-13"
+      ],
+      "steps": [
+        "Write TS-11-8..TS-11-13 in cmd/speca/task_load_test.go (fixtures built with the newRepo-style helper; for empty plans, schema_version 1 and EAdd-only variants edit copies of the fixture JSON) and confirm they fail",
+        "In executeTask resolve the input with specpkg.Locate(\"speca\", ...) and afspec.LoadSpec; a load failure is exit 1, stage load, category input, no result, exactly as the report form",
+        "Refuse a package whose SchemaVersion is neither 0 nor afspec.SchemaVersion: usage error naming the package, saying speca writes format version 2 only and a save would discard the v1 plan; apply it before any other post-load check and regardless of --force",
+        "Refuse unknown explicit ids: usage error naming the package and every unknown id, fix_hint {flag: --task, valid: every task id}; with no tasks say the plan has no tasks and give no fix_hint",
+        "For `next` call (*TasksV2Json).NextTask; when absent give a usage error saying either that every task is done or dropped (no fix_hint) or that no pending task has its dependencies done (fix_hint {flag: --task, valid: the pending ids})",
+        "Refuse `all` on a plan with no tasks naming the package",
+        "Return an interim usage-free placeholder after these checks for the not-yet-built planning step; run the cmd/speca tests"
+      ],
+      "touches": [
+        "cmd/speca/task.go",
+        "cmd/speca/task_load_test.go"
+      ],
+      "depends_on": [
+        2
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Refuse unwritable packages and plan all-or-nothing moves through the state machine",
+      "criteria": [
+        "11-REQ-2.5",
+        "11-REQ-2.6",
+        "11-REQ-2.7",
+        "11-REQ-2.8",
+        "11-REQ-3.1",
+        "11-REQ-3.2",
+        "11-REQ-3.3",
+        "11-REQ-3.4",
+        "11-REQ-3.5",
+        "11-REQ-3.6",
+        "11-REQ-4.1",
+        "11-REQ-4.2",
+        "11-REQ-4.3",
+        "11-REQ-4.5"
+      ],
+      "tests": [
+        "TS-11-17",
+        "TS-11-19",
+        "TS-11-20",
+        "TS-11-22",
+        "TS-11-23",
+        "TS-11-24"
+      ],
+      "steps": [
+        "Write TS-11-17, 19, 20, 22, 23, 24 in cmd/speca/task_plan_test.go (sealed/superseded/archived and drifted active fixtures are made by editing frontmatter or using Spec.Transition on a copy) and confirm they fail",
+        "Immediately after the load and legacy check, and before expanding ids, refuse status sealed, superseded or archived (message: its tasks can no longer change; a change is a new package that supersedes it) and active with intent drift via the report's intentDrift helper (message: the library refuses every write until the intent matches its hash again): exit 1, stage status, category lifecycle (envelope.CategoryLifecycle), no fix_hint; --force and --dry-run do not alter it",
+        "Expand ids after the post-load usage checks: `next` -> NextTask id, `all` -> every task in plan order except those already in the target state and dropped ones, explicit ids unchanged even when already in the target state; sort the resolved ids into plan order",
+        "Build the plan: for each resolved id test afspec.ValidTaskTransition(current, target); collect every refused task; if any refused, return exit 1, stage task, category lifecycle naming every refused task with current state and target, citing format v2 §8.3.1 and listing each task's allowed targets (found by testing the four states)",
+        "Set fix_hint {flag: --state, valid: targets of the first refused task in plan order}; omit it when that task is dropped and say --force with done or pending is the only way out",
+        "Apply allowed moves in plan order with TransitionTask, each on the copy the previous returned, keeping the original plan for later readiness checks; when nothing is resolved return an empty change set (the write and result come next task)",
+        "Run the cmd/speca tests"
+      ],
+      "touches": [
+        "cmd/speca/task.go",
+        "cmd/speca/plan.go",
+        "cmd/speca/task_plan_test.go"
+      ],
+      "depends_on": [
+        3
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Write the change with Save and report it",
+      "criteria": [
+        "11-REQ-4.4",
+        "11-REQ-7.1",
+        "11-REQ-7.2",
+        "11-REQ-7.3",
+        "11-REQ-7.4",
+        "11-REQ-7.5",
+        "11-REQ-7.6",
+        "11-REQ-9.4"
+      ],
+      "tests": [
+        "TS-11-14",
+        "TS-11-15",
+        "TS-11-16",
+        "TS-11-18",
+        "TS-11-25",
+        "TS-11-37",
+        "TS-11-38",
+        "TS-11-39",
+        "TS-11-40",
+        "TS-11-41"
+      ],
+      "steps": [
+        "Write TS-11-14, 15, 16, 18, 25, 37, 38, 39, 40, 41 in cmd/speca/task_write_test.go and confirm they fail; TS-11-25 uses an injectable save function variable (default (*afspec.Spec).Save) replaced by a stub",
+        "When at least one task changed: set spec.Tasks to the new plan, set spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339) and call the injectable save with spec.Dir; with no changes write nothing and leave updated_at unchanged",
+        "Map errors from save with errors.As: *LifecycleError and *IntentError -> exit 1, stage status, category lifecycle; *SaveError -> exit 1, stage write, category disk, retryable false, message saying a failure while writing temporary files leaves the package unchanged, a failure during the final renames may leave some files updated, and the caller should run `speca <spec>`",
+        "Build the success result with the report form's builder on the state written (all report fields, task counts reflecting the change) and set Changes, one envelope.Change{Kind: \"task\", ID, From, To} per changed task in plan order",
+        "On refusals at stage status, task or validate and on a write failure return the report of the package as loaded from disk, with no Changes; ensure Result.Next() returns nil for those failures (and for all failures) so the envelope next is absent",
+        "Implement a summary function: `speca: <dir name> task N <from> → <to>`, `speca: <dir name> tasks N, M → <to>`, `speca: <dir name> no task changed`, with ` (dry run, nothing written)` appended when dry run; wire it into Result.Summary for task-form results",
+        "Run the cmd/speca tests"
+      ],
+      "touches": [
+        "cmd/speca/task.go",
+        "cmd/speca/result.go",
+        "cmd/speca/task_write_test.go",
+        "cmd/speca/result_test.go"
+      ],
+      "depends_on": [
+        4
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "implement",
+      "title": "Add --force bypasses, readiness warnings and the unknown-key guard",
+      "criteria": [
+        "11-REQ-5.1",
+        "11-REQ-5.2",
+        "11-REQ-5.3",
+        "11-REQ-5.4",
+        "11-REQ-5.5",
+        "11-REQ-6.1",
+        "11-REQ-6.2",
+        "11-REQ-6.3",
+        "11-REQ-6.4",
+        "11-REQ-6.5"
+      ],
+      "tests": [
+        "TS-11-27",
+        "TS-11-28",
+        "TS-11-29",
+        "TS-11-30",
+        "TS-11-31",
+        "TS-11-32",
+        "TS-11-33",
+        "TS-11-34",
+        "TS-11-35",
+        "TS-11-36"
+      ],
+      "steps": [
+        "Write TS-11-27..TS-11-36 in cmd/speca/task_force_test.go (TS-11-36 as a property test over generated packages with arbitrary validation failures and optional unknown keys, using testing/quick or math/rand) and confirm they fail",
+        "With --force and target done or pending, for a named move the machine refuses and whose task is not already in the target state, call CompleteTaskStates or ResetTaskStates instead; allowed moves still use TransitionTask; a task already in the target state yields neither change nor warning",
+        "For each bypassed task raise run.Warn(cli.WarnTaskStateForced, \"high\", ...) naming the task and its from and to states, and set Forced true on its Change",
+        "With target in_progress or dropped, --force bypasses nothing: refuse as in the machine refusal and add to the message that --force cannot set in_progress or dropped",
+        "For a move to in_progress where plan.IsReady(id) is false on the plan before the call, raise a low task_not_ready warning naming the task and the depends_on ids not done (for an omitted depends_on use the preceding task)",
+        "Run afspec Validate before the write: collect entries with Check unknown_field; when present and no --force refuse with exit 1, stage validate, category invalid_spec, no fix_hint, message listing each artifact and key, report on disk, no Changes",
+        "When validation fails otherwise raise exactly one low spec_invalid warning naming distinct Check else Category (as specr's rules does); with --force and unknown_field entries write anyway and raise one high spec_invalid warning naming the removed keys; never raise more than one spec_invalid",
+        "Confirm --force changes none of the usage, status or legacy-version refusals; run the cmd/speca tests"
+      ],
+      "touches": [
+        "cmd/speca/task.go",
+        "cmd/speca/plan.go",
+        "cmd/speca/task_force_test.go"
+      ],
+      "depends_on": [
+        5
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 7,
+      "kind": "implement",
+      "title": "Add --dry-run and the claim suggestions in next",
+      "criteria": [
+        "11-REQ-1.1",
+        "11-REQ-8.1",
+        "11-REQ-8.2",
+        "11-REQ-8.3",
+        "11-REQ-8.4",
+        "11-REQ-9.1",
+        "11-REQ-9.2",
+        "11-REQ-9.3",
+        "11-REQ-3.6",
+        "11-REQ-4.5"
+      ],
+      "tests": [
+        "TS-11-1",
+        "TS-11-21",
+        "TS-11-26",
+        "TS-11-42",
+        "TS-11-43",
+        "TS-11-44",
+        "TS-11-45",
+        "TS-11-46",
+        "TS-11-47",
+        "TS-11-48"
+      ],
+      "steps": [
+        "Write TS-11-1, 21, 26, 42..48 in cmd/speca/task_dryrun_test.go and cmd/speca/result_test.go; TS-11-21 is a property test over generated plans (1-8 tasks, random states and dependencies), ids and targets with and without --force, asserting tasks.json is byte-identical on refusal; confirm they fail",
+        "Under --dry-run run every check, expansion, warning and refusal and skip updated_at-persisting Save; the result carries the would-be updated_at, the changes, DryRun true, and the summary suffix; a refusal is identical to the real call",
+        "Under --dry-run set the result's next to one cli.Next{Tool: speca, Input: spec_dir, Flags: --task <resolved ids comma-joined> --state S [--force]}; with no changes next is empty",
+        "After a real successful move make Result.Next the report's next computed on the package after the call (a claim yields `specr <spec_dir> --task N`, a done yields the next ready claim or nothing)",
+        "In the report form's Next add the claim `speca <spec_dir> --task N --state in_progress` when no task is in_progress, next_task is a ready pending task and the package is writable (draft, or active without intent drift)",
+        "In the list form's Next add the claim of the ready pending task of the first active package in number order with no task in progress, a ready pending task and no intent drift",
+        "Run the cmd/speca tests"
+      ],
+      "touches": [
+        "cmd/speca/task.go",
+        "cmd/speca/result.go",
+        "cmd/speca/report.go",
+        "cmd/speca/list.go",
+        "cmd/speca/task_dryrun_test.go",
+        "cmd/speca/result_test.go"
+      ],
+      "depends_on": [
+        6
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 8,
+      "kind": "implement",
+      "title": "Describe the task form in help and --schema and update the documentation",
+      "criteria": [
+        "11-REQ-10.4",
+        "11-REQ-10.5"
+      ],
+      "tests": [
+        "TS-11-52",
+        "TS-11-53"
+      ],
+      "steps": [
+        "Write TS-11-52 (help text mentions the task form, --task, --state, --force, --dry-run) and TS-11-53 (--schema equals cmd/speca/testdata/schema.golden.json) and confirm they fail",
+        "Extend speca's help/usage text to cover the task form, --task, --state, --force and --dry-run",
+        "Pass the enum map {\"state\": the four states} to cli.FlagsDocument in the --schema description; describe the new flags, the changes and dry_run result fields, and exit codes 1 and 2 covering refusals",
+        "Regenerate the golden with UPDATE_GOLDEN=1 go test ./cmd/speca -run Schema and review that the diff only holds the new flags, fields and exit-code text",
+        "Update docs/speca.md (the task form, flags, errors and warnings tables), docs/api.md (Change, CategoryLifecycle, the two warning codes), docs/architecture.md (speca writes through Spec.Save) and docs/cli.md only if affected",
+        "Run `make doc` to regenerate docs/generated; write no tests about docs"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "docs/speca.md",
+        "docs/api.md",
+        "docs/architecture.md",
+        "docs/generated"
+      ],
+      "depends_on": [
+        7
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 9,
+      "kind": "integration",
+      "title": "Verify the claim, refusal and forced-recovery paths end to end",
+      "tests": [
+        "TS-11-54",
+        "TS-11-55",
+        "TS-11-56"
+      ],
+      "steps": [
+        "Write TS-11-54, 55 and 56 as smoke tests in cmd/speca/smoke_test.go against the real speca and specr Main entry points and real fixture copies on disk, and confirm they pass",
+        "Trace 11-PATH-1, 11-PATH-2 and 11-PATH-3 through the real code: Main, cli.SplitArgs, specpkg.Locate, afspec.LoadSpec, status guard, NextTask, ValidTaskTransition, TransitionTask, CompleteTaskStates/ResetTaskStates, Validate, Spec.Save, report builder, Run.Envelope and Emit; confirm each step calls the next and no placeholder remains in executeTask",
+        "Confirm every contract is consumed in production code: Change entries and DryRun by the speca result and envelope, CategoryLifecycle by the status and task refusals, WarnTaskNotReady and WarnTaskStateForced by run.Warn calls in cmd/speca, the status/write error mapping by executeTask",
+        "Search every file in the tasks' touches (cmd/speca, envelope, internal/cli) for panic(\"not implemented\"), TODO, \"not yet implemented\" and bare `return nil` on non-trivial paths, and remove any that remain",
+        "Run make test and make lint, and run make doc so docs/generated is current"
+      ],
+      "touches": [
+        "cmd/speca/smoke_test.go"
+      ],
+      "depends_on": [
+        8
+      ],
+      "done_when": [
+        "`make test` and `make lint` pass"
+      ],
+      "state": "pending"
+    }
+  ]
+}

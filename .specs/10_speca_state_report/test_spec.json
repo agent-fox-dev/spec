@@ -1,0 +1,1185 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "10",
+  "spec_name": "speca_state_report",
+  "schema_version": 2,
+  "tests": [
+    {
+      "id": "TS-10-1",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.1"
+      ],
+      "title": "IsReady follows depends_on, an explicit empty list, and the previous-task default",
+      "given": [
+        "a plan of four tasks: task 1 pending without depends_on, task 2 pending without depends_on, task 3 pending with depends_on [], task 4 pending with depends_on [1,2]",
+        "task 1 is done and task 2 is pending"
+      ],
+      "when": "IsReady is called for ids 1, 2, 3 and 4, and again after task 1 is set to in_progress",
+      "then": [
+        "with task 1 done: IsReady(2) is true because the previous task is done",
+        "IsReady(3) is true because an explicit empty list means no dependencies",
+        "IsReady(4) is false because task 2 is not done",
+        "IsReady(1) is false because task 1 is done and not pending",
+        "a pending first task without depends_on is ready",
+        "a pending task whose previous task is in_progress is not ready"
+      ],
+      "pseudocode": "p = plan(...); assert p.IsReady(2); assert p.IsReady(3); assert !p.IsReady(4); assert !p.IsReady(1)"
+    },
+    {
+      "id": "TS-10-2",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.2"
+      ],
+      "title": "A missing or dropped dependency makes the task not ready",
+      "given": [
+        "task 2 pending with depends_on [99]",
+        "task 3 pending with depends_on [1] where task 1 is dropped",
+        "task 4 pending without depends_on whose previous task 3 is dropped"
+      ],
+      "when": "IsReady is called for tasks 2, 3 and 4",
+      "then": [
+        "IsReady returns false for each of the three tasks"
+      ],
+      "pseudocode": "assert !p.IsReady(2); assert !p.IsReady(3); assert !p.IsReady(4)"
+    },
+    {
+      "id": "TS-10-3",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.3"
+      ],
+      "title": "IsReady returns false for an unknown id or a nil receiver without panicking",
+      "given": [
+        "a plan with tasks 1 and 2",
+        "a nil *TasksV2Json"
+      ],
+      "when": "IsReady(42), IsReady(0), IsReady(-1) are called on the plan and IsReady(1) on the nil receiver",
+      "then": [
+        "every call returns false",
+        "no call panics"
+      ],
+      "pseudocode": "var n *TasksV2Json; assert !n.IsReady(1); assert !p.IsReady(42)"
+    },
+    {
+      "id": "TS-10-4",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.4"
+      ],
+      "title": "NextTask returns a copy of the first in_progress task",
+      "given": [
+        "a plan where task 2 and task 3 are in_progress and task 1 is done, task 4 pending and ready-looking"
+      ],
+      "when": "NextTask is called and the returned task's Title and DependsOn are mutated",
+      "then": [
+        "it returns (task 2, true)",
+        "the plan's task 2 title and depends_on are unchanged after the mutation"
+      ],
+      "pseudocode": "t, ok = p.NextTask(); assert ok && t.Id == 2; t.Title = 'x'; assert p.Tasks[1].Title != 'x'"
+    },
+    {
+      "id": "TS-10-5",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.5"
+      ],
+      "title": "NextTask returns the first ready task when none is in progress",
+      "given": [
+        "a plan where task 1 is done, task 2 is dropped, task 3 is pending with depends_on [1], task 4 is pending with depends_on [3]"
+      ],
+      "when": "NextTask is called",
+      "then": [
+        "it returns (task 3, true)"
+      ],
+      "pseudocode": "t, ok = p.NextTask(); assert ok && t.Id == 3"
+    },
+    {
+      "id": "TS-10-6",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.6"
+      ],
+      "title": "NextTask returns (nil, false) for a nil plan, an empty plan, and a blocked plan",
+      "given": [
+        "a nil receiver",
+        "a plan with no tasks",
+        "a plan where every task is done or dropped",
+        "a plan where the only pending task depends on an unfinished pending task that is itself blocked"
+      ],
+      "when": "NextTask is called on each",
+      "then": [
+        "each call returns nil and false",
+        "no call panics"
+      ],
+      "pseudocode": "for p in cases: t, ok = p.NextTask(); assert t == nil && !ok"
+    },
+    {
+      "id": "TS-10-7",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-1.7"
+      ],
+      "title": "examples/tasks pick with id 0 uses NextTask and keeps its two messages",
+      "given": [
+        "a plan fully done or dropped",
+        "a plan whose only pending task has an unfinished dependency",
+        "a plan with an in_progress task and one with a ready pending task"
+      ],
+      "when": "pick(tasks, 0) is called on each, and the existing examples/tasks tests are run",
+      "then": [
+        "the fully done plan fails with an error containing \"every task is done or dropped\"",
+        "the blocked plan fails with an error containing \"no pending task has all its dependencies done\"",
+        "the in_progress task is chosen first, otherwise the first ready task",
+        "the existing examples/tasks tests pass unchanged"
+      ],
+      "pseudocode": "_, err = pick(done, 0); assert contains(err, 'every task is done or dropped')"
+    },
+    {
+      "id": "TS-10-8",
+      "kind": "property",
+      "verifies": [
+        "10-REQ-1.8"
+      ],
+      "title": "NextTask returns the first in_progress task, else the earliest ready task",
+      "given": [
+        "generated plans with random states, random present, absent or empty depends_on, and ids that may dangle"
+      ],
+      "when": "for any task plan, NextTask is called",
+      "then": [
+        "when it returns (t, true) and some task is in_progress, t is the first in_progress task in plan order",
+        "when it returns (t, true) and none is in progress, IsReady(t.Id) is true and no earlier task is ready",
+        "when it returns false, no task is in_progress and no task is ready"
+      ],
+      "pseudocode": "for p in gen_plans(): t, ok = p.NextTask(); if ok: if any(inprog): assert t.Id == first_inprog.Id else: assert p.IsReady(t.Id) and not any(p.IsReady(x.Id) for x in before(t)) else: assert none inprog and none ready"
+    },
+    {
+      "id": "TS-10-9",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-2.1"
+      ],
+      "title": "The shared resolver resolves paths, names, numbers and reaches archived packages only by path",
+      "given": [
+        "a repo with .specs/01_a, .specs/09_b and .specs/archive/09_old",
+        "the working directory is the repo root and --dir is set"
+      ],
+      "when": "the resolver is called with a package directory path, a file path inside it, a path relative to --dir, the directory name, the number, the bare name, and the path of the archived package",
+      "then": [
+        "each live reference returns the absolute package directory",
+        "a number reference 09 resolves to 09_b, not the archived 09_old",
+        "the archive path resolves to the archived directory",
+        "results equal those of the former specr locate"
+      ],
+      "pseudocode": "d = specpkg.Locate('speca', ref, root, specsDir); assert d == abs('.specs/09_b')"
+    },
+    {
+      "id": "TS-10-10",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-2.2"
+      ],
+      "title": "The resolver refuses bad references with a usage error naming the calling tool",
+      "given": [
+        "a repo with .specs/09_b and an archived .specs/archive/05_old"
+      ],
+      "when": "the resolver is called with tool \"specr\" and \"speca\" and references -, https://example.com/x, a multi-line string, an unknown name, an ambiguous reference matching two packages, and the number 05",
+      "then": [
+        "each call returns a *cli.UsageError whose Category() is \"usage\"",
+        "each message begins with the tool name passed in",
+        "for 05 the message names the archived package that matches"
+      ],
+      "pseudocode": "err = Locate('speca', '-', ...); assert errors.As(err, &ue) && ue.Category()=='usage' && startsWith(err.Error(), 'speca')"
+    },
+    {
+      "id": "TS-10-11",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-2.3"
+      ],
+      "title": "The listing returns NN_name directories and the display rule picks relative or absolute",
+      "given": [
+        "a root holding 01_a, 10_b, notes.txt, a directory named misc, and archive/",
+        "a --dir containing the root, and a package path outside --dir"
+      ],
+      "when": "the directory listing and the display rule are called",
+      "then": [
+        "only NN_name directories are returned",
+        "a path inside --dir is shown relative to it",
+        "a path outside --dir is shown absolute"
+      ],
+      "pseudocode": "assert names(List(root)) == ['01_a','10_b']; assert Display(inside, dir) == '.specs/01_a'; assert Display(outside, dir) == outside"
+    },
+    {
+      "id": "TS-10-12",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-2.4"
+      ],
+      "title": "The task summary builds TaskInfo in plan order with a copied depends_on and ready",
+      "given": [
+        "a plan with a done task, a ready pending task, a blocked pending task and an optional task"
+      ],
+      "when": "the task summary builder is called, then the returned depends_on is mutated",
+      "then": [
+        "one TaskInfo per task in plan order with id, title, kind, state, optional",
+        "ready is true only for the ready pending task",
+        "mutating TaskInfo.DependsOn leaves the plan unchanged"
+      ],
+      "pseudocode": "infos = specpkg.TaskInfos(spec); assert [i.ID for i in infos] == ids; assert infos[1].Ready && !infos[2].Ready"
+    },
+    {
+      "id": "TS-10-13",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-2.5"
+      ],
+      "title": "The moved converters produce the same validation and traceability reports as before and spec output is unchanged",
+      "given": [
+        "a fixture package with errors, warnings, uncovered criteria and an unowned test",
+        "the golden output captured from the pre-move specgen conversion"
+      ],
+      "when": "specpkg converts the ValidationResult and the spec's traceability, and specgen runs the pipeline over the same package",
+      "then": [
+        "ValidationReport has valid, error_count, warning_count and items with check, artifact, entity, message",
+        "TraceReport has criteria_covered, criteria_uncovered, paths_covered, paths_uncovered, tests_unowned",
+        "the JSON of spec's result is byte-for-byte equal to the golden output",
+        "specgen no longer defines reportOf, itemOf, traceOf, unownedTests"
+      ],
+      "pseudocode": "r = specpkg.ReportOf(spec.Validate()); tr = specpkg.TraceOf(spec); assert json(r) == golden"
+    },
+    {
+      "id": "TS-10-14",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-2.6"
+      ],
+      "title": "Rule names are the distinct Check, or Category when Check is empty, in first-appearance order",
+      "given": [
+        "entries with Check values C3, C7, C3, an entry with empty Check and Category schema, and one with Category cross_spec_actor and Check cross_spec_actor"
+      ],
+      "when": "the rule-names function is called, and called on an empty set",
+      "then": [
+        "it returns [C3, C7, schema, cross_spec_actor]",
+        "an empty set returns an empty result"
+      ],
+      "pseudocode": "assert Rules(entries) == ['C3','C7','schema','cross_spec_actor']"
+    },
+    {
+      "id": "TS-10-15",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-2.7"
+      ],
+      "title": "specr output is unchanged except for ready, and its schema golden includes ready",
+      "given": [
+        "a repo with the 09_agent_mode and 01_test_feature fixtures"
+      ],
+      "when": "specr renders a package, a task with --task N, and --schema, and the cmd/specr tests run",
+      "then": [
+        "each entry of result.tasks and result.task carries ready",
+        "all other result fields match the previous behaviour",
+        "cmd/specr/testdata/schema.golden.json contains ready on TaskInfo and the golden test passes"
+      ],
+      "pseudocode": "env = run('09'); assert all('ready' in t or state != pending for t in env.result.tasks)"
+    },
+    {
+      "id": "TS-10-16",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-3.1"
+      ],
+      "title": "speca writes exactly one speca envelope and accepts flags before or after the input",
+      "given": [
+        "a repo with the v2_example fixture under .specs/09_agent_mode"
+      ],
+      "when": "Main is run with `09`, `--validate 09`, `09 --validate`, `--list`, `--list --all`, and `--specs-dir .specs 09`",
+      "then": [
+        "stdout holds exactly one JSON object that DecodeSpeca decodes",
+        "tool is \"speca\"",
+        "the process exit code equals env.exit_code",
+        "flag order before or after the input gives the same result"
+      ],
+      "pseudocode": "code = Main(argv, out, err); env = DecodeSpeca(out); assert env.Tool=='speca' && code == env.ExitCode"
+    },
+    {
+      "id": "TS-10-17",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-3.2"
+      ],
+      "title": "-h and --help print the help to stderr with the sibling sentence and exit 0",
+      "given": [
+        "no repository"
+      ],
+      "when": "Main is run with -h and with --help",
+      "then": [
+        "exit code 0",
+        "stdout is empty",
+        "stderr names the forms and examples",
+        "stderr near the top has one line saying spec writes a package from an idea, specr renders one and speca reports its state"
+      ],
+      "pseudocode": "code = Main(['--help'], out, err); assert code==0 && out=='' && contains(err, 'speca reports its state')"
+    },
+    {
+      "id": "TS-10-18",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-3.3"
+      ],
+      "title": "A bare invocation prints help and exits 2 with a usage envelope when stdout is not a terminal",
+      "given": [
+        "stdout is a buffer, not a terminal"
+      ],
+      "when": "Main is run with no arguments, and with only --validate, and with only --all",
+      "then": [
+        "exit code 2",
+        "stderr holds the help",
+        "stdout holds one usage envelope with exit_code 2"
+      ],
+      "pseudocode": "code = Main([], out, err); assert code==2; env = DecodeSpeca(out); assert env.Error.Stage=='usage'"
+    },
+    {
+      "id": "TS-10-19",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-3.4"
+      ],
+      "title": "--version prints speca and the build identity",
+      "given": [
+        "a known build identity"
+      ],
+      "when": "Main is run with --version",
+      "then": [
+        "stdout is \"speca <identity>\"",
+        "exit code 0"
+      ],
+      "pseudocode": "code = Main(['--version'], out, err); assert out.trim()=='speca '+Identity() && code==0"
+    },
+    {
+      "id": "TS-10-20",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-3.5"
+      ],
+      "title": "--schema matches the checked-in golden file without reading any directory",
+      "given": [
+        "a nonexistent --dir and input"
+      ],
+      "when": "Main is run with --schema --dir /nonexistent anything",
+      "then": [
+        "exit code 0",
+        "stdout equals cmd/speca/testdata/schema.golden.json",
+        "the document holds tool, description with the sibling sentence, input with examples, flags, result without side_effects, input, model and usage, and exit_codes",
+        "UPDATE_GOLDEN=1 rewrites the golden file"
+      ],
+      "pseudocode": "code = Main(['--schema','--dir','/nonexistent','anything'], out, err); assert out == read(golden)"
+    },
+    {
+      "id": "TS-10-21",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-3.6"
+      ],
+      "title": "Every malformed invocation exits 2 with a usage envelope and no result",
+      "given": [
+        "a repo with .specs/09_agent_mode and another package sharing a number or name prefix for an ambiguous reference"
+      ],
+      "when": "Main is run with: two inputs; `--list 09`; `--validate --list`; `--all 09`; `-`; a URL; a multi-line input; --dir pointing to a file; reference `99` naming no package; an ambiguous reference; and --bogus",
+      "then": [
+        "each exit code is 2",
+        "error.stage is \"usage\" and error.category is \"usage\"",
+        "result is absent",
+        "the message is also printed to stderr",
+        "no package was read"
+      ],
+      "pseudocode": "for argv in cases: code = Main(argv,out,err); env = DecodeSpeca(out); assert code==2 && env.Error.Stage=='usage' && env.Error.Category=='usage' && env.Result==nil && err != ''"
+    },
+    {
+      "id": "TS-10-22",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-3.7"
+      ],
+      "title": "speca writes no file and ignores credential and model environment variables",
+      "given": [
+        "a repo with several packages including an archive",
+        "credential and model variables set to invalid values, and no network access",
+        "a snapshot of the file tree and modification times"
+      ],
+      "when": "speca runs the report, --validate, --list --all and --schema forms",
+      "then": [
+        "the file tree and modification times are identical before and after each call",
+        "the output does not change with the credential and model variables set or unset",
+        "no network connection is attempted"
+      ],
+      "pseudocode": "before = snapshot(root); for form in forms: Main(form); assert snapshot(root) == before"
+    },
+    {
+      "id": "TS-10-23",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-3.8"
+      ],
+      "title": "The build target installs speca with the same LDFLAGS as the other commands",
+      "given": [
+        "the repository Makefile"
+      ],
+      "when": "`make -n build` is run",
+      "then": [
+        "the output installs ./cmd/spec, ./cmd/specr and ./cmd/speca each with the same LDFLAGS value",
+        "the build target's help line names spec, specr and speca"
+      ],
+      "pseudocode": "out = run('make -n build'); assert count(out, '-ldflags') == 3 and contains(out, './cmd/speca')"
+    },
+    {
+      "id": "TS-10-24",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-4.1"
+      ],
+      "title": "The report carries the identity fields",
+      "given": [
+        "a repo with the v2_example package under .specs/09_agent_mode with an intent_hash, supersedes and tags set, and a second package with none of them"
+      ],
+      "when": "speca 09 is run for each package",
+      "then": [
+        "exit 0 and error absent",
+        "result has spec_dir by the display rule, spec_id, spec_name, title, status, created_at and updated_at",
+        "intent_hash, supersedes and tags are present when set and absent when empty"
+      ],
+      "pseudocode": "env = run('09'); assert env.Result.SpecDir=='.specs/09_agent_mode' && env.Result.Status!=''"
+    },
+    {
+      "id": "TS-10-25",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-4.2",
+        "10-REQ-5.5"
+      ],
+      "title": "valid is always present, failing_rules appears only when invalid, and no spec_invalid warning is raised",
+      "given": [
+        "a valid v2 package",
+        "a v2 package with a broken cross-file rule such as C3"
+      ],
+      "when": "speca is run on each",
+      "then": [
+        "the valid package has valid true, failing_rules absent",
+        "the invalid package has valid false and failing_rules listing the rule names of Validate's errors",
+        "neither call raises a spec_invalid warning",
+        "both exit 0"
+      ],
+      "pseudocode": "assert *env.Result.Valid == false && env.Result.FailingRules == ['C3']; assert no warning code spec_invalid"
+    },
+    {
+      "id": "TS-10-26",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-4.3"
+      ],
+      "title": "intent_drift is true only for an active package whose intent no longer matches",
+      "given": [
+        "an active package with an intent_hash matching its PRD",
+        "an active package whose Intent section was edited",
+        "an active package whose PRD has no ## Intent section",
+        "a draft package with a mismatching hash",
+        "an active package with no intent_hash"
+      ],
+      "when": "speca <spec> is run on each, and --validate on the edited one",
+      "then": [
+        "intent_drift is true for the edited and for the missing-Intent packages in both forms",
+        "intent_drift is absent for the matching, draft and no-hash packages"
+      ],
+      "pseudocode": "assert env.Result.IntentDrift == true for edited; assert absent otherwise"
+    },
+    {
+      "id": "TS-10-27",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-4.4"
+      ],
+      "title": "The report lists tasks with counts and the next task",
+      "given": [
+        "a package with tasks in states done, in_progress, pending ready, pending blocked and dropped",
+        "a package whose plan has no tasks",
+        "a package whose tasks are all done"
+      ],
+      "when": "speca <spec> is run on each",
+      "then": [
+        "tasks lists every task in plan order as TaskInfo with ready",
+        "task_counts holds pending, in_progress, done, dropped and total",
+        "next_task is the in_progress task's TaskInfo for the first package",
+        "the empty plan gives tasks [] and total 0",
+        "next_task is absent when all tasks are done"
+      ],
+      "pseudocode": "assert ids(r.Tasks)==[1..5] && r.TaskCounts=={1,1,1,1,5} && r.NextTask.ID==2"
+    },
+    {
+      "id": "TS-10-28",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-4.5"
+      ],
+      "title": "allowed_status lists the lifecycle moves in fixed order",
+      "given": [
+        "packages with status draft, active, sealed, superseded and archived"
+      ],
+      "when": "speca <spec> is run on each",
+      "then": [
+        "draft gives [active, archived]",
+        "active gives [sealed]",
+        "sealed gives [superseded, archived]",
+        "superseded gives [archived]",
+        "archived gives an empty list that is present in the JSON as []"
+      ],
+      "pseudocode": "assert allowed['sealed']==['superseded','archived']; assert allowed['archived']==[]"
+    },
+    {
+      "id": "TS-10-29",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-4.6"
+      ],
+      "title": "depends_on comes from the package's own tasks.json and dependents from the root graph",
+      "given": [
+        "package 03_c whose tasks.json depends on 01_a twice and 02_b",
+        "packages 04_d and 05_e whose dependencies name 03_c, with 05_e naming it twice",
+        "package 01_a with no dependencies"
+      ],
+      "when": "speca 03 and speca 01 are run",
+      "then": [
+        "03's depends_on is [01, 02] in file order without duplicates",
+        "03's dependents is [04, 05] sorted without duplicates",
+        "01's depends_on is [] and present"
+      ],
+      "pseudocode": "assert r.DependsOn==['01','02'] && r.Dependents==['04','05']"
+    },
+    {
+      "id": "TS-10-30",
+      "kind": "property",
+      "verifies": [
+        "10-REQ-4.7"
+      ],
+      "title": "task_counts.total equals len(tasks) and the sum of the four state counts",
+      "given": [
+        "generated packages with random plans of tasks in all four states, including empty plans"
+      ],
+      "when": "for any loaded package, the report's counts are computed",
+      "then": [
+        "task_counts.total == len(tasks)",
+        "total == pending + in_progress + done + dropped"
+      ],
+      "pseudocode": "for p in gen_pkgs(): r = report(p); assert r.TaskCounts.Total == len(r.Tasks) == sum(r.TaskCounts.Pending, InProgress, Done, Dropped)"
+    },
+    {
+      "id": "TS-10-31",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-5.1"
+      ],
+      "title": "An unreadable spec root omits dependents and raises a low specs_dir_unreadable warning",
+      "given": [
+        "a package reached by an absolute path outside a --specs-dir that is missing",
+        "the same with --specs-dir naming a regular file"
+      ],
+      "when": "speca <path> is run",
+      "then": [
+        "exit 0",
+        "dependents is absent",
+        "warnings has code specs_dir_unreadable, severity low, stage preflight, naming the root",
+        "every other field is reported"
+      ],
+      "pseudocode": "assert env.Result.Dependents == nil && warn.Code=='specs_dir_unreadable' && warn.Severity=='low'"
+    },
+    {
+      "id": "TS-10-32",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-5.2"
+      ],
+      "title": "A dangling dependency does not stop dependents from being computed",
+      "given": [
+        "package 03_c depends on missing package 99_x, and package 04_d depends on 03_c"
+      ],
+      "when": "speca 03 is run",
+      "then": [
+        "exit 0",
+        "dependents lists 04 from the partial graph"
+      ],
+      "pseudocode": "assert r.Dependents == ['04']"
+    },
+    {
+      "id": "TS-10-33",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-5.3"
+      ],
+      "title": "A package that LoadSpec refuses fails the report and the verdict at stage load",
+      "given": [
+        "a package directory with a malformed prd.md frontmatter, reached by path"
+      ],
+      "when": "speca <path> and speca <path> --validate are run",
+      "then": [
+        "exit 1",
+        "error.stage is \"load\" and error.category is \"input\"",
+        "the message names the package directory and the library's reason",
+        "result is absent"
+      ],
+      "pseudocode": "assert code==1 && env.Error.Stage=='load' && env.Error.Category=='input' && env.Result==nil && contains(env.Error.Message, dir)"
+    },
+    {
+      "id": "TS-10-34",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-5.4"
+      ],
+      "title": "A package in another format version is reported with a high spec_invalid warning",
+      "given": [
+        "a package whose PRD schema_version is 1"
+      ],
+      "when": "speca <spec> and speca <spec> --validate are run",
+      "then": [
+        "exit 0 in both forms",
+        "warnings contains code spec_invalid with severity high saying tests and tasks are not read",
+        "the fields that loaded are reported"
+      ],
+      "pseudocode": "assert warn.Code=='spec_invalid' && warn.Severity=='high' && code==0"
+    },
+    {
+      "id": "TS-10-35",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-6.1",
+        "10-REQ-6.4"
+      ],
+      "title": "--validate returns identity, verdict, validation and traceability only",
+      "given": [
+        "a valid package and an invalid package with errors and warnings"
+      ],
+      "when": "speca <spec> --validate is run on each",
+      "then": [
+        "exit 0",
+        "result has the identity fields, intent_drift when true, valid, validation and traceability",
+        "tasks, task_counts, next_task, allowed_status, depends_on, dependents and failing_rules are absent",
+        "result.valid equals validation.valid equals (error_count == 0)",
+        "error_count and warning_count equal the lengths of the listed errors and warnings",
+        "each item has check, artifact, entity and message; traceability has the five TraceReport fields"
+      ],
+      "pseudocode": "assert *r.Valid == r.Validation.Valid == (r.Validation.ErrorCount == 0); assert r.Tasks == nil && r.FailingRules == nil"
+    },
+    {
+      "id": "TS-10-36",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-6.2",
+        "10-REQ-6.3"
+      ],
+      "title": "--validate keeps only the cross-spec findings attributed to the package",
+      "given": [
+        "packages A, B and C where A names an unknown dependency, B has a cross_spec_actor error, C defines a glossary term conflicting with B, and A and B are on a dependency cycle",
+        "a target package D with no edges while the cycle exists",
+        "an archived target package reached by path"
+      ],
+      "when": "speca A --validate, speca B --validate, speca C --validate, speca D --validate and the archived path are run",
+      "then": [
+        "A's validation lists its own findings followed by its unknown-dependency error and the cycle error",
+        "B lists its actor error and the cycle error but not A's error",
+        "C lists the glossary warning for a term in its own glossary",
+        "D lists no cycle error",
+        "the archived target is included in the cross-spec run and its findings are kept",
+        "cross-spec findings come after the package's own findings"
+      ],
+      "pseudocode": "assert checks(A) == own + ['cross_spec_unknown_dependency','cross_spec_cycle']; assert 'cross_spec_cycle' not in checks(D)"
+    },
+    {
+      "id": "TS-10-37",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-6.5"
+      ],
+      "title": "--validate skips cross-spec rules when the spec root cannot be read",
+      "given": [
+        "a package reached by path with --specs-dir pointing to a missing directory"
+      ],
+      "when": "speca <path> --validate is run",
+      "then": [
+        "exit 0",
+        "warnings contains specs_dir_unreadable with severity low naming the root",
+        "validation holds only the package's own findings"
+      ],
+      "pseudocode": "assert warn.Code=='specs_dir_unreadable' && warn.Severity=='low' && code==0"
+    },
+    {
+      "id": "TS-10-38",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-6.6"
+      ],
+      "title": "A sibling package that fails to load is left out of --validate's cross-spec run",
+      "given": [
+        "a root with a valid target package and a sibling whose prd.md is malformed"
+      ],
+      "when": "speca <target> --validate is run",
+      "then": [
+        "exit 0",
+        "error is absent",
+        "the target's verdict is reported"
+      ],
+      "pseudocode": "assert code==0 && env.Error == nil && env.Result.Valid != nil"
+    },
+    {
+      "id": "TS-10-39",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-6.7"
+      ],
+      "title": "An invalid package under --validate is a successful call",
+      "given": [
+        "a package that fails the cross-file rule C3"
+      ],
+      "when": "speca <spec> --validate is run",
+      "then": [
+        "exit 0",
+        "result.valid is false",
+        "error is absent",
+        "validation.error_count is greater than 0"
+      ],
+      "pseudocode": "assert code==0 && *r.Valid==false && env.Error==nil"
+    },
+    {
+      "id": "TS-10-40",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-7.1"
+      ],
+      "title": "--list sorts packages by numeric prefix, with ties broken by full name",
+      "given": [
+        "a root with 100_x, 99_y, 02_b, 02_a, and a directory without NN_ prefix"
+      ],
+      "when": "speca --list is run",
+      "then": [
+        "exit 0",
+        "packages are in the order 02_a, 02_b, 99_y, 100_x",
+        "the non-package directory is not listed",
+        "a package with a missing prd.md is still listed"
+      ],
+      "pseudocode": "assert dirs(r.Packages) == ['.specs/02_a','.specs/02_b','.specs/99_y','.specs/100_x']"
+    },
+    {
+      "id": "TS-10-41",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-7.2",
+        "10-REQ-7.3"
+      ],
+      "title": "A loaded package gets a full entry and an unloadable one gets only spec_dir and load_error",
+      "given": [
+        "a valid package with tasks, an invalid package, a package with malformed prd.md and a package with no prd.md"
+      ],
+      "when": "speca --list is run",
+      "then": [
+        "exit 0",
+        "loaded entries have spec_dir, spec_id, spec_name, title, status, valid, task_counts and next_task when NextTask returns one",
+        "an invalid package has valid false",
+        "unloadable entries hold only spec_dir and load_error with the library's message",
+        "the call continues past them"
+      ],
+      "pseudocode": "assert pkgs[2].LoadError != '' && pkgs[2].SpecID=='' && pkgs[2].Valid==nil"
+    },
+    {
+      "id": "TS-10-42",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-7.4",
+        "10-REQ-7.5"
+      ],
+      "title": "--all appends archived packages marked archived and tolerates a missing archive",
+      "given": [
+        "a root with 01_a and archive/ holding 05_old (superseded) and 03_older",
+        "a second root without archive/"
+      ],
+      "when": "speca --list --all is run on each, and speca --list on the first",
+      "then": [
+        "the first root lists 01_a, then 03_older, 05_old in numeric order, each archived: true",
+        "05_old has status superseded and archived: true",
+        "the second root adds nothing and has no warnings",
+        "without --all no archived entries appear"
+      ],
+      "pseudocode": "assert last.Archived && last.Status=='superseded'; assert warnings == []"
+    },
+    {
+      "id": "TS-10-43",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-7.6"
+      ],
+      "title": "--list on an unreadable or missing spec root fails at load with a --specs-dir hint",
+      "given": [
+        "a --specs-dir that does not exist",
+        "a --specs-dir that is a regular file"
+      ],
+      "when": "speca --list is run",
+      "then": [
+        "exit 1",
+        "error.stage is \"load\" and error.category is \"input\"",
+        "the message names the root",
+        "error.fix_hint.flag is \"--specs-dir\""
+      ],
+      "pseudocode": "assert code==1 && env.Error.FixHint.Flag=='--specs-dir' && contains(env.Error.Message, root)"
+    },
+    {
+      "id": "TS-10-44",
+      "kind": "integration",
+      "verifies": [
+        "10-REQ-7.7"
+      ],
+      "title": "--list on an existing empty spec root returns an empty packages list",
+      "given": [
+        "an existing empty .specs directory"
+      ],
+      "when": "speca --list is run",
+      "then": [
+        "exit 0",
+        "result.packages is present as []"
+      ],
+      "pseudocode": "assert code==0 && raw(result.packages)=='[]'"
+    },
+    {
+      "id": "TS-10-45",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-8.1"
+      ],
+      "title": "The report summary names directory, status, task progress, next task and invalidity",
+      "given": [
+        "a result for 16_indexed_code_search active with 3 of 7 tasks done and next task 4",
+        "a result with valid false",
+        "a result with no tasks and no next task",
+        "a very long spec dir name"
+      ],
+      "when": "Summary() is called on each",
+      "then": [
+        "the first is exactly \"speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4\"",
+        "the invalid one says the package does not validate",
+        "there is no next-task clause when none exists",
+        "the envelope summary is at most 200 characters"
+      ],
+      "pseudocode": "assert Result{...}.Summary()=='speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4'"
+    },
+    {
+      "id": "TS-10-46",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-8.2"
+      ],
+      "title": "The --validate summary says whether the package validates, with error count and rule names",
+      "given": [
+        "a valid verdict",
+        "a verdict with 3 errors whose rules are C3, C7, cross_spec_actor"
+      ],
+      "when": "Summary() is called on each",
+      "then": [
+        "\"speca: 16_indexed_code_search validates\"",
+        "\"speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)\"",
+        "at most 200 characters in the envelope"
+      ],
+      "pseudocode": "assert s == 'speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)'"
+    },
+    {
+      "id": "TS-10-47",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-8.3"
+      ],
+      "title": "The list summary gives the package count, non-zero status counts in lifecycle order and unreadable count",
+      "given": [
+        "9 packages: 2 draft, 5 active, 2 sealed",
+        "a list with 1 draft and 2 unreadable packages",
+        "a list of zero packages"
+      ],
+      "when": "Summary() is called on each",
+      "then": [
+        "\"speca: 9 packages (2 draft, 5 active, 2 sealed)\"",
+        "the second mentions 2 unreadable",
+        "the empty list yields a sentence with 0 packages"
+      ],
+      "pseudocode": "assert Summary()=='speca: 9 packages (2 draft, 5 active, 2 sealed)'"
+    },
+    {
+      "id": "TS-10-48",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-8.4"
+      ],
+      "title": "The report suggests specr <spec_dir> --task N with a why for in-progress or ready",
+      "given": [
+        "a result whose next_task 4 is in_progress",
+        "a result whose next_task 5 is a ready pending task"
+      ],
+      "when": "Next() is called on each",
+      "then": [
+        "each returns exactly one entry with tool \"specr\", the spec_dir as input and flag --task with the id",
+        "the why says in progress for the first and next ready task for the second"
+      ],
+      "pseudocode": "n = r.Next(); assert len(n)==1 && n[0].Tool=='specr' && n[0].Flags['--task']=='4'"
+    },
+    {
+      "id": "TS-10-49",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-8.5"
+      ],
+      "title": "The list suggests the first active package with a ready task and no task in progress",
+      "given": [
+        "a list in order: a draft package with a ready task, an active package with a task in progress, an active package with ready task 3, another active package with ready task 1"
+      ],
+      "when": "Next() is called on the list result",
+      "then": [
+        "exactly one entry with tool \"specr\" for the third package's spec_dir with --task 3"
+      ],
+      "pseudocode": "n = r.Next(); assert len(n)==1 && n[0].Input=='.specs/03_c' && task=='3'"
+    },
+    {
+      "id": "TS-10-50",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-8.6"
+      ],
+      "title": "No call is suggested for --validate, a report without next_task, or a list without a qualifying package",
+      "given": [
+        "a validate result",
+        "a report result with no next_task",
+        "a list whose active packages all have a task in progress or no ready task"
+      ],
+      "when": "Next() is called on each",
+      "then": [
+        "each returns an absent or empty next"
+      ],
+      "pseudocode": "for r in cases: assert len(r.Next())==0"
+    },
+    {
+      "id": "TS-10-51",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-9.1"
+      ],
+      "title": "AdminResult documents every field and omits fields a form does not produce",
+      "given": [
+        "an AdminResult for each of the three forms"
+      ],
+      "when": "each is marshalled to JSON and the type's struct tags are inspected",
+      "then": [
+        "every field has a non-empty description tag",
+        "valid is a *bool and is absent when nil",
+        "a report's empty tasks, allowed_status, depends_on appear as [] while a validate result omits them",
+        "a list result's packages appears as [] when empty and is absent in the other forms"
+      ],
+      "pseudocode": "b = json(AdminResult{}); assert not contains(b,'valid'); for f in fields(AdminResult): assert f.Tag.Get('description') != ''"
+    },
+    {
+      "id": "TS-10-52",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-9.2"
+      ],
+      "title": "DecodeSpeca decodes every speca envelope and rejects non-envelopes",
+      "given": [
+        "captured outputs of the report, --validate, --list and an error call",
+        "the text \"not json\""
+      ],
+      "when": "DecodeSpeca is called on each",
+      "then": [
+        "each valid output decodes to an AdminEnvelope with the expected Result or Error",
+        "\"not json\" returns a non-nil error"
+      ],
+      "pseudocode": "env, err = DecodeSpeca(data); assert err==nil; _, err = DecodeSpeca('not json'); assert err != nil"
+    },
+    {
+      "id": "TS-10-53",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-9.3"
+      ],
+      "title": "TaskCounts, PackageInfo and TaskInfo.ready have the documented JSON shape",
+      "given": [
+        "a TaskInfo with ready true and one with ready false",
+        "a TaskCounts value and PackageInfo values for a loaded and a failed package"
+      ],
+      "when": "each is marshalled and decoded",
+      "then": [
+        "ready is true in JSON for a ready pending task and absent otherwise",
+        "TaskCounts has pending, in_progress, done, dropped and total",
+        "a failed PackageInfo has only spec_dir and load_error",
+        "an archived PackageInfo has archived true"
+      ],
+      "pseudocode": "assert json(TaskInfo{Ready:false}) lacks 'ready'; assert json(PackageInfo{SpecDir:'x',LoadError:'e'}) == {spec_dir,load_error}"
+    },
+    {
+      "id": "TS-10-54",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-9.4"
+      ],
+      "title": "envelope imports only the standard library and existing decoders still work",
+      "given": [
+        "the envelope package's source and its existing tests"
+      ],
+      "when": "its imports are listed and the existing envelope tests, including DecodeSpec and DecodeSpecr, are run",
+      "then": [
+        "every import is in the standard library",
+        "the existing envelope tests pass unchanged",
+        "existing exported names remain"
+      ],
+      "pseudocode": "for imp in importsOf('envelope'): assert isStd(imp)"
+    },
+    {
+      "id": "TS-10-55",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-9.5"
+      ],
+      "title": "cmd/speca Result embeds AdminResult and every envelope has retryable and resumable false",
+      "given": [
+        "a success envelope for each form and an error envelope for each stage (usage, load)"
+      ],
+      "when": "each is built through Run.Envelope and decoded",
+      "then": [
+        "Result embeds envelope.AdminResult and has Summary() and Next() methods",
+        "retryable is false and resumable is false on every envelope"
+      ],
+      "pseudocode": "for env in all: assert !env.Retryable && !env.Resumable"
+    },
+    {
+      "id": "TS-10-56",
+      "kind": "unit",
+      "verifies": [
+        "10-REQ-9.6"
+      ],
+      "title": "A --schema document that cannot be encoded yields an error envelope at stage schema",
+      "given": [
+        "the schema encoder is replaced by one that returns an error"
+      ],
+      "when": "Main is run with --schema",
+      "then": [
+        "exit 1",
+        "stdout holds one envelope with error.stage \"schema\" and error.category \"internal\"",
+        "result is absent"
+      ],
+      "pseudocode": "encode = failing; code = Main(['--schema'],out,err); assert code==1 && env.Error.Stage=='schema' && env.Error.Category=='internal'"
+    },
+    {
+      "id": "TS-10-57",
+      "kind": "smoke",
+      "verifies": [
+        "10-PATH-1",
+        "10-REQ-4.1",
+        "10-REQ-8.4"
+      ],
+      "title": "An agent reads a package's state and follows the suggested specr call",
+      "given": [
+        "a repo with v2_example under .specs/09_agent_mode and valid_spec_with_arch under .specs/01_test_feature",
+        "the spec and specr commands' real Main entry points"
+      ],
+      "when": "speca 09 is run from the repo root, then specr is run with the suggested next input and flags",
+      "then": [
+        "speca exits 0 with one envelope holding the package state, tasks with ready, next_task and allowed_status",
+        "next holds one entry specr <spec_dir> --task N",
+        "running that call returns a RenderResult whose task carries ready and N as id",
+        "no file in the repo changed"
+      ],
+      "pseudocode": "e1 = speca('09'); n = e1.Next[0]; e2 = specr(n.Input, n.Flags); assert e2.Result.Task.ID == e1.Result.NextTask.ID",
+      "real_components": [
+        "speca Main",
+        "internal/specpkg resolver",
+        "afspec LoadSpec, Validate, IsReady, NextTask",
+        "DiscoverSpecs and BuildDependencyGraph",
+        "internal/cli envelope",
+        "specr Main",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-10-58",
+      "kind": "smoke",
+      "verifies": [
+        "10-PATH-2",
+        "10-REQ-6.1"
+      ],
+      "title": "An agent asks for the full verdict on a package under a root with sibling packages",
+      "given": [
+        "a repo with several packages, one depending on another, one with a cross-spec actor error",
+        "real Validate and ValidateCrossSpec"
+      ],
+      "when": "speca <the failing package> --validate is run",
+      "then": [
+        "exit 0",
+        "one envelope with valid false, validation listing the package's own and kept cross-spec findings, and traceability",
+        "summary names the error count and rule names",
+        "no tasks field and no file changed"
+      ],
+      "pseudocode": "env = speca(pkg,'--validate'); assert code==0 && !*env.Result.Valid && contains(env.Summary, 'does not validate')",
+      "real_components": [
+        "speca Main",
+        "internal/specpkg converters",
+        "afspec LoadSpec, Validate, ValidateCrossSpec, BuildDependencyGraph",
+        "internal/cli envelope",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-10-59",
+      "kind": "smoke",
+      "verifies": [
+        "10-PATH-3",
+        "10-REQ-7.4"
+      ],
+      "title": "An agent lists every package including the archive",
+      "given": [
+        "a repo with live packages in several states, one malformed package, and archive/ holding a superseded package"
+      ],
+      "when": "speca --list --all is run",
+      "then": [
+        "exit 0",
+        "packages are in numeric order with the archived package at the end marked archived: true",
+        "the malformed package has load_error only",
+        "summary has per-status counts and the unreadable count",
+        "next suggests specr <spec_dir> --task N for the first active package with a ready task and none in progress"
+      ],
+      "pseudocode": "env = speca('--list','--all'); assert env.Result.Packages[-1].Archived; assert env.Next[0].Tool=='specr'",
+      "real_components": [
+        "speca Main",
+        "internal/specpkg listing",
+        "afspec LoadSpec, Validate, NextTask",
+        "internal/cli envelope",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "TS-10-60",
+      "kind": "smoke",
+      "verifies": [
+        "10-PATH-4",
+        "10-REQ-3.6"
+      ],
+      "title": "A positional input with --list is refused before anything is read",
+      "given": [
+        "a repo with .specs/09_agent_mode and a snapshot of its file tree"
+      ],
+      "when": "the speca binary's Main is run with `--list 09`",
+      "then": [
+        "exit 2",
+        "stderr holds the message",
+        "stdout holds one usage envelope with stage usage and category usage and no result",
+        "the file tree is unchanged"
+      ],
+      "pseudocode": "code = Main(['--list','09'], out, err); assert code==2 && env.Error.Stage=='usage' && err != ''",
+      "real_components": [
+        "speca Main",
+        "cli.SplitArgs",
+        "internal/cli envelope",
+        "filesystem"
+      ]
+    }
+  ]
+}

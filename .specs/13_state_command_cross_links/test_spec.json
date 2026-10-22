@@ -1,0 +1,639 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "13",
+  "spec_name": "state_command_cross_links",
+  "schema_version": 2,
+  "tests": [
+    {
+      "id": "TS-13-1",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-1.1"
+      ],
+      "title": "cli.SiblingCommands is an untyped constant with the exact sibling sentence",
+      "given": [
+        "the internal/cli package"
+      ],
+      "when": "the constant is compared with the expected text and concatenated with a raw-string constant in a const declaration",
+      "then": [
+        "cli.SiblingCommands equals \"spec writes a package from an idea, specr renders one, speca reports and changes its state.\"",
+        "the const expression `const x = \"a\\n\" + cli.SiblingCommands` compiles"
+      ],
+      "pseudocode": "const probe = \"a\\n\" + cli.SiblingCommands; assert cli.SiblingCommands == \"spec writes a package from an idea, specr renders one, speca reports and changes its state.\"; assert probe != \"\""
+    },
+    {
+      "id": "TS-13-2",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-1.2"
+      ],
+      "title": "The sibling sentence is written in exactly one non-test Go file",
+      "given": [
+        "the repository tree"
+      ],
+      "when": "every non-test .go file under the repository is scanned for the sibling sentence text",
+      "then": [
+        "exactly one file contains it",
+        "that file is under internal/cli",
+        "no file under cmd/spec, cmd/specr or cmd/speca contains it"
+      ],
+      "pseudocode": "hits = [f for f in walk('**/*.go') if not f.endswith('_test.go') and SENTENCE in read(f)]; assert len(hits)==1; assert hits[0].startswith('internal/cli/')"
+    },
+    {
+      "id": "TS-13-3",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-2.1"
+      ],
+      "title": "-h and --help of each command print the sibling line between title and Usage",
+      "given": [
+        "the spec, specr and speca entry points run in process with captured stdout and stderr"
+      ],
+      "when": "each command is invoked with -h and then with --help",
+      "then": [
+        "the exit code is 0",
+        "stdout is empty",
+        "stderr contains \"\\n\\n\" + cli.SiblingCommands + \"\\n\\n\" before the first \"Usage:\"",
+        "the title line precedes the sibling line"
+      ],
+      "pseudocode": "for cmd in [spec, specr, speca]: for flag in ['-h','--help']: code,out,err = cmd.Main([flag]); assert code==0; assert out==''; i=err.index('Usage:'); assert ('\\n\\n'+SiblingCommands+'\\n\\n') in err[:i]"
+    },
+    {
+      "id": "TS-13-4",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-2.2"
+      ],
+      "title": "A bare invocation of each command exits 2 with a usage envelope and the sibling line on stderr",
+      "given": [
+        "stdout is not a terminal",
+        "the spec, specr and speca entry points run in process"
+      ],
+      "when": "each command is invoked with no arguments",
+      "then": [
+        "the exit code is 2",
+        "stdout holds an envelope with error category usage",
+        "stderr contains cli.SiblingCommands"
+      ],
+      "pseudocode": "for cmd in [spec, specr, speca]: code,out,err = cmd.Main([]); assert code==2; assert decode(out).error.category=='usage'; assert SiblingCommands in err"
+    },
+    {
+      "id": "TS-13-5",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-2.3"
+      ],
+      "title": "specr help describes next as naming the render target and the speca claim or done call",
+      "given": [
+        "specr is run with --help"
+      ],
+      "when": "the help text on stderr is read",
+      "then": [
+        "the paragraph describing next mentions \"speca\" and the claim or done call",
+        "the help still contains \"specr <spec> --task N\"",
+        "the exit code is 0 and stdout is empty"
+      ],
+      "pseudocode": "code,out,err = specr.Main(['--help']); para = paragraph_containing(err,'next'); assert 'speca' in para; assert 'specr <spec> --task N' in err"
+    },
+    {
+      "id": "TS-13-6",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-2.4"
+      ],
+      "title": "speca help carries the constant and not the old wording",
+      "given": [
+        "speca is run with --help"
+      ],
+      "when": "the help text on stderr is read",
+      "then": [
+        "it contains cli.SiblingCommands",
+        "it does not contain \"speca reports its state\""
+      ],
+      "pseudocode": "code,out,err = speca.Main(['--help']); assert SiblingCommands in err; assert 'speca reports its state' not in err"
+    },
+    {
+      "id": "TS-13-7",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-2.5"
+      ],
+      "title": "Each command's package doc names the other two commands in one sentence",
+      "given": [
+        "the cmd/spec, cmd/specr and cmd/speca packages parsed with go/parser"
+      ],
+      "when": "each package doc comment is split into sentences",
+      "then": [
+        "for each command some single sentence contains the names of both other commands"
+      ],
+      "pseudocode": "for pkg,others in {spec:[specr,speca], specr:[spec,speca], speca:[spec,specr]}: doc = parse_pkg_doc('cmd/'+pkg); assert any(all(o in s for o in others) for s in sentences(doc))"
+    },
+    {
+      "id": "TS-13-8",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-3.1"
+      ],
+      "title": "specr --schema description is its own sentence plus one space plus the sibling sentence",
+      "given": [
+        "specr is run with --schema"
+      ],
+      "when": "the JSON document on stdout is decoded",
+      "then": [
+        "the exit code is 0",
+        "description starts with the pre-existing specr sentence",
+        "description ends with \" \" + cli.SiblingCommands"
+      ],
+      "pseudocode": "code,out,_ = specr.Main(['--schema']); d = json(out).description; assert code==0; assert d.startswith(specrSentence+' '); assert d.endswith(' '+SiblingCommands)"
+    },
+    {
+      "id": "TS-13-9",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-3.2"
+      ],
+      "title": "speca --schema description ends with the sibling sentence and holds no other copy",
+      "given": [
+        "speca is run with --schema"
+      ],
+      "when": "the JSON document on stdout is decoded",
+      "then": [
+        "the exit code is 0",
+        "description ends with \" \" + cli.SiblingCommands",
+        "the sibling sentence occurs exactly once in the description",
+        "the old wording \"speca reports its state\" is absent"
+      ],
+      "pseudocode": "code,out,_ = speca.Main(['--schema']); d = json(out).description; assert code==0; assert d.endswith(' '+SiblingCommands); assert d.count(SiblingCommands)==1; assert 'reports its state' not in d"
+    },
+    {
+      "id": "TS-13-10",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-3.3"
+      ],
+      "title": "Both schema golden files match and differ from the previous ones only in description",
+      "given": [
+        "the checked-in cmd/specr/testdata/schema.golden.json and cmd/speca/testdata/schema.golden.json",
+        "UPDATE_GOLDEN is not set"
+      ],
+      "when": "TestSchemaGolden runs for specr and speca and the golden documents are decoded",
+      "then": [
+        "both goldens match the live --schema output byte for byte",
+        "the flags, result and exit_codes members are unchanged: no flag or result field added or removed",
+        "each golden description ends with the sibling sentence"
+      ],
+      "pseudocode": "for cmd in [specr, speca]: live = cmd.schema(); assert bytes(live)==read(golden); g=json(live); assert g.description.endswith(SiblingCommands); assert 'writable' not in str(g.result)"
+    },
+    {
+      "id": "TS-13-11",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-4.1"
+      ],
+      "title": "IntentDrift is true only for an active package whose intent hash is set and fails or differs",
+      "given": [
+        "specs built in memory with a PRD body that has an ## Intent section"
+      ],
+      "when": "IntentDrift is called for each status with a matching hash, a different hash, an unset hash, and a body without ## Intent",
+      "then": [
+        "active + set + matching hash gives false",
+        "active + set + different hash gives true",
+        "active + set + body without ## Intent (hash error) gives true",
+        "active + unset hash gives false",
+        "draft, sealed, superseded and archived give false even with a different hash"
+      ],
+      "pseudocode": "h,_ = ComputeIntentHash(body); assert !IntentDrift(spec(active,&h,body)); assert IntentDrift(spec(active,&\"x\",body)); assert IntentDrift(spec(active,&h,'no intent')); assert !IntentDrift(spec(active,nil,body)); for s in [draft,sealed,superseded,archived]: assert !IntentDrift(spec(s,&\"x\",body))"
+    },
+    {
+      "id": "TS-13-12",
+      "kind": "property",
+      "verifies": [
+        "13-REQ-4.2"
+      ],
+      "title": "Writable equals (draft) or (active and no intent drift) for every combination",
+      "given": [
+        "a generator over statuses {draft, active, sealed, superseded, archived}, IntentHash set or unset, and PRD bodies that match, mismatch or lack ## Intent"
+      ],
+      "when": "for any generated spec, Writable is called",
+      "then": [
+        "the result equals status==draft || (status==active && !IntentDrift(spec))"
+      ],
+      "pseudocode": "for spec in gen_specs(): assert Writable(spec) == (spec.Status=='draft' or (spec.Status=='active' and not IntentDrift(spec)))"
+    },
+    {
+      "id": "TS-13-13",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-4.3"
+      ],
+      "title": "IntentDrift and Writable return false for a nil spec without panicking",
+      "given": [
+        "a nil *afspec.Spec"
+      ],
+      "when": "IntentDrift(nil) and Writable(nil) are called",
+      "then": [
+        "both return false",
+        "neither panics"
+      ],
+      "pseudocode": "assert IntentDrift(nil)==false; assert Writable(nil)==false"
+    },
+    {
+      "id": "TS-13-14",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-4.4"
+      ],
+      "title": "speca decides drift and writability only through specpkg and its envelopes are unchanged",
+      "given": [
+        "temp repositories holding a draft package, an active package without drift, an active package with drift, and a sealed package",
+        "no non-test Go function in cmd/speca computes intent drift"
+      ],
+      "when": "speca report, list and a task form are run on each package and the cmd/speca sources are scanned for afspec.ComputeIntentHash",
+      "then": [
+        "the report intent_drift is true only for the drifted package",
+        "the task form on the drifted and sealed packages is refused at stage status",
+        "the claim suggestion appears only for writable packages",
+        "no non-test file in cmd/speca calls ComputeIntentHash or declares intentDrift"
+      ],
+      "pseudocode": "for p in pkgs: r=speca(p); assert r.intent_drift == IntentDrift(load(p)); assert refused(speca(p,'--task','1','--state','in_progress')) == !Writable(load(p)); assert 'ComputeIntentHash' not in cmd_speca_sources"
+    },
+    {
+      "id": "TS-13-15",
+      "kind": "unit",
+      "verifies": [
+        "13-REQ-4.5"
+      ],
+      "title": "specr keeps writability in an unexported field that never reaches the JSON or schema",
+      "given": [
+        "specr run on a draft package and on a sealed package"
+      ],
+      "when": "the Result is built, marshalled and the --schema document is produced",
+      "then": [
+        "the Result's unexported writable field equals specpkg.Writable of the loaded package",
+        "the JSON result has no key containing writable or intent_drift",
+        "the --schema result description has no such key"
+      ],
+      "pseudocode": "res = execute(draftRef); assert res.writable==true; res2 = execute(sealedRef); assert res2.writable==false; assert 'writable' not in json(res) and 'intent_drift' not in json(res); assert 'writable' not in schema_json"
+    },
+    {
+      "id": "TS-13-16",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-5.1",
+        "13-REQ-5.2",
+        "13-REQ-7.1",
+        "13-REQ-7.3"
+      ],
+      "title": "A whole render of a writable idle package offers the claim of the first task, then the render suggestion",
+      "given": [
+        "a draft package with three pending tasks, task 1 has no depends_on, no task in progress"
+      ],
+      "when": "specr <spec> is run without --task",
+      "then": [
+        "next has exactly two elements",
+        "next[0] is tool speca, input equal to result.spec_dir, flags [--task, 1, --state, in_progress]",
+        "next[0].why contains the task id, its title and the word claim",
+        "next[1] is tool specr with flags [--task, 1]",
+        "next[0].input equals next[1].input and len(next[0].flags) == 4"
+      ],
+      "pseudocode": "r = specr(repo,'09_agent_mode'); n=r.next; assert len(n)==2; assert n[0]=={tool:'speca',input:r.result.spec_dir,flags:['--task','1','--state','in_progress']}; assert 'claim' in n[0].why and title1 in n[0].why; assert n[1].tool=='specr' and n[1].flags==['--task','1']"
+    },
+    {
+      "id": "TS-13-17",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-5.1"
+      ],
+      "title": "A whole render with --section or --max-tokens still offers the claim and names the first unfinished ready task",
+      "given": [
+        "a draft package where task 1 is done and task 2 is pending with depends_on [1]"
+      ],
+      "when": "specr is run with --section tasks, and again with --max-tokens set",
+      "then": [
+        "next[0] is the claim of task 2",
+        "next[1] is specr --task 2"
+      ],
+      "pseudocode": "mark_done(1); for extra in [['--section','tasks'],['--max-tokens','2000']]: n=specr(spec,*extra).next; assert n[0].flags==['--task','2','--state','in_progress']; assert n[1].flags==['--task','2']"
+    },
+    {
+      "id": "TS-13-18",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-5.3"
+      ],
+      "title": "A whole render with any task in progress offers no speca entry",
+      "given": [
+        "a draft package where task 2 is in_progress and task 1 is pending and ready"
+      ],
+      "when": "specr <spec> is run without --task",
+      "then": [
+        "next holds no element with tool speca",
+        "next holds the unchanged render suggestion --task 1"
+      ],
+      "pseudocode": "set_state(2,'in_progress'); n=specr(spec).next; assert all(e.tool!='speca' for e in n); assert n==[render_suggestion(1)]"
+    },
+    {
+      "id": "TS-13-19",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-5.4"
+      ],
+      "title": "A whole render whose first unfinished task is not ready offers no speca entry",
+      "given": [
+        "a draft package where task 1 is pending with depends_on [2] and task 2 is pending"
+      ],
+      "when": "specr <spec> is run without --task",
+      "then": [
+        "next holds no element with tool speca",
+        "next holds the render suggestion naming task 1"
+      ],
+      "pseudocode": "set_depends_on(1,[2]); n=specr(spec).next; assert all(e.tool!='speca' for e in n); assert n[0].tool=='specr' and n[0].flags==['--task','1']"
+    },
+    {
+      "id": "TS-13-20",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-5.5"
+      ],
+      "title": "A whole render of a package that cannot take a write offers no speca entry",
+      "given": [
+        "otherwise idle packages with status sealed, superseded, archived, and an active one whose PRD intent no longer matches the recorded IntentHash"
+      ],
+      "when": "specr <spec> is run on each without --task",
+      "then": [
+        "for every package next holds no element with tool speca",
+        "the render suggestion for task 1 is still present"
+      ],
+      "pseudocode": "for p in [sealed,superseded,archived,active_drift]: n=specr(p).next; assert all(e.tool!='speca' for e in n); assert n[0].tool=='specr'"
+    },
+    {
+      "id": "TS-13-21",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-5.6"
+      ],
+      "title": "A whole render with every task done or dropped produces no next entries",
+      "given": [
+        "a draft package whose tasks are all done or dropped"
+      ],
+      "when": "specr <spec> is run without --task",
+      "then": [
+        "the exit code is 0",
+        "next is empty or absent in the envelope"
+      ],
+      "pseudocode": "set_all(['done','dropped','done']); r=specr(spec); assert r.exit==0; assert len(r.next or [])==0"
+    },
+    {
+      "id": "TS-13-22",
+      "kind": "property",
+      "verifies": [
+        "13-REQ-5.7"
+      ],
+      "title": "specr's whole-render claim equals speca's report claim for any package state",
+      "given": [
+        "a generator of package states: status, intent hash set or unset and matching or not, task states, and depends_on lists including absent and explicit []"
+      ],
+      "when": "for any generated package, specr <spec> and speca <spec> are both run",
+      "then": [
+        "the claim entries (tool speca, flags ending --state in_progress) of both envelopes are equal element by element, or both absent",
+        "when present, the claimed task equals the task named by specr's render suggestion"
+      ],
+      "pseudocode": "for pkg in gen_pkgs(): a=claims(specr(pkg).next); b=claims(speca(pkg).next); assert a==b; if a: assert a[0].flags[1]==render_sugg(specr(pkg).next).flags[1]"
+    },
+    {
+      "id": "TS-13-23",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-6.1",
+        "13-REQ-7.1"
+      ],
+      "title": "A task render of a pending ready task offers its claim first, even with another task in progress",
+      "given": [
+        "a draft package where task 1 is pending with no depends_on, task 3 is in_progress"
+      ],
+      "when": "specr <spec> --task 1 is run",
+      "then": [
+        "next[0] is tool speca with flags [--task, 1, --state, in_progress] and a why saying to claim task 1 before working on it",
+        "next[1] is the specr render suggestion for the next unfinished task after 1"
+      ],
+      "pseudocode": "set_state(3,'in_progress'); n=specr(spec,'--task','1').next; assert n[0].tool=='speca' and n[0].flags==['--task','1','--state','in_progress']; assert 'claim' in n[0].why; assert n[1].tool=='specr'"
+    },
+    {
+      "id": "TS-13-24",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-6.2"
+      ],
+      "title": "A task render of an in-progress task offers the done call first",
+      "given": [
+        "a draft package where task 1 is in_progress"
+      ],
+      "when": "specr <spec> --task 1 is run",
+      "then": [
+        "next[0] is tool speca with flags [--task, 1, --state, done] and a why saying to record task 1 done once its work is finished and its tests pass",
+        "next[1] is specr --task 2"
+      ],
+      "pseudocode": "set_state(1,'in_progress'); n=specr(spec,'--task','1').next; assert n[0]=={tool:'speca',input:dir,flags:['--task','1','--state','done'],why:ANY}; assert 'done' in n[0].why; assert n[1].flags==['--task','2']"
+    },
+    {
+      "id": "TS-13-25",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-6.3"
+      ],
+      "title": "A task render of a pending task that is not ready offers no speca entry",
+      "given": [
+        "a draft package where task 2 is pending with depends_on [1] and task 1 is pending"
+      ],
+      "when": "specr <spec> --task 2 is run",
+      "then": [
+        "next holds no element with tool speca",
+        "next holds the render suggestion --task 3"
+      ],
+      "pseudocode": "n=specr(spec,'--task','2').next; assert all(e.tool!='speca' for e in n); assert n==[render_suggestion(3)]"
+    },
+    {
+      "id": "TS-13-26",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-6.4"
+      ],
+      "title": "A task render of a done or dropped task offers no speca entry",
+      "given": [
+        "a draft package where task 1 is done and task 2 is dropped"
+      ],
+      "when": "specr <spec> --task 1 and specr <spec> --task 2 are run",
+      "then": [
+        "neither next holds an element with tool speca"
+      ],
+      "pseudocode": "for t in [1,2]: n=specr(spec,'--task',str(t)).next; assert all(e.tool!='speca' for e in n)"
+    },
+    {
+      "id": "TS-13-27",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-6.5"
+      ],
+      "title": "A task render of a non-writable package offers no speca entry for any task state",
+      "given": [
+        "sealed, superseded, archived and drifted-active packages, each with a pending ready task 1 and, in a variant, task 1 in_progress"
+      ],
+      "when": "specr <spec> --task 1 is run on each package and variant",
+      "then": [
+        "no next holds an element with tool speca"
+      ],
+      "pseudocode": "for p in non_writable: for st in ['pending','in_progress']: set_state(p,1,st); assert all(e.tool!='speca' for e in specr(p,'--task','1').next)"
+    },
+    {
+      "id": "TS-13-28",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-7.2"
+      ],
+      "title": "The specr render suggestion is unchanged in rule, flags and why",
+      "given": [
+        "a draft package in whole-render, task-render and all-done states"
+      ],
+      "when": "the specr element of next is compared with the pre-change rule: first task after N (or first overall) not done or dropped",
+      "then": [
+        "its flags are [--task, id]",
+        "its why is \"task %d (%s) is the first task not done; render the package scoped to it\" after a whole render and \"task %d (%s) is the next task not done\" after a task render",
+        "when no unfinished task remains the specr element is absent and next holds only the speca entry or nothing"
+      ],
+      "pseudocode": "n=specr(spec).next; s=[e for e in n if e.tool=='specr'][0]; assert s.why==fmt('task %d (%s) is the first task not done; render the package scoped to it',1,t1); n=specr(spec,'--task','3').next; assert [e for e in n if e.tool=='specr']==[]"
+    },
+    {
+      "id": "TS-13-29",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-7.4"
+      ],
+      "title": "A --markdown-file write failure still emits next with the same entries",
+      "given": [
+        "a draft package with task 1 pending and ready",
+        "--markdown-file names a path in a directory that does not exist"
+      ],
+      "when": "specr <spec> --markdown-file <bad path> is run, and again without --markdown-file",
+      "then": [
+        "the first exits 1 with result and next present",
+        "its next equals the next of the successful render"
+      ],
+      "pseudocode": "bad=specr(spec,'--markdown-file','/nonexistent/x.md'); ok=specr(spec); assert bad.exit==1; assert bad.next==ok.next and bad.next[0].tool=='speca'"
+    },
+    {
+      "id": "TS-13-30",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-7.5"
+      ],
+      "title": "A package that cannot be loaded produces an error and no next",
+      "given": [
+        "a spec reference that resolves to no package or to a package with malformed JSON"
+      ],
+      "when": "specr is run on it",
+      "then": [
+        "the exit code is 1",
+        "the envelope has an error",
+        "the envelope has no next"
+      ],
+      "pseudocode": "r=specr('99_missing'); assert r.exit==1; assert r.error!=None; assert r.next in (None,[])"
+    },
+    {
+      "id": "TS-13-31",
+      "kind": "integration",
+      "verifies": [
+        "13-REQ-7.6"
+      ],
+      "title": "specr leaves every package file byte-identical, including when next holds a speca entry",
+      "given": [
+        "a draft package with a pending ready task 1 and an in-progress variant",
+        "a hash of every file in the package directory"
+      ],
+      "when": "specr is run whole, with --task 1 in each variant",
+      "then": [
+        "every file hash is identical before and after each call",
+        "no file is created or removed in the package"
+      ],
+      "pseudocode": "before=hash_dir(pkg); specr(spec); specr(spec,'--task','1'); assert hash_dir(pkg)==before"
+    },
+    {
+      "id": "TS-13-32",
+      "kind": "smoke",
+      "verifies": [
+        "13-PATH-1",
+        "13-REQ-5.1",
+        "13-REQ-4.2"
+      ],
+      "title": "An agent renders a package, runs the suggested claim through speca and tasks.json records task 1 in progress",
+      "given": [
+        "a temp repository with a draft package, three pending tasks, none in progress"
+      ],
+      "when": "specr <spec> is run, then the first next entry is run as a speca call",
+      "then": [
+        "specr's next[0] is the claim of task 1",
+        "speca exits 0 and tasks.json on disk shows task 1 in_progress",
+        "specr's own call changed nothing on disk before the claim"
+      ],
+      "pseudocode": "r=specr(spec); c=r.next[0]; assert c.tool=='speca'; out=speca(c.input,*c.flags); assert out.exit==0; assert load(tasks).task(1).state=='in_progress'",
+      "real_components": [
+        "specr command",
+        "speca command",
+        "internal/specpkg",
+        "afspec",
+        "temp repository on disk"
+      ]
+    },
+    {
+      "id": "TS-13-33",
+      "kind": "smoke",
+      "verifies": [
+        "13-PATH-2",
+        "13-REQ-6.2"
+      ],
+      "title": "An agent renders its in-progress task and records it done through speca",
+      "given": [
+        "a temp repository with a writable package where task 1 is in_progress"
+      ],
+      "when": "specr <spec> --task 1 is run, then next[0] is run as a speca call",
+      "then": [
+        "next[0] is the done call of task 1 and next[1] is specr --task 2",
+        "speca exits 0 and tasks.json on disk shows task 1 done"
+      ],
+      "pseudocode": "set_state(1,'in_progress'); r=specr(spec,'--task','1'); c=r.next[0]; assert c.flags==['--task','1','--state','done']; assert speca(c.input,*c.flags).exit==0; assert load(tasks).task(1).state=='done'",
+      "real_components": [
+        "specr command",
+        "speca command",
+        "internal/specpkg",
+        "afspec",
+        "temp repository on disk"
+      ]
+    },
+    {
+      "id": "TS-13-34",
+      "kind": "smoke",
+      "verifies": [
+        "13-PATH-3",
+        "13-REQ-2.1",
+        "13-REQ-3.1",
+        "13-REQ-3.2"
+      ],
+      "title": "A reader of any command's help or schema learns of the other two",
+      "given": [
+        "the spec, specr and speca commands built from the repository"
+      ],
+      "when": "spec --help, specr --help, speca --help, specr --schema and speca --schema are run",
+      "then": [
+        "each exits 0",
+        "each help on stderr carries the sibling line before Usage:",
+        "each schema document on stdout has a description ending with the sibling sentence"
+      ],
+      "pseudocode": "for c in [spec,specr,speca]: assert c.Main(['--help']).exit==0 and SiblingCommands in stderr; for c in [specr,speca]: assert json(c.Main(['--schema']).stdout).description.endswith(SiblingCommands)",
+      "real_components": [
+        "spec command",
+        "specr command",
+        "speca command",
+        "internal/cli"
+      ]
+    }
+  ]
+}
