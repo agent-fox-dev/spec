@@ -129,18 +129,25 @@ func checkDestination(sc *statusCall) *cli.ErrorInfo {
 func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
 	var changes []envelope.Change
 	here := sc.dir
+	superseding := sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded)
 	if !sc.moveOnly {
-		if sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded) {
-			// Superseding is made in task 7.
-			return nil, &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryInternal,
-				Message: "--status superseded is not implemented yet"}
-		}
 		sc.spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		if _, err := transitionSpec(sc.spec, sc.target, sc.dir); err != nil {
+		var err error
+		if superseding {
+			err = sc.supersede()
+		} else {
+			_, err = transitionSpec(sc.spec, sc.target, sc.dir)
+		}
+		if err != nil {
 			return nil, writeFailure(sc.name, err)
 		}
 		changes = append(changes, envelope.Change{Kind: "status", From: sc.spec.Status, To: sc.target})
 		sc.raise()
+	}
+	if superseding {
+		if change := sc.recordSupersedes(); change != nil {
+			changes = append(changes, *change)
+		}
 	}
 	if sc.movesUnderArchive() {
 		dest, err := moveUnderArchive(sc.dir, sc.holdingDir())

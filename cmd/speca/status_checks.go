@@ -45,13 +45,16 @@ func (sc *statusCall) unknownKeys() []string {
 
 // checkTarget makes the checks that belong to the status asked for. Activation
 // needs an intent and, unless --force, a package that validates; sealing needs
-// an intent that has not drifted and, unless --force, no open task.
+// an intent that has not drifted and, unless --force, no open task; superseding
+// needs a replacing package that can replace.
 func checkTarget(sc *statusCall) *cli.ErrorInfo {
 	switch sc.target {
 	case string(afspec.PrdFrontmatterV2JsonStatusActive):
 		return sc.checkActivation()
 	case string(afspec.PrdFrontmatterV2JsonStatusSealed):
 		return sc.checkSealing()
+	case string(afspec.PrdFrontmatterV2JsonStatusSuperseded):
+		return sc.checkReplacing()
 	}
 	return nil
 }

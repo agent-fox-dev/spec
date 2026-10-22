@@ -100,6 +100,10 @@ frontmatter as the loader does and asks which keys the schema's type lacks; they
 join the keys of the other artifacts as `prd.md /key`, in the refusal and in the
 warning.
 
+The same keys decide whether the replacing package can be saved to record the id
+it supersedes (12-REQ-7.3): one that holds any is not saved, and the warning names
+them.
+
 Activation, which the spec covers with its validation check, treats such a key as
 a failing rule `unknown_field` of the same check: refused at stage `validate`,
 category `invalid_spec`, with `--force` the way past and the key named in the

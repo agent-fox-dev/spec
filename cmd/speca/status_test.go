@@ -711,3 +711,218 @@ func TestAStatusCallUnderDryRunWritesNothing(t *testing.T) {
 		t.Error("a dry run wrote")
 	}
 }
+
+// supersedesOf is the supersedes list of the package, read from disk.
+func supersedesOf(t *testing.T, dir string) []string {
+	t.Helper()
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec.Supersedes
+}
+
+// TS-12-35: a package that is superseded or archived cannot replace another,
+// and --force does not change that.
+func TestAReplacingPackageThatIsSupersededOrArchivedIsRefused_TS12_35(t *testing.T) {
+	root := newRepo(t)
+	packageWith(t, root, "03_old", "03", "old", "sealed")
+	packageWith(t, root, "11_a", "11", "a", "superseded")
+	packageWith(t, root, "archive/12_b", "12", "b", "archived")
+
+	for _, by := range []string{"11_a", ".specs/archive/12_b"} {
+		argv := []string{"03_old", "--status", "superseded", "--by", by, "--force"}
+		e := refusedAt(t, root, "status", envelope.CategoryLifecycle, argv...)
+		if e == nil {
+			continue
+		}
+		saysAll(t, argv, e.Message, "--by", "cannot replace")
+		if e.FixHint == nil || e.FixHint.Flag != "--by" {
+			t.Errorf("%v: fix_hint %+v; want --by", argv, e.FixHint)
+		}
+	}
+}
+
+// TS-12-36: superseding writes the banner and the status, records the id in the
+// replacing package, and moves the package under archive/.
+func TestSupersedingWritesTheBannerRecordsTheIDAndMoves_TS12_36(t *testing.T) {
+	root := newRepo(t)
+	packageWith(t, root, "03_old", "03", "old", "sealed")
+	replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+
+	_, r := succeeds(t, root, "03_old", "--status", "superseded", "--by", "12_new")
+	want := []envelope.Change{
+		{Kind: "status", From: "sealed", To: "superseded"},
+		{Kind: "supersedes", Spec: "12", Added: "03"},
+		{Kind: "moved", From: ".specs/03_old", To: ".specs/archive/03_old"},
+	}
+	if !slices.Equal(r.Changes, want) {
+		t.Errorf("changes %+v; want %+v", r.Changes, want)
+	}
+	if r.SpecDir != ".specs/archive/03_old" || r.Status != "superseded" || exists(pkgDir(root, "03_old")) {
+		t.Errorf("spec_dir %q, status %q; want it superseded under archive/", r.SpecDir, r.Status)
+	}
+	old := pkgDir(root, "archive/03_old")
+	if b, _ := os.ReadFile(filepath.Join(old, "prd.md")); !strings.Contains(string(b), "DEPRECATED") || !strings.Contains(string(b), "superseded by spec 12") {
+		t.Errorf("the banner is missing from the prd.md of the superseded package:\n%s", b)
+	}
+	if got := supersedesOf(t, replacing); !slices.Equal(got, []string{"03"}) {
+		t.Errorf("supersedes of the replacing package = %v; want [03]", got)
+	}
+}
+
+// TS-12-37: a replacing package that cannot be saved is not a failure: the call
+// goes through, with a low warning that names it, the id and why. --force does
+// not reach it.
+func TestAReplacingPackageThatCannotBeSavedIsAWarning_TS12_37(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prepare func(t *testing.T, root string) string
+		reason  string
+	}{
+		"sealed": {func(t *testing.T, root string) string {
+			return packageWith(t, root, "12_new", "12", "new", "sealed")
+		}, "sealed"},
+		"active with drift": {func(t *testing.T, root string) string {
+			dir := activePackage(t, root, "12_new", "12", "new")
+			editFile(t, filepath.Join(dir, "prd.md"), "Coding agents drive", "Coding agents might drive")
+			return dir
+		}, "Intent"},
+		"unknown keys": {func(t *testing.T, root string) string {
+			dir := packageWith(t, root, "12_new", "12", "new", "draft")
+			addUnknownKey(t, dir)
+			return dir
+		}, "traceability"},
+		"a save that fails": {func(t *testing.T, root string) string {
+			dir := packageWith(t, root, "12_new", "12", "new", "draft")
+			readOnly(t, dir)
+			return dir
+		}, "save"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			packageWith(t, root, "03_old", "03", "old", "sealed")
+			replacing := tc.prepare(t, root)
+			before := treeBytes(t, replacing)
+
+			env, r := succeeds(t, root, "03_old", "--status", "superseded", "--by", "12_new", "--force")
+			w := oneWarning(t, env, "supersedes_not_recorded", "low")
+			saysAll(t, nil, w.Message, ".specs/12_new", "03", tc.reason)
+			if w.Stage != "status" {
+				t.Errorf("warning stage %q; want status", w.Stage)
+			}
+			if !slices.Equal(kinds(r.Changes), []string{"status", "moved"}) {
+				t.Errorf("changes %+v; want status and moved, no supersedes", r.Changes)
+			}
+			if r.Status != "superseded" || r.SpecDir != ".specs/archive/03_old" {
+				t.Errorf("status %q, spec_dir %q; want superseded under archive/", r.Status, r.SpecDir)
+			}
+			if !mapsEqual(before, treeBytes(t, replacing)) {
+				t.Error("a file of the replacing package changed")
+			}
+		})
+	}
+}
+
+// readOnly makes the directory unwritable for the rest of the test, and
+// writable again when it ends so that its temporary directory can be removed.
+// It skips as root, who is stopped by nothing.
+func readOnly(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("a read-only directory stops nothing as root")
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TS-12-38: a move-only supersede call skips the banner and the status, adds the
+// id the replacing package lacks, and moves the package: nothing of the old one
+// is rewritten.
+func TestAMoveOnlySupersedeCallRecordsTheMissingIDAndMoves_TS12_38(t *testing.T) {
+	root := newRepo(t)
+	old := packageWith(t, root, "03_old", "03", "old", "superseded")
+	replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+	before := treeBytes(t, old)
+
+	_, r := succeeds(t, root, "03_old", "--status", "superseded", "--by", "12_new")
+	if !slices.Equal(kinds(r.Changes), []string{"supersedes", "moved"}) {
+		t.Errorf("changes %+v; want supersedes, then moved", r.Changes)
+	}
+	if after := treeBytes(t, pkgDir(root, "archive/03_old")); !mapsEqual(before, after) {
+		t.Error("a file of the old package differs after the move")
+	}
+	if got := supersedesOf(t, replacing); !slices.Equal(got, []string{"03"}) {
+		t.Errorf("supersedes of the replacing package = %v; want [03]", got)
+	}
+}
+
+// 12-REQ-7.4: when the replacing package has the id already, the move-only call
+// only moves, and says nothing of a record that was not needed.
+func TestAMoveOnlySupersedeCallWithTheIDRecordedOnlyMoves(t *testing.T) {
+	root := newRepo(t)
+	packageWith(t, root, "03_old", "03", "old", "superseded")
+	replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+	editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 2", "schema_version: 2\nsupersedes: [\"03\"]")
+	before := treeBytes(t, replacing)
+
+	env, r := succeeds(t, root, "03_old", "--status", "superseded", "--by", "12_new")
+	if !slices.Equal(kinds(r.Changes), []string{"moved"}) || len(env.Warnings) != 0 {
+		t.Errorf("changes %+v, warnings %v; want a move and no warning", r.Changes, warningCodes(env))
+	}
+	if !mapsEqual(before, treeBytes(t, replacing)) {
+		t.Error("the replacing package was rewritten")
+	}
+}
+
+// 12-REQ-7.2: an active replacing package with no drift is saved too.
+func TestAnActiveReplacingPackageIsGivenTheID(t *testing.T) {
+	root := newRepo(t)
+	packageWith(t, root, "03_old", "03", "old", "sealed")
+	replacing := activePackage(t, root, "12_new", "12", "new")
+
+	env, r := succeeds(t, root, "03_old", "--status", "superseded", "--by", "12_new")
+	if len(env.Warnings) != 0 || !slices.Equal(kinds(r.Changes), []string{"status", "supersedes", "moved"}) {
+		t.Errorf("changes %+v, warnings %v; want all three and no warning", r.Changes, warningCodes(env))
+	}
+	if got := supersedesOf(t, replacing); !slices.Equal(got, []string{"03"}) || statusOnDisk(t, replacing) != "active" {
+		t.Errorf("supersedes %v, status %q; want [03] and still active", got, statusOnDisk(t, replacing))
+	}
+}
+
+// TS-12-39: however many times the call is made, and wherever an interrupted move
+// left it, the old id is in the replacing package's supersedes once, after the
+// ids that were there.
+func TestTheOldIDIsInTheReplacingPackageExactlyOnce_TS12_39(t *testing.T) {
+	for _, interrupted := range []bool{false, true} {
+		for calls := 1; calls <= 5; calls++ {
+			root := newRepo(t)
+			packageWith(t, root, "03_old", "03", "old", "sealed")
+			replacing := packageWith(t, root, "12_new", "12", "new", "draft")
+			editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 2", "schema_version: 2\nsupersedes: [\"01\", \"02\"]")
+
+			if interrupted {
+				// The status and the record are written; the move is not.
+				readOnly(t, filepath.Join(root, ".specs"))
+				run(t, "--dir", root, ".specs/03_old", "--status", "superseded", "--by", "12_new")
+				if err := os.Chmod(filepath.Join(root, ".specs"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i < calls; i++ {
+				path := ".specs/03_old"
+				if exists(pkgDir(root, "archive/03_old")) {
+					path = ".specs/archive/03_old"
+				}
+				run(t, "--dir", root, path, "--status", "superseded", "--by", "12_new")
+			}
+			if got := supersedesOf(t, replacing); !slices.Equal(got, []string{"01", "02", "03"}) {
+				t.Errorf("interrupted %v, %d calls: supersedes = %v; want [01 02 03]", interrupted, calls, got)
+			}
+			if !exists(pkgDir(root, "archive/03_old")) || statusOnDisk(t, pkgDir(root, "archive/03_old")) != "superseded" {
+				t.Errorf("interrupted %v, %d calls: the old package is not superseded under archive/", interrupted, calls)
+			}
+		}
+	}
+}

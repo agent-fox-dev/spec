@@ -355,7 +355,7 @@ func TestSpecaHasNoCodeThatWritesOrReachesOut_TS10_22(t *testing.T) {
 	forbiddenOS := []string{"Create", "CreateTemp", "OpenFile", "WriteFile", "Mkdir", "MkdirAll", "MkdirTemp", "Rename",
 		"Remove", "RemoveAll", "Truncate", "Chmod", "Chtimes", "Symlink", "Link", "Getenv", "LookupEnv", "Environ", "Setenv"}
 	forbiddenMethods := []string{"Save", "Transition", "Supersede", "MoveToArchive", "CreateSpec", "WriteAtomic", "EmitWithOutput"}
-	allowedMethods := map[string][]string{"task.go": {"Save"}, "status.go": {"Transition"}}
+	allowedMethods := map[string][]string{"task.go": {"Save"}, "status.go": {"Transition"}, "status_supersede.go": {"Supersede", "Save"}}
 
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {
