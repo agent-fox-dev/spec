@@ -121,3 +121,21 @@ iterating `tasks` finds `total` of them. The package's `valid` is false and
 
 **Test of the delivered behaviour:** `TestReportCountsAddUp_TS10_30`
 (`cmd/speca/report_test.go`), over plans in the four states.
+
+## D-6: "the package has at least one edge" means an edge from or to it
+
+**Spec:** 10-REQ-6.3 has the verdict keep the errors that name no entity (the
+dependency cycle) "when the package has at least one edge in the graph"; the
+reason, in the design decisions, is that a package with no edge cannot be on a
+cycle.
+
+**Code:** `concern` (`cmd/speca/verdict.go`, `concern`) reads it as an edge the
+package is at either end of: `graph.Dependencies(id)` or `graph.Dependents(id)`
+is not empty. A package that is only depended on, and depends on nothing, keeps
+the cycle error though it may not be on the cycle; the rule cannot tell, since
+the error names no package. A package with no edge at all never has it.
+
+**Test of the delivered behaviour:**
+`TestVerdictKeepsTheCrossSpecFindingsOfThePackage_TS10_36`
+(`cmd/speca/verdict_test.go`): the package that is only depended on keeps the
+cycle error, and the one with no edge does not.

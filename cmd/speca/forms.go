@@ -52,10 +52,6 @@ func notYet(form string) *cli.ErrorInfo {
 	return &cli.ErrorInfo{Stage: "load", Category: "input", Message: form + " form not yet implemented"}
 }
 
-// verdict is the form of speca <spec> --validate: the format's verdict on the
-// package in dir.
-func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) { return nil, notYet("the verdict") }
-
 // list is the form of speca --list: every package under the spec root.
 func list(c *call) (*Result, *cli.ErrorInfo) { return nil, notYet("the list") }
 
@@ -109,19 +105,24 @@ func intentDrift(spec *afspec.Spec) bool {
 	return err != nil || hash != *spec.IntentHash
 }
 
+// warnRootUnreadable raises the low specs_dir_unreadable warning: the spec root
+// (missing, not a directory, or not readable) could not be read, and the form
+// goes without what it would have read there.
+func (c *call) warnRootUnreadable(err error, leftOut string) {
+	c.run.Warn(cli.WarnSpecsDirUnreadable, "low", "the spec root %s could not be read (%v); %s",
+		specpkg.Display(c.specsDir, c.root), err, leftOut)
+}
+
 // discover lists the packages of the spec root whose PRD can be read. When the
-// root itself cannot be read (it is missing, is not a directory, or is not
-// readable) it raises a low specs_dir_unreadable warning naming the root and
-// what the form leaves out because of it, and reports ok as false. A package
-// whose PRD cannot be parsed is left out of metas without a word: the library
-// names such packages in the error, and the forms that matter list or load
-// them themselves.
+// root itself cannot be read it warns, saying what the form leaves out because
+// of it, and reports ok as false. A package whose PRD cannot be parsed is left
+// out of metas without a word: the library names such packages in the error,
+// and the forms that matter list or load them themselves.
 func (c *call) discover(leftOut string) (metas []afspec.SpecMeta, ok bool) {
 	metas, err := afspec.DiscoverSpecs(c.specsDir)
 	if metas == nil {
 		// DiscoverSpecs returns a list, empty at worst, once it has read the root.
-		c.run.Warn(cli.WarnSpecsDirUnreadable, "low", "the spec root %s could not be read (%v); %s",
-			specpkg.Display(c.specsDir, c.root), err, leftOut)
+		c.warnRootUnreadable(err, leftOut)
 		return nil, false
 	}
 	return metas, true
