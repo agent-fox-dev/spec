@@ -23,6 +23,7 @@ import (
 	"github.com/agent-fox-dev/spec/internal/issuex"
 	"github.com/agent-fox-dev/spec/internal/project"
 	"github.com/agent-fox-dev/spec/internal/repomap"
+	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
 
 // DefaultSpecDirName is where spec packages live under the repository root.
@@ -894,9 +895,9 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		validated = loaded
 	}
 
-	report := reportOf(validated.Validate())
+	report := specpkg.ReportOf(validated.Validate())
 	pkg.Validation = report
-	pkg.Traceability = traceOf(validated)
+	pkg.Traceability = specpkg.TraceOf(validated)
 
 	// The package now exists as far as later scopes are concerned, valid or
 	// not: the landscape lists it, so the next PRD is written against it. A
@@ -1108,81 +1109,6 @@ func summarize(r *Package, s *afspec.Spec) {
 	if s.Tasks != nil {
 		r.Tasks = len(s.Tasks.Tasks)
 	}
-}
-
-func reportOf(v afspec.ValidationResult) ValidationReport {
-	out := ValidationReport{
-		Valid:        v.Valid,
-		ErrorCount:   len(v.Errors),
-		WarningCount: len(v.Warnings),
-	}
-	for _, e := range v.Errors {
-		out.Errors = append(out.Errors, itemOf(e))
-	}
-	for _, w := range v.Warnings {
-		out.Warnings = append(out.Warnings, itemOf(w))
-	}
-	return out
-}
-
-func itemOf(e afspec.ValidationEntry) ValidationItem {
-	return ValidationItem{
-		Check:    e.Check,
-		Artifact: e.Artifact,
-		Entity:   e.EntityID,
-		Message:  e.Message,
-	}
-}
-
-// traceOf derives the coverage summary.
-//
-// It is computed rather than read, because format v2 makes coverage and
-// traceability derived: there is no coverage object in the artifacts to
-// report, and the numbers here are the only place they exist. The matrix
-// carries one link per criterion AND one per execution path, distinguished by
-// Kind, which is why this walks it once rather than asking for coverage twice.
-func traceOf(s *afspec.Spec) TraceReport {
-	var out TraceReport
-	for _, link := range s.ComputeTraceability().Links {
-		switch link.Kind {
-		case "path":
-			if link.Covered {
-				out.PathsCovered++
-			} else {
-				out.PathsUncovered = append(out.PathsUncovered, link.ID)
-			}
-		default:
-			if link.Covered {
-				out.CriteriaCovered++
-			} else {
-				out.CriteriaUncovered = append(out.CriteriaUncovered, link.ID)
-			}
-		}
-	}
-	out.TestsUnowned = unownedTests(s)
-	return out
-}
-
-// unownedTests are the tests no task lists. Rule C7 already reports them as
-// errors; repeating them here is what lets a caller act on the gap without
-// parsing validation messages.
-func unownedTests(s *afspec.Spec) []string {
-	if s.TestSpec == nil || s.Tasks == nil {
-		return nil
-	}
-	owned := map[string]bool{}
-	for _, t := range s.Tasks.Tasks {
-		for _, id := range t.Tests {
-			owned[id] = true
-		}
-	}
-	var out []string
-	for _, t := range s.TestSpec.Tests {
-		if !owned[t.Id] {
-			out = append(out, t.Id)
-		}
-	}
-	return out
 }
 
 // prdComment is what is posted back to the issue a spec was generated from.

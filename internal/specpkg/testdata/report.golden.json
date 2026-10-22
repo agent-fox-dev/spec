@@ -1,0 +1,54 @@
+{
+  "traceability": {
+    "criteria_covered": 5,
+    "criteria_uncovered": [
+      "09-REQ-2.3"
+    ],
+    "paths_covered": 1,
+    "paths_uncovered": [
+      "09-PATH-2"
+    ],
+    "tests_unowned": [
+      "TS-09-3"
+    ]
+  },
+  "validation": {
+    "valid": false,
+    "error_count": 4,
+    "warning_count": 1,
+    "errors": [
+      {
+        "check": "C4",
+        "artifact": "requirements.json",
+        "entity": "09-REQ-2.3",
+        "message": "criterion 09-REQ-2.3 is not verified by any test"
+      },
+      {
+        "check": "C5",
+        "artifact": "requirements.json",
+        "entity": "09-PATH-2",
+        "message": "execution path 09-PATH-2 is not verified by any smoke test"
+      },
+      {
+        "check": "C7",
+        "artifact": "test_spec.json",
+        "entity": "TS-09-3",
+        "message": "test TS-09-3 is not owned by any task; add TS-09-3 to the tests of an existing task (the task that builds what it checks)"
+      },
+      {
+        "check": "C8",
+        "artifact": "requirements.json",
+        "entity": "09-REQ-2.3",
+        "message": "criterion 09-REQ-2.3 is not owned by any implement task; add 09-REQ-2.3 to the criteria of the implement task that builds it (not the integration task, which owns smoke tests)"
+      }
+    ],
+    "warnings": [
+      {
+        "check": "glossary_hint",
+        "artifact": "requirements.json",
+        "entity": "Frobnicate",
+        "message": "term \"Frobnicate\" appears in 4 criteria but has no glossary entry"
+      }
+    ]
+  }
+}
