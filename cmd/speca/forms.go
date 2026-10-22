@@ -87,7 +87,7 @@ func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
 	r := envelope.AdminResult{
 		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Title: spec.Title,
 		Status: spec.Status, CreatedAt: spec.CreatedAt, UpdatedAt: spec.UpdatedAt,
-		IntentDrift: intentDrift(spec),
+		IntentDrift: specpkg.IntentDrift(spec),
 	}
 	if spec.IntentHash != nil && *spec.IntentHash != "" {
 		r.IntentHash = *spec.IntentHash
@@ -99,18 +99,6 @@ func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
 		r.Tags = slices.Clone(spec.Tags)
 	}
 	return r
-}
-
-// intentDrift reports whether an active package's intent has been changed
-// since it was activated: it has an intent_hash, and its PRD either has no
-// ## Intent section or has one that hashes to something else. The library
-// refuses every save of such a package, so a caller learns here why.
-func intentDrift(spec *afspec.Spec) bool {
-	if spec.Status != string(afspec.PrdFrontmatterV2JsonStatusActive) || spec.IntentHash == nil || *spec.IntentHash == "" {
-		return false
-	}
-	hash, err := afspec.ComputeIntentHash(spec.PRDBody)
-	return err != nil || hash != *spec.IntentHash
 }
 
 // warnUnreadable raises the low specs_dir_unreadable warning: a directory the

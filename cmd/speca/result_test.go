@@ -15,12 +15,14 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
-// report16 is the result of the report form for a package in .specs.
+// report16 is the result of the report form for a package in .specs. A draft and
+// an active package can take a write, as the report form says of a package whose
+// intent has not drifted.
 func report16(status string, done, total int, next *envelope.TaskInfo, valid bool) *Result {
 	return &Result{AdminResult: envelope.AdminResult{
 		SpecDir: ".specs/16_indexed_code_search", SpecID: "16", SpecName: "indexed_code_search", Status: status,
 		Valid: ptr(valid), TaskCounts: &envelope.TaskCounts{Done: done, Total: total}, NextTask: next,
-	}}
+	}, writable: status == "draft" || status == "active"}
 }
 
 // TS-10-45: the report's sentence names the directory, the status, the tasks
@@ -177,16 +179,24 @@ func TestListNext_TS10_49(t *testing.T) {
 		return envelope.PackageInfo{SpecDir: fmt.Sprintf(".specs/%02d_p", n), Status: status,
 			TaskCounts: &envelope.TaskCounts{InProgress: inProgress}, NextTask: next}
 	}
-	r := &Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{
+	packages := []envelope.PackageInfo{
 		pkg(1, "draft", 0, task(1, "pending")),
 		pkg(2, "active", 1, task(2, "in_progress")),
 		pkg(3, "active", 0, task(3, "pending")),
 		pkg(4, "active", 0, task(1, "pending")),
-	}}}
+	}
+	writable := map[string]bool{".specs/01_p": true, ".specs/02_p": true, ".specs/03_p": true, ".specs/04_p": true}
+	r := &Result{AdminResult: envelope.AdminResult{Packages: packages}, writableDirs: writable}
 	got := r.Next()
 	if len(got) != 2 || got[0].Tool != "speca" || got[0].Input != ".specs/03_p" || !slices.Equal(got[0].Flags, []string{"--task", "3", "--state", "in_progress"}) ||
 		got[1].Tool != "specr" || got[1].Input != ".specs/03_p" || !slices.Equal(got[1].Flags, []string{"--task", "3"}) {
 		t.Errorf("Next = %+v; want the claim of .specs/03_p's task 3, then specr .specs/03_p --task 3", got)
+	}
+
+	// A package that cannot take a write, whose intent drifted, is skipped for the next.
+	writable[".specs/03_p"] = false
+	if got := r.Next(); len(got) != 2 || got[0].Input != ".specs/04_p" {
+		t.Errorf("with .specs/03_p unable to take a write: Next = %+v; want the claim of .specs/04_p", got)
 	}
 
 	// An archived package is not work to do, whatever its status says.

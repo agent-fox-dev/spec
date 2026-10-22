@@ -38,10 +38,13 @@ type Result struct {
 	// result is that of a package that has not changed.
 	callNext []cli.Next
 	nextSet  bool
-	// drifted holds the directories of the packages of a list whose intent
-	// drifted, which an entry of the list does not say. The list suggests no
-	// claim for one.
-	drifted map[string]bool
+	// writable is whether the package the report is of can take a write, as
+	// specpkg.Writable says. The report suggests a claim only if it can.
+	writable bool
+	// writableDirs holds, for each package of a list, whether it can take a
+	// write, which an entry of the list does not say. The list suggests no claim
+	// for one that cannot.
+	writableDirs map[string]bool
 	// lifecycle holds the status call the report suggests for the package, if one
 	// is, which comes before any suggestion about its tasks. Only the report form
 	// sets it.
@@ -220,22 +223,10 @@ func (r *Result) taskNext() []cli.Next {
 	// A ready task is claimed before it is worked on, so the claim comes first,
 	// for a package that can take it: a draft, or an active one whose intent
 	// still matches its hash. A task already in progress has been claimed.
-	if t.State == string(afspec.TaskStatePending) && t.Ready && r.writable() {
+	if t.State == string(afspec.TaskStatePending) && t.Ready && r.writable {
 		return []cli.Next{claimOf(r.SpecDir, *t), render}
 	}
 	return []cli.Next{render}
-}
-
-// writable reports whether the package can take a write: a draft, or an active
-// package whose intent has not drifted.
-func (r *Result) writable() bool {
-	switch r.Status {
-	case string(afspec.PrdFrontmatterV2JsonStatusDraft):
-		return true
-	case string(afspec.PrdFrontmatterV2JsonStatusActive):
-		return !r.IntentDrift
-	}
-	return false
 }
 
 // claimOf is the call that claims task t of the package at dir: speca's own task
@@ -252,7 +243,7 @@ func claimOf(dir string, t envelope.TaskInfo) cli.Next {
 func (r *Result) listNext() []cli.Next {
 	for _, p := range r.Packages {
 		if p.Archived || p.LoadError != "" || p.Status != string(afspec.PrdFrontmatterV2JsonStatusActive) ||
-			p.TaskCounts == nil || p.TaskCounts.InProgress > 0 || p.NextTask == nil || !p.NextTask.Ready || r.drifted[p.SpecDir] {
+			p.TaskCounts == nil || p.TaskCounts.InProgress > 0 || p.NextTask == nil || !p.NextTask.Ready || !r.writableDirs[p.SpecDir] {
 			continue
 		}
 		why := fmt.Sprintf("%s is active with no task in progress; task %d (%s) is the next ready task", p.SpecDir, p.NextTask.ID, p.NextTask.Title)

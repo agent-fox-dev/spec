@@ -169,19 +169,16 @@ func writeSpec(spec *afspec.Spec, name string) *cli.ErrorInfo {
 // --force does not bypass it, because the library has no way to write such a
 // package. It is a lifecycle refusal at stage status.
 func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
-	switch spec.Status {
-	case string(afspec.PrdFrontmatterV2JsonStatusSealed),
-		string(afspec.PrdFrontmatterV2JsonStatusSuperseded),
-		string(afspec.PrdFrontmatterV2JsonStatusArchived):
-		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
-			Message: fmt.Sprintf("%s is %s, so its tasks can no longer change: a change to it is a new package that supersedes it", name, spec.Status)}
-	}
-	if intentDrift(spec) {
+	switch {
+	case specpkg.Writable(spec):
+		return nil
+	case specpkg.IntentDrift(spec):
 		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
 			Message: fmt.Sprintf("%s is active and its ## Intent section no longer matches its intent_hash (or is gone): "+
 				"the library refuses every write until the intent matches its hash again", name)}
 	}
-	return nil
+	return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
+		Message: fmt.Sprintf("%s is %s, so its tasks can no longer change: a change to it is a new package that supersedes it", name, spec.Status)}
 }
 
 // checkNamedTasks refuses a --task that names what the plan cannot supply: an
