@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -440,5 +441,45 @@ func TestMarkdownIsNotHTMLEscaped(t *testing.T) {
 		if strings.Contains(stdout.String(), "\\u00"+esc) {
 			t.Errorf("stdout escapes HTML (u00%s)", esc)
 		}
+	}
+}
+
+// TS-10-15: every task of a render carries ready, true for a pending task
+// whose dependencies are done, and the schema golden says so.
+func TestTasksCarryReady_TS10_15(t *testing.T) {
+	root := newRepo(t)
+	ready := func(tasks []envelope.TaskInfo) []bool {
+		var out []bool
+		for _, task := range tasks {
+			out = append(out, task.Ready)
+		}
+		return out
+	}
+
+	// 09_agent_mode: task 2 depends on 1, task 3 on 1 and 2; none is done.
+	env, code, _ := run(t, "--dir", root, "09")
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{true, false, false}) {
+		t.Errorf("ready = %v; want only task 1", got)
+	}
+
+	spec := load(t, root, "09_agent_mode")
+	spec.Tasks = spec.Tasks.CompleteTaskStates([]int{1})
+	if err := spec.Save(spec.Dir); err != nil {
+		t.Fatal(err)
+	}
+	env, _, _ = run(t, "--dir", root, "09", "--task", "2")
+	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{false, true, false}) {
+		t.Errorf("with task 1 done, ready = %v; want only task 2", got)
+	}
+	if env.Result.Task == nil || env.Result.Task.ID != 2 || !env.Result.Task.Ready {
+		t.Errorf("result.task = %+v; want task 2, ready", env.Result.Task)
+	}
+
+	golden, err := os.ReadFile(filepath.Join("testdata", "schema.golden.json"))
+	if err != nil || !strings.Contains(string(golden), `"ready": {`) {
+		t.Errorf("the schema golden does not describe ready (%v)", err)
 	}
 }
