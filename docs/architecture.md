@@ -2,9 +2,9 @@
 
 This repository holds the agent-fox specification format, its reference
 implementation (the `afspec` Go library), the `spec` command, which turns a
-product idea into a package of that format, and the `specr` command, which
-renders a package as Markdown. It is one Go module,
-`github.com/agent-fox-dev/spec`.
+product idea into a package of that format, the `specr` command, which
+renders a package as Markdown, and the `speca` command, which reports a
+package's state. It is one Go module, `github.com/agent-fox-dev/spec`.
 
 ## Layout
 
@@ -19,6 +19,7 @@ afspec/                     # The reference library, package afspec
 envelope/                   # The commands' JSON output as Go types (stdlib only)
 cmd/spec/                   # The spec command: flags, help, the entry point
 cmd/specr/                  # The specr command: a package rendered as Markdown
+cmd/speca/                  # The speca command: a package's state, its verdict, the list
 specgen/                    # The generation pipeline: phases, prompts, review, split
   templates/                #   The prompts, as Markdown, embedded
 internal/
@@ -27,6 +28,7 @@ internal/
   issuex/                   #   GitHub and GitLab: read an issue, post a comment
   project/                  #   Language detection, the test-command audit, steering
   repomap/                  #   The token-budgeted repository map
+  specpkg/                  #   What the commands share about a package on disk
 examples/                   # Programs using afspec: create, validate, work through tasks
 docs/                       # Repository documentation
 .specs/                     # Spec packages for work on this repository
@@ -62,7 +64,7 @@ The v1 schemas have no copy in `afspec/`: the library reads version 2 only.
 | Load and save, atomically and round-trip exact | `afspec.go`, `prd.go`, `marshal.go`, `create.go` |
 | Schema validation and the cross-file rules C1–C11 | `validate.go`, `schemas.go`, `unknown.go` |
 | Lifecycle (`draft → active → sealed`, superseded, archived) and the intent hash | `lifecycle.go`, `intent.go` |
-| Task state machine | `task.go` |
+| Task state machine, readiness (`IsReady`) and the next task (`NextTask`) | `task.go` |
 | Mutation and ID allocation | `mutate.go`, `nextid.go`, `bootstrap.go` |
 | Discovery, the cross-spec dependency graph, lint | `discover.go`, `dirname.go`, `specsdir.go`, `graph.go`, `lint.go` |
 | Derived coverage and traceability | `coverage.go` |
@@ -73,20 +75,22 @@ The full API is listed in [afspec/README.md](../afspec/README.md).
 
 ## The output contract
 
-Both commands write one JSON object to stdout. Its Go types are the public
+The commands write one JSON object to stdout. Its Go types are the public
 package `envelope`, which imports the standard library only: the envelope, the
-error and warning vocabulary, `spec`'s result (`SpecResult`) and `specr`'s
-(`RenderResult`). A program that reads the output imports it and calls
-`envelope.DecodeSpec` or `DecodeSpecr`; it pulls in neither the model SDK nor
-the `replace` that `go.mod` carries for agentkit-go.
+error and warning vocabulary, `spec`'s result (`SpecResult`), `specr`'s
+(`RenderResult`) and `speca`'s (`AdminResult`). A program that reads the output
+imports it and calls `envelope.DecodeSpec`, `DecodeSpecr` or `DecodeSpeca`; it
+pulls in neither the model SDK nor the `replace` that `go.mod` carries for
+agentkit-go.
 
 The commands do not keep a second definition. `internal/cli` names the types
 as aliases (`cli.Envelope` is `envelope.Envelope[any]`, since the shell does
 not know which result it carries) and adds what only a producer needs: the
 `Run` that accumulates warnings and cost, the `warnStages` table, the schema
-generator behind `specr --schema`. `specgen.Result` embeds `envelope.SpecResult`
-and `cmd/specr`'s `Result` embeds `envelope.RenderResult`, adding the methods
-the shell asks of a result (`Summary`, `Next`, `Artifacts`). Nothing under
+generator behind `specr --schema` and `speca --schema`. `specgen.Result` embeds
+`envelope.SpecResult`, `cmd/specr`'s `Result` embeds `envelope.RenderResult` and
+`cmd/speca`'s embeds `envelope.AdminResult`, adding the methods the shell asks
+of a result (`Summary`, `Next`, `Artifacts`). Nothing under
 `envelope/` imports another package of this module.
 
 ## The spec command
@@ -101,7 +105,7 @@ cut-down AgentKit, is [ADR 01](adr/01-run-the-spec-command-on-the-agentkit-drive
 cmd/spec ──> internal/cli ──> internal/agentrun ──> agentkit-go (driver, workspace,
    │              │                                  tools, catalog, codesearch,
    │              └──> internal/issuex                provider/anthropic)
-   └──> specgen ──> afspec, internal/{agentrun, cli, issuex, project, repomap}
+   └──> specgen ──> afspec, internal/{agentrun, cli, issuex, project, repomap, specpkg}
 ```
 
 Nothing under `internal/` imports `specgen`, and `afspec` imports nothing
@@ -230,15 +234,56 @@ cmd/specr ──> afspec
 
 It does not use `cli.App`, which resolves a model, a forge and a code-search
 index before it hands over: `specr` has none of those. `cmd/specr` parses its
-own flags with `cli.SplitArgs`, resolves the reference (`locate.go`), loads the
-package with `afspec.LoadSpec`, validates it for a warning, renders it with
+own flags with `cli.SplitArgs`, resolves the reference (`specpkg.Locate`), loads
+the package with `afspec.LoadSpec`, validates it for a warning, renders it with
 `RenderCombined`, `RenderIndividual` or `RenderIndividualScoped`
 (`render.go`), and emits a `cli.Envelope`. `--schema` is built by
 `cli.FlagsDocument` and `cli.EnvelopeDocument` (`internal/cli/schemadoc.go`),
 which describe a flag set and a Go type by reflection, reading each field's
 `description` tag.
 
+## The speca command
+
+`speca` is documented for callers in [speca.md](speca.md); the decision is
+[ADR 10](adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
+
+```
+cmd/speca ──> afspec
+    ├───────> envelope        (its result: AdminResult)
+    ├───────> internal/specpkg
+    └───────> internal/cli    (the Run, SplitArgs, the --schema generator)
+
+cmd/specr ──> internal/specpkg
+specgen   ──> internal/specpkg
+internal/specpkg ──> afspec, envelope, internal/cli   (for the usage error)
+```
+
+Like `specr`, it does not use `cli.App`, and it links `internal/cli` and so the
+model stack, which it never uses (ADR 05, Consequences). `internal/specpkg`
+holds what `spec`, `specr` and `speca` each need and none should copy: the
+resolver of a package reference (`Locate`, `List`), the display rule for a path
+(`Display`), the task summary with its `ready` (`TaskInfos`), the converters of
+afspec's verdict and derived coverage into the envelope's `ValidationReport` and
+`TraceReport` (`ReportOf`, `TraceOf`), and the names of the rules a verdict
+breaks (`Rules`). It is a package of its own because `envelope` must stay
+standard-library only and `internal/cli` does not import `afspec`.
+
+`cmd/speca` has three forms, each in a file of its own, chosen by the flags in
+`forms.go`:
+
+| Form | File | Reads |
+|---|---|---|
+| the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` |
+| the verdict, `speca <spec> --validate` | `verdict.go` | the package and every package of the spec root, for the cross-spec rules |
+| the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` |
+
+It writes nothing. Readiness is not decided here: `IsReady` and `NextTask` are
+`afspec`'s, and `specr` and `examples/tasks` use them too, so the three agree on
+what "ready" and "next" mean.
+
 ## Consumers
 
-agent-fox's tools import `afspec` as a library. Lifecycle management has no
-CLI surface; it is library API for an embedder to call.
+agent-fox's tools import `afspec` as a library. Reading a package's state has a
+command, `speca`; changing it (activating, sealing, archiving or superseding a
+package, moving a task) has no CLI surface and is library API for an embedder to
+call.

@@ -117,12 +117,12 @@ raw JSON.
 | `spec_id`, `spec_name`, `title`, `status` | from the PRD frontmatter |
 | `valid` | whether the package passes the format's validation. An invalid package still renders in full, with a `spec_invalid` warning naming the failing rules |
 | `scope` | `spec` (the whole package) or `task` |
-| `task` | the task the render is scoped to: `id`, `title`, `kind`, `state`, `optional`, `depends_on`; present exactly when `scope` is `task` |
+| `task` | the task the render is scoped to: `id`, `title`, `kind`, `state`, `optional`, `depends_on`, `ready`; present exactly when `scope` is `task` |
 | `sections` | the sections the Markdown holds, in order |
 | `max_tokens` | the `--max-tokens` budget, when there was one |
 | `reduced` | what the budget dropped: `architecture`, `test_detail`; absent when nothing was |
 | `tokens` | the Markdown's estimated tokens, bytes / 4 |
-| `tasks` | every task of the plan, in order, without its body: the ids `--task` takes, and their states |
+| `tasks` | every task of the plan, in order, without its body: the ids `--task` takes, and their states. A pending task whose dependencies are all done carries `"ready": true` (`afspec`'s `IsReady`, the same rule [`speca`](speca.md) uses); the field is absent otherwise |
 | `markdown_file` | the absolute path `--markdown-file` wrote |
 | `markdown` | the render. It is the last field, so a reader meets what it is before what it says |
 

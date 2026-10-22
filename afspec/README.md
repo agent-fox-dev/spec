@@ -220,6 +220,8 @@ appends unconditionally.
 | `(*TasksV2Json).TransitionTask(id, target) (*TasksV2Json, error)` | Move one task through the state machine of §8.3.1 |
 | `(*TasksV2Json).CompleteTaskStates(ids)` / `ResetTaskStates(ids)` | Set states directly, bypassing the machine |
 | `(*TasksV2Json).GetTask(id) (*Task, bool)` | A copy of one task |
+| `(*TasksV2Json).IsReady(id) bool` | Whether the task exists, is `pending`, and has every dependency `done`. A task's dependencies are its `depends_on` when present (an empty list means none), otherwise the task before it in plan order (§8.3); a dependency the plan lacks, or a `dropped` one, is not done |
+| `(*TasksV2Json).NextTask() (*Task, bool)` | A copy of the task to work on: the first `in_progress` task in plan order, else the first ready one; `nil, false` when there is none |
 | `ValidTaskTransition(current, target) bool` | Whether a task transition is allowed |
 
 ### Lint

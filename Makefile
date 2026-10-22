@@ -24,9 +24,10 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*##"}; {printf "  %-16s %s\n", $$1, $$2}'
 
 .PHONY: build
-build: $(AGENTKIT_DEP) ## Install the spec and specr commands
+build: $(AGENTKIT_DEP) ## Install the spec, specr and speca commands
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/specr
+	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/speca
 
 .PHONY: test
 test: $(AGENTKIT_DEP) ## Run all Go tests

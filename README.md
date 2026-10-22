@@ -53,15 +53,17 @@ validation or code generation.
 ## Implementations
 
 This repository holds the format, its reference library, the command that
-writes packages of it and the command that renders them:
+writes packages of it, the command that renders them and the command that
+reports their state:
 
 | Path | What it is |
 | --- | --- |
 | `specification/` | The format: the reference documents and the canonical JSON Schemas |
 | [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save and render spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
-| [`envelope/`](docs/api.md#envelope) | The JSON `spec` and `specr` write to stdout, as Go types for a program to decode it into; standard library only |
+| [`envelope/`](docs/api.md#envelope) | The JSON `spec`, `specr` and `speca` write to stdout, as Go types for a program to decode it into; standard library only |
 | `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline, built on `afspec` and [agentkit-go](https://github.com/agent-fox-dev/agentkit-go) |
 | `cmd/specr/` | The `specr` command: a package rendered as Markdown, whole or scoped to one task |
+| `cmd/speca/` | The `speca` command: a package's state, the format's verdict on it, or the list of every package |
 
 See [docs/architecture.md](docs/architecture.md) for how the pieces fit
 together.
@@ -119,10 +121,10 @@ A Go program that calls either command decodes its output with the
 [`envelope`](docs/api.md#envelope) package (`envelope.DecodeSpec`,
 `envelope.DecodeSpecr`) instead of writing structs of its own.
 
-Lifecycle management for an existing package — activating, sealing,
-archiving, superseding, validating — has no CLI surface; it's library API in
-[`afspec`](afspec/README.md) for an embedder to call. Rendering has one,
-below.
+Changing an existing package — activating, sealing, archiving or superseding
+it, or moving a task from one state to another — has no CLI surface; it's
+library API in [`afspec`](afspec/README.md) for an embedder to call. Rendering
+a package and reading its state have one each, below.
 
 ## Rendering a Spec Package
 
@@ -148,20 +150,45 @@ codes: `0` rendered, `1` the package could not be read, `2` a usage error.
 Everything is in [docs/specr.md](docs/specr.md); the decision is
 [ADR 05](docs/adr/05-render-a-package-with-its-own-command.md).
 
+## Reporting a Spec Package's State
+
+The `speca` CLI is the spec admin command. In this form it reads a package and
+changes nothing: it reports a package's state, gives the format's full verdict
+on it, or lists every package under the spec root. It takes one reference to a
+package (none with `--list`) and writes one JSON object to stdout, as `spec`
+and `specr` do:
+
+```bash
+speca 16                  # status, validity, every task with its state and readiness, the next task,
+                          # the lifecycle moves allowed, the packages it depends on and that depend on it
+speca 16 --validate       # schema errors, the cross-file rules C1–C11 and the cross-spec rules, by rule
+speca --list              # every package under the spec root, in number order
+speca --list --all        # and those under archive/
+speca --schema            # the flags and the output, as JSON Schema
+```
+
+`result.next_task` is the task to work on — the one in progress, else the first
+whose dependencies are done — and `next` names the `specr` call that renders
+it. A package that does not validate is reported with exit 0, in `valid`; exit
+codes `0`, `1` and `2` are those of the other two commands. It writes no file,
+makes no model or network call, and reads no credential. Everything is in
+[docs/speca.md](docs/speca.md); the decision is
+[ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
+
 ## Installation
 
-Build the `spec` and `specr` commands from a checkout:
+Build the `spec`, `specr` and `speca` commands from a checkout:
 
 ```bash
 git clone https://github.com/agent-fox-dev/spec && cd spec
-make build          # installs spec and specr into $GOBIN
+make build          # installs spec, specr and speca into $GOBIN
 ```
 
-`make build` stamps both commands with `git describe`, the commit and the
+`make build` stamps all three commands with `git describe`, the commit and the
 build time (the variables in [version.go](version.go)), which `--version`
 prints, e.g. `spec v1.4.1 (commit 94f3890, built 2026-10-14T06:33:13Z)`.
 
-`go install …/cmd/spec@version` (or `…/cmd/specr@version`) does not work yet: the module carries a
+`go install …/cmd/spec@version` (or `…/cmd/specr@version`, `…/cmd/speca@version`) does not work yet: the module carries a
 `replace` for agentkit-go until that module is tagged (see
 [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md)).
 
@@ -184,7 +211,7 @@ and no API key: the command's tests run against a scripted model.
 | --- | --- |
 | `make help` | List all targets |
 | `make check` | `make fmt`, `vet`, `lint` and `test` |
-| `make build` | Install the `spec` and `specr` commands, stamped with the version |
+| `make build` | Install the `spec`, `specr` and `speca` commands, stamped with the version |
 | `make test` | `go test ./... -count=1` |
 | `make test-fast` | The tests with `-short` |
 | `make fmt` | `gofmt -l -w .` |
@@ -207,7 +234,9 @@ and no API key: the command's tests run against a scripted model.
 - [Architecture](docs/architecture.md) and [configuration](docs/configuration.md)
 - [The spec command](docs/cli.md) — input, flags, the output envelope, errors and warnings
 - [The specr command](docs/specr.md) — the forms of a render, the reference it takes, the output and `--schema`
+- [The speca command](docs/speca.md) — the report, the verdict and the list, the reference it takes, the output and `--schema`
 - [Configuration](docs/configuration.md) — environment variables and limits
 - [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
 - [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
 - [ADR 06](docs/adr/06-build-against-the-latest-agentkit-go.md) — why every build moves to the latest agentkit-go
+- [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports
