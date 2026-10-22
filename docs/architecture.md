@@ -269,23 +269,33 @@ afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 breaks (`Rules`). It is a package of its own because `envelope` must stay
 standard-library only and `internal/cli` does not import `afspec`.
 
-`cmd/speca` has three forms, each in a file of its own, chosen by the flags in
+`cmd/speca` has four forms, each in a file of its own, chosen by the flags in
 `forms.go`:
 
-| Form | File | Reads |
-|---|---|---|
-| the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` |
-| the verdict, `speca <spec> --validate` | `verdict.go` | the package and every package of the spec root, for the cross-spec rules |
-| the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` |
+| Form | File | Reads | Writes |
+|---|---|---|---|
+| the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` | nothing |
+| the verdict, `speca <spec> --validate` | `verdict.go` | the package and every package of the spec root, for the cross-spec rules | nothing |
+| the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
+| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | `tasks.json` and the `updated_at` of `prd.md`, through `Spec.Save` |
 
-It writes nothing. Readiness is not decided here: `IsReady` and `NextTask` are
+The task form is the one that writes, and it writes only through the library:
+`plan.go` chooses the moves and applies them with `TransitionTask` (and, under
+`--force`, `CompleteTaskStates` and `ResetTaskStates`), so the state machine is
+`afspec`'s and not a copy; `task.go` sets `updated_at`, which `Save` does not, and
+calls `Spec.Save`, which writes every artifact through temporary files and then
+renames them. A call that is refused, and a dry run, write nothing. Nothing
+outside `task.go` may call `Save`; a test of the sources checks it, and checks
+that the other forms leave the file tree as it was.
+
+Readiness is not decided here: `IsReady` and `NextTask` are
 `afspec`'s. `speca` uses both; `specr` reports `IsReady` on each task it lists,
 through `specpkg.TaskInfo`; and `examples/tasks` picks its task with `NextTask`.
 So the three agree on what "ready" and "next" mean.
 
 ## Consumers
 
-agent-fox's tools import `afspec` as a library. Reading a package's state has a
-command, `speca`; changing it (activating, sealing, archiving or superseding a
-package, moving a task) has no CLI surface and is library API for an embedder to
-call.
+agent-fox's tools import `afspec` as a library. Reading a package's state and
+moving its tasks have a command, `speca`; changing its lifecycle status
+(activating, sealing, archiving or superseding a package) has no CLI surface and
+is library API for an embedder to call.

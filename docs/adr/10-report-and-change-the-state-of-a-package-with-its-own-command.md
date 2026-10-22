@@ -64,8 +64,35 @@ reason: an agent that can drive one command can drive all of them.
   satisfies a dependency. `speca` uses both, `specr` shows `IsReady` on each task
   it lists and `examples/tasks` picks its task with `NextTask`, so "ready" and
   "next" mean one thing.
-- **`speca` writes no file, makes no model or network call and reads no
-  credential.** It runs in milliseconds on the files alone.
+- **The read-only forms write no file, and no form makes a model or network call
+  or reads a credential.** `speca` runs in milliseconds on the files alone. The
+  first form that writes is the task form (spec 11), below.
+
+### The task form
+
+`speca <spec> --task T --state S` moves tasks through the library's task state
+machine and saves the package with `Spec.Save`. It is the form the first
+decision above made room for, and it keeps the decision's shape:
+
+- **The library makes every change; the command adds checks.** A move is
+  `TransitionTask`, `--force`'s bypass is `CompleteTaskStates` or
+  `ResetTaskStates` (the library has no setter for `in_progress` or `dropped`, so
+  `--force` covers neither), and the write is `Save`. One state machine cannot
+  drift from a copy of itself.
+- **All moves or none.** Every named move is checked before any is made. A refused
+  move is a lifecycle refusal (category `lifecycle`, not `usage`: the package was
+  read and the call was well-formed), carrying the states the task may move to.
+- **The state machine is the compare-and-set, and there is no lock.** A claim of
+  a task already in progress is not a move, so the second of two agents is
+  refused and learns the task is taken.
+- **A refusal carries the package as it is on disk,** without a summary of its own
+  and without `next`, so the caller sees the states and is not pointed at a task
+  another agent holds.
+- **`Save` is not trusted to refuse.** The command refuses a package `Save` would
+  refuse (sealed, superseded, archived, or intent drifted) before looking at any
+  move, so that `--dry-run` reports the refusal the real call would meet; and it
+  refuses a write that would delete keys the schema does not know, which `Save`
+  does silently, unless `--force` says so.
 
 ### Shared code
 
@@ -95,9 +122,10 @@ and the later scopes add their fields to the same type.
 
 - `make build` installs three commands. `speca` is stamped the same way as the
   other two.
-- The README's "no CLI surface" sentence is now true of changing a package, not
-  of reading its state; it is corrected, and corrected again when the forms that
-  change state arrive.
+- The README's "no CLI surface" sentence is now true of changing a package's
+  lifecycle status, not of reading its state or moving its tasks; it was
+  corrected for the first, and for the second when the task form arrived, and it
+  is corrected again when the lifecycle forms do.
 - `specr`'s tasks carry `ready`, the one change to its output. A field on the
   shared `TaskInfo` never means something different depending on which command
   wrote it.

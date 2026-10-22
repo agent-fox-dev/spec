@@ -97,6 +97,30 @@ func TestHelpGoesToStderr_TS10_17(t *testing.T) {
 	}
 }
 
+// TS-11-52: the help describes the task form and the flags that belong to it.
+func TestHelpDescribesTheTaskForm_TS11_52(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--help"}, &stdout, &stderr); code != cli.ExitOK {
+		t.Fatalf("code %d", code)
+	}
+	help := stderr.String()
+	for _, want := range []string{
+		"speca <spec> --task T --state S", "--task", "--state", "--force", "--dry-run",
+		"next", "all", "pending, in_progress, done or dropped", "state machine", "§8.3.1",
+		"task_state_forced", "writes nothing",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the help does not say %q", want)
+		}
+	}
+	// The help no longer says the command changes nothing, which the task form does.
+	for _, stale := range []string{"speca changes nothing", "It changes nothing"} {
+		if strings.Contains(help, stale) {
+			t.Errorf("the help still says %q", stale)
+		}
+	}
+}
+
 // TS-10-18: a bare invocation prints the help, exits 2 and, into a pipe, also
 // writes a usage envelope. So does one that names flags but no input.
 func TestBareInvocation_TS10_18(t *testing.T) {

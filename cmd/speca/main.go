@@ -37,7 +37,8 @@ const description = "Reports the state of a specification package: its lifecycle
 	"validates, every task with its state and whether it is ready, the next task to work on, the " +
 	"lifecycle moves allowed from its status, and the packages it depends on and that depend on it. " +
 	"With --validate, the format's full verdict on the package; with --list, every package under the " +
-	"spec root. It changes nothing. " + siblings + "."
+	"spec root. With --task and --state it moves one or more tasks through the task state machine, " +
+	"every one or none, and writes the package. Without them it changes nothing. " + siblings + "."
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
@@ -71,26 +72,54 @@ Forms:
   speca --list             every package under the spec root, in number order,
                            each with its status, whether it validates, its task
                            counts and its next task; --all adds archive/
+  speca <spec> --task T --state S
+                           the task form: move tasks T to state S. T is a task
+                           id, several ids (--task 1,2 or --task 1 --task 2),
+                           next (the task to work on now) or all (every task
+                           not already in S and not dropped); S is pending,
+                           in_progress, done or dropped. The task state machine
+                           (format v2 §8.3.1) allows every move or none is made,
+                           and the result lists the changes. Claiming a task
+                           that is in_progress is refused, which is how a second
+                           agent learns it is taken
+    --dry-run              run every check and report what would change; write
+                           nothing
+    --force                with done or pending, set a state the machine
+                           refuses, through the library's own bypasses (a high
+                           task_state_forced warning names each task so set);
+                           also write over keys the schema does not know. It
+                           skips nothing else, and cannot set in_progress or
+                           dropped
 
 Output is one JSON object on stdout; next names the call to make after this
 one. --schema prints the flags and the shape of the output as JSON Schema.
 
-speca changes nothing: it writes no file, makes no model call and no network
-call, and reads no credential.
+The report, --validate and --list change nothing. The task form writes the
+package's tasks.json and the updated_at of its prd.md through the library's
+atomic save, and nothing else; with --dry-run it writes nothing. speca makes no
+model call and no network call, and reads no credential.
 
 Exit codes:
   0  reported — a package that does not validate is reported too, in valid
-     and validation
+     and validation; or the tasks were moved
   1  failed: the package could not be loaded, or the spec root --list reads
-     could not be read
+     could not be read; or the task form was refused after the package was
+     read: the machine does not allow a move (stage task), the package can no
+     longer take a write (stage status), a save would delete keys the schema
+     does not know (stage validate), or the write failed (stage write). The
+     result then holds the package as it is on disk
   2  usage error — the reference names no package, or two; two operations in
-     one call; a flag that cannot hold. Nothing was read
+     one call; a flag that cannot hold; an id the plan does not have. Nothing
+     was read or written
 
 Examples:
   speca 16
   speca .specs/16_indexed_code_search --validate
   speca --list
   speca --list --all
+  speca 16 --task next --state in_progress
+  speca 16 --task 4 --state done
+  speca 16 --task 1,2 --state in_progress --dry-run
 
 Flags:
 `
@@ -285,14 +314,14 @@ func describe(fs *flag.FlagSet) selfDescription {
 			Description: inputDescription,
 			Examples:    []string{".specs/16_indexed_code_search", "16", "indexed_code_search", ".specs/16_indexed_code_search/tasks.json"},
 		},
-		Flags: cli.FlagsDocument(fs, nil),
+		Flags: cli.FlagsDocument(fs, map[string][]string{"state": taskStates}),
 		// speca makes no model call and no forge write, and takes no
 		// classified input, so those envelope fields never appear.
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
-			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), or the list of packages",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; the stage is named in error",
-			cli.ExitUsage:  "usage error: the reference names no package or two, two operations in one call, or a flag that cannot hold; nothing was read",
+			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, or the tasks moved",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk",
+			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, or an id the plan does not have; nothing was read or written",
 		},
 	}
 }

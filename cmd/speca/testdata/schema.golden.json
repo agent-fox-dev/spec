@@ -1,6 +1,6 @@
 {
   "tool": "speca",
-  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. It changes nothing. spec writes a package from an idea, specr renders one, speca reports its state.",
+  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and writes the package. Without them it changes nothing. spec writes a package from an idea, specr renders one, speca reports its state.",
   "input": {
     "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list.",
     "examples": [
@@ -46,6 +46,12 @@
       },
       "state": {
         "type": "string",
+        "enum": [
+          "pending",
+          "in_progress",
+          "done",
+          "dropped"
+        ],
         "default": "",
         "description": "the task form: the state to move the tasks to: pending, in_progress, done or dropped"
       },
@@ -755,8 +761,8 @@
     ]
   },
   "exit_codes": {
-    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), or the list of packages",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; the stage is named in error",
-    "2": "usage error: the reference names no package or two, two operations in one call, or a flag that cannot hold; nothing was read"
+    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, or the tasks moved",
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk",
+    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, or an id the plan does not have; nothing was read or written"
   }
 }
