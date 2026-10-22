@@ -1,13 +1,19 @@
-// Command speca reports the state of a version 2 specification package.
+// Command speca reports the state of a version 2 specification package, and
+// moves the state of its tasks.
 //
 //	speca [flags] <spec>
+//	speca <spec> --validate
 //	speca --list [--all]
+//	speca <spec> --task T --state S [--force] [--dry-run]
 //
 // It takes one input, a reference to a spec package, and writes exactly one
-// JSON object to stdout: the package's state, its verdict under --validate, or,
-// with --list and no input, every package under the spec root. It reads the
-// packages and changes nothing: it writes no file, makes no model or network
-// call and reads no credential.
+// JSON object to stdout: the package's state, its verdict under --validate,
+// with --list and no input, every package under the spec root, or, in the task
+// form, the package's state after the change and the changes made. The report,
+// --validate and --list read the packages and change nothing: they write no
+// file. The task form saves the package through the library, which rewrites
+// every artifact of it. No form makes a model or network call or reads a
+// credential.
 package main
 
 import (
@@ -38,7 +44,8 @@ const description = "Reports the state of a specification package: its lifecycle
 	"lifecycle moves allowed from its status, and the packages it depends on and that depend on it. " +
 	"With --validate, the format's full verdict on the package; with --list, every package under the " +
 	"spec root. With --task and --state it moves one or more tasks through the task state machine, " +
-	"every one or none, and writes the package. Without them it changes nothing. " + siblings + "."
+	"every one or none, and saves the package through the library, which rewrites all of its " +
+	"artifacts. Without them it changes nothing. " + siblings + "."
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
@@ -77,11 +84,12 @@ Forms:
                            id, several ids (--task 1,2 or --task 1 --task 2),
                            next (the task to work on now) or all (every task
                            not already in S and not dropped); S is pending,
-                           in_progress, done or dropped. The task state machine
-                           (format v2 §8.3.1) allows every move or none is made,
-                           and the result lists the changes. Claiming a task
-                           that is in_progress is refused, which is how a second
-                           agent learns it is taken
+                           in_progress, done or dropped. Every move must be one
+                           the task state machine (format v2 §8.3.1) allows, or
+                           none is made, and the result lists the changes.
+                           Claiming a task that is in_progress is refused, which
+                           is how a second agent learns it is taken (calls made
+                           at the same moment are not locked against each other)
     --dry-run              run every check and report what would change; write
                            nothing
     --force                with done or pending, set a state the machine
@@ -94,10 +102,14 @@ Forms:
 Output is one JSON object on stdout; next names the call to make after this
 one. --schema prints the flags and the shape of the output as JSON Schema.
 
-The report, --validate and --list change nothing. The task form writes the
-package's tasks.json and the updated_at of its prd.md through the library's
-atomic save, and nothing else; with --dry-run it writes nothing. speca makes no
-model call and no network call, and reads no credential.
+The report, --validate and --list change nothing. The task form changes the
+state of the tasks and the updated_at of prd.md, and saves the package through
+the library: Spec.Save rewrites every artifact of it (prd.md, requirements.json,
+test_spec.json, tasks.json and architecture.md if there is one) in its
+canonical encoding, through temporary files it renames, so that formatting the
+encoding does not keep (a YAML comment in the frontmatter of prd.md, say) is
+lost and the files are left with mode 0600. With --dry-run it writes nothing.
+speca makes no model call and no network call, and reads no credential.
 
 Exit codes:
   0  reported — a package that does not validate is reported too, in valid
@@ -110,7 +122,7 @@ Exit codes:
      result then holds the package as it is on disk
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have. Nothing
-     was read or written
+     was written
 
 Examples:
   speca 16
@@ -171,9 +183,12 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		errs = append(errs, errors.New("--all adds the packages under archive/ to --list, and means nothing without it"))
 	}
 	if o.taskForm() {
-		for flagName, given := range map[string]bool{"--validate": o.validate, "--list": o.list} {
-			if given {
-				errs = append(errs, fmt.Errorf("the task form (--task, --state) and %s are two operations: give one", flagName))
+		for _, f := range []struct {
+			name  string
+			given bool
+		}{{"--validate", o.validate}, {"--list", o.list}} {
+			if f.given {
+				errs = append(errs, fmt.Errorf("the task form (--task, --state) and %s are two operations: give one", f.name))
 			}
 		}
 		if len(o.tasks) == 0 {
@@ -189,9 +204,12 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			hint = &cli.FixHint{Flag: "--state", Valid: slices.Clone(taskStates)}
 		}
 	} else {
-		for flagName, given := range map[string]bool{"--force": o.force, "--dry-run": o.dryRun} {
-			if given {
-				errs = append(errs, fmt.Errorf("%s has no effect without --task: it applies to the task form", flagName))
+		for _, f := range []struct {
+			name  string
+			given bool
+		}{{"--force", o.force}, {"--dry-run", o.dryRun}} {
+			if f.given {
+				errs = append(errs, fmt.Errorf("%s has no effect without --task: it applies to the task form", f.name))
 			}
 		}
 	}
@@ -321,7 +339,7 @@ func describe(fs *flag.FlagSet) selfDescription {
 		ExitCodes: map[int]string{
 			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, or the tasks moved",
 			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk",
-			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, or an id the plan does not have; nothing was read or written",
+			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, or an id the plan does not have; nothing was written",
 		},
 	}
 }

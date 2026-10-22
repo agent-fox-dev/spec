@@ -277,14 +277,15 @@ standard-library only and `internal/cli` does not import `afspec`.
 | the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` | nothing |
 | the verdict, `speca <spec> --validate` | `verdict.go` | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
-| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | `tasks.json` and the `updated_at` of `prd.md`, through `Spec.Save` |
+| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | every artifact of the package, through `Spec.Save`; the content that changes is the task states and the `updated_at` of `prd.md` |
 
 The task form is the one that writes, and it writes only through the library:
 `plan.go` chooses the moves and applies them with `TransitionTask` (and, under
 `--force`, `CompleteTaskStates` and `ResetTaskStates`), so the state machine is
 `afspec`'s and not a copy; `task.go` sets `updated_at`, which `Save` does not, and
 calls `Spec.Save`, which writes every artifact through temporary files and then
-renames them. A call that is refused, and a dry run, write nothing. Nothing
+renames them, so that all of them are in the library's canonical encoding and
+have mode `0600` afterwards. A call that is refused, and a dry run, write nothing. Nothing
 outside `task.go` may call `Save`; a test of the sources checks it, and checks
 that the other forms leave the file tree as it was.
 

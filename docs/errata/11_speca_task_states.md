@@ -80,8 +80,12 @@ whose `Artifact` is the file and whose key is only in its `Message` ("…the key
 back to the whole message if the library words it otherwise. The library's
 exported `UnknownFields` would need the artifacts read a second time.
 
+The key is cut out with `the key (.+?) is not allowed by the schema`, so a key
+that holds a space is whole; `unknownKeys` is unit-tested, with the fallback.
+
 **Test of the delivered behaviour:** `TestUnknownKeysRefuseTheWrite_TS11_34` and
-`TestForceWritesOverUnknownKeys_TS11_35` (`cmd/speca/task_force_test.go`).
+`TestForceWritesOverUnknownKeys_TS11_35` (`cmd/speca/task_force_test.go`), and
+`TestUnknownKeysNamesTheKeysThatWouldBeLost` (`cmd/speca/task_conformance_test.go`).
 
 ## D-9: the warnings of a call are raised when the call goes ahead
 
@@ -94,9 +98,10 @@ under `--dry-run`. A call refused at stage `task`, `status` or `validate`, or
 whose write fails, raises none: they would say that a task was set through a
 bypass, or claimed, when it was not.
 
-**Test of the delivered behaviour:** `TestARefusalAtValidateCarriesTheOnDiskReport_TS11_41`
-and `TestSaveErrorsAreMapped_TS11_25` (`cmd/speca/task_force_test.go`,
-`cmd/speca/task_write_test.go`).
+**Test of the delivered behaviour:** `TestARefusedCallRaisesNoWarning`
+(`cmd/speca/task_conformance_test.go`): a claim of a task that is not ready
+beside one that is taken, a claim refused for unknown keys, and a forced move
+whose write fails each raise none of the warnings they planned.
 
 ## D-10: one `task_state_forced` warning for each task set through a bypass
 
@@ -138,7 +143,9 @@ resolves to no move writes nothing, so it deletes no key, and neither refuses
 nor warns, as 11-REQ-2.7 and TS-11-16 ask of it (exit 0, nothing written).
 
 **Test of the delivered behaviour:** `TestNothingToMoveWritesNothing_TS11_16`
-(`cmd/speca/task_write_test.go`).
+(`cmd/speca/task_write_test.go`) and `TestNothingToMoveIgnoresUnknownKeys`
+(`cmd/speca/task_conformance_test.go`): a package that holds an unknown key, and
+a call that resolves to no move, is exit 0 with no warning and no refusal.
 
 ## D-4: the claim is added before the render in `next`, and spec 10's tests say so
 
@@ -174,3 +181,138 @@ that cannot be written is not one an agent can work on.
 
 **Test of the delivered behaviour:** `TestTheListSuggestsTheClaim_TS11_47`
 (`cmd/speca/task_dryrun_test.go`).
+
+## D-1: TS-11-1 moves a task to in_progress
+
+**Spec:** the `when` of TS-11-1 says `--state pending`; its pseudocode says
+`in_progress`; 11-REQ-1.1 and the test expect exit 0.
+
+**Code:** a pending task cannot move to pending (the machine refuses it), so the
+test follows its pseudocode and moves the task to `in_progress`.
+
+**Test of the delivered behaviour:** `TestTheTaskFormResolvesLikeTheReport_TS11_1`
+(`cmd/speca/task_dryrun_test.go`).
+
+## D-7: the load is split from the legacy warning
+
+**Spec:** 11-REQ-1.8 has the task form stop on a package that fails to load "as
+the report form does".
+
+**Code:** the report form's `loadPackage` raises a high `spec_invalid` warning for
+a version 1 package ("the report is of what loaded"). The task form refuses such a
+package as a usage error (11-REQ-2.4) and must not also say that it reported what
+loaded, so `load` (`cmd/speca/forms.go`) does the loading and `loadPackage` adds the
+warning for the report.
+
+**Test of the delivered behaviour:** `TestAPackageInAnotherFormatIsRefused_TS11_13`
+(`cmd/speca/task_load_test.go`).
+
+## D-11: the verdict in the result is on the package as written
+
+**Spec:** 11-REQ-7.4 has the result be "the report of the package computed on the
+state written". The survey took validation to be a property of the package as it
+was loaded, which a state change cannot alter.
+
+**Code:** that is true of the task states, not of the keys a write deletes. A
+package with an unknown key, written under `--force`, is no longer one, so the
+result is built on `validateWritten` (`cmd/speca/task.go`), the library's own
+`ValidateSchema` and `ValidateCrossFile` in `Validate`'s order, with the
+`unknown_field` entries left out. It is the verdict `speca <spec>` gives when it
+is run next. Under `--dry-run` it is the verdict on what would be written. A call
+that writes nothing reports the package as it is, unknown keys included. The
+refusal and the warnings are still decided on the package as it was loaded.
+
+**Test of the delivered behaviour:**
+`TestTheResultOfAForcedWriteValidatesAsTheWrittenPackageDoes`
+(`cmd/speca/task_conformance_test.go`) and `TestForceWritesOverUnknownKeys_TS11_35`
+(`cmd/speca/task_force_test.go`).
+
+## D-12: a task form with no input is the bare invocation
+
+**Spec:** 11-REQ-1.6 has the task form with no positional input refused as a
+usage error.
+
+**Code:** `speca --task 1 --state done` has no input, and the existing path for
+that (spec 10: the help on stderr, and a usage envelope on stdout when stdout is
+not a terminal; exit 2) is the refusal, so the task form adds none.
+
+**Test of the delivered behaviour:** `TestTheTaskFormTakesOneInput_TS11_6`
+(`cmd/speca/task_flags_test.go`).
+
+## D-18: the summary of a forced move ends in the shell's clause
+
+**Spec:** 11-REQ-7.5 gives the summary as `speca: <dir name> task N <from> → <to>`.
+
+**Code:** `Run.Envelope` appends `; <n> high-severity warning(s)` to the summary of
+a success that raised a high warning. A `--force` that sets a state, or writes over
+unknown keys, raises one, so its summary is `speca: 09_agent_mode task 2 dropped →
+pending; 1 high-severity warning`. The sentence `Result.Summary` returns is the
+spec's; the clause is the shell's, and is the same for `spec` and `specr`.
+
+**Test of the delivered behaviour:**
+`TestTheSummaryOfAForcedMoveCarriesTheShellsClause`
+(`cmd/speca/task_conformance_test.go`).
+
+## D-19: a save rewrites every artifact, and leaves them at mode 0600
+
+**Spec:** 11-REQ-7.1 has the write change `tasks.json` and the `updated_at` of
+`prd.md`. The PRD says `Save` writes every artifact through temporary files.
+
+**Code:** `Spec.Save` writes `prd.md`, `requirements.json`, `test_spec.json`,
+`tasks.json` and, when there is one, `architecture.md`, each through
+`os.CreateTemp` and a rename (`afspec/afspec.go`, `writeTempFile`). The content of
+all but the task states and `updated_at` is the one that was read, but in the
+canonical encoding, so formatting it does not keep (a YAML comment in the
+frontmatter) is lost, and the files end with the temporary files' mode, 0600,
+where they may have been 0644. That is the library's behaviour, and the spec puts
+changing `Save` out of scope. The documentation (`docs/speca.md`, `help`,
+`docs/architecture.md`) says so, rather than that only `tasks.json` and
+`updated_at` are written.
+
+**Test of the delivered behaviour:** `TestASaveRewritesEveryArtifactAtMode0600`
+(`cmd/speca/task_conformance_test.go`).
+
+## D-20: the unknown keys of `prd.md` are looked for by the command
+
+**Spec:** 11-REQ-6.3 and 6.4 have the guard cover "each artifact and key" the write
+would delete, and say the library reports them as `unknown_field`.
+
+**Code:** the library records the unknown keys of `requirements.json`,
+`test_spec.json` and `tasks.json` only. `Save` also renders the frontmatter of
+`prd.md` again from the fields it has, so a key of one's own in it is deleted and
+nothing reports it. `frontmatterUnknownKeys` (`cmd/speca/task.go`) parses the
+frontmatter as `parsePRD` finds it and asks `afspec.UnknownFields` which keys
+`PrdFrontmatterV2Json` lacks; they join the guard and the `--force` warning as
+`prd.md /key`. A YAML comment is lost with the rewrite too, and is not detected; the
+documentation says so.
+
+**Test of the delivered behaviour:** `TestUnknownFrontmatterKeysRefuseTheWrite`
+(`cmd/speca/task_conformance_test.go`).
+
+## D-21: a duplicate task id is moved once, and `next` on an empty plan says so
+
+**Spec:** 11-REQ-1.1 collapses duplicate ids named in the call; it says nothing of
+a plan that holds one id twice. 11-REQ-2.2 has `--task next` with no next task say
+that every task is done or dropped, or that no pending task is ready.
+
+**Code:** a plan with a task id twice does not validate, but the task form goes
+ahead on a package that does not validate (11-REQ-6.2), and the library addresses a
+task by its id and finds the first. `resolveTasks` (`cmd/speca/plan.go`) returns
+each id once, so the first task with the id moves and the other is left, instead of
+a second move of the same id failing as `in_progress` to `in_progress`. For a plan
+with no tasks, `--task next` says that there are no tasks, since "every task is done
+or dropped" is not what is true of none; it is the same usage error.
+
+**Test of the delivered behaviour:** `TestADuplicateTaskIDIsMovedOnce` and
+`TestNextOnAPlanWithNoTasks` (`cmd/speca/task_conformance_test.go`).
+
+## D-22: `--task next next` is `next`
+
+**Spec:** 11-REQ-1.4 refuses `next` or `all` "together with any other --task value".
+
+**Code:** the same keyword given twice is one value (11-REQ-1.1 collapses
+duplicates), so `--task next --task next` is `next` and is accepted.
+`--task next --task 1` and `--task all --task next` are refused.
+
+**Test of the delivered behaviour:** `TestParseTaskSpec_11REQ1_1` (the case "next
+twice") and `TestBadTaskValuesAreRefused_TS11_4` (`cmd/speca/task_flags_test.go`).

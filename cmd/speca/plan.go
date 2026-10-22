@@ -55,7 +55,9 @@ func allowedFrom(from afspec.TaskState) []string {
 // names, the one the report calls next_task. all is every task except those
 // already in the target state and those dropped, which only a named id moves.
 // An id that is named is always moved, even when the task is already in the
-// target state: the state machine judges that move, and refuses it.
+// target state: the state machine judges that move, and refuses it. Each id is
+// in the result once: a plan that has a task id twice does not validate, but
+// the library addresses a task by its id and finds the first.
 func resolveTasks(plan *afspec.TasksV2Json, wanted taskSpec, target afspec.TaskState) []int {
 	if plan == nil {
 		return nil
@@ -79,7 +81,13 @@ func resolveTasks(plan *afspec.TasksV2Json, wanted taskSpec, target afspec.TaskS
 			}
 		}
 	}
-	return out
+	var once []int
+	for _, id := range out {
+		if !slices.Contains(once, id) {
+			once = append(once, id)
+		}
+	}
+	return once
 }
 
 // planMoves checks every move before it applies any. If the state machine

@@ -280,6 +280,10 @@ func TestForceWritesOverUnknownKeys_TS11_35(t *testing.T) {
 		!strings.Contains(ws[0].Message, "traceability") || !strings.Contains(ws[0].Message, "tasks.json") {
 		t.Errorf("warnings = %+v; want one high spec_invalid naming the key", env.Warnings)
 	}
+	// The package that was written holds no such key: it validates.
+	if r := result(t, env); r.Valid == nil || !*r.Valid || len(r.FailingRules) != 0 {
+		t.Errorf("valid %v failing_rules %v; want the package as written, which validates", r.Valid, r.FailingRules)
+	}
 }
 
 // TS-11-36: whatever is wrong with a package, a call raises at most one

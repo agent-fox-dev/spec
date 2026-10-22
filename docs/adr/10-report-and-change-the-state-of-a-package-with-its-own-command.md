@@ -51,13 +51,16 @@ reason: an agent that can drive one command can drive all of them.
   that move a package through its lifecycle, are added under this decision by
   the scopes that follow.
 - **`next` only suggests calls that exist.** A suggestion made before the form
-  exists would send an agent into a usage error. Today it points at
-  `specr <spec> --task N`; the later scopes add the claim, activation and seal
-  suggestions when they add the forms.
+  exists would send an agent into a usage error. It began with the render,
+  `specr <spec> --task N`; the task form (spec 11) added the claim before it, and
+  the lifecycle forms will add the activation and seal suggestions when they add
+  the forms.
 - **A package that does not validate is a successful call.** The question was
   whether it validates, and the answer is in `valid`. Exit 1 is for a call that
   could not do its job: the package could not be loaded, or `--list` could not
-  read its spec root.
+  read its spec root. A task-form call that is refused after the package was read
+  (a move the machine does not allow, a package that can no longer take a write,
+  keys a save would delete, a failed write) is exit 1 as well.
 - **Readiness follows the format.** `(*TasksV2Json).IsReady` and `NextTask` are
   in `afspec`. A task's dependencies are its `depends_on` when present, an
   empty list meaning none, otherwise the task before it (§8.3); only `done`
@@ -84,7 +87,8 @@ decision above made room for, and it keeps the decision's shape:
   read and the call was well-formed), carrying the states the task may move to.
 - **The state machine is the compare-and-set, and there is no lock.** A claim of
   a task already in progress is not a move, so the second of two agents is
-  refused and learns the task is taken.
+  refused and learns the task is taken, when its call comes after the first was
+  written. Two calls that read the package at the same moment are not told apart.
 - **A refusal carries the package as it is on disk,** without a summary of its own
   and without `next`, so the caller sees the states and is not pointed at a task
   another agent holds.
@@ -92,7 +96,11 @@ decision above made room for, and it keeps the decision's shape:
   refuse (sealed, superseded, archived, or intent drifted) before looking at any
   move, so that `--dry-run` reports the refusal the real call would meet; and it
   refuses a write that would delete keys the schema does not know, which `Save`
-  does silently, unless `--force` says so.
+  does silently, unless `--force` says so. The keys of the three JSON artifacts
+  are the library's to report; the frontmatter of `prd.md` is checked by the
+  command, because the library does not. What `Save` does to a package, the
+  command inherits: every artifact is written again, in the canonical encoding,
+  and a YAML comment in the frontmatter is not kept.
 
 ### Shared code
 

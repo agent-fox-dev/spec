@@ -23,11 +23,17 @@ func report(c *call, dir string) (*Result, *cli.ErrorInfo) {
 // calls it too, on the package after a change, which may not be on disk (under
 // --dry-run it never is), so it reads nothing of the package from dir.
 func (c *call) reportOf(dir string, spec *afspec.Spec) *Result {
+	return c.reportWith(dir, spec, spec.Validate())
+}
+
+// reportWith is the report on spec with v as its verdict. The task form gives
+// the verdict on the package as written, which is not Validate's when a write
+// deletes keys the library reported.
+func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResult) *Result {
 	r := &Result{AdminResult: c.identityOf(dir, spec)}
 
 	// The package's own verdict. A version 2 package that does not validate
 	// raises no warning: valid and failing_rules are the answer.
-	v := spec.Validate()
 	valid := v.Valid
 	r.Valid = &valid
 	if !valid {

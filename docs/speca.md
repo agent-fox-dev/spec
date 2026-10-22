@@ -22,9 +22,16 @@ state.
 
 The report, `--validate` and `--list` read the packages and change nothing.
 The task form is the one form that writes: it moves tasks through the library's
-task state machine and saves the package with the library's atomic `Spec.Save`,
-and writes nothing else; with `--dry-run` it writes nothing. `speca` makes no
-model call and no network call, and reads no credential. Changing a package's
+task state machine, sets `updated_at`, and saves the package with the library's
+`Spec.Save`. `Save` rewrites **every** artifact of the package (`prd.md`,
+`requirements.json`, `test_spec.json`, `tasks.json`, and `architecture.md` when
+there is one) in its canonical encoding, through temporary files that it renames.
+What it changes in content is the task states and `updated_at`, but formatting
+the encoding does not keep (a YAML comment in the frontmatter of `prd.md`, say)
+is lost, and the files are left with mode `0600`, because the temporary files are
+created private. The task form writes no other file; with `--dry-run` it writes
+nothing. `speca` makes no model call and no network call, and reads no
+credential. Changing a package's
 lifecycle status (activating, sealing, archiving, superseding it) is not a form
 of this command yet; it is library API in [`afspec`](../afspec/README.md).
 
@@ -220,8 +227,10 @@ ids are one. `--state` is `pending`, `in_progress`, `done` or `dropped`.
 Every named move is checked before any is made, and **either every move is made
 or none is**. A move the machine does not allow refuses the whole call. A claim
 of a task that is already `in_progress` is such a move, which makes the machine
-the compare-and-set two agents need: the second is refused, and learns that the
-task is taken.
+the compare-and-set two agents need: of two calls that follow one another, the
+second is refused, and learns that the task is taken. There is no lock: two calls
+that read the package at the same moment both see the task pending, both claim
+it, and the last to write is the one whose files stand.
 
 The checks run in this order, and each stops the call:
 
@@ -234,14 +243,18 @@ The checks run in this order, and each stops the call:
    and an active one whose `## Intent` section drifted or is gone, are refused,
    as the library's `Save` would refuse them. `--force` and `--dry-run` change
    nothing here;
-5. the ids: an id the plan does not have, `next` with no next task, and `all` on a
-   plan with no tasks are usage errors;
+5. the ids: an id the plan does not have, `next` with no next task (a plan with
+   no tasks says so, rather than that every task is done), and `all` on a plan
+   with no tasks are usage errors;
 6. the moves (stage `task`);
-7. the keys (stage `validate`), when a write would happen: `Save` re-encodes every artifact and drops the
-   keys the schema does not allow, so a package that holds any (a leaked version
-   1 `traceability`, say) would lose them. That is refused, listing each artifact
-   and key, unless `--force` is given. A package that does not validate for
-   another reason still takes the change.
+7. the keys (stage `validate`), when a write would happen: `Save` re-encodes every
+   artifact and drops the keys the schema does not allow, so a package that holds
+   any (a leaked version 1 `traceability`, or a key of your own in the frontmatter
+   of `prd.md`) would lose them. That is refused, listing each artifact and key
+   (`tasks.json /traceability`, `prd.md /my_key`), unless `--force` is given. The
+   library reports such keys in the three JSON artifacts; the frontmatter of
+   `prd.md` is looked at by `speca`. A package that does not validate for another
+   reason still takes the change.
 
 **`--force`** applies when `--state` is `done` or `pending`: a move the machine
 refuses is then made with the library's own bypasses, `CompleteTaskStates` or
@@ -268,7 +281,9 @@ the package unchanged, and one during the renames may leave some files updated;
 the message says so and tells the caller to run `speca <spec>`.
 
 **The result** of a call that succeeds is the report of the package as it was
-written, with every field the report has, and `changes`: one
+written (its `valid` and `failing_rules` are the verdict on the files `Save`
+wrote, which hold none of the keys it deleted), with every field the report has,
+and `changes`: one
 `{"kind": "task", "id", "from", "to"}` for each task whose state changed, in plan
 order, with `"forced": true` where a bypass was used.
 
@@ -423,7 +438,7 @@ One sentence per form, which the shell caps at 200 characters:
 | report | `speca: <directory> <status>, <done> of <total> tasks done`, then `; next task N` when there is one, then `; does not validate (<rules>)` when `valid` is `false` |
 | `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)`; `1 error` for one |
 | `--list` | `speca: <n> packages` (`1 package` for one), then, when there is anything to count, ` (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
-| task form | `speca: <directory> task N <from> → <to>`, `speca: <directory> tasks N, M → <to>`, or `speca: <directory> no task changed`; ` (dry run, nothing written)` is added under `--dry-run`. A refusal has no sentence of its own: its `summary` is the refusal's message |
+| task form | `speca: <directory> task N <from> → <to>`, `speca: <directory> tasks N, M → <to>`, or `speca: <directory> no task changed`; ` (dry run, nothing written)` is added under `--dry-run`. A refusal has no sentence of its own: its `summary` is the refusal's message. The shell adds `; <n> high-severity warning(s)` to the sentence of any success that raised a high warning, so a call that used `--force` to set a state, or to write over keys, ends in `; 1 high-severity warning` |
 
 ### Reading it from Go
 
@@ -489,7 +504,7 @@ always false.
 |---|---|---|
 | `0` | `done` | reported — including a package that does not validate; or the tasks were moved, or none needed to be |
 | `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed |
-| `2` | `usage` | usage error — nothing was read or written |
+| `2` | `usage` | usage error — nothing was written |
 
 ### Warning codes
 
@@ -580,10 +595,12 @@ The same loop in Go is [`examples/tasks`](../examples/tasks/main.go).
 `speca` is a fast call, so the parts of `spec`'s shell that serve a long model
 run are absent: there is no model, no `--preflight`, no `--detail`, no `--output`
 and no progress on stderr. (`--dry-run` here is the task form's, not `spec`'s.)
-It changes nothing but the state of the tasks of a package: not its content
-(requirements, tests, a task's title, steps or dependencies), not its lifecycle
-status (library API for now), and it creates and renders no package, which are
-`spec`'s and `specr`'s. It takes no lock: two writers of one package at once get
-the last writer's files, as they do with the library, and the state machine is
-what a second claim meets. The decision to build it is
+It changes nothing but the state of the tasks of a package and its `updated_at`:
+not its content (requirements, tests, a task's title, steps or dependencies), not
+its lifecycle status (library API for now), and it creates and renders no
+package, which are `spec`'s and `specr`'s. (The save writes every artifact again,
+as the task form's section says, but with the content it had.) It takes no lock:
+two writers of one package at once get the last writer's files, as they do with
+the library, and the state machine is what a second claim, made after the first
+was written, meets. The decision to build it is
 [ADR 10](adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).

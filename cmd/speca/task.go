@@ -3,11 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-yaml"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -58,12 +62,15 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	}
 
 	warnings := moves.warnings
+	validity := spec.Validate()
 	if len(moves.moves) > 0 {
 		// A save re-encodes every artifact from the Go types, and the decode
 		// dropped the keys they lack: writing a package that holds any deletes them.
-		// That is data loss, and a refusal that --force overrides.
-		v := spec.Validate()
-		switch unknown := unknownKeys(v.Errors); {
+		// That is data loss, and a refusal that --force overrides. The library
+		// reports the keys of the three JSON artifacts; the frontmatter of prd.md
+		// is looked at here.
+		v := validity
+		switch unknown := append(unknownKeys(v.Errors), frontmatterUnknownKeys(spec.Dir)...); {
 		case len(unknown) > 0 && !c.opts.force:
 			return c.refused(dir, spec, &cli.ErrorInfo{Stage: "validate", Category: envelope.CategoryInvalidSpec,
 				Message: fmt.Sprintf("%s holds keys the schema does not allow, and a save would delete them: %s; "+
@@ -78,6 +85,9 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 
 		spec.Tasks = moves.after
 		spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		// The report is on the package as written, which holds none of the keys
+		// the write deletes.
+		validity = validateWritten(spec)
 		if !c.opts.dryRun {
 			if failure := writeSpec(spec, name); failure != nil {
 				return c.onDisk(dir, failure)
@@ -89,7 +99,7 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		c.run.Warn(w.code, w.severity, "%s", w.message)
 	}
 
-	r := c.reportOf(dir, spec)
+	r := c.reportWith(dir, spec, validity)
 	r.taskForm = true
 	r.DryRun = c.opts.dryRun
 	for _, m := range moves.moves {
@@ -192,6 +202,9 @@ func checkNamedTasks(name string, plan *afspec.TasksV2Json, wanted taskSpec) *cl
 		if _, ok := plan.NextTask(); ok {
 			return nil
 		}
+		if len(tasks) == 0 {
+			return usageInfo(fmt.Errorf("%s has no tasks, so --task next names none", name), nil)
+		}
 		var pending []string
 		for _, t := range tasks {
 			if t.State == afspec.TaskStatePending {
@@ -231,7 +244,7 @@ func checkNamedTasks(name string, plan *afspec.TasksV2Json, wanted taskSpec) *cl
 }
 
 // unknownKey finds the key in the library's message about one it dropped.
-var unknownKey = regexp.MustCompile(`the key (\S+) is not allowed`)
+var unknownKey = regexp.MustCompile(`the key (.+?) is not allowed by the schema`)
 
 // unknownKeys names, as "artifact key", each key the validation says the schema
 // does not allow. The entries carry the key only in their message, so it is cut
@@ -249,4 +262,51 @@ func unknownKeys(entries []afspec.ValidationEntry) []string {
 		}
 	}
 	return out
+}
+
+// frontmatterUnknownKeys names, as "prd.md /key", each key in the frontmatter of
+// the prd.md in dir that the schema does not allow. A save writes the
+// frontmatter again from the fields it knows, so such a key is deleted as the
+// ones in the other artifacts are; the library does not report it, so it is
+// looked for here, in the frontmatter as parsePRD finds it. A prd.md that cannot
+// be read or parsed has none to report: the package would not have loaded.
+func frontmatterUnknownKeys(dir string) []string {
+	data, err := os.ReadFile(filepath.Join(dir, "prd.md"))
+	if err != nil {
+		return nil
+	}
+	rest, ok := strings.CutPrefix(string(data), "---")
+	if !ok {
+		return nil
+	}
+	rest = strings.TrimPrefix(rest, "\n")
+	block, _, found := strings.Cut(rest, "\n---\n")
+	if !found {
+		if block, found = strings.CutSuffix(rest, "\n---"); !found {
+			return nil
+		}
+	}
+	var raw map[string]any
+	if yaml.Unmarshal([]byte(block), &raw) != nil {
+		return nil
+	}
+	var out []string
+	for _, key := range afspec.UnknownFields(raw, &afspec.PrdFrontmatterV2Json{}) {
+		out = append(out, "prd.md "+key)
+	}
+	return out
+}
+
+// validateWritten is the verdict on the package as a save writes it: Validate
+// without the keys the decode dropped, which the save leaves out. It runs the
+// library's two stages as Validate does, the cross-file rules only when the
+// schema holds.
+func validateWritten(spec *afspec.Spec) afspec.ValidationResult {
+	schema := spec.ValidateSchema()
+	errs := slices.DeleteFunc(slices.Clone(schema.Errors), func(e afspec.ValidationEntry) bool { return e.Check == "unknown_field" })
+	if len(errs) > 0 {
+		return afspec.ValidationResult{Valid: false, Errors: errs, Warnings: schema.Warnings}
+	}
+	cross := spec.ValidateCrossFile()
+	return afspec.ValidationResult{Valid: len(cross.Errors) == 0, Errors: cross.Errors, Warnings: append(schema.Warnings, cross.Warnings...)}
 }

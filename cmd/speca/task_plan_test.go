@@ -99,7 +99,9 @@ func TestARefusedMoveRefusesTheCall_11REQ3_2(t *testing.T) {
 	if refusal == nil || refusal.Stage != "task" || refusal.Category != "lifecycle" {
 		t.Fatalf("refusal = %+v", refusal)
 	}
-	for _, want := range []string{"pkg", "§8.3.1", "task 1 is pending", "task 3 is done", "in_progress or dropped", "pending"} {
+	for _, want := range []string{"pkg", "§8.3.1",
+		"task 1 is pending and cannot move to done (it may move to in_progress or dropped)",
+		"task 3 is done and cannot move to done (it is already there; it may move to pending)"} {
 		if !strings.Contains(refusal.Message, want) {
 			t.Errorf("message %q does not say %q", refusal.Message, want)
 		}
@@ -164,7 +166,9 @@ func TestARefusedMoveRefusesTheWholeCall_TS11_19(t *testing.T) {
 	if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "task" || env.Error.Category != "lifecycle" {
 		t.Fatalf("code %d: %+v", code, env.Error)
 	}
-	for _, want := range []string{"task 1 is pending", "task 3 is done", "§8.3.1", "in_progress or dropped", "09_agent_mode"} {
+	for _, want := range []string{"09_agent_mode", "§8.3.1",
+		"task 1 is pending and cannot move to done (it may move to in_progress or dropped)",
+		"task 3 is done and cannot move to done (it is already there; it may move to pending)"} {
 		if !strings.Contains(env.Error.Message, want) {
 			t.Errorf("message %q does not say %q", env.Error.Message, want)
 		}

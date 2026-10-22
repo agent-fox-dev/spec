@@ -176,7 +176,8 @@ validate is reported with exit 0, in `valid`; exit codes `0`, `1` and `2` are
 those of the other two commands. The task form moves tasks through the library's
 task state machine, every one or none, so a second claim of a task that is taken
 is refused with the states it may move to, and it writes through the library's
-atomic `Spec.Save`; the other forms write no file. `speca` makes no model or
+`Spec.Save`, which writes every artifact of the package again; the other forms
+write no file. `speca` makes no model or
 network call and reads no credential. Everything is in
 [docs/speca.md](docs/speca.md); the decision is
 [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
