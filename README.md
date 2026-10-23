@@ -187,6 +187,19 @@ makes no model or network call and reads no credential. Everything is in
 [docs/speca.md](docs/speca.md); the decision is
 [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
 
+## Agent Skills
+
+`skills/` holds two Claude Code skills that put the three commands to work in
+a person's own session, one on each side of `spec`:
+
+| Skill | Step | What it does |
+| --- | --- | --- |
+| `af-prd` | before `spec` | writes a PRD with the user, in the shape `spec`'s own PRD phase writes, checked against what the format demands, and saves it where `spec <prd>` takes it |
+| `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request |
+
+`make install-skills` copies each one to `~/.claude/skills/<name>/SKILL.md`;
+`make uninstall-skills` removes them.
+
 ## Installation
 
 Build the `spec`, `specr` and `speca` commands from a checkout:
@@ -235,6 +248,7 @@ and no API key: the command's tests run against a scripted model.
 | `make tidy` | `go mod tidy` |
 | `make clean` | Remove `build/` and the coverage profile |
 | `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
+| `make install-skills`, `make uninstall-skills` | Install the skills under `skills/` into `~/.claude/skills`, or remove them |
 
 ## Documentation
 

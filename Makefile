@@ -111,7 +111,8 @@ json-gen: ## Regenerate the Go artifact types from the JSON Schemas
 SKILLS_TEMPLATES_DIR := $(CURDIR)/skills
 CLAUDE_SKILLS_DIR := $(HOME)/.claude/skills
 
-install-skills:
+.PHONY: install-skills uninstall-skills
+install-skills: ## Install the af-* skills under skills/ into ~/.claude/skills
 	@for skill in $(SKILLS_TEMPLATES_DIR)/af-*; do \
 		name=$$(basename "$$skill"); \
 		target="$(CLAUDE_SKILLS_DIR)/$$name"; \
@@ -120,7 +121,7 @@ install-skills:
 		echo "installed: $$name -> $$target/SKILL.md"; \
 	done
 
-uninstall-skills:
+uninstall-skills: ## Remove the installed af-* skills from ~/.claude/skills
 	@for skill in $(SKILLS_TEMPLATES_DIR)/af-*; do \
 		name=$$(basename "$$skill"); \
 		if [ -d "$(CLAUDE_SKILLS_DIR)/$$name" ]; then \
