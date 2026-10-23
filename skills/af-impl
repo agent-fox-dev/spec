@@ -1,6 +1,6 @@
 ---
 name: af-impl
-description: Implement a version 2 specification package with the user watching. Reads the spec's four artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each test-first, each verified by the spec's own checks before it is committed with its state, and runs from the survey to the pull request on its own, without waiting to be told to continue. Never edits the spec and never merges its own work.
+description: Implement a version 2 specification package with the user watching. Reads the spec's four artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the pull request on its own, without waiting to be told to continue. Never edits the spec and never merges its own work.
 argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search]"
 ---
 
@@ -18,11 +18,19 @@ The format (`spec-format-v2.md` in the `spec` repository) is the contract.
 Four rules shape everything below. **The plan is the contract**: every
 criterion is verified by a test, every test is owned by a task, and the task
 is the unit of work; you implement what a task owns and nothing else. **The
-spec is read-only**: `tasks.json` state is the only thing in the package that
-changes, and only after a task has been measured. **Measure, do not assert**:
-the spec's own `test_commands` run before any change and after every task,
-and the report says what they returned. **One landing**: the branch goes up
+spec is read-only**: a task's state is the only thing in the package that
+changes, always through `speca`, and a task becomes `done` only after it has
+been measured. **Measure, do not assert**: the spec's own `test_commands` run
+before any change and after every task, and the report says what they
+returned. **One landing**: the branch goes up
 for someone else to merge.
+
+Three commands from the `spec` repository do the package's bookkeeping, and
+each writes one JSON object to stdout: `speca` reports where a package stands
+and moves its tasks through the format's state machine, `specr` renders it as
+Markdown, and `impl` (agent-fox's, where installed) preflights it. Read their
+JSON; do not work out a package's state, scope or verdict by reading its
+files by hand while the commands are there to ask.
 
 If `.specs/steering.md` exists, read it first. Follow the repository's own
 agent instructions (`CLAUDE.md`, `AGENTS.md`) for branching, commits and
@@ -40,6 +48,8 @@ You stop short of the end, and report how far you got (§8), for these
 reasons and no others:
 
 - a refusal in §2 (an unmet dependency is one), or a blocker in §3;
+- `speca` refusing a task's claim or its `done`, or changing the package's
+  content when it writes (§5);
 - a task parked after its second failed attempt (§5), because every later
   task builds on it.
 
@@ -54,10 +64,11 @@ first tool call of the next task.
 
 The branch is the record, not your memory. After any gap (a compaction, an
 interruption, a resumed session), `git log`, `git status` and a fresh
-`specr <package> --section tasks` say where you are; continue with the first
-task not done, as §4 describes. If you have a task-list tool, enter every
-task before the first one, then conformance, landing and the report, and
-finish the turn only when none is left open.
+`speca <package>` say where you are: `result.next_task` is the task in
+progress, else the first ready one. Continue with it, as §4 describes. If
+you have a task-list tool, enter every task before the first one, then
+conformance, landing and the report, and finish the turn only when none is
+left open.
 
 ## 1. Read the package
 
@@ -80,6 +91,38 @@ artefacts:
 which: an incomplete package is not implemented, and it is not yours to
 complete. A package under `.specs/archive/` is history; refuse it.
 
+Ask `speca` where the package stands before you read it:
+
+```sh
+speca <package> > "${TMPDIR:-/tmp}/af-impl-<NN>-state.json"
+```
+
+`speca` is the `spec` repository's admin command; in this form it reads the
+package and changes nothing. It resolves the same references as this section
+(a path, a file inside the package, a number, a name) and refuses one that
+names no package or two with exit `2`, listing the packages the spec root
+holds. Exit `1` is a package the library could not load: the missing-file
+refusal above, with `error.message` as the reason. In `result`:
+
+- `spec_dir` is the package's directory; it is `<package>` from here on, in
+  every `speca` and `specr` call and in the report;
+- `status`, `valid` with `failing_rules`, and `intent_drift` are what §2
+  checks;
+- `tasks` is the plan, each task with its `state`, `depends_on` and `ready`
+  (pending, and everything it depends on is `done`); `task_counts` counts the
+  states; `next_task` is the task to work on now: the one in progress, else
+  the first ready one;
+- `depends_on` is the spec ids the package's own `dependencies` name.
+
+`next` may also suggest a lifecycle call, `speca <package> --status active`
+or `--status sealed`. Those moves belong to the spec's owner, not to this run
+(see *Never*); the task calls in `next` are the ones you follow.
+
+With no `$ARGUMENTS`, run `speca --list`: every package under the spec root,
+in number order, with its status, verdict, task counts and next task. Show it
+and ask which package to implement. That is the one question the run asks,
+and it comes before the run begins.
+
 Render the package with `specr` and read the rendering; do not read the four
 JSON files and scope them by hand. `specr` is the `spec` repository's
 renderer. It changes nothing, it produces the same document `impl` hands its
@@ -90,8 +133,8 @@ files more reliably than reading them does.
 specr <package> --markdown-file "${TMPDIR:-/tmp}/af-impl-<NN>.md" > "${TMPDIR:-/tmp}/af-impl-<NN>.json"
 ```
 
-`<package>` is `$ARGUMENTS` as given; `specr` resolves the same references as
-this section. Write both files outside the repository so the tree stays
+`<package>` is `speca`'s `spec_dir`; `specr` resolves the same references
+as `speca`, so `$ARGUMENTS` as given works too. Write both files outside the repository so the tree stays
 clean, and send stdout to a file: the envelope repeats the whole Markdown.
 Read the `.md` in full. It holds the PRD, the architecture if there is one,
 the requirements, the tests and the tasks. In the `.json`, `result.valid` is
@@ -104,9 +147,10 @@ package still renders, with a `spec_invalid` warning that names the rules.
 Exit `1` means the package could not be read: that is the missing-file
 refusal above, with `error.message` as the reason. Exit `2` is a wrong
 reference or task id; correct it and render again, and never go on without
-the rendering. If `specr` is not installed, read the four JSON files and
-scope each task by hand, and say in the report that you did;
-`make build` in a checkout of `github.com/agent-fox-dev/spec` installs it.
+the rendering. `make build` in a checkout of `github.com/agent-fox-dev/spec`
+installs `speca` and `specr` together. If they are not installed and cannot
+be, read the four JSON files, work out each task's readiness and scope by
+hand, and say in the report that you did.
 
 Note every module, type, command, file and library the spec names, and every
 `external_apis` entry whose `verified` is false: those signatures are
@@ -123,8 +167,14 @@ Before reading any code in depth, check what would make the run pointless:
   Never start on the work branch itself: the diff under review would be
   empty.
 - The package validates. If `impl` is installed, `impl <package> --preflight`
-  checks everything in this list and the format's rules at once; otherwise
-  `result.valid` in §1's envelope checks the format's rules, which are:
+  checks everything in this list and the format's rules at once. Otherwise
+  `speca <package> --validate` gives the format's full verdict: the schemas,
+  the cross-file rules C1 to C11, and the cross-spec rules over the whole spec
+  root (a dependency on a package that does not exist, a dependency cycle, an
+  actor shared with an upstream package that is missing, a glossary term
+  defined two ways). `result.valid` is the answer, and every finding in
+  `result.validation.errors` names its `check`, `artifact` and `entity`; a
+  package that does not validate still exits `0`. The cross-file rules are:
   `spec_id` and `spec_name` agree across the four files and the directory
   name; every `verifies`, `criteria`, `tests` and `depends_on` entry
   resolves; every criterion has a test and every test has a task; the last
@@ -132,9 +182,27 @@ Before reading any code in depth, check what would make the run pointless:
   `unwanted` criterion has a `contract`. A rule that fails is a defect in the
   spec, and the spec is not yours to edit: report it and stop.
 - `status` is `draft` or `active`. A `sealed`, `superseded` or `archived`
-  package is not implemented; `draft` is, with a warning.
-- Every `dependencies[].spec` names a package that is sealed or whose
-  integration task is `done`. One that is not stops you here; ask.
+  package is not implemented; `draft` is, with a warning, and stays a draft:
+  activating it is the owner's call.
+- `intent_drift` is absent. A drift means the PRD's `## Intent` was edited
+  after the package was activated; the library refuses every write to such a
+  package, so no task state could be recorded, and whether the new intent is a
+  new package is the owner's question. Report it and stop.
+- Every id in `result.depends_on` names a package that is sealed or whose
+  integration task is `done`: run `speca <id>` for each and read its `status`
+  and the `state` of its last task. One that is not stops you here; ask.
+- The package can take the state changes the run will make. Run the first
+  one as a dry run: `speca <package> --task <N> --state in_progress
+  --dry-run` for a `next_task` N that is `pending`, or `--state done` for one
+  already `in_progress`. It writes nothing, and it checks the package, not
+  the task: on a branch being continued, §4 finds the task again. A refusal
+  at stage `status` (the package is sealed, superseded, archived or drifted)
+  or `validate` (a write would drop keys the schema does not allow) is a
+  blocker: report
+  `error.message` and stop. Never get past it with `--force`. No
+  `next_task` at all means every task is `done` or `dropped`, and there is
+  nothing to implement, or that the pending tasks wait on one another, which
+  is a defect in the plan; say which, and stop.
 - `test_commands.linter` and `test_commands.all_tests` are commands the
   project really has (`make`, `go test`, `pytest`, `npm test`), need no
   shell features, and belong to this project's ecosystem.
@@ -183,17 +251,34 @@ time in twenty. Everything smaller is drift with a resolution.
 
 `impl/<NN>-<slug>` from the base branch, where `NN` is the `spec_id` and the
 slug is the `spec_name`. When that branch already exists, check it out and
-**continue**: tasks whose `state` is `done` are skipped, a task left
-`in_progress` is reopened, and a `wip:` commit at the tip is dropped so the
-task starts again from the last landed commit. Never force-push, and never
-rewrite a commit that landed.
+**continue**: a `wip:` commit at the tip is dropped so the task starts again
+from the last landed commit, and then `speca <package>`, run on the branch,
+says where the plan stands. Tasks whose `state` is `done` are skipped, and
+`next_task` is where you start: a task left `in_progress` is reopened as it
+is, a `pending` one is claimed (§5). Never force-push, and never rewrite a
+commit that landed.
 
 ## 5. Each task, in order
 
 For each task that is not `done`, in array order (a task's `depends_on`
 must all be `done` first):
 
-1. **Scope.** Render the spec scoped to this task, to files as in §1:
+1. **Claim.** When the task is `pending`, claim it before anything else:
+
+   ```sh
+   speca <package> --task <N> --state in_progress
+   ```
+
+   A task already `in_progress` is the one being resumed, and it is yours:
+   do not claim it again, since the state machine refuses a second claim. A
+   refusal names its stage: `task` means the task's state is not what
+   `speca <package>` said, `status` that the package can no longer take a
+   write, `validate` that a write would drop keys the schema does not allow.
+   Each is a blocker: report `error.message` and stop. A `task_not_ready`
+   warning means something the task depends on is not `done`: release it
+   (`--state pending`) and take `result.next_task` instead. The claim is a
+   change to the working tree, committed with the task's work.
+2. **Scope.** Render the spec scoped to this task, to files as in §1:
 
    ```sh
    specr <package> --task <N> --markdown-file "${TMPDIR:-/tmp}/af-impl-<NN>-task-<N>.md" > "${TMPDIR:-/tmp}/af-impl-<NN>-task-<N>.json"
@@ -203,12 +288,14 @@ must all be `done` first):
    requirements that own its criteria, its tests, the paths those tests
    verify, and its `steps`, `touches` and `done_when`. Every other
    requirement, test and task is there by id and title, as context. Render
-   again for each task, because states change as tasks land. Implement this
-   task and no other; do not touch another task's work.
-2. **Orient.** Read the files the task `touches` and their tests, and the
+   again for each task, because states change as tasks land. `result.task`
+   must say `in_progress`; the envelope's `next` then names
+   `speca <package> --task <N> --state done`, the call that follows the
+   gate. Implement this task and no other; do not touch another task's work.
+3. **Orient.** Read the files the task `touches` and their tests, and the
    survey's notes on them. Paths in the spec are what the author expected;
    confirm them against the code.
-3. **Test first.** Write every test the task owns from its entry in
+4. **Test first.** Write every test the task owns from its entry in
    `test_spec.json` — `given`, `when`, `then`, `pseudocode` — in the
    project's own framework and layout, and put the test id (`TS-16-3`) in the
    function name or a comment so it can be found. Run them and watch them
@@ -222,23 +309,24 @@ must all be `done` first):
    passes before the implementation proves nothing about it: when a red
    first run is impossible (a pure refactor, a docs-only change), say so as
    a test-first deviation rather than burying it in notes.
-4. **Implement** the `steps`, in order, until the tests pass. Follow the
+5. **Implement** the `steps`, in order, until the tests pass. Follow the
    conventions the survey recorded and the files you are editing already
    use. No unrelated improvements: a "while I was here" fix belongs in a
    change of its own. When every task lists `touches`, the change may touch
    only those paths, the paths the survey's decisions name, documentation,
    and the test files that carry the spec's test ids.
-5. **Check, narrowly.** Run the tests you wrote, then the package you
+6. **Check, narrowly.** Run the tests you wrote, then the package you
    changed, in the suite's targeted form (`go test ./pkg -run Name`,
    `pytest tests/test_x.py::test_y`, `npm test -- <file>`). The full suite
    is the gate's job, once, after the task.
-6. **Documentation.** Update what the change makes wrong, from the code:
+7. **Documentation.** Update what the change makes wrong, from the code:
    every quoted string, field name, exit code and sample payload is copied
    from the code or a test, not from the PRD, and you can say which line it
    came from. When the code does not do what the spec asks, the docs say
    what the code does. The steering file's documentation table, if there is
    one, names the files.
-7. **Never edit the spec package.** If the implementation has to diverge
+8. **Never edit the spec package.** The task's state, written by `speca`,
+   is the one change it takes. If the implementation has to diverge
    from a requirement, a test's contract or a survey decision, do what is
    right for the code, write an erratum under `docs/errata/` citing the code
    line and the test of the delivered behaviour, and declare the deviation
@@ -260,24 +348,47 @@ A task lands only on a landable verdict **and** a report that answers for
 every test it owns and every `done_when` entry. A task that changed nothing
 is a failed attempt. A failed attempt is discarded — reset to the last
 commit, new files removed — and the task is tried once more with the failure
-in view, at once, without a message in between. A second failure is parked as
-a `wip: <subject>` commit with the task's state `in_progress`; that ends the
-run, because every later task builds on it. Return to the base branch and
-report what failed with the check's own output. A test that still fails is
+in view, at once, without a message in between. The reset takes the claim
+with it, so claim the task again (step 1) before the second attempt. A second
+failure is parked as a `wip: <subject>` commit with the task's state
+`in_progress`, which the claim already wrote; that ends the run, because every
+later task builds on it. Return to the base branch and report what failed
+with the check's own output. A test that still fails is
 reported as failed, with why; it is worth more than one claimed passed on a
 run that never happened. Never skip, delete or weaken a test to get green.
 
-**Commit.** Set the task's `state` to `done` in `tasks.json` and commit it
-with the task's work as one `feat: <subject>` commit, body ending in a
-`Spec: <NN_name>, task <N>` trailer, and a `Deviation: {"key": …, "reason":
-…}` trailer for each deviation declared. Do not write that checks pass; say
+**Record.** On a landable verdict, record the task done, through the state
+machine:
+
+```sh
+speca <package> --task <N> --state done
+```
+
+`speca` writes through the library's `Spec.Save`, which writes every
+artifact of the package again and sets `updated_at` in the frontmatter of
+`prd.md`. Check what it wrote with `git diff -- <package>`: across the
+claim and this call, the task's `state` and `updated_at`, and nothing else.
+A package `spec` wrote is already in the library's encoding, so that is the
+whole diff. If other lines changed, the package was not in that encoding;
+when the content is the same, commit it with the first task and name it in
+the report. A change of content is a blocker: stop and report it. A refusal
+of the call is a blocker too, reported with `error.message`. Never retry with
+`--force`, and never set the state by hand while `speca` is there. Without
+`speca` (§1), change that one task's `state` value in `tasks.json` by hand,
+nothing else, and say so in the report.
+
+**Commit** the recorded state with the task's work as one `feat: <subject>`
+commit, body ending in a `Spec: <NN_name>, task <N>` trailer, and a
+`Deviation: {"key": …, "reason": …}` trailer for each deviation declared. Do not write that checks pass; say
 what they returned. The gate that passed after task N is the baseline for
 task N+1, so "regressed" always means "this task broke it".
 
 **Next.** The commit body carries what the pull request will need — the test
 verdicts, any test-first deviation — because §7 is assembled from `git log`,
 not from what you remember. Then write one progress line and, in the same
-turn, render the next task that is not done and begin it. When none is left,
+turn, begin the next task: the `next` of the `done` call names the claim of
+the next ready task, and its `result.next_task` is that task. When it has no
+`next_task` and `task_counts` holds no `pending` or `in_progress` task,
 begin §6 the same way.
 
 **The integration task** is last, and it exists to catch the wiring gaps
@@ -304,6 +415,11 @@ the whole diff from the base branch:
 - **Scope.** Any file outside the tasks' `touches`, the survey's decisions,
   documentation and the spec's test files is a change the spec did not ask
   for: take it out, or list it as unmet.
+- **The package.** `speca <package> --validate` still says `valid`, and
+  `speca <package>` counts no task `pending` or `in_progress`.
+  `git diff <base> -- <package>` holds the task states and `updated_at`, and
+  any re-encoding the report already names; anything else is a change to the
+  spec, and it comes out.
 - **A clean environment.** Run the gate once more with an empty `HOME`, no
   global git configuration and `GIT_TERMINAL_PROMPT=0`. A test that passes
   only on this machine's configuration (`git init` without `-b`, a commit
@@ -333,17 +449,23 @@ request must say the work is not complete while it is non-empty.
   the verification, before and after, as measured; and the conformance
   findings and what was done about each. Every claim in it comes from
   something that ran.
-- Do not merge it. Do not seal the spec; a review that rejects the pull
-  request may reopen a task, which a sealed spec cannot record.
+- Do not merge it. Do not seal the spec, though `speca <package>` now
+  suggests `speca <package> --status sealed`: a review that rejects the pull
+  request may reopen a task, which a sealed spec cannot record. Name that
+  call in the pull request instead, for after the merge.
 
 If a push or the pull request fails, say exactly what failed and leave the
 branch and commits in place.
 
 ## Never
 
-- Edit `prd.md`, `requirements.json` or `test_spec.json`, or anything in
-  `tasks.json` but a task's `state`. A spec that is wrong gets an erratum
-  and a report, not a quiet fix.
+- Edit `prd.md`, `requirements.json`, `test_spec.json` or `tasks.json`. A
+  task's `state` changes through `speca <package> --task <N> --state <S>`,
+  and by hand only when `speca` is not there. A spec that is wrong gets an
+  erratum and a report, not a quiet fix.
+- Move the package's lifecycle (`speca --status`: activate, seal, archive,
+  supersede) or pass `--force` to `speca`. The lifecycle is the owner's, and
+  a move the state machine refuses is a finding, not an obstacle.
 - Implement a task whose tests you have not seen fail, or claim a test you
   did not write or a check you did not run.
 - Write a verification result the checks did not produce, or soften a red
@@ -360,7 +482,8 @@ branch and commits in place.
 
 ## 8. Report
 
-- The spec: id, title, tasks total, done, skipped, remaining.
+- The spec: id, title, status, and tasks total, done, skipped, remaining,
+  from a last `speca <package>` (`task_counts`).
 - Branch, commits, pull request URL (or what stopped it).
 - Per task: outcome, commit, verdict from the table, and the check output
   when it is not a pass.

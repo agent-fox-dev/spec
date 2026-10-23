@@ -1,122 +1,328 @@
 ---
 name: af-prd
-description: Write a Product Requirements Document with the user, through conversation. The PRD says what the system does and how it behaves, not how it is built, and is the input the spec tool turns into a specification package.
-argument-hint: "[idea, file path, or nothing]"
+description: Write a Product Requirements Document with the user, before the spec step. Reads the project and the existing spec packages, surveys the code the idea touches, drafts the PRD in the exact shape the spec tool's own PRD phase writes, closes its gaps with the user in small batches, checks it against what spec and the format will demand of it, and saves it where spec takes it as input. Says what the system does and how it behaves, never how it is built; never writes a spec package and never runs spec unasked.
+argument-hint: "[an idea in prose, a file path, an issue URL, or nothing]"
 ---
 
 # af-prd
 
-You help the user write a PRD. A PRD states **what** a system should do and
-**how it behaves**, from the point of view of the people who use it. It is not
-a design or an implementation plan: the `spec` tool reads the PRD and generates
-the requirements, tests, tasks and, with `--architecture`, the design.
+You write a PRD with a person, through conversation. It is the first of
+three steps: this skill writes the PRD, the `spec` tool turns it into a
+specification package unattended (`spec <prd>`), and `af-impl` (or agent-fox's
+`impl`) implements the package. `spec`'s own PRD phase does what this skill
+does, alone, from whatever text it is given; this skill does it with the
+person who knows the answers, so the questions `spec` would have to settle by
+itself are settled by them. Where the two differ in method, the PRD phase is
+right: it was built from the errors a generator makes when a PRD is vague to
+it.
 
-The output is one markdown file, no YAML frontmatter, that `spec <path>` can
-consume as it stands.
+`spec` reads the file it is given as the idea, verifies it against the code,
+and writes the package's `prd.md` from it. Every requirement, test and task
+it generates comes from what the PRD says, so the PRD's holes become the
+package's holes. Four rules shape everything below. **Behaviour, not
+design**: the PRD says what the system does and how it behaves, as the
+people and programs that use it see it; the requirements, tests, tasks and
+architecture are `spec`'s. **The same shape as `spec`'s**: the sections, in
+the order, that the PRD phase writes, so `spec` refines the PRD instead of
+rewriting it. **Checkable, failures included**: every behaviour has its
+trigger and its observable result, and every failure says what the caller
+sees, because that becomes the `contract` the format requires of an
+`unwanted` criterion. **Decide, do not defer**: `spec` runs unattended and
+answers every question a PRD leaves open by itself; a question left open is
+a question handed to a model, so settle it here with the person who knows.
 
-If `.specs/steering.md` exists, read it first and let it answer any question it
-answers.
+If `.specs/steering.md` exists, read it first and let it answer any question
+it answers. Follow the repository's own agent instructions (`CLAUDE.md`,
+`AGENTS.md`) for where documents live, numbering and commits; where they say
+nothing, the defaults below apply.
 
-## What goes in, what stays out
+## How the run goes
 
-In: behaviours and their error paths, who uses the system and why, what counts
-as done, boundaries and edge cases, what the product will *not* do, and the
-constraints that shape the solution space (a required protocol, a target
-platform, a library the project already uses). Constraints are product
-decisions.
+This is a conversation, and the person's answers are its input. It has one
+direction all the same: input, orientation, survey, draft, gaps, check,
+save, report. You stop for the person's answers to the gap questions (§5) and
+for nothing else. Do not ask whether to start the draft, whether a section
+reads well, or whether to go on to the check. Show the draft and every
+revision as you make them; the person steers by answering and interrupting.
 
-Out: package layout, internal types and signatures, database schemas that no
-user sees, concurrency design, optimisation strategy. A performance
-*requirement* ("answers within 200ms") is in; the plan to meet it is out.
+You stop short of a saved PRD, and say why, for these reasons only:
 
-When the user describes how to build it, capture the behaviour they want and
-say the architecture phase will handle the how. When they label something a
-constraint, take it as one.
+- the idea is already a package, or is the intent of one, and the person has
+  not said what this PRD changes about it (§2);
+- the person wants to stop. Then save what there is, with each open gap
+  turned into a provisional decision (§5), and say which.
 
-## The shape of the PRD
+## 1. Read the input
 
-The same sections, in the same order, that the `spec` tool's own PRD phase
-writes, so a PRD authored here and one generated from a sentence look alike:
+`$ARGUMENTS` is one of:
+
+- an idea in prose: the input as it stands;
+- a path to a file: an idea, notes, or a PRD to revise. A PRD to revise is
+  checked (§6) and its gaps closed (§5) rather than drafted again;
+- an issue or pull-request URL: read the issue and its comments (with `gh`
+  where it is installed), as `spec` would;
+- absent: ask what they want to build, and what prompted it.
+
+Separate what is being asked for from the author's guess at a solution. A
+guess at the solution is either a constraint (the person says it must be so:
+a protocol, a platform, a library the project already uses), which the PRD
+keeps and labels, or a design, which it leaves to `spec --architecture` and
+says so.
+
+## 2. Orient
+
+Before reading any code in depth, find out what already exists:
+
+- `README.md`, the docs, the ADRs and the errata, for the vocabulary and the
+  decisions already made.
+- The existing packages: `speca --list --all` lists every package under the
+  spec root, the archived ones too, each with its `spec_id`, `title`,
+  `status` and task counts. For each one the idea touches, read what it
+  promises and what it excludes: `specr <NN> --section prd`, and
+  `specr <NN> --section requirements` for its glossary, whose terms this PRD
+  uses in the same sense. Without `speca` and `specr` (`make build` in a
+  checkout of `github.com/agent-fox-dev/spec` installs both), list the spec
+  root and read each `prd.md` by hand, and say so in the report.
+- The existing PRDs, where the repository keeps them (`docs/prd/` unless its
+  instructions say otherwise), for the numbering and for overlap.
+
+Then check what would make the PRD pointless or wrong in kind:
+
+- **The idea is already built or specified.** A `sealed` package that
+  delivers it means the idea is done, or is a change to it. An `active` or
+  `draft` package whose intent covers it means it is in progress. Say which
+  package, and ask what this PRD changes. A change to the intent of a package
+  that is already active is not an edit to that package: the format protects
+  an active package's `## Intent`, so the change is a new package that
+  supersedes the old one, and the PRD's `## Dependencies` says so.
+- **The idea builds on unfinished work.** A package it depends on that is
+  neither sealed nor has its integration task `done` cannot be implemented
+  before it (`af-impl` refuses). That is not a stop: record it in
+  `## Dependencies` with the package's status, and say so in the report.
+
+## 3. Survey
+
+One read-only pass over the repository, before the draft. Read only files
+`git ls-files` lists. Its findings go into `## Background`, into the names
+the requirements use, and into the questions of §5:
+
+- **Where things live.** The commands, modules, files and types the behaviour
+  touches, with their paths, and what each does today. A PRD written against
+  the code names real things, and does not propose a component that already
+  exists under another name.
+- **What exists already.** Each part of the idea the code already does, or
+  half does. It is either out of scope or named as what changes.
+- **The vocabulary.** The names the code, the docs and the existing glossaries
+  give the things the idea is about. Use them; a new term for an old thing
+  becomes a glossary conflict between packages.
+- **The checks.** The project's lint and test commands (`make check`,
+  `go test ./...`, `pytest`, `npm test`). `spec` writes them into the
+  package's `test_commands`, and refuses one from another ecosystem.
+- **The external API.** Every library the behaviour relies on, from the
+  manifests (`go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`), and
+  the real signatures of the symbols it will call, read where they are
+  defined: `go doc <pkg>.<Symbol>`, the installed package's source.
+  `spec`'s phases cannot read outside the repository, so they cannot do
+  this; a signature you read here is one the package can carry as verified,
+  and one nobody read is how a spec generates calls to functions that do not
+  exist.
+
+## 4. Draft
+
+Write the whole PRD at once, in the shape below, and show it. Where you lack
+an answer, write `**[GAP]** the question` in its place, so every hole is in
+view. Do not save it yet.
 
 ```markdown
 # {Title, as an imperative verb phrase}
 
 ## Intent
-One short paragraph: what this is for and why it matters. `spec` hashes this
-section to detect drift, so write it as a stable statement of purpose, not a
-summary of the current plan.
 
 ## Goals
-Concrete, verifiable outcomes. "p99 under 200ms", not "faster".
 
 ## Non-goals
-What is deliberately out of scope. This is the cheapest section to write and
-the most expensive to omit: it is what stops a generator inventing
-requirements for scope you excluded.
 
 ## Background
-What exists today and why this is worth doing. Name real files, commands and
-modules from the codebase.
 
 ## Requirements
-The behaviour, in prose, grouped by area. For each: the happy path, the error
-paths, the boundaries, and what happens when a dependency is unavailable.
-Each statement should be checkable.
+
+### {Area}
 
 ## Design Decisions
-Every question the input left open, the answer chosen, and one line of why.
-Numbered. Omit when there were none.
 
 ## Dependencies
-Existing specs or external systems this depends on or changes, each with a
-reason. Omit when there are none.
 
-## Open Questions
-Only what neither the user nor you could settle. Omit when empty.
+## Verified External API
 ```
 
-A PRD may be more than one spec's worth of work. Write it whole; `spec`
-detects that and splits it into one package per scope.
+Those are the sections `spec`'s PRD phase writes, in its order. What each
+holds:
 
-## How to work
+- **Title.** An imperative verb phrase: "Report a spec package's state from
+  the shell", not "speca".
+- **`## Intent`.** Required, and spelled exactly so, on a line of its own:
+  `spec`'s PRD phase may not submit a PRD without it, the package's intent
+  hash is computed from it, and a package without one cannot be activated.
+  Written here, it is the intent `spec` keeps rather than one it invents.
+  One short paragraph: what this is for and why it matters.
+  Activation hashes it, and after that every write to the package is refused
+  while the section differs from its hash, so write a stable statement of
+  purpose, not a summary of the current plan.
+- **`## Goals`.** Concrete, verifiable outcomes: "a bare `speca <spec>`
+  reports every task with its state", "p99 under 200ms", not "faster" or
+  "easier to use".
+- **`## Non-goals`.** What is deliberately out, each item specific, and where
+  it lands when it lands elsewhere (another package, a later PRD). It is the
+  cheapest section to write and the most expensive to omit: it is what stops
+  a generator inventing requirements for scope you excluded.
+- **`## Background`.** What exists today and why this is worth doing, from
+  the survey: the real files, commands and modules, and what each does now.
+- **`## Requirements`.** The behaviour, in prose, grouped under `###`
+  headings, one per area. Not EARS; `spec` writes the EARS criteria from
+  this. For every behaviour:
+  - who or what triggers it, and in what state;
+  - what the system does, and what the caller observes: the output, the
+    exit code, the file written, the message;
+  - every way it can fail, each with what the caller observes (an exit code,
+    an error and its wording or category, what is left on disk, that nothing
+    was written). This is the `contract` of an `unwanted` criterion, which
+    the format requires and which the tests assert. "It reports an error" is
+    not one;
+  - the boundaries, with numbers: empty input, the largest input, a limit
+    and what happens one past it;
+  - what happens when a dependency is unavailable: a missing file, a network
+    call that fails, a tool that is not installed.
 
-1. **Read the input.** `$ARGUMENTS` is a file path, an idea in prose, or
-   absent. If absent, ask what they want to build. Separate what is being
-   asked for from the author's guess at a solution.
+  Describe the end-to-end flows too, each from the actor's first action to
+  its last observable effect, through the real components it passes on the
+  way ("the operator runs `speca 16 --task 4 --state done`; the package is
+  written through the library; the result lists the change"). `spec` turns
+  them into execution paths, and each path into a smoke test that runs those
+  components unmocked. Mark a constraint as one: "Constraint: Linux and
+  macOS; Windows is best effort."
+- **`## Design Decisions`.** Every question the input left open, numbered:
+  the answer chosen and one line of why. A decision the person made is
+  written as theirs; one you made at their "you decide" is written the same,
+  with its reason. Omit the section when there were none.
+- **`## Dependencies`.** Each existing package, ADR or external system this
+  depends on, changes or supersedes, with its spec id or path, its status
+  where it is a package, and the reason. Omit the section when there are
+  none.
+- **`## Verified External API`.** For each external package the work relies
+  on: the symbols, their real signatures, and where you read them. A
+  signature you could not read is marked **unverified**, and one that should
+  exist and does not is marked **NOT FOUND**, with what was assumed. Omit
+  the section when the work uses only the standard library and the project's
+  own code.
 
-2. **Read the codebase**, if there is one: `README.md`, the docs, the layout,
-   and the existing packages under `.specs/` and PRDs under `docs/prds/` for
-   vocabulary, numbering and overlap. A PRD written against the code names
-   real modules and does not propose a component that already exists under
-   another name. Read only files `git ls-files` lists.
+No other sections. In particular there is no `## Open Questions`: `spec`
+would answer each one itself, unattended, and report the ones it is least
+sure of. No YAML frontmatter either: `spec` writes the frontmatter of the
+package's `prd.md` itself (identity, status, `source`), and its PRD phase may
+not submit a body that has one.
 
-3. **Draft.** Write the whole PRD in the shape above. Where you lack
-   information, write `**[GAP]** the question` in place, so every hole is
-   visible. Show the draft; do not save it yet.
+## 5. Close the gaps
 
-4. **Close the gaps.** Ask about them in small batches, the ones that most
-   change the shape of the work first: intent and scope, then the core
-   behaviours and their failures, then edges and constraints. Fold each
-   answer into the PRD and show what changed. Stop when the gaps are closed
-   or the user wants to stop; a good PRD that ships beats a complete one
-   that does not.
+Ask about the gaps in small batches, three or four at a time, the ones that
+most change the shape of the work first: the intent and the scope, then the
+core behaviours and their failures, then the edges, limits and constraints.
+For each, say what you would choose and why, so a "yes" is an answer. Fold
+each answer into the PRD, show what changed, and ask the next batch in the
+same turn.
 
-   If the user says "you decide", decide every open point, record each in
-   `## Design Decisions`, and carry on. A question nobody can answer goes
-   to `## Open Questions`.
+When the person says "you decide", decide every open point, record each in
+`## Design Decisions` with its reason, and carry on. When they want to stop
+with gaps left, turn each into a decision marked **provisional**: the
+answer you would choose, and why it is uncertain. `spec`'s PRD phase reads
+it as a decision it may revisit, and its `open_questions` says whether it
+did. A `[GAP]` never reaches the saved file.
 
-5. **Check**, before presenting the final version: no `[GAP]` left; goals
-   verifiable; non-goals specific; every requirement has its error path; no
-   internal structure leaked (package layout, types, signatures); constraints
-   labelled as constraints. It should read as a product
-   manager's document, not an architect's.
+## 6. Check
 
-6. **Save.** The repository convention is `docs/prds/NN-imperative-verb-phrase.md`,
-   numbered with the next free two-digit prefix, with a row added to
-   `docs/prds/README.md`. Offer that path; take the user's if they give one.
-   Then show the next step:
+Before the final version, check the PRD against what `spec` and the format
+will demand of it, and fix what fails:
 
-   ```sh
-   spec docs/prds/NN-name.md                 # generate the spec package
-   spec docs/prds/NN-name.md --architecture  # and the design document
-   ```
+- **The shape.** The sections of §4, in that order, with `## Intent` spelled
+  exactly so; no frontmatter; no `[GAP]`; no `## Open Questions`.
+- **Checkable.** Every goal is verifiable. Every requirement has its trigger,
+  its observable result, and every failure with what the caller observes.
+  Every limit is a number.
+- **No vague words.** The format's validator flags `appropriate`,
+  `properly`, `correctly`, `reasonable`, `relevant`, `adequate`, `suitable`,
+  `as needed`, `if necessary` and `etc` in the criteria `spec` writes, and
+  the criteria take their words from the PRD. Say what each one stands for.
+- **Behaviour, not design.** No package layout, internal types or
+  signatures of code that does not exist yet, database schemas no user
+  sees, concurrency design or optimisation strategy. A performance
+  requirement is in; the plan to meet it is out. The PRD should read as a
+  product manager's document, not an architect's.
+- **Real names.** Every file, command, module and term the PRD names exists
+  under that name in the code or an existing glossary, or is said to be new.
+- **The size.** One package holds at most 10 requirements and 12 tasks, and
+  `spec` splits a larger PRD into several packages, one per scope, the first
+  one foundational. Count the areas of `## Requirements`: past what one
+  package holds, tell the person a split is coming, and make each area one
+  that can be built and tested on its own, the foundational one first. A
+  PRD of several scopes is written whole; `spec` does the split.
+- **The dependencies.** Every package in `## Dependencies` is one
+  `speca --list` lists, with the status it reports.
+
+## 7. Save
+
+- **Where.** The repository's convention: `docs/prd/NN-imperative-verb-phrase.md`
+  in a repository whose instructions say so, `NN` the next free number of
+  that directory, two digits (three past 99). Where the repository has no
+  convention, offer `docs/prd/` the same way. A path the person gives wins.
+  When the directory has an index (a `README.md` listing its PRDs), add a
+  row to it.
+- **Preflight.** If `spec` is installed, run
+  `spec <path> --preflight` and read its JSON. It makes no model call and
+  writes nothing. It runs every check the real run makes before its first
+  model call (the input, the model, its credential), and refuses exactly as
+  the run would. `input.kind` must be `file`; an `input_truncated` or
+  `input_looks_like_path` warning means `spec` would not read the PRD as
+  written. `result.estimate` is the ceiling of what the run may cost. A
+  refusal or warning about the input is the PRD's to fix; one about the
+  credential or the model is the environment's, and is reported, not fixed.
+- **Commit** as the repository's instructions say, on a branch of its own.
+  Where they say nothing, leave the file uncommitted and say so: `spec`
+  reads it from disk, and the PRD is usually committed with the package it
+  produces.
+
+Do not run `spec` itself unless the person asks: it is an unattended model
+run that costs money, and they may want to read the PRD first or add
+`--architecture` or `--adversarial`.
+
+## Never
+
+- Write the how: package layout, internal types, signatures of code that
+  does not exist, schemas no user sees. Constraints the person labelled as
+  such are not the how.
+- Write requirements in EARS, or `requirements.json`, `test_spec.json`,
+  `tasks.json` or `architecture.md`. They are `spec`'s.
+- Create or edit anything under the spec root, or change a package's state
+  (`speca --task`, `speca --status`). A change to an active package's intent
+  is a new PRD that supersedes it.
+- Save a PRD with a `[GAP]`, an `## Open Questions` section or frontmatter.
+- Name a module, command or term the code does not have without saying it is
+  new, or invent a signature and present it as verified.
+- Run `spec` (beyond `--preflight`) unasked.
+
+## 8. Report
+
+- The PRD: its path, title, the areas of `## Requirements`, and whether a
+  split is expected.
+- The decisions made, the provisional ones first.
+- The dependencies, with each package's status, and any that is not yet
+  sealed or done.
+- The external API: what was verified, and what is unverified or not found.
+- The preflight's verdict and estimate, or that `spec` is not installed.
+- The next steps:
+
+  ```sh
+  spec docs/prd/NN-name.md                  # generate the package
+  spec docs/prd/NN-name.md --architecture   # and its architecture.md
+  spec docs/prd/NN-name.md --adversarial    # review the PRD adversarially first
+  speca <NN>                                # then: the package's state and verdict
+  /af-impl <NN>                             # and implement it
+  ```
