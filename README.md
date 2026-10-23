@@ -195,7 +195,7 @@ a person's own session, one on each side of `spec`:
 | Skill | Step | What it does |
 | --- | --- | --- |
 | `af-prd` | before `spec` | writes a PRD with the user, in the shape `spec`'s own PRD phase writes, checked against what the format demands, and saves it where `spec <prd>` takes it |
-| `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request |
+| `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request, with an issue for each item it leaves open (through aflib's `issue` command) |
 
 `make install-skills` copies each one to `~/.claude/skills/<name>/SKILL.md`;
 `make uninstall-skills` removes them.
