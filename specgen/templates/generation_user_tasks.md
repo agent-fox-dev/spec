@@ -18,6 +18,10 @@ The complete requirements artifact and the full table of tests are above. Use th
 
 Every task carries an implicit definition of done that you do not need to write out: the listed tests exist, are executable and pass; `test_commands.all_tests` passes; `test_commands.linter` passes. The coder works test-first, so **there are no separate "write the tests" tasks** — tests are written inside the task that owns them.
 
+## Dependencies on other specs
+
+`dependencies` lists the specs the PRD's `## Dependencies` table names, each as `{spec, reason}`. `spec` is the other spec's number alone — `"06"`, as in the example below — never its directory name (`06_router`) or its name. A number that names no existing spec makes the plan invalid. Leave the array empty when the PRD names none.
+
 ## Rules that make the plan invalid
 
 - **Every test in the test spec is listed in the `tests` of at least one task.** Nothing may be left unowned — that is the single most common way a plan ships with holes.

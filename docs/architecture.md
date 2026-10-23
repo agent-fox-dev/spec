@@ -138,13 +138,23 @@ combinators (`schema`) and the indexed search (`codesearch`).
    **requirements**, **test spec** and **tasks** phases run in that order, each
    a fresh agent that sees the PRD and the artifacts before it; the optional
    **architecture** phase runs; the package is saved with `afspec`, read back,
-   validated, activated, and its PRD posted under `--comment`.
+   validated, activated, and its PRD posted under `--comment`. Validated is
+   `specpkg.Verdict`, the verdict `speca --validate` gives: the package's own
+   rules and the rules across specs that concern it, run over the spec root as
+   it is then ([ADR 11](adr/11-validate-a-package-against-the-spec-root.md)).
+   The requirements phase is shown the actors of the existing specs
+   (`specgen/siblings.go`), because the rule across specs is about their names.
    A split pipelines its scopes (`specgen/split_run.go`): the PRD phases run
    in order, and each scope's package is built on its own goroutine as soon as
    its PRD exists, up to `--max-parallel` at once. The numbering, the
    landscape of existing specs and the split plan are shared between those
    goroutines under one lock; numbers are reserved by the coordinator, in
-   scope order.
+   scope order. A package may depend only on those before it, so the
+   goroutines order themselves by number where it matters: a package's
+   requirements phase waits for the requirements phase of each package before
+   it, to read its actors, and its validation waits for each of them to settle
+   (written and validated, or failed), because a dependency still being built
+   is not on disk to be found.
 5. **`internal/cli`** builds the envelope from the result and the run's
    bookkeeping (warnings, phases, forge writes) and prints it.
 
@@ -263,7 +273,10 @@ Like `specr`, it does not use `cli.App`, and it links `internal/cli` and so the
 model stack, which it never uses (ADR 05, Consequences). `internal/specpkg`
 holds what `spec`, `specr` and `speca` each need and none should copy: the
 resolver of a package reference (`Locate`, `List`), the display rule for a path
-(`Display`), the task summary with its `ready` (`TaskInfos`), the converters of
+(`Display`), the task summary with its `ready` (`TaskInfos`), the format's full
+verdict on a package (`Verdict`: its own rules, then the rules across specs that
+concern it, which `spec` applies to every package it writes and `speca
+--validate` to the package it is asked about), the converters of
 afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 `TraceReport` (`ReportOf`, `TraceOf`), and the names of the rules a verdict
 breaks (`Rules`). It is a package of its own because `envelope` must stay
@@ -275,7 +288,7 @@ chosen by the flags in `forms.go`:
 | Form | File | Reads | Writes |
 |---|---|---|---|
 | the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` | nothing |
-| the verdict, `speca <spec> --validate` | `verdict.go` | the package and every package of the spec root, for the cross-spec rules | nothing |
+| the verdict, `speca <spec> --validate` | `verdict.go`, through `specpkg.Verdict` | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
 | the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | every artifact of the package, through `Spec.Save`; the content that changes is the task states and the `updated_at` of `prd.md` |
 | the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package, through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |

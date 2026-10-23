@@ -304,7 +304,7 @@ func (c *call) locateBy(dir string) (string, *cli.ErrorInfo) {
 	if err != nil {
 		return "", usageInfo(fmt.Errorf("--by: %w", err), nil)
 	}
-	if sameDir(dir, byDir) {
+	if specpkg.SameDir(dir, byDir) {
 		return "", usageInfo(fmt.Errorf("--by: %s is the package itself: name the package that replaces it", specpkg.Display(dir, c.root)), nil)
 	}
 	return byDir, nil
