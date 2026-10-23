@@ -1,6 +1,6 @@
 ---
 name: af-impl
-description: Implement a version 2 specification package with the user watching. Reads the spec's four artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the pull request on its own, without waiting to be told to continue. Never edits the spec and never merges its own work.
+description: Implement a version 2 specification package with the user watching. Reads the spec's four artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the pull request on its own, without waiting to be told to continue. Opens an issue for every open item the pull request lists, linked both ways, with the issue command. Never edits the spec and never merges its own work.
 argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search]"
 ---
 
@@ -28,9 +28,12 @@ for someone else to merge.
 Three commands from the `spec` repository do the package's bookkeeping, and
 each writes one JSON object to stdout: `speca` reports where a package stands
 and moves its tasks through the format's state machine, `specr` renders it as
-Markdown, and `impl` (agent-fox's, where installed) preflights it. Read their
-JSON; do not work out a package's state, scope or verdict by reading its
-files by hand while the commands are there to ask.
+Markdown, and `impl` (agent-fox's, where installed) preflights it. A fourth,
+`issue` from the `aflib` repository, talks to the forge, GitHub or GitLab:
+it opens the issues that track what the branch leaves undone, and edits the
+pull request that links them (§7). Read their JSON; do not work out a
+package's state, scope or verdict by reading its files by hand while the
+commands are there to ask.
 
 If `.specs/steering.md` exists, read it first. Follow the repository's own
 agent instructions (`CLAUDE.md`, `AGENTS.md`) for branching, commits and
@@ -439,16 +442,65 @@ cannot, with an erratum, as above. Documentation findings and files out of
 scope can only be fixed. What remains is the `unmet` list, and the pull
 request must say the work is not complete while it is non-empty.
 
+The `unmet` list holds every **open item**: what the branch does not do that
+the spec asks (a criterion `missing`, `partial` or `different`, a
+deviation that leaves a criterion unsatisfied), and what the run could not
+show (a check or test that did not run here, a contract no test asserts, a
+finding left as it is). Each is one entry, with what is missing, why, the
+ids it concerns (`16-REQ-3.2`, `TS-16-7`, `D-3`) and its evidence
+(`file:line`, the check's output). §7 opens an issue for each. A deviation
+that is decided, recorded in an erratum and leaves every criterion met is
+not an open item; it goes with the deviations.
+
 ## 7. Land
 
 - Push the branch and open a pull request against the base branch, unless
-  the repository's instructions or the user say the branch stays local. The
-  body holds: the unmet list first, if any; the spec's deviations and how
-  the tasks handled them, grouped by the survey's kinds; one entry per task
-  with its commit, files changed, test verdicts and any test-first deviation;
-  the verification, before and after, as measured; and the conformance
-  findings and what was done about each. Every claim in it comes from
-  something that ran.
+  the repository's instructions or the user say the branch stays local:
+  `issue --create-pr --head <branch> --base <base> --title <title>
+  --body-file <file>` where `issue` is installed, the forge's own tooling
+  otherwise. Write the body to a file outside the repository first. It
+  holds: the open items first, if any, under the one heading
+  `## Not complete: open items`; the spec's deviations and how the tasks
+  handled them, grouped by the survey's kinds; one entry per task with its
+  commit, files changed, test verdicts and any test-first deviation; the
+  verification, before and after, as measured; and the conformance findings
+  and what was done about each. Every claim in it comes from something that
+  ran. `result.ref` is the pull request (`acme/widgets!31`) and
+  `result.pull_request.html_url` its URL; both are needed below.
+- **Track the open items.** Every entry under `## Not complete: open items`
+  gets an issue, so the gap is tracked after the pull request is merged,
+  not left in a description nobody reads again. For each:
+  1. Look for one that exists: `issue --list --state all --limit 100`,
+     followed through its `next` while `result.incomplete` is true, and
+     reuse an issue whose title is the one below (a run continued after a
+     gap may already have opened it).
+  2. Write its body to a file: what is missing and why, in the words of the
+     entry; the ids it concerns, with each criterion's text from the render;
+     the evidence (`file:line`, the check's output); the erratum, when there
+     is one; what would close it; and the references: the pull request by
+     its URL, and the spec by its `NN_name`, its `spec_dir` and a link to
+     that directory on the base branch, where it stays after the merge.
+  3. `issue --create --title "<NN_name>: <what is missing>" --body-file
+     <file> --dry-run`, then the same call without `--dry-run`. The title
+     says the gap in under 60 characters. `result.issue.html_url` is the
+     issue.
+
+  Then put the links in the pull request: rewrite its body file so that each
+  entry ends with its issue (`→ #42`, or the URL), and
+  `issue <pr ref> --edit --body-file <file>`. Read `side_effects` to see
+  every write was made. Entries that concern one criterion may share one
+  issue; an entry that is fixed before the pull request goes up is not an
+  open item and gets none.
+
+  `issue` writes need a token: `GITHUB_TOKEN` or `GH_TOKEN` for GitHub,
+  `GITLAB_TOKEN` for GitLab; the repository is the one of the origin
+  remote. `go install github.com/agent-fox-dev/aflib/cmd/issue@latest`
+  installs `issue`. Without it, use the forge's own tooling the same way
+  (`gh issue create`, `glab issue create`, the forge tools of the session).
+  An issue that cannot be opened at all, for a missing token or a refusal,
+  stops nothing. The entry stays in the pull request with
+  `(no issue: <the reason>)`, and the report gives the `issue --create`
+  call that opens it.
 - Do not merge it. Do not seal the spec, though `speca <package>` now
   suggests `speca <package> --status sealed`: a review that rejects the pull
   request may reopen a task, which a sealed spec cannot record. Name that
@@ -479,6 +531,9 @@ branch and commits in place.
   landed commit.
 - Stash, reset or otherwise change the user's uncommitted work.
 - Widen the change to things no task asked for.
+- Leave an open item without an issue or the reason it has none. Close,
+  edit or comment on an issue this run did not open, or open one for
+  anything but an open item.
 
 ## 8. Report
 
@@ -489,4 +544,6 @@ branch and commits in place.
   when it is not a pass.
 - The survey's decisions, and the deviations declared with their errata.
 - The conformance findings, fixed and unmet.
+- The open items, each with its issue URL, or why it has none and the
+  `issue --create` call that opens it.
 - Anything left unfinished, and the command that continues it.
