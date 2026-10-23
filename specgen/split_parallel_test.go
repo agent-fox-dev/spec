@@ -103,9 +103,11 @@ func wait(t *testing.T, ch <-chan struct{}, what string) {
 }
 
 // A split is pipelined: the second scope's PRD is written while the first
-// scope's package is still being generated, the third scope's package
-// finishes before the first's, and the numbers, the result and the plan still
-// follow the plan's order.
+// scope's package is still being generated, the third scope's package is
+// generated before the first's last step is, and the numbers, the result and
+// the plan still follow the plan's order. A package is validated once the
+// ones before it have settled (see siblings.go), so the third cannot be written
+// before the first, whatever the order its phases end in.
 func TestASplitIsPipelined(t *testing.T) {
 	ws := newWorkspace(t)
 	a := &concurrentAuthor{inner: splitAuthor(t)}
@@ -119,9 +121,12 @@ func TestASplitIsPipelined(t *testing.T) {
 	}
 	a.beforeGenerate = func(req artifactRequest) {
 		if req.SpecName == "widget_core" && req.Step == afspec.StepRequirements {
-			// The first package waits for the second PRD and for the third
-			// package: neither could happen if the scopes ran in sequence.
+			// The first package waits for the second PRD: that could not
+			// happen if the scopes ran in sequence.
 			wait(t, secondPRD, "the second scope's PRD")
+		}
+		if req.SpecName == "widget_core" && req.Step == afspec.StepTasks {
+			// And, at its last step, for the third package to be generated.
 			wait(t, thirdDone, "the third scope's package")
 		}
 	}

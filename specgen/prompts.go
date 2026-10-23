@@ -398,6 +398,39 @@ func landscapeBlock(metas []afspec.SpecMeta, specRoot string) string {
 	}
 	b.WriteString("\nDo not restate what an existing spec already covers. If this work depends on " +
 		"one, name it in the PRD's `## Dependencies` section with a reason, and the tasks " +
-		"artifact's `dependencies` array will carry it.\n")
+		"artifact's `dependencies` array will carry it. In that array a spec is named by its number " +
+		"alone (`06`), never by its directory name or its name.\n")
+	return b.String()
+}
+
+// specActors are the actors of one spec's execution paths.
+type specActors struct {
+	// Spec is the spec's NN_name.
+	Spec string
+	// Actors are the names its paths use, each once, in alphabetical order.
+	Actors []string
+}
+
+// actorsBlock lists the actors the execution paths of the existing specs use,
+// for the requirements step. The rule across specs that decides a dependency is
+// about these names, which the step would otherwise have to guess; it is empty
+// when there are none, and the prompt is then what it was.
+func actorsBlock(specs []specActors) string {
+	if len(specs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Actors of the existing specs\n\n")
+	b.WriteString("The validator checks each spec this one depends on against the execution paths: at least one step " +
+		"of this spec's paths must be played by an actor named exactly as an actor of that spec (case is ignored). " +
+		"These are the names the paths of the existing specs use. Where this spec depends on one of them, reuse one of " +
+		"its names for the component of that spec your paths exercise, and list the spec in `dependencies` by its number.\n\n")
+	for _, s := range specs {
+		names := make([]string, len(s.Actors))
+		for i, a := range s.Actors {
+			names[i] = "`" + oneLine(a) + "`"
+		}
+		fmt.Fprintf(&b, "- `%s`: %s\n", s.Spec, strings.Join(names, ", "))
+	}
 	return b.String()
 }

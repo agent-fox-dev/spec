@@ -87,8 +87,10 @@ and reports the ones it is least sure of as `open_questions` in the result.
 It then generates `requirements.json`, `test_spec.json` and `tasks.json` in
 that order — each validated against the format's schema and its cross-file
 rules before it is written — writes the package under `.specs/{NN}_{name}/`,
-and activates it if it validates. A package that fails cross-file validation
-is still written to disk, with the broken rules named in the result.
+validates it against the other specs of the spec root (an unknown dependency, a
+cycle, a dependency with no actor in common), and activates it if it validates.
+A package that fails either is still written to disk, in `draft`, with the
+broken rules named in the result. It is the verdict `speca <spec> --validate` gives.
 
 Output is one JSON object on stdout — spec id, artifacts written, requirement
 and test counts, the validation report, derived traceability coverage, and

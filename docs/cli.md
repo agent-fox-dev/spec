@@ -73,6 +73,14 @@ conversation that sees the PRD and the artifacts before it:
 2. `test_spec.json` — one flat list of tests
 3. `tasks.json` — one flat list of tasks
 
+The requirements phase is also told what the rules across specs (below) will ask
+of its execution paths: for each spec the package depends on, at least one step
+must be played by an actor that also plays a step in that spec's paths, by the
+same name (case is ignored). It is shown the actors the paths of the existing
+specs use and, in a split, those of the earlier packages of the run once their
+requirements are written. The `dependencies` of `tasks.json` name a spec by its
+number alone (`06`), never by its directory name.
+
 Each artifact is submitted through a tool whose schema is the format's own JSON
 Schema, and whose handler runs every cross-file rule decidable at that point
 (`afspec.ValidateGenerationStepComplete`). A violation comes back to the model
@@ -104,6 +112,18 @@ not a failed run.
 
 The package is then written, read back from disk, validated, and activated
 (`draft → active`, computing the intent hash) if it validates.
+
+Validated means the format's whole verdict, the one `speca <spec> --validate`
+gives: the package's own rules (the schemas and `C1`…`C11`), then the rules
+across specs (format v2 §10.4) that concern it, applied to the spec root as it
+is once the package is written. They are an unknown dependency, a dependency
+cycle, a spec it depends on whose execution paths share no actor with its own,
+and, as a warning, a glossary term two specs define differently. A package that
+breaks one is on disk, in `draft`, and reported as `invalid_spec` with the rule
+named in `result.validation`. The actor rule is applied only here: the phase that
+writes the dependencies comes after the requirements, so it could not repair it.
+A spec root that cannot be read for the check fails the run at stage
+`validate`, category `disk`.
 
 ### The adversarial review (`--adversarial`)
 
@@ -213,7 +233,12 @@ being generated. A scope's package (its three generation phases, the write,
 the validation) starts as soon as its PRD exists, beside the next scope's PRD
 phase, with at most `--max-parallel` packages (default 3) in flight. Package
 numbers are reserved in scope order, and the result reports the packages in
-plan order, whichever finishes first. `--max-parallel 1` writes the scopes one
+plan order, whichever finishes first. A package depends only on those before
+it, and is validated against them (the rules across specs), so its requirements
+phase waits for the requirements phase of every package before it, to be shown
+their actors, and its validation waits for those packages to settle; the phases
+between still overlap, and the packages are validated in plan order
+([ADR 11](adr/11-validate-a-package-against-the-spec-root.md)). `--max-parallel 1` writes the scopes one
 after another, each scope's PRD waiting for the package before it. Progress
 lines of a scope carry its label (`scope 2 of 4 (issuex_github): …`).
 
@@ -456,7 +481,7 @@ written, such as `invalid_spec`, still names the package on disk.
 | `refusal` | the model declined the request | no |
 | `no_result` | a phase ended without an accepted submission; the message says why and what to change: a ceiling to raise, or, when a response hit the output token limit while the model was still thinking, `--max-tokens` to raise or the effort to lower | no |
 | `disk` | the filesystem refused a write | no |
-| `invalid_spec` | the package was written and does not validate | no |
+| `invalid_spec` | the package was written and does not validate, by its own rules or by those across specs | no |
 | `internal` | a bug in spec | no |
 
 ### Exit codes
@@ -474,7 +499,9 @@ written, such as `invalid_spec`, still names the package on disk.
 (`requirements`, `criteria`, `execution_paths`, `tests`, `tasks`), and:
 
 - `validation` — the format's verdict, every error naming its rule (`C1`…`C11`,
-  `json_schema`, `completeness`)
+  `json_schema`, `completeness`, and across specs `cross_spec_unknown_dependency`,
+  `cross_spec_cycle`, `cross_spec_actor`; a glossary conflict is the warning
+  `cross_spec_glossary`)
 - `traceability` — derived, never stored: `criteria_covered`,
   `criteria_uncovered`, `paths_covered`, `paths_uncovered`, `tests_unowned`
 - `open_questions` — the decisions made under uncertainty

@@ -92,6 +92,10 @@ type scriptedAuthor struct {
 	followOn    map[string]PRD
 	followOnErr map[string]error
 
+	// shapes changes the fixture for the packages it names, by spec name: the
+	// spec it depends on, and the actor of every step of its execution paths.
+	shapes map[string]packageShape
+
 	// prdCost is the spend every PRD phase reports.
 	prdCost float64
 	// onGenerate, when set, is called at the start of every generation
@@ -134,6 +138,9 @@ func (a *scriptedAuthor) GenerateArtifact(_ context.Context, req artifactRequest
 	if req.SpecID+"_"+req.SpecName != a.primary {
 		fixtures, _ := loadFixture(a.t, req.SpecID, req.SpecName)
 		content = fixtures[req.Step]
+	}
+	if s, ok := a.shapes[req.SpecName]; ok {
+		s.apply(req.Step, content)
 	}
 	skip := a.skipStepValidation
 	if a.breakScope != "" && req.SpecName == a.breakScope && req.Step == afspec.StepTasks {

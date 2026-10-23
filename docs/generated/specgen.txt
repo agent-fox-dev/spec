@@ -55,9 +55,9 @@ const (
 
 const (
 	// CategoryInvalid means the package was generated and does not satisfy
-	// the format's cross-file rules. The files are on disk and the errors
-	// name the rules, because a spec you can read and fix is worth more than
-	// no spec at all.
+	// the format's rules, its own or those across specs. The files are on
+	// disk and the errors name the rules, because a spec you can read and fix
+	// is worth more than no spec at all.
 	CategoryInvalid = envelope.CategoryInvalidSpec
 	// CategoryDisk is a filesystem failure.
 	CategoryDisk = envelope.CategoryDisk

@@ -51,8 +51,9 @@ resolves every open question itself, records each in a '## Design Decisions'
 section, and reports the ones it is least sure of as open_questions in the
 result. It then generates requirements.json, test_spec.json and tasks.json in
 that order — each validated against the format's schema and its cross-file
-rules before it is written — writes the package under .specs/NN_name/, and
-activates it if it validates.
+rules before it is written — writes the package under .specs/NN_name/, checks
+it against the other specs of the spec root (an unknown dependency, a cycle, a
+dependency it shares no actor with), and activates it if it validates.
 
 An input that is more than one spec's worth of work is split: the PRD phase
 reports every scope, and spec writes all of them, one package per scope, each

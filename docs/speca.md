@@ -159,8 +159,9 @@ The cross-spec rules (format v2 §10.4: an unknown dependency, a dependency
 cycle, a missing shared actor, a glossary term defined two ways) need every
 package of the spec root, so this form loads each `NN_name` directory that
 loads, adds the package itself when it is not among them — an archived package
-is not — builds the dependency graph and runs `afspec.ValidateCrossSpec`. Of
-what that finds it keeps:
+is not — builds the dependency graph and runs `afspec.ValidateCrossSpec`. `spec`
+gives every package it writes the same verdict (`specpkg.Verdict`), against the
+spec root as it is then, before it activates the package. Of what that finds it keeps:
 
 - the errors tagged with the package's `spec_id`, which the library gives to
   the downstream package that decides them (an unknown dependency, a missing

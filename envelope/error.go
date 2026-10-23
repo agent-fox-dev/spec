@@ -33,8 +33,8 @@ const (
 	// CategoryDisk is a filesystem failure.
 	CategoryDisk = "disk"
 	// CategoryInvalidSpec means the package was generated and does not
-	// satisfy the format's cross-file rules. The files are on disk and the
-	// errors name the rules.
+	// satisfy the format's rules, its own or those across specs. The files
+	// are on disk and the errors name the rules.
 	CategoryInvalidSpec = "invalid_spec"
 )
 

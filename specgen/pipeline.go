@@ -319,9 +319,9 @@ func scoped(label string, err error) error {
 // Categories this package adds to the shared vocabulary.
 const (
 	// CategoryInvalid means the package was generated and does not satisfy
-	// the format's cross-file rules. The files are on disk and the errors
-	// name the rules, because a spec you can read and fix is worth more than
-	// no spec at all.
+	// the format's rules, its own or those across specs. The files are on
+	// disk and the errors name the rules, because a spec you can read and fix
+	// is worth more than no spec at all.
 	CategoryInvalid = envelope.CategoryInvalidSpec
 	// CategoryDisk is a filesystem failure.
 	CategoryDisk = envelope.CategoryDisk
@@ -630,6 +630,9 @@ type runEnv struct {
 	// run — which leaves nothing on disk to count — still numbers its
 	// packages consecutively.
 	lastID int
+	// siblings are the packages of this run by number, for the packages after
+	// them to wait for and read (see siblings.go).
+	siblings map[int]*sibling
 }
 
 // setLandscapeStatus records a package's new status in the landscape.
@@ -734,6 +737,7 @@ func (e *runEnv) reservePackage(prd PRD, label string) (slot, error) {
 		}
 	}
 	dirName := specID + "_" + prd.SpecName
+	e.track(specID, dirName)
 	return slot{specID: specID, dirName: dirName, path: filepath.Join(e.specsDir, dirName)}, nil
 }
 
@@ -782,6 +786,9 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 	o := e.o
 	wrap := func(err error) error { return scopedIf(label, err) }
 	specID, dirName, specPath := sl.specID, sl.dirName, sl.path
+	// The packages after this one wait for it, however it ends.
+	sib := e.sibling(specID)
+	defer sib.settle()
 	written := false
 	if !o.DryRun {
 		defer func() {
@@ -813,8 +820,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 
 	partial := afspec.PartialSpec{SpecID: specID, SpecName: prd.SpecName}
 	for _, step := range afspec.GenerationSteps {
-		done := o.Progress.Begin("%sgenerating %s", prefixed(label), afspec.ArtifactFileName(step))
-		_, stats, err := e.author.GenerateArtifact(ctx, artifactRequest{
+		req := artifactRequest{
 			Step:          step,
 			SpecID:        specID,
 			SpecName:      prd.SpecName,
@@ -828,11 +834,23 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			RelevantFiles: prd.RelevantFiles,
 			RepoMap:       e.repoMap,
 			CodebaseNotes: prd.CodebaseNotes,
-		})
+		}
+		if step == afspec.StepRequirements {
+			// The paths are checked against the specs this one depends on, by
+			// the names their paths use. The earlier packages of this run are
+			// not on disk yet, so this step waits for theirs.
+			e.awaitRequirements(ctx, specID)
+			req.Actors = e.actorsNow(specID)
+		}
+		done := o.Progress.Begin("%sgenerating %s", prefixed(label), afspec.ArtifactFileName(step))
+		_, stats, err := e.author.GenerateArtifact(ctx, req)
 		recordPhase(o.Run, stats, prd.SpecName)
 		done(cli.PhaseSummary(stats))
 		if err != nil {
 			return unwritten(pkg), wrap(fail(string(step), agentrun.CategoryOf(err), err))
+		}
+		if step == afspec.StepRequirements {
+			sib.endRequirements(actorsOf(partial.Requirements))
 		}
 		pkg.Artifacts = append(pkg.Artifacts, afspec.ArtifactFileName(step))
 	}
@@ -895,7 +913,26 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		validated = loaded
 	}
 
-	report := specpkg.ReportOf(validated.Validate())
+	// The verdict is the format's whole one, speca's: the package's own rules
+	// and the rules across specs, which need the specs it depends on. Those
+	// written before it in this run are settled first, and a dry run, which
+	// wrote none of them, hands over the ones it held in memory.
+	if o.DryRun {
+		sib.keep(validated)
+	}
+	e.awaitSettled(ctx, specID)
+	var inMemory []*afspec.Spec
+	if o.DryRun {
+		inMemory = append(e.earlierSpecs(specID), validated)
+	}
+	verdict, err := specpkg.Verdict(e.specsDir, validated, inMemory...)
+	if err != nil {
+		// The package was just written there, so a spec root that cannot be
+		// read now is the disk's failure, not a verdict.
+		return pkg, wrap(fail("validate", CategoryDisk,
+			fmt.Errorf("the package was written to %s and the spec root cannot be read to check it against the other specs: %w", specPath, err)))
+	}
+	report := specpkg.ReportOf(verdict)
 	pkg.Validation = report
 	pkg.Traceability = specpkg.TraceOf(validated)
 

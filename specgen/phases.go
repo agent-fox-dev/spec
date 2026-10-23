@@ -139,6 +139,10 @@ type artifactRequest struct {
 	RepoMap string
 	// CodebaseNotes are what the PRD phase learned reading the code, or "".
 	CodebaseNotes string
+	// Actors are the actors of the specs that exist, for the requirements
+	// step, whose execution paths the cross-spec rules check. Empty for the
+	// other steps.
+	Actors []specActors
 }
 
 type architectureRequest struct {
@@ -259,7 +263,7 @@ func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest)
 		Kind:   string(req.Step),
 		System: generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
 		User: generationUserPrompt(req.Step, req.SpecID, req.SpecName, req.Root, req.PRD,
-			codebaseNotesBlock(req.CodebaseNotes), landscapeBlock(req.Landscape, req.SpecRoot),
+			codebaseNotesBlock(req.CodebaseNotes), landscapeBlock(req.Landscape, req.SpecRoot)+actorsBlock(req.Actors),
 			priorArtifactsBlock(*req.Partial, req.Step), relevantFilesBlock(req.RelevantFiles)),
 		RepoMap:    req.RepoMap,
 		Terminator: name,

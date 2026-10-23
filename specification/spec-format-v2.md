@@ -414,7 +414,7 @@ subtasks (merged into tasks), `verification` subtasks (replaced by
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `spec` | string | yes | The `spec_id` of the upstream spec. Must exist in the spec root (checked by `spec validate --cross`). |
+| `spec` | string | yes | The `spec_id` of the upstream spec. Must exist in the spec root (checked by the cross-spec rules, §10.4). |
 | `reason` | string | yes | What this spec consumes from it. |
 
 Ordering is at spec granularity: every task of this spec runs after the
@@ -579,11 +579,13 @@ glossary entry.
 
 ### 10.4 Cross-spec
 
-`spec validate --cross` checks: every `dependencies[].spec` exists; the
+The cross-spec rules check: every `dependencies[].spec` exists; the
 dependency graph is acyclic; glossary terms shared between specs have the
 same definition (warning); and, for each dependency edge, the downstream
 spec has at least one path step whose actor also appears in an upstream
-path (error, unchanged from v1).
+path (error, unchanged from v1). An actor matches by name, ignoring case.
+`speca <spec> --validate` applies them to a package, and `spec` applies them to
+every package it writes, so a package they reject is left in `draft`.
 
 ---
 
