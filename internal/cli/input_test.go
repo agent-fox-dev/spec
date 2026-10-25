@@ -15,108 +15,97 @@ import (
 	"github.com/agent-fox-dev/spec/internal/issuex"
 )
 
-type mockForgeClient struct {
-	issuex.NoOpClient
-	authenticated bool
-	readErr       error
-	thread        issuex.IssueThread
-	readIssueFn   func(ctx context.Context, ref issuex.IssueRef) (issuex.IssueThread, error)
-}
-
-func (m *mockForgeClient) Authenticated() bool {
-	return m.authenticated
-}
-
-func (m *mockForgeClient) ReadIssue(ctx context.Context, ref issuex.IssueRef) (issuex.IssueThread, error) {
-	if m.readIssueFn != nil {
-		return m.readIssueFn(ctx, ref)
-	}
-	if m.readErr != nil {
-		return issuex.IssueThread{}, m.readErr
-	}
-	return m.thread, nil
-}
-
-func TestResolveClassifiesText(t *testing.T) {
-	in, err := Resolve(context.Background(), "the widget counter double-counts on retry", nil, nil, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if in.Kind != KindText || in.Origin != "argument" {
-		t.Errorf("got %+v, want text/argument", in)
-	}
-	if in.Body != "the widget counter double-counts on retry" {
-		t.Errorf("Body = %q", in.Body)
-	}
-}
-
-func TestResolveReadsAFile(t *testing.T) {
+// The argument is classified without a model: "-" is stdin, a readable file is
+// read, and everything else is text, a directory and a path that does not exist
+// included, since "the widget/ package panics" is a plausible report.
+func TestResolve_ClassifiesTheArgument(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "crash.log")
-	if err := os.WriteFile(path, []byte("panic: nil map\n"), 0o644); err != nil {
+	file := filepath.Join(dir, "crash.log")
+	if err := os.WriteFile(file, []byte("panic: nil map\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	in, err := Resolve(context.Background(), path, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if in.Kind != KindFile {
-		t.Errorf("Kind = %s, want file", in.Kind)
-	}
-	if in.Body != "panic: nil map\n" {
-		t.Errorf("Body = %q", in.Body)
-	}
-}
-
-// A path that exists but is a directory is not an error: "src/" is a
-// plausible thing to name in a bug report, so it falls through to text.
-func TestResolveTreatsADirectoryAsText(t *testing.T) {
-	in, err := Resolve(context.Background(), t.TempDir(), nil, nil, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if in.Kind != KindText {
-		t.Errorf("Kind = %s, want text", in.Kind)
-	}
-}
-
-// A path that does NOT exist is text too. Refusing it as a missing file would
-// reject "the widget/ package panics".
-func TestResolveTreatsAMissingPathAsText(t *testing.T) {
-	in, err := Resolve(context.Background(), "internal/nope/missing.go panics on empty input", nil, nil, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if in.Kind != KindText {
-		t.Errorf("Kind = %s, want text", in.Kind)
+	for _, tc := range []struct {
+		name, arg, stdin string
+		kind             SourceKind
+		origin, body     string
+	}{
+		{"text", "the widget counter double-counts on retry", "", KindText, "argument", "the widget counter double-counts on retry"},
+		{"file", file, "", KindFile, file, "panic: nil map\n"},
+		{"directory", dir, "", KindText, "argument", dir},
+		{"missing path", "internal/nope/missing.go panics on empty input", "", KindText, "argument", "internal/nope/missing.go panics on empty input"},
+		{"stdin", "-", "piped report\n", KindStdin, "stdin", "piped report\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, err := Resolve(context.Background(), tc.arg, strings.NewReader(tc.stdin), nil, nil)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if in.Kind != tc.kind || in.Origin != tc.origin || in.Body != tc.body {
+				t.Errorf("got %s/%s %q, want %s/%s %q", in.Kind, in.Origin, in.Body, tc.kind, tc.origin, tc.body)
+			}
+		})
 	}
 }
 
-func TestResolveReadsStdin(t *testing.T) {
-	in, err := Resolve(context.Background(), "-", strings.NewReader("piped report\n"), nil, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if in.Kind != KindStdin || in.Origin != "stdin" {
-		t.Errorf("got %+v", in)
-	}
-	if in.Body != "piped report\n" {
-		t.Errorf("Body = %q", in.Body)
-	}
-}
-
-func TestResolveRejectsEmptyInput(t *testing.T) {
-	for _, arg := range []string{"", "   "} {
-		if _, err := Resolve(context.Background(), arg, nil, nil, nil); !errors.Is(err, ErrNoInput) {
-			t.Errorf("Resolve(%q) = %v, want ErrNoInput", arg, err)
-		}
-	}
-	if _, err := Resolve(context.Background(), "-", strings.NewReader("  \n"), nil, nil); !errors.Is(err, ErrNoInput) {
-		t.Errorf("empty stdin: want ErrNoInput, got %v", err)
+func TestResolve_RefusesAnEmptyInput(t *testing.T) {
+	for _, tc := range []struct{ name, arg, stdin string }{
+		{"empty", "", ""}, {"blank", "   ", ""}, {"blank stdin", "-", "  \n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Resolve(context.Background(), tc.arg, strings.NewReader(tc.stdin), nil, nil); !errors.Is(err, ErrNoInput) {
+				t.Errorf("err = %v, want ErrNoInput", err)
+			}
+		})
 	}
 }
 
-func TestResolveFetchesAnIssue(t *testing.T) {
+// A single-line, whitespace-free, path-shaped argument that does not exist is
+// read as text with a high-severity warning naming it; prose, multi-line input
+// and an existing directory are not.
+func TestResolve_FlagsAMistypedPath(t *testing.T) {
+	existing := filepath.Join(t.TempDir(), "src")
+	if err := os.Mkdir(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		arg     string
+		flagged bool
+	}{
+		{"widget/report.txt", true},
+		{"report.txt", true},
+		{"nope/", true},
+		{"the widget counter double-counts on retry", false},
+		{"see widget/report.txt for details", false},
+		{"widget/report.txt\nsecond line", false},
+		{"version.1234567", false},
+		{"plainword", false},
+		{"end.", false},
+		{existing, false},
+		{existing + "/", false},
+	} {
+		t.Run(tc.arg, func(t *testing.T) {
+			run := NewRun("tool", "test")
+			in, err := Resolve(context.Background(), tc.arg, nil, nil, run)
+			if err != nil || in.Kind != KindText {
+				t.Fatalf("Resolve = %s, %v; want text", in.Kind, err)
+			}
+			ws := warningsOf(run.Warnings(), WarnInputLooksLikePath)
+			if !tc.flagged {
+				if len(ws) != 0 {
+					t.Errorf("flagged as a path: %+v", ws)
+				}
+				return
+			}
+			if len(ws) != 1 || ws[0].Severity != "high" || ws[0].Stage != "input" || !strings.Contains(ws[0].Message, tc.arg) {
+				t.Errorf("warnings = %+v, want one high input warning naming the argument", ws)
+			}
+		})
+	}
+}
+
+// An issue is read through the forge client with its comments, where the
+// useful part of a report usually is.
+func TestResolve_ReadsAnIssueWithItsComments(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/comments") {
@@ -146,11 +135,8 @@ func TestResolveFetchesAnIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if in.Kind != KindIssue {
-		t.Fatalf("Kind = %s, want issue", in.Kind)
-	}
-	if in.Issue == nil || in.Issue.Number != 42 {
-		t.Fatalf("Issue = %+v", in.Issue)
+	if in.Kind != KindIssue || in.Issue == nil || in.Issue.Number != 42 {
+		t.Fatalf("input = %s, issue %+v", in.Kind, in.Issue)
 	}
 	for _, want := range []string{"it crashes", "on save", "here is the traceback", "maintainer"} {
 		if !strings.Contains(in.Body, want) {
@@ -159,119 +145,19 @@ func TestResolveFetchesAnIssue(t *testing.T) {
 	}
 }
 
-// A truncated report must say so: one that ends mid-stack-trace with no
-// marker reads to a model as a complete stack trace that had no more frames.
-func TestTruncateMarksTheCut(t *testing.T) {
-	long := strings.Repeat("a line of log output\n", MaxInputBytes/10)
-	got, cut := Truncate(long)
-	if !cut {
-		t.Fatal("want truncated")
-	}
-	if len(got) > MaxInputBytes+200 {
-		t.Errorf("len = %d, want about %d", len(got), MaxInputBytes)
-	}
-	if !strings.Contains(got, "truncated at") {
-		t.Error("the cut must be visible in the text")
-	}
-	short := "one line\n"
-	if got, cut := Truncate(short); cut || got != short {
-		t.Errorf("short input was altered: %q, %v", got, cut)
-	}
-}
-
-func TestRenderThreadIsDeterministic(t *testing.T) {
-	ref := issuex.IssueRef{Repo: issuex.Repo{Owner: "acme", Name: "widgets", Host: "github.com"}, Number: 7}
-	thread := issuex.IssueThread{
-		Issue: issuex.Issue{
-			Title:  "t",
-			Body:   "b",
-			State:  "open",
-			Author: issuex.User{Login: "u"},
-			Labels: []string{"bug"},
-		},
-		Comments: []issuex.Comment{{Body: "c", User: issuex.User{Login: "v"}}},
-	}
-	first := RenderThread(ref, thread)
-	if second := RenderThread(ref, thread); first != second {
-		t.Error("RenderThread is not deterministic")
-	}
-	if !strings.Contains(first, "Labels: bug") {
-		t.Errorf("labels missing:\n%s", first)
-	}
-}
-
-// TS-04-1 (unit): toolio Input struct and KindIssue source kind adopt issuex types and value
-// Verifies: 04-REQ-1.1
-func TestTS0401_KindIssueAndInputFields(t *testing.T) {
-	if got := string(KindIssue); got != "issue" {
-		t.Errorf("string(KindIssue) = %q, want %q", got, "issue")
-	}
-	var in Input
-	var _ *issuex.IssueRef = in.Issue
-	var _ *issuex.IssueThread = in.Thread
-}
-
-// TS-04-2 (integration): Resolve parses GitHub and GitLab issue and pull/merge request URLs via issuex
-// Verifies: 04-REQ-1.2, 04-REQ-10.1
-func TestTS0402_ResolveParsesGitHubAndGitLabURLs(t *testing.T) {
-	ctx := context.Background()
+// Every shape of forge URL is an issue: a GitHub issue and pull request, a
+// GitLab issue and merge request, each with its repository, number and
+// pull-request flag.
+func TestResolve_RecognisesEveryForgeURLShape(t *testing.T) {
 	client := &mockForgeClient{
 		authenticated: true,
-		readIssueFn: func(ctx context.Context, ref issuex.IssueRef) (issuex.IssueThread, error) {
-			return issuex.IssueThread{
-				Issue: issuex.Issue{
-					Number: ref.Number,
-					Title:  fmt.Sprintf("Issue %d", ref.Number),
-					Body:   "Body content",
-					State:  "open",
-					Author: issuex.User{Login: "author1"},
-					IsPR:   ref.IsPullRequest,
-				},
-				Comments: []issuex.Comment{
-					{Body: "A comment", User: issuex.User{Login: "reviewer1"}},
-				},
-			}, nil
+		readIssueFn: func(_ context.Context, ref issuex.IssueRef) (issuex.IssueThread, error) {
+			return issuex.IssueThread{Issue: issuex.Issue{
+				Number: ref.Number, Title: fmt.Sprintf("Issue %d", ref.Number), State: "open",
+				Author: issuex.User{Login: "author1"}, IsPR: ref.IsPullRequest,
+			}}, nil
 		},
 	}
-
-	// GitHub issue URL
-	inGH, errGH := Resolve(ctx, "https://github.com/org/repo/issues/42", nil, client, nil)
-	if errGH != nil {
-		t.Fatalf("Resolve GitHub issue: %v", errGH)
-	}
-	if inGH.Kind != KindIssue {
-		t.Errorf("inGH.Kind = %s, want %s", inGH.Kind, KindIssue)
-	}
-	if inGH.Issue == nil {
-		t.Fatal("inGH.Issue is nil")
-	}
-	if inGH.Issue.Repo.Owner != "org" || inGH.Issue.Repo.Name != "repo" || inGH.Issue.Number != 42 {
-		t.Errorf("inGH.Issue = %+v, want org/repo#42", inGH.Issue)
-	}
-	if inGH.Thread == nil || inGH.Thread.Issue.Number != 42 {
-		t.Errorf("inGH.Thread = %+v", inGH.Thread)
-	}
-
-	// GitLab merge request URL
-	inGL, errGL := Resolve(ctx, "https://gitlab.com/group/sub/project/-/merge_requests/99", nil, client, nil)
-	if errGL != nil {
-		t.Fatalf("Resolve GitLab MR: %v", errGL)
-	}
-	if inGL.Kind != KindIssue {
-		t.Errorf("inGL.Kind = %s, want %s", inGL.Kind, KindIssue)
-	}
-	if inGL.Issue == nil {
-		t.Fatal("inGL.Issue is nil")
-	}
-	if inGL.Issue.Repo.Owner != "group/sub" || inGL.Issue.Repo.Name != "project" || inGL.Issue.Number != 99 || !inGL.Issue.IsPullRequest {
-		t.Errorf("inGL.Issue = %+v, want group/sub/project#99 IsPullRequest=true", inGL.Issue)
-	}
-	if inGL.Thread == nil || inGL.Thread.Issue.Number != 99 {
-		t.Errorf("inGL.Thread = %+v", inGL.Thread)
-	}
-
-	// All four shapes of 04-REQ-10.1: a GitHub pull request and a GitLab issue
-	// too, each with its kind, repository, number and pull-request flag.
 	for _, tc := range []struct {
 		url         string
 		owner, name string
@@ -283,256 +169,251 @@ func TestTS0402_ResolveParsesGitHubAndGitLabURLs(t *testing.T) {
 		{"https://gitlab.com/group/sub/project/-/issues/5", "group/sub", "project", 5, false},
 		{"https://gitlab.com/group/sub/project/-/merge_requests/99", "group/sub", "project", 99, true},
 	} {
-		in, err := Resolve(ctx, tc.url, nil, client, nil)
-		if err != nil {
-			t.Fatalf("Resolve(%s): %v", tc.url, err)
-		}
-		if in.Kind != KindIssue || in.Issue == nil {
-			t.Errorf("%s: Kind = %s, Issue = %+v", tc.url, in.Kind, in.Issue)
-			continue
-		}
-		got := in.Issue
-		if got.Repo.Owner != tc.owner || got.Repo.Name != tc.name || got.Number != tc.number || got.IsPullRequest != tc.isPR {
-			t.Errorf("%s: parsed %+v, want %s/%s#%d IsPullRequest=%v", tc.url, got, tc.owner, tc.name, tc.number, tc.isPR)
-		}
-	}
-}
-
-// TS-04-3 (unit): Resolve rejects issue URLs when no forge client is configured
-// Verifies: 04-REQ-1.3
-func TestTS0403_ResolveRejectsNilForgeClient(t *testing.T) {
-	_, err := Resolve(context.Background(), "https://github.com/owner/repo/issues/10", nil, nil, nil)
-	if err == nil {
-		t.Fatal("Resolve with nil forge client should return an error")
-	}
-	if !strings.Contains(err.Error(), "cannot read issue: no forge client configured") {
-		t.Errorf("err = %q, want containing 'cannot read issue: no forge client configured'", err.Error())
-	}
-}
-
-// TS-04-4 (unit): Resolve annotates unauthenticated 404 errors with private repository credential notice
-// Verifies: 04-REQ-1.4
-func TestTS0404_ResolveAnnotatesUnauthenticated404(t *testing.T) {
-	client := &mockForgeClient{
-		authenticated: false,
-		readErr:       issuex.ErrNotFound,
-	}
-	_, err := Resolve(context.Background(), "https://github.com/private/repo/issues/1", nil, client, nil)
-	if err == nil {
-		t.Fatal("Resolve should fail on 404")
-	}
-	if !errors.Is(err, issuex.ErrNotFound) {
-		t.Errorf("err = %v, want wrapping issuex.ErrNotFound", err)
-	}
-	errStr := strings.ToLower(err.Error())
-	if !strings.Contains(errStr, "credentials") && !strings.Contains(errStr, "private") {
-		t.Errorf("err = %q, want mention of credentials or private", err.Error())
-	}
-}
-
-// TS-04-5 (unit): Resolve updates pull request flag, truncates long threads, and populates Input fields
-// Verifies: 04-REQ-1.5
-func TestTS0405_ResolvePullRequestAndTruncation(t *testing.T) {
-	makeLargeComments := func() []issuex.Comment {
-		var comments []issuex.Comment
-		// MaxInputBytes is 256KB, make comments exceeding that
-		body := strings.Repeat("a line of lengthy traceback information\n", 8000)
-		comments = append(comments, issuex.Comment{
-			Body: body,
-			User: issuex.User{Login: "bot"},
+		t.Run(tc.url, func(t *testing.T) {
+			in, err := Resolve(context.Background(), tc.url, nil, client, nil)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if in.Kind != KindIssue || in.Issue == nil || in.Thread == nil {
+				t.Fatalf("Kind = %s, Issue = %+v, Thread = %+v", in.Kind, in.Issue, in.Thread)
+			}
+			got := in.Issue
+			if got.Repo.Owner != tc.owner || got.Repo.Name != tc.name || got.Number != tc.number || got.IsPullRequest != tc.isPR {
+				t.Errorf("parsed %+v, want %s/%s#%d IsPullRequest=%v", got, tc.owner, tc.name, tc.number, tc.isPR)
+			}
+			if in.Thread.Issue.Number != tc.number || in.Origin != got.URL() {
+				t.Errorf("thread #%d, origin %q", in.Thread.Issue.Number, in.Origin)
+			}
 		})
-		return comments
 	}
+}
 
+// An issue that cannot be read is an error; a 404 to a client without a
+// credential says the repository may be private.
+func TestResolve_AnIssueThatCannotBeRead(t *testing.T) {
+	const url = "https://github.com/private/repo/issues/1"
+	for _, tc := range []struct {
+		name     string
+		forge    issuex.Client
+		mention  string
+		notFound bool
+	}{
+		{"no forge client", nil, "cannot read issue: no forge client configured", false},
+		{"not found without a credential", &mockForgeClient{readErr: issuex.ErrNotFound}, "credentials", true},
+		{"not found with a credential", &mockForgeClient{authenticated: true, readErr: issuex.ErrNotFound}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Resolve(context.Background(), url, nil, tc.forge, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.mention) {
+				t.Fatalf("err = %v, want one naming %q", err, tc.mention)
+			}
+			if tc.notFound && !errors.Is(err, issuex.ErrNotFound) {
+				t.Errorf("err = %v does not wrap ErrNotFound", err)
+			}
+			if tc.mention == "" && strings.Contains(err.Error(), "credentials") {
+				t.Errorf("an authenticated client is told to bring credentials: %v", err)
+			}
+		})
+	}
+}
+
+// A thread read as an issue that is a pull request is marked one, and a
+// thread over the input bound is cut and says so.
+func TestResolve_APullRequestThreadIsMarkedAndTruncated(t *testing.T) {
 	client := &mockForgeClient{
 		authenticated: true,
 		thread: issuex.IssueThread{
-			Issue: issuex.Issue{
-				Number: 5,
-				Title:  "Big PR",
-				State:  "open",
-				Author: issuex.User{Login: "pr-author"},
-				IsPR:   true,
-			},
-			Comments: makeLargeComments(),
+			Issue: issuex.Issue{Number: 5, Title: "Big PR", State: "open", Author: issuex.User{Login: "pr-author"}, IsPR: true},
+			Comments: []issuex.Comment{{
+				Body: strings.Repeat("a line of lengthy traceback information\n", 8000),
+				User: issuex.User{Login: "bot"},
+			}},
 		},
 	}
-
 	in, err := Resolve(context.Background(), "https://github.com/org/repo/issues/5", nil, client, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if in.Kind != KindIssue {
-		t.Errorf("in.Kind = %s, want %s", in.Kind, KindIssue)
+	if in.Kind != KindIssue || in.Issue == nil || !in.Issue.IsPullRequest || in.Origin != in.Issue.URL() {
+		t.Errorf("input = %s, issue %+v, origin %q", in.Kind, in.Issue, in.Origin)
 	}
-	if in.Issue == nil || !in.Issue.IsPullRequest {
-		t.Errorf("in.Issue = %+v, want IsPullRequest=true", in.Issue)
-	}
-	if in.Origin != in.Issue.URL() {
-		t.Errorf("in.Origin = %q, want %q", in.Origin, in.Issue.URL())
-	}
-	if !in.Truncated {
-		t.Error("in.Truncated = false, want true")
-	}
-	if len(in.Body) > MaxInputBytes+200 {
-		t.Errorf("len(in.Body) = %d, want <= %d", len(in.Body), MaxInputBytes+200)
-	}
-	if !strings.Contains(in.Body, "truncated at") {
-		t.Errorf("in.Body missing truncation notice: %s", in.Body[len(in.Body)-100:])
-	}
-	if in.Thread == nil {
-		t.Error("in.Thread is nil")
+	if !in.Truncated || len(in.Body) > MaxInputBytes+200 || !strings.Contains(in.Body, "truncated at") {
+		t.Errorf("truncated = %v, %d bytes", in.Truncated, len(in.Body))
 	}
 }
 
-// TS-04-6 (unit): RenderThread renders distinct header prefix based on forge host and pull request flag
-// Verifies: 04-REQ-2.1, 04-REQ-2.2, 04-REQ-2.3, 04-REQ-10.2
-func TestTS0406_RenderThreadBrandingHeader(t *testing.T) {
-	refGL := issuex.IssueRef{Repo: issuex.Repo{Host: "gitlab.com", Owner: "o", Name: "r"}, Number: 1, IsPullRequest: true}
-	refGH := issuex.IssueRef{Repo: issuex.Repo{Host: "github.com", Owner: "o", Name: "r"}, Number: 2, IsPullRequest: false}
-	refGHEmpty := issuex.IssueRef{Repo: issuex.Repo{Host: "", Owner: "o", Name: "r"}, Number: 3, IsPullRequest: false}
-	refCustom := issuex.IssueRef{Repo: issuex.Repo{Host: "forgejo.example.com", Owner: "o", Name: "r"}, Number: 4, IsPullRequest: true}
+// --input-kind refuses a mismatch as a usage error naming why, before anything
+// is fetched: with no forge client, entering the issue branch would fail with
+// another error.
+func TestResolveForced_RefusesAMismatch(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, kind, arg, mention string
+	}{
+		{"missing file", "file", "/no/such/path.txt", "does not exist"},
+		{"a URL as a file", "file", "https://github.com/a/b/issues/1", "does not exist"},
+		{"a directory as a file", "file", dir, "is a directory"},
+		{"text as an issue", "issue", "not a url", "is not a GitHub or GitLab issue"},
+		{"another host as an issue", "issue", "https://example.com/not/a/forge/issues/1", "is not a GitHub or GitLab issue"},
+		{"a file as stdin", "stdin", "file.txt", `must be "-"`},
+		{"an unknown kind", "url", "x", "--input-kind must be one of"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ResolveForced(context.Background(), tc.kind, tc.arg, strings.NewReader("piped"), nil)
+			var ue *UsageError
+			if !errors.As(err, &ue) || ue.Category() != "usage" || !strings.Contains(err.Error(), tc.mention) {
+				t.Errorf("err = %v, want a usage error naming %q", err, tc.mention)
+			}
+		})
+	}
+	for _, kind := range []string{"text", "file"} {
+		t.Run("empty "+kind, func(t *testing.T) {
+			if _, err := ResolveForced(context.Background(), kind, "  ", nil, nil); !errors.Is(err, ErrNoInput) {
+				t.Errorf("err = %v, want ErrNoInput", err)
+			}
+		})
+	}
+}
 
+// A forced kind is read as that kind. Text is the argument verbatim, untrimmed,
+// and neither a file of that name nor a parseable URL is read.
+func TestResolveForced_ReadsTheForcedKind(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("report.txt", []byte("the file's own content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	abs, err := filepath.Abs("report.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := issuex.IssueThread{Issue: issuex.Issue{Number: 3, Title: "t", State: "open"}}
+	for _, tc := range []struct {
+		name, kind, arg, stdin string
+		want                   SourceKind
+		body                   string
+	}{
+		{"text naming a file", "text", "report.txt", "", KindText, "report.txt"},
+		{"text that is a URL", "text", "https://github.com/a/b/issues/1", "", KindText, "https://github.com/a/b/issues/1"},
+		{"text verbatim", "text", " missing/file.go ", "", KindText, " missing/file.go "},
+		{"file", "file", abs, "", KindFile, "the file's own content"},
+		{"stdin", "stdin", "-", "piped", KindStdin, "piped"},
+		{"issue", "issue", "https://github.com/a/b/issues/3", "", KindIssue, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, err := ResolveForced(context.Background(), tc.kind, tc.arg, strings.NewReader(tc.stdin), &mockForgeClient{thread: thread})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if in.Kind != tc.want || (tc.body != "" && in.Body != tc.body) {
+				t.Errorf("input = %s %q, want %s %q", in.Kind, in.Body, tc.want, tc.body)
+			}
+			if tc.kind == "text" && in.Issue != nil {
+				t.Error("forced text was read as an issue")
+			}
+		})
+	}
+}
+
+// A truncated report must say so: one that ends mid-stack-trace with no
+// marker reads to a model as a complete stack trace that had no more frames.
+func TestTruncate_MarksTheCut(t *testing.T) {
+	long := strings.Repeat("a line of log output\n", MaxInputBytes/10)
+	got, cut := Truncate(long)
+	if !cut || len(got) > MaxInputBytes+200 || !strings.Contains(got, "truncated at") {
+		t.Errorf("truncated = %v, %d bytes, marked = %v", cut, len(got), strings.Contains(got, "truncated at"))
+	}
+	short := "one line\n"
+	if got, cut := Truncate(short); cut || got != short {
+		t.Errorf("short input was altered: %q, %v", got, cut)
+	}
+}
+
+// The header names the forge by its host and the kind of thread.
+func TestRenderThread_Header(t *testing.T) {
 	thread := issuex.IssueThread{Issue: issuex.Issue{State: "open"}}
-
-	if got := RenderThread(refGL, thread); !strings.HasPrefix(got, "GitLab pull request o/r#1 (state: open)\n") {
-		t.Errorf("GitLab PR header = %q", got)
-	}
-	if got := RenderThread(refGH, thread); !strings.HasPrefix(got, "GitHub issue o/r#2 (state: open)\n") {
-		t.Errorf("GitHub issue header = %q", got)
-	}
-	if got := RenderThread(refGHEmpty, thread); !strings.HasPrefix(got, "GitHub issue o/r#3 (state: open)\n") {
-		t.Errorf("GitHub empty host header = %q", got)
-	}
-	if got := RenderThread(refCustom, thread); !strings.HasPrefix(got, "Forge pull request o/r#4 (state: open)\n") {
-		t.Errorf("Forge custom host header = %q", got)
+	for _, tc := range []struct {
+		host   string
+		number int
+		pr     bool
+		want   string
+	}{
+		{"gitlab.com", 1, true, "GitLab pull request o/r#1 (state: open)\n"},
+		{"github.com", 2, false, "GitHub issue o/r#2 (state: open)\n"},
+		{"", 3, false, "GitHub issue o/r#3 (state: open)\n"},
+		{"forgejo.example.com", 4, true, "Forge pull request o/r#4 (state: open)\n"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			ref := issuex.IssueRef{Repo: issuex.Repo{Host: tc.host, Owner: "o", Name: "r"}, Number: tc.number, IsPullRequest: tc.pr}
+			if got := RenderThread(ref, thread); !strings.HasPrefix(got, tc.want) {
+				t.Errorf("header = %q", got)
+			}
+		})
 	}
 }
 
-// TS-04-7 (property): RenderThread formats issue thread metadata and comments in deterministic order
-// Verifies: 04-REQ-2.4
-func TestTS0407_RenderThreadDeterministicOrder(t *testing.T) {
-	testCases := []issuex.IssueThread{
+// The thread is rendered the same way every time, so a provider's cache prefix
+// survives: title, author, labels when there are any, body, then each comment
+// in order.
+func TestRenderThread_IsDeterministicAndOrdered(t *testing.T) {
+	for i, tc := range []issuex.IssueThread{
 		{
-			Issue: issuex.Issue{
-				Title:  "Crash in parser",
-				Author: issuex.User{Login: "alice"},
-				State:  "open",
-				Body:   "Steps to reproduce:\n1. run app\n2. crash",
-				Labels: []string{"bug", "critical"},
-			},
+			Issue: issuex.Issue{Title: "Crash in parser", Author: issuex.User{Login: "alice"}, State: "open",
+				Body: "Steps to reproduce:\n1. run app\n2. crash", Labels: []string{"bug", "critical"}},
 			Comments: []issuex.Comment{
 				{User: issuex.User{Login: "bob"}, Body: "Confirmed on macOS"},
 				{User: issuex.User{Login: "carol"}, Body: "Fixed in PR #12"},
 			},
 		},
 		{
-			Issue: issuex.Issue{
-				Title:  "Feature request: dark mode",
-				Author: issuex.User{Login: "david"},
-				State:  "closed",
-				Body:   "Please add dark mode.",
-				Labels: nil, // no labels
-			},
-			Comments: []issuex.Comment{
-				{User: issuex.User{Login: "eve"}, Body: "Shipped in v2.0"},
-			},
+			Issue:    issuex.Issue{Title: "Feature request: dark mode", Author: issuex.User{Login: "david"}, State: "closed", Body: "Please add dark mode."},
+			Comments: []issuex.Comment{{User: issuex.User{Login: "eve"}, Body: "Shipped in v2.0"}},
 		},
-		{
-			Issue: issuex.Issue{
-				Title:  "Empty issue",
-				Author: issuex.User{Login: "frank"},
-				State:  "open",
-				Body:   "",
-			},
-			Comments: nil,
-		},
-	}
-
-	for i, tc := range testCases {
-		ref := issuex.IssueRef{Repo: issuex.Repo{Host: "github.com", Owner: "org", Name: "repo"}, Number: i + 1}
-		out1 := RenderThread(ref, tc)
-		out2 := RenderThread(ref, tc)
-
-		if out1 != out2 {
-			t.Fatalf("case %d: RenderThread is not deterministic: out1 != out2", i)
-		}
-
-		titleSub := "Title: " + tc.Issue.Title
-		authorSub := "Author: " + tc.Issue.Author.Login
-		idxTitle := strings.Index(out1, titleSub)
-		if idxTitle == -1 {
-			t.Errorf("case %d: missing %q", i, titleSub)
-		}
-		idxAuthor := strings.Index(out1, authorSub)
-		if idxAuthor == -1 {
-			t.Errorf("case %d: missing %q", i, authorSub)
-		}
-		if idxAuthor <= idxTitle {
-			t.Errorf("case %d: Author appears before Title", i)
-		}
-
-		lastIdx := idxAuthor
-		if len(tc.Issue.Labels) > 0 {
-			labelsSub := "Labels: " + strings.Join(tc.Issue.Labels, ", ")
-			idxLabels := strings.Index(out1, labelsSub)
-			if idxLabels == -1 {
-				t.Errorf("case %d: missing %q", i, labelsSub)
+		{Issue: issuex.Issue{Title: "Empty issue", Author: issuex.User{Login: "frank"}, State: "open"}},
+	} {
+		t.Run(tc.Issue.Title, func(t *testing.T) {
+			ref := issuex.IssueRef{Repo: issuex.Repo{Host: "github.com", Owner: "org", Name: "repo"}, Number: i + 1}
+			out := RenderThread(ref, tc)
+			if out != RenderThread(ref, tc) {
+				t.Fatal("RenderThread is not deterministic")
 			}
-			if idxLabels <= lastIdx {
-				t.Errorf("case %d: Labels appear before Author", i)
+			parts := []string{"Title: " + tc.Issue.Title, "Author: " + tc.Issue.Author.Login}
+			if len(tc.Issue.Labels) > 0 {
+				parts = append(parts, "Labels: "+strings.Join(tc.Issue.Labels, ", "))
+			} else if strings.Contains(out, "Labels:") {
+				t.Error("a Labels line without labels")
 			}
-			lastIdx = idxLabels
-		} else {
-			if strings.Contains(out1, "Labels:") {
-				t.Errorf("case %d: unexpected Labels line", i)
+			if tc.Issue.Body != "" {
+				parts = append(parts, tc.Issue.Body)
 			}
-		}
-
-		if tc.Issue.Body != "" {
-			idxBody := strings.Index(out1, strings.TrimSpace(tc.Issue.Body))
-			if idxBody == -1 {
-				t.Errorf("case %d: missing body", i)
+			for _, c := range tc.Comments {
+				parts = append(parts, fmt.Sprintf("--- comment by %s ---\n%s", c.User.Login, c.Body))
 			}
-			if idxBody <= lastIdx {
-				t.Errorf("case %d: Body appears before header/labels", i)
+			last := -1
+			for _, p := range parts {
+				i := strings.Index(out, p)
+				if i < 0 {
+					t.Errorf("missing %q", p)
+					continue
+				}
+				if i <= last {
+					t.Errorf("%q is out of order", p)
+				}
+				last = i
 			}
-			lastIdx = idxBody
-		}
-
-		for _, c := range tc.Comments {
-			expectedComment := fmt.Sprintf("--- comment by %s ---\n%s", c.User.Login, strings.TrimSpace(c.Body))
-			idxComment := strings.Index(out1, expectedComment)
-			if idxComment == -1 {
-				t.Errorf("case %d: missing comment block %q", i, expectedComment)
-			}
-			if idxComment <= lastIdx {
-				t.Errorf("case %d: comment block appears out of order", i)
-			}
-			lastIdx = idxComment
-		}
+		})
 	}
 }
 
-// TS-04-8 (unit): RenderThread appends truncation notice when comments are truncated
-// Verifies: 04-REQ-2.5
-func TestTS0408_RenderThreadTruncationNotice(t *testing.T) {
+// A thread with more comments than were read says so at its end.
+func TestRenderThread_MarksUnreadComments(t *testing.T) {
 	ref := issuex.IssueRef{Repo: issuex.Repo{Host: "gitlab.com", Owner: "g", Name: "p"}, Number: 10}
-	thread := issuex.IssueThread{
-		Issue:     issuex.Issue{Title: "Bug", State: "open", Author: issuex.User{Login: "alice"}},
-		Truncated: true,
-	}
-	out := RenderThread(ref, thread)
-	if !strings.HasSuffix(out, "\n[... further comments not read ...]\n") {
-		t.Errorf("out = %q, want ending with truncation notice", out)
-	}
-
-	threadNotTruncated := issuex.IssueThread{
-		Issue:     issuex.Issue{Title: "Bug", State: "open", Author: issuex.User{Login: "alice"}},
-		Truncated: false,
-	}
-	outNotTruncated := RenderThread(ref, threadNotTruncated)
-	if strings.Contains(outNotTruncated, "[... further comments not read ...]") {
-		t.Errorf("outNotTruncated = %q, should not contain truncation notice", outNotTruncated)
+	const notice = "\n[... further comments not read ...]\n"
+	for _, truncated := range []bool{true, false} {
+		out := RenderThread(ref, issuex.IssueThread{
+			Issue: issuex.Issue{Title: "Bug", State: "open", Author: issuex.User{Login: "alice"}}, Truncated: truncated,
+		})
+		if strings.HasSuffix(out, notice) != truncated {
+			t.Errorf("truncated=%v: out = %q", truncated, out)
+		}
 	}
 }

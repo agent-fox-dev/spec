@@ -4,41 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
-	"github.com/agent-fox-dev/agentkit-go/tools"
-	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 )
 
-// withoutIndex makes the index builder fail, so these tests neither build a
-// real index nor depend on one.
-func withoutIndex(t *testing.T) {
-	t.Helper()
-	old := agentrun.NewIndex
-	agentrun.NewIndex = func(*workspace.Workspace) (tools.Index, error) { return nil, errors.New("no index in tests") }
-	t.Cleanup(func() { agentrun.NewIndex = old })
-}
-
-// scripted makes the shell use a scripted model in place of Anthropic's.
-func scripted(t *testing.T) {
-	t.Helper()
-	t.Cleanup(SetProvider(faux.New()))
-}
-
-func TestMainRunsExecWithTheResolvedDeps(t *testing.T) {
+func TestMain_RunsExecWithTheResolvedDeps(t *testing.T) {
 	scripted(t)
-	withoutIndex(t)
 	app, seen := newApp(t, nil)
-	dir := t.TempDir()
-	env, code, _ := runApp(t, app, []string{"--dir", dir, "--model", "ADVANCED", "an idea"}, "")
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--model", "ADVANCED", "an idea"}, "")
 	if code != ExitOK || !env.OK || env.Status != "done" {
 		t.Fatalf("code=%d env=%+v", code, env)
 	}
@@ -57,36 +36,169 @@ func TestMainRunsExecWithTheResolvedDeps(t *testing.T) {
 	if seen.Index != nil || seen.IndexUnavailable == "" {
 		t.Errorf("an index that could not be built: Index=%v reason=%q", seen.Index, seen.IndexUnavailable)
 	}
-	if !hasWarning(env, WarnCodeSearchUnavailable) {
+	if len(warningsOf(env.Warnings, WarnCodeSearchUnavailable)) != 1 {
 		t.Errorf("warnings = %+v, want code_search_unavailable", env.Warnings)
 	}
 }
 
-func TestTotalBudgetLowersTheOnePhasesCeiling(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
+// Every invocation that cannot hold is a usage error, before the input is read,
+// a model resolved or Exec run, and the message names what was wrong.
+func TestMain_RefusesAWrongInvocationBeforeAnythingRuns(t *testing.T) {
+	outDir := t.TempDir()
 	for _, tc := range []struct {
+		name    string
+		argv    []string
+		mention string
+	}{
+		{"unknown detail", []string{"--detail", "brief", "x"}, "--detail"},
+		{"negative budget", []string{"--budget", "-1", "x"}, "--budget cannot be negative"},
+		{"negative total budget", []string{"--total-budget", "-1", "x"}, "--total-budget cannot be negative"},
+		{"negative max turns", []string{"--max-turns", "-1", "x"}, "--max-turns cannot be negative"},
+		{"negative max tokens", []string{"--max-tokens", "-1", "x"}, "--max-tokens cannot be negative"},
+		{"unknown input kind", []string{"--input-kind", "url", "x"}, "--input-kind"},
+		{"unknown effort", []string{"--effort", "huge", "x"}, "huge"},
+		{"undefined flag", []string{"--no-such-flag", "x"}, "no-such-flag"},
+		{"two inputs", []string{"one", "two"}, "expected one input"},
+		{"output to stdin", []string{"--output", "-", "x"}, "--output"},
+		{"output to a directory", []string{"--output", outDir, "x"}, "directory"},
+		{"phase model naming no phase", []string{"--phase-model", "review=ADVANCED", "x"}, "names no phase"},
+		{"phase model without a model", []string{"--phase-model", "tasks", "x"}, "PHASE=MODEL"},
+		{"phase model with only an effort", []string{"--phase-model", "tasks=:high", "x"}, "names no model"},
+		{"input and context over the bound", []string{"--context", strings.Repeat("x", MaxInputBytes), "x"}, "exceed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, code, _ := runApp(t, refusingApp(t), tc.argv, "")
+			if code != ExitUsage || env.Status != "usage" || env.OK || env.Error == nil || env.Error.Category != "usage" {
+				t.Fatalf("code=%d env=%+v", code, env)
+			}
+			if !strings.Contains(env.Error.Message, tc.mention) {
+				t.Errorf("message %q does not mention %q", env.Error.Message, tc.mention)
+			}
+		})
+	}
+}
+
+// --output is checked before PreCheck, the workspace, the input and the model:
+// a --dir that does not exist and no credential would otherwise fail first.
+func TestMain_ChecksOutputBeforeAnythingElse(t *testing.T) {
+	var preCheck, checkInput bool
+	app := refusingApp(t)
+	app.PreCheck = func(*Common) error { preCheck = true; return nil }
+	app.CheckInput = func(Input) error { checkInput = true; return nil }
+
+	var stdout, stderr bytes.Buffer
+	code := app.Main(context.Background(),
+		[]string{"--dir", filepath.Join(t.TempDir(), "missing"), "--output", "-", "x"},
+		strings.NewReader(""), &stdout, &stderr)
+	if code != ExitUsage {
+		t.Fatalf("code = %d, want %d", code, ExitUsage)
+	}
+	if preCheck || checkInput {
+		t.Errorf("PreCheck=%v CheckInput=%v, want neither called", preCheck, checkInput)
+	}
+	if !strings.Contains(stderr.String(), "--output") {
+		t.Errorf("stderr %q does not name --output", stderr.String())
+	}
+}
+
+// A model that cannot be resolved, for the run or for one phase, is a model
+// failure at preflight that names the tiers.
+func TestMain_AnUnknownModelIsAModelFailure(t *testing.T) {
+	for name, argv := range map[string][]string{
+		"--model":       {"--model", "gpt-9", "x"},
+		"--phase-model": {"--phase-model", "tasks=gpt-9", "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scripted(t)
+			env, code, _ := runApp(t, refusingApp(t), append([]string{"--dir", t.TempDir()}, argv...), "")
+			if code != ExitFailed || env.Error == nil || env.Error.Category != agentrun.CategoryModel || env.Error.Stage != "preflight" {
+				t.Fatalf("code=%d error=%+v", code, env.Error)
+			}
+			if env.Error.FixHint == nil || env.Error.FixHint.Flag != "--model" {
+				t.Errorf("fix hint = %+v", env.Error.FixHint)
+			}
+		})
+	}
+}
+
+func TestMain_AMissingCredentialIsAnAuthFailure(t *testing.T) {
+	for _, v := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN",
+		"CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_BEDROCK"} {
+		t.Setenv(v, "")
+	}
+	env, code, _ := runApp(t, refusingApp(t), []string{"--dir", t.TempDir(), "x"}, "")
+	if code != ExitFailed || env.Error == nil || env.Error.Category != agentrun.CategoryAuth {
+		t.Fatalf("code=%d error=%+v", code, env.Error)
+	}
+	if env.Error.FixHint == nil || len(env.Error.FixHint.Env) == 0 {
+		t.Errorf("fix hint = %+v", env.Error.FixHint)
+	}
+}
+
+// --input-kind skips the guessing: a mismatch is a usage error before anything
+// is fetched, a model resolved (no credential is set, so that would fail
+// differently) or Exec run, and a match is read as that kind.
+func TestMain_InputKindForcesTheClassification(t *testing.T) {
+	requests := noNetwork(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	for _, m := range []struct{ kind, arg string }{
+		{"file", "https://github.com/a/b/issues/1"},
+		{"file", filepath.Join(dir, "missing.txt")},
+		{"file", dir},
+		{"issue", "a plain string"},
+		{"issue", "https://example.com/not/a/forge/issues/1"},
+		{"stdin", "not-a-dash"},
+	} {
+		t.Run(m.kind+" "+m.arg, func(t *testing.T) {
+			env, code, _ := runApp(t, refusingApp(t), []string{"--dir", dir, "--input-kind", m.kind, m.arg}, "piped")
+			if code != ExitUsage || env.Error == nil || env.Error.Category != "usage" {
+				t.Errorf("code=%d error=%+v", code, env.Error)
+			}
+		})
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("%d HTTP requests were made", n)
+	}
+
+	t.Run("stdin -", func(t *testing.T) {
+		scripted(t)
+		app, seen := newApp(t, nil)
+		env, code, _ := runApp(t, app, []string{"--dir", dir, "--input-kind", "stdin", "-"}, "piped")
+		if code != ExitOK || env.Input == nil || env.Input.Kind != string(KindStdin) || seen.Input.Body != "piped" {
+			t.Errorf("code=%d input=%+v", code, env.Input)
+		}
+	})
+}
+
+// A single-phase command folds --total-budget into the per-phase ceiling; a
+// multi-phase one keeps the per-phase --budget.
+func TestMain_TotalBudgetLowersTheOnePhasesCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
 		single bool
 		want   float64
-	}{{true, 4}, {false, 10}} {
-		app, seen := newApp(t, nil)
-		app.SinglePhase = tc.single
-		app.DefaultBounds = agentrun.Bounds{MaxTurns: 10, MaxBudgetUSD: 2}
-		_, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--budget", "10", "--total-budget", "4", "x"}, "")
-		if code != ExitOK {
-			t.Fatalf("code = %d", code)
-		}
-		if _, got := seen.Runner.ResolvedBounds(); got != tc.want {
-			t.Errorf("single=%v: ceiling = %v, want %v", tc.single, got, tc.want)
-		}
+	}{{"single phase", true, 4}, {"several phases", false, 10}} {
+		t.Run(tc.name, func(t *testing.T) {
+			scripted(t)
+			app, seen := newApp(t, nil)
+			app.SinglePhase = tc.single
+			app.DefaultBounds = agentrun.Bounds{MaxTurns: 10, MaxBudgetUSD: 2}
+			_, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--budget", "10", "--total-budget", "4", "x"}, "")
+			if code != ExitOK {
+				t.Fatalf("code = %d", code)
+			}
+			if _, got := seen.Runner.ResolvedBounds(); got != tc.want {
+				t.Errorf("ceiling = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
 // --max-tokens is the cap on one response of every phase, and it has to reach
 // the request a phase sends, not just the parsed flags. A phase that asks for
 // its own cap gets the flag's instead; with no flag it keeps its own.
-func TestMaxTokensReachesTheRequestsOfTheRun(t *testing.T) {
-	withoutIndex(t)
+func TestMain_MaxTokensReachesTheRequestsOfTheRun(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		argv []string
@@ -96,6 +208,7 @@ func TestMaxTokensReachesTheRequestsOfTheRun(t *testing.T) {
 		{"the flag replaces it", []string{"--max-tokens", "12345"}, 12345},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			withoutIndex(t)
 			p := faux.New()
 			t.Cleanup(SetProvider(p))
 			app, _ := newApp(t, func(ctx context.Context, d Deps) (int, any, *ErrorInfo) {
@@ -119,99 +232,84 @@ func TestMaxTokensReachesTheRequestsOfTheRun(t *testing.T) {
 	}
 }
 
-func TestUsageErrorsAreRefusedBeforeAnythingRuns(t *testing.T) {
-	for _, argv := range [][]string{
-		{"--detail", "brief", "x"},
-		{"--budget", "-1", "x"},
-		{"--total-budget", "-1", "x"},
-		{"--max-turns", "-1", "x"},
-		{"--max-tokens", "-1", "x"},
-		{"--input-kind", "url", "x"},
-		{"--effort", "huge", "x"},
-		{"--no-such-flag", "x"},
-		{"one", "two"},
-		{"--output", "-", "x"},
-	} {
-		app, _ := newApp(t, func(context.Context, Deps) (int, any, *ErrorInfo) {
-			t.Fatalf("%v: Exec ran", argv)
-			return 0, nil, nil
-		})
-		env, code, _ := runApp(t, app, argv, "")
-		if code != ExitUsage || env.Status != "usage" || env.OK || env.Error == nil || env.Error.Category != "usage" {
-			t.Errorf("%v: code=%d env=%+v", argv, code, env)
+// The effort comes from --effort, then $AF_MODEL_EFFORT; "off" sends none, and
+// an invalid environment value is a usage error naming the variable.
+func TestMain_EffortComesFromTheFlagThenTheEnvironment(t *testing.T) {
+	t.Run("environment", func(t *testing.T) {
+		scripted(t)
+		t.Setenv(EffortEnv, "low")
+		app, seen := newApp(t, nil)
+		_, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
+		if seen.Models.Default.Effort != "low" {
+			t.Errorf("effort = %q, want low", seen.Models.Default.Effort)
 		}
-	}
+	})
+	t.Run("the flag wins", func(t *testing.T) {
+		scripted(t)
+		t.Setenv(EffortEnv, "low")
+		app, seen := newApp(t, nil)
+		_, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "--effort", "off", "x"}, "")
+		if seen.Models.Default.Effort != "" {
+			t.Errorf("--effort off = %q, want none", seen.Models.Default.Effort)
+		}
+	})
+	t.Run("an invalid environment value", func(t *testing.T) {
+		scripted(t)
+		t.Setenv(EffortEnv, "loud")
+		env, code, _ := runApp(t, refusingApp(t), []string{"--dir", t.TempDir(), "x"}, "")
+		if code != ExitUsage || env.Error == nil || !strings.Contains(env.Error.Message, EffortEnv) {
+			t.Errorf("code=%d error=%+v", code, env.Error)
+		}
+	})
 }
 
-// The table above cannot tell a negative value from a flag that does not exist:
-// both are usage errors. This one can.
-func TestANegativeMaxTokensIsRefusedByName(t *testing.T) {
-	app, _ := newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--max-tokens", "-1", "x"}, "")
-	if code != ExitUsage || env.Error == nil || !strings.Contains(env.Error.Message, "--max-tokens cannot be negative") {
-		t.Errorf("code=%d error=%+v", code, env.Error)
-	}
-}
-
-func TestAnUnknownModelIsAModelFailure(t *testing.T) {
+// An effort the model does not take is lowered to the highest one it does, and
+// one warning per model names every phase it applies to, the review phases
+// included on a run that never asks for a review: the warning describes the
+// resolved plan, not the phases that ran.
+func TestMain_AClampedEffortIsWarnedOncePerModel(t *testing.T) {
 	scripted(t)
-	app, _ := newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--model", "gpt-9", "x"}, "")
-	if code != ExitFailed || env.Error == nil || env.Error.Category != agentrun.CategoryModel || env.Error.Stage != "preflight" {
-		t.Fatalf("code=%d error=%+v", code, env.Error)
-	}
-	if env.Error.FixHint == nil || env.Error.FixHint.Flag != "--model" {
-		t.Errorf("fix hint = %+v", env.Error.FixHint)
-	}
-}
-
-func TestAMissingCredentialIsAnAuthFailure(t *testing.T) {
-	for _, v := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN",
-		"CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_BEDROCK"} {
-		t.Setenv(v, "")
-	}
-	app, _ := newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
-	if code != ExitFailed || env.Error == nil || env.Error.Category != agentrun.CategoryAuth {
-		t.Fatalf("code=%d error=%+v", code, env.Error)
-	}
-	if env.Error.FixHint == nil || len(env.Error.FixHint.Env) == 0 {
-		t.Errorf("fix hint = %+v", env.Error.FixHint)
-	}
-}
-
-func TestEffortComesFromTheFlagThenTheEnvironment(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
-	t.Setenv(EffortEnv, "low")
-	app, seen := newApp(t, nil)
-	_, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
-	if seen.Models.Default.Effort != "low" {
-		t.Errorf("env effort = %q, want low", seen.Models.Default.Effort)
-	}
-	app, seen = newApp(t, nil)
-	_, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "--effort", "off", "x"}, "")
-	if seen.Models.Default.Effort != "" {
-		t.Errorf("--effort off = %q, want none", seen.Models.Default.Effort)
-	}
-	t.Setenv(EffortEnv, "loud")
-	app, _ = newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
-	if code != ExitUsage || !strings.Contains(env.Error.Message, EffortEnv) {
-		t.Errorf("an invalid $%s: code=%d error=%+v", EffortEnv, code, env.Error)
-	}
-}
-
-func TestAnEffortTheModelDoesNotTakeIsClampedWithAWarning(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
 	app, seen := newApp(t, nil)
 	env, _, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--model", "claude-haiku-4-5", "--effort", "max", "x"}, "")
 	if seen.Models.Default.Effort != "high" {
 		t.Errorf("effort = %q, want high", seen.Models.Default.Effort)
 	}
-	if !hasWarning(env, WarnEffortClamped) {
-		t.Errorf("warnings = %+v", env.Warnings)
+	clamps := warningsOf(env.Warnings, WarnEffortClamped)
+	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, prd_review, prd_revision, requirements, test_spec, tasks, architecture") {
+		t.Errorf("clamp warnings = %+v", clamps)
+	}
+}
+
+// --phase-model chooses one phase's model and effort; the others keep the
+// tier's, and the envelope records every phase of the plan.
+func TestMain_PhaseModelChoosesOnePhasesModel(t *testing.T) {
+	scripted(t)
+	app, seen := newApp(t, nil)
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(),
+		"--phase-model", "tasks=claude-haiku-4-5:low", "--phase-model", "prd=ADVANCED", "x"}, "")
+	if code != ExitOK {
+		t.Fatalf("code = %d: %+v", code, env.Error)
+	}
+	for phase, want := range map[string]string{
+		agentrun.PhaseTasks:        "claude-haiku-4-5/low",
+		agentrun.PhasePRD:          "claude-opus-5-5/xhigh",
+		agentrun.PhaseRequirements: "claude-sonnet-5-5/high",
+	} {
+		if got := seen.Runner.ModelFor(phase).String(); got != want {
+			t.Errorf("%s runs on %s, want %s", phase, got, want)
+		}
+	}
+	if env.Model == nil || len(env.Model.Phases) != len(agentrun.Phases) ||
+		env.Model.Phases["tasks"] != (PhaseModelInfo{ID: "claude-haiku-4-5", Effort: "low"}) {
+		t.Fatalf("envelope model = %+v", env.Model)
+	}
+	for _, phase := range []string{agentrun.PhasePRDReview, agentrun.PhasePRDRevision} {
+		if _, ok := env.Model.Phases[phase]; !ok {
+			t.Errorf("model.phases has no %s", phase)
+		}
+	}
+	if env.Model.ID != "claude-sonnet-5-5" || env.Model.Effort != "high" {
+		t.Errorf("the default = %s/%s", env.Model.ID, env.Model.Effort)
 	}
 }
 
@@ -224,35 +322,35 @@ type summaryResult struct {
 func (r *summaryResult) SetDetail(d string) { r.Detail = d }
 func (r *summaryResult) SummaryView() any   { return map[string]string{"detail": "summary"} }
 
-func TestDetailPicksTheResultView(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
+func TestMain_DetailPicksTheResultView(t *testing.T) {
 	exec := func(context.Context, Deps) (int, any, *ErrorInfo) {
 		return ExitOK, &summaryResult{Full: "everything"}, nil
 	}
 	for detail, want := range map[string]string{"summary": `{"detail":"summary"}`, "full": `{"full":"everything","detail":"full"}`} {
-		app, _ := newApp(t, exec)
-		var stdout bytes.Buffer
-		app.Main(context.Background(), []string{"--dir", t.TempDir(), "--detail", detail, "x"}, strings.NewReader(""), &stdout, &bytes.Buffer{})
-		var raw struct {
-			Result json.RawMessage `json:"result"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
-			t.Fatal(err)
-		}
-		var got bytes.Buffer
-		if err := json.Compact(&got, raw.Result); err != nil {
-			t.Fatal(err)
-		}
-		if got.String() != want {
-			t.Errorf("--detail %s: result = %s, want %s", detail, got.String(), want)
-		}
+		t.Run(detail, func(t *testing.T) {
+			scripted(t)
+			app, _ := newApp(t, exec)
+			var stdout bytes.Buffer
+			app.Main(context.Background(), []string{"--dir", t.TempDir(), "--detail", detail, "x"}, strings.NewReader(""), &stdout, &bytes.Buffer{})
+			var raw struct {
+				Result json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
+				t.Fatal(err)
+			}
+			var got bytes.Buffer
+			if err := json.Compact(&got, raw.Result); err != nil {
+				t.Fatal(err)
+			}
+			if got.String() != want {
+				t.Errorf("result = %s, want %s", got.String(), want)
+			}
+		})
 	}
 }
 
-func TestOutputWritesTheSameEnvelopeBeforeStdout(t *testing.T) {
+func TestMain_OutputWritesTheSameEnvelopeBeforeStdout(t *testing.T) {
 	scripted(t)
-	withoutIndex(t)
 	out := filepath.Join(t.TempDir(), "nested", "env.json")
 	app, _ := newApp(t, nil)
 	var stdout bytes.Buffer
@@ -269,9 +367,34 @@ func TestOutputWritesTheSameEnvelopeBeforeStdout(t *testing.T) {
 	}
 }
 
-func TestABareInvocationPrintsHelpAndAUsageEnvelope(t *testing.T) {
+// A failed --output write is one low-severity output_not_written warning on
+// the same run's stdout envelope, naming the path and why, and the exit code is
+// unaffected.
+func TestMain_AFailedOutputWriteIsAWarning(t *testing.T) {
+	scripted(t)
+	unwritable := unwritableOutput(t)
 	app, _ := newApp(t, nil)
-	env, code, stderr := runApp(t, app, nil, "")
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--output", unwritable, "x"}, "")
+	if code != ExitOK || !env.OK || env.ExitCode != ExitOK || env.Status != "done" {
+		t.Errorf("code=%d ok=%v exit_code=%d status=%q, want a clean success", code, env.OK, env.ExitCode, env.Status)
+	}
+	ws := warningsOf(env.Warnings, WarnOutputNotWritten)
+	if len(ws) != 1 {
+		t.Fatalf("output_not_written warnings = %+v, want one", ws)
+	}
+	if w := ws[0]; w.Severity != "low" || w.Stage != "emit" || !strings.Contains(w.Message, unwritable) ||
+		strings.TrimSpace(strings.TrimPrefix(w.Message, unwritable)) == "" {
+		t.Errorf("warning = %+v, want low, emit, naming the path and the cause", w)
+	}
+	if _, err := os.Stat(unwritable); err == nil {
+		t.Error("a file exists at the unwritable path")
+	}
+}
+
+// A bare invocation prints the help to stderr and, for a program reading
+// stdout, a usage envelope.
+func TestMain_ABareInvocationPrintsHelpAndAUsageEnvelope(t *testing.T) {
+	env, code, stderr := runApp(t, refusingApp(t), nil, "")
 	if code != ExitUsage || env.Error == nil || env.Error.Message != NoInputMessage {
 		t.Errorf("code=%d env=%+v", code, env)
 	}
@@ -280,38 +403,45 @@ func TestABareInvocationPrintsHelpAndAUsageEnvelope(t *testing.T) {
 	}
 }
 
-func TestHelpAndVersionPrintNoEnvelope(t *testing.T) {
-	app, _ := newApp(t, nil)
-	var stdout, stderr bytes.Buffer
-	if code := app.Main(context.Background(), []string{"--help"}, strings.NewReader(""), &stdout, &stderr); code != ExitOK || stdout.Len() != 0 {
-		t.Errorf("--help: code=%d stdout=%q", code, stdout.String())
-	}
-	stdout.Reset()
-	if code := app.Main(context.Background(), []string{"--version"}, strings.NewReader(""), &stdout, &stderr); code != ExitOK || stdout.String() != "tool test\n" {
-		t.Errorf("--version: code=%d stdout=%q", code, stdout.String())
+func TestMain_HelpAndVersionPrintNoEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		flag, stdout string
+	}{{"--help", ""}, {"--version", "tool test\n"}} {
+		t.Run(tc.flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := refusingApp(t).Main(context.Background(), []string{tc.flag}, strings.NewReader(""), &stdout, &stderr); code != ExitOK || stdout.String() != tc.stdout {
+				t.Errorf("code=%d stdout=%q", code, stdout.String())
+			}
+		})
 	}
 }
 
-func TestPreflightRunsPreflightExecInsteadOfExec(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
-	app, _ := newApp(t, func(context.Context, Deps) (int, any, *ErrorInfo) {
-		t.Fatal("Exec ran under --preflight")
-		return 0, nil, nil
+// --preflight runs PreflightExec in place of Exec, and a command without one
+// refuses it.
+func TestMain_PreflightRunsPreflightExecInsteadOfExec(t *testing.T) {
+	t.Run("supported", func(t *testing.T) {
+		scripted(t)
+		app := refusingApp(t)
+		ran := false
+		app.PreflightExec = func(context.Context, Deps) (int, any, *ErrorInfo) {
+			ran = true
+			return ExitOK, nil, nil
+		}
+		if _, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--preflight", "x"}, ""); code != ExitOK || !ran {
+			t.Errorf("code=%d ran=%v", code, ran)
+		}
 	})
-	ran := false
-	app.PreflightExec = func(context.Context, Deps) (int, any, *ErrorInfo) {
-		ran = true
-		return ExitOK, nil, nil
-	}
-	if _, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--preflight", "x"}, ""); code != ExitOK || !ran {
-		t.Errorf("code=%d ran=%v", code, ran)
-	}
+	t.Run("unsupported", func(t *testing.T) {
+		scripted(t)
+		env, code, _ := runApp(t, refusingApp(t), []string{"--dir", t.TempDir(), "--preflight", "x"}, "")
+		if code != ExitFailed || env.Error == nil || !strings.Contains(env.Error.Message, "does not support --preflight") {
+			t.Errorf("code=%d error=%+v", code, env.Error)
+		}
+	})
 }
 
-func TestContextIsCarriedBesideTheInput(t *testing.T) {
+func TestMain_ContextIsCarriedBesideTheInput(t *testing.T) {
 	scripted(t)
-	withoutIndex(t)
 	app, seen := newApp(t, nil)
 	env, _, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--context", "first", "--context", "second", "x"}, "")
 	want := "## Additional context from the caller\n\nfirst\n\nsecond\n"
@@ -320,126 +450,5 @@ func TestContextIsCarriedBesideTheInput(t *testing.T) {
 	}
 	if env.Input == nil || env.Input.ContextBytes != len(want) {
 		t.Errorf("input = %+v", env.Input)
-	}
-}
-
-func hasWarning(env Envelope, code WarnCode) bool {
-	for _, w := range env.Warnings {
-		if w.Code == code {
-			return true
-		}
-	}
-	return false
-}
-
-func TestPhaseModelChoosesOnePhasesModel(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
-	app, seen := newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(),
-		"--phase-model", "tasks=claude-haiku-4-5:low", "--phase-model", "prd=ADVANCED", "x"}, "")
-	if code != ExitOK {
-		t.Fatalf("code = %d: %+v", code, env.Error)
-	}
-	if got := seen.Runner.ModelFor(agentrun.PhaseTasks).String(); got != "claude-haiku-4-5/low" {
-		t.Errorf("tasks runs on %s", got)
-	}
-	if got := seen.Runner.ModelFor(agentrun.PhasePRD).String(); got != "claude-opus-5-5/xhigh" {
-		t.Errorf("prd runs on %s", got)
-	}
-	if got := seen.Runner.ModelFor(agentrun.PhaseRequirements).String(); got != "claude-sonnet-5-5/high" {
-		t.Errorf("requirements runs on %s", got)
-	}
-	if env.Model == nil || len(env.Model.Phases) != len(agentrun.Phases) ||
-		env.Model.Phases["tasks"] != (PhaseModelInfo{ID: "claude-haiku-4-5", Effort: "low"}) {
-		t.Errorf("envelope model = %+v", env.Model)
-	}
-	if env.Model.ID != "claude-sonnet-5-5" || env.Model.Effort != "high" {
-		t.Errorf("the default = %s/%s", env.Model.ID, env.Model.Effort)
-	}
-}
-
-func TestABadPhaseModelIsAUsageError(t *testing.T) {
-	for _, v := range []string{"review=ADVANCED", "tasks", "tasks=:high"} {
-		app, _ := newApp(t, nil)
-		env, code, _ := runApp(t, app, []string{"--phase-model", v, "x"}, "")
-		if code != ExitUsage || env.Error == nil || env.Error.Category != "usage" {
-			t.Errorf("%q: code=%d error=%+v", v, code, env.Error)
-		}
-	}
-	scripted(t)
-	app, _ := newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--phase-model", "tasks=gpt-9", "x"}, "")
-	if code != ExitFailed || env.Error == nil || env.Error.Category != agentrun.CategoryModel {
-		t.Errorf("an unknown phase model: code=%d error=%+v", code, env.Error)
-	}
-}
-
-func TestClampedEffortsAreWarnedOncePerModel(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
-	app, _ := newApp(t, nil)
-	env, _, _ := runApp(t, app, []string{"--dir", t.TempDir(), "--model", "claude-haiku-4-5", "--effort", "max", "x"}, "")
-	var clamps []Warning
-	for _, w := range env.Warnings {
-		if w.Code == WarnEffortClamped {
-			clamps = append(clamps, w)
-		}
-	}
-	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, prd_review, prd_revision, requirements, test_spec, tasks, architecture") {
-		t.Errorf("clamp warnings = %+v", clamps)
-	}
-}
-
-// TS-09-64 (integration): model.phases, the --phase-model help and the
-// effort_clamped warning list prd_review and prd_revision, on a run that
-// never mentions --adversarial: they describe the resolved plan, not the
-// phases that ran.
-//
-// Verifies: 09-REQ-10.7
-func TestTS09_64_TheReviewPhasesAreListedWithoutAdversarial(t *testing.T) {
-	scripted(t)
-	withoutIndex(t)
-	app, _ := newApp(t, nil)
-	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
-	if code != ExitOK || env.Model == nil {
-		t.Fatalf("code=%d model=%+v", code, env.Model)
-	}
-	for _, phase := range []string{agentrun.PhasePRDReview, agentrun.PhasePRDRevision} {
-		if _, ok := env.Model.Phases[phase]; !ok {
-			t.Errorf("model.phases has no %s: %+v", phase, env.Model.Phases)
-		}
-	}
-
-	fs := flag.NewFlagSet("tool", flag.ContinueOnError)
-	(&Common{}).Register(fs)
-	help := fs.Lookup("phase-model").Usage
-	if !strings.Contains(help, "prd_review") || !strings.Contains(help, "prd_revision") {
-		t.Errorf("--phase-model help = %q", help)
-	}
-
-	app, _ = newApp(t, nil)
-	env, _, _ = runApp(t, app, []string{"--dir", t.TempDir(), "--model", "claude-haiku-4-5", "--effort", "max", "x"}, "")
-	var clamped string
-	for _, w := range env.Warnings {
-		if w.Code == WarnEffortClamped {
-			clamped = w.Message
-		}
-	}
-	if !strings.Contains(clamped, "prd_review") || !strings.Contains(clamped, "prd_revision") {
-		t.Errorf("effort_clamped = %q", clamped)
-	}
-}
-
-// TS-13-1: SiblingCommands is an untyped string constant with the exact sentence,
-// so a help text built of raw-string constants can carry it.
-func TestSiblingCommandsIsAnUntypedConstantWithTheSentence_TS13_1(t *testing.T) {
-	const probe = "a\n" + SiblingCommands // does not compile unless it is a constant string
-	const want = "spec writes a package from an idea, specr renders one, speca reports and changes its state."
-	if SiblingCommands != want {
-		t.Errorf("SiblingCommands = %q; want %q", SiblingCommands, want)
-	}
-	if probe != "a\n"+want {
-		t.Errorf("the constant does not concatenate: %q", probe)
 	}
 }
