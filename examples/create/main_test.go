@@ -9,7 +9,7 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-func TestCreateWritesAValidActiveSpec(t *testing.T) {
+func TestCreate_WritesAValidActiveSpec(t *testing.T) {
 	root := t.TempDir()
 	var stdout strings.Builder
 	if err := run([]string{"-root", root}, &stdout, io.Discard); err != nil {
