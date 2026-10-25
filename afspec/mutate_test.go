@@ -1,8 +1,11 @@
 package afspec
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
-func TestAddRequirementRejectsDuplicates(t *testing.T) {
+func TestAddRequirement_AppendsToACopyAndRefusesADuplicate(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	req := *spec.Requirements
 
@@ -23,7 +26,7 @@ func TestAddRequirementRejectsDuplicates(t *testing.T) {
 	}
 }
 
-func TestGetAndRemoveRequirement(t *testing.T) {
+func TestGetAndRemoveRequirement_WorkOnCopies(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	req := *spec.Requirements
 
@@ -45,7 +48,7 @@ func TestGetAndRemoveRequirement(t *testing.T) {
 	}
 }
 
-func TestGlossaryMutators(t *testing.T) {
+func TestGlossaryEntries_AreSetAndRemovedOnCopies(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	req := *spec.Requirements
 
@@ -69,7 +72,7 @@ func TestGlossaryMutators(t *testing.T) {
 	}
 }
 
-func TestAddCriterionAndPath(t *testing.T) {
+func TestAddCriterionAndExecutionPath_RefuseDuplicates(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	r, err := AddCriterion(spec.Requirements.Requirements[0],
@@ -103,7 +106,7 @@ func TestAddCriterionAndPath(t *testing.T) {
 	}
 }
 
-func TestAddTestAndTestsOfKind(t *testing.T) {
+func TestAddTest_AppendsToACopyAndRefusesADuplicate(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	added, err := AddTest(*spec.TestSpec, Test{
@@ -119,7 +122,10 @@ func TestAddTestAndTestsOfKind(t *testing.T) {
 	if _, err := AddTest(added, Test{Id: "TS-01-1"}); err == nil {
 		t.Error("a duplicate test ID was accepted")
 	}
+}
 
+func TestTestsOfKindAndGetTest_FindTestsInTheTestSpec(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
 	if got := len(spec.TestSpec.TestsOfKind(TestKindSmoke)); got != 1 {
 		t.Errorf("smoke tests = %d; want 1", got)
 	}
@@ -133,7 +139,7 @@ func TestAddTestAndTestsOfKind(t *testing.T) {
 	}
 }
 
-func TestAddTaskAndDependency(t *testing.T) {
+func TestAddTaskAndDependency_WorkOnCopies(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	added, err := AddTask(*spec.Tasks, Task{
@@ -157,7 +163,7 @@ func TestAddTaskAndDependency(t *testing.T) {
 	}
 }
 
-func TestAddExternalAPI(t *testing.T) {
+func TestAddExternalAPI_RefusesADuplicatePackage(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	added, err := AddExternalAPI(*spec.Requirements, ExternalApi{
 		Package: "github.com/spf13/cobra", Version: "v1.10.2", Verified: true,
@@ -174,7 +180,7 @@ func TestAddExternalAPI(t *testing.T) {
 	}
 }
 
-func TestExtractInterfaceSummaryReportsContracts(t *testing.T) {
+func TestExtractInterfaceSummary_ReportsGlossaryAndContracts(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	summary := extractInterfaceSummary(spec)
 
@@ -191,5 +197,29 @@ func TestExtractInterfaceSummaryReportsContracts(t *testing.T) {
 		if c["criterion_id"] == "" || c["contract"] == "" {
 			t.Errorf("incomplete contract entry: %v", c)
 		}
+	}
+}
+
+// A dependent spec sees the glossary and contracts of the specs it depends on,
+// and nothing when there are none or the root cannot be read.
+func TestLoadDependentInterfaces_SummarisesTheUpstreamSpecs(t *testing.T) {
+	root := specRoot(t, map[string]string{
+		"01_test_feature":  fixtureValidSpec,
+		"02_draft_feature": fixtureDraft,
+	})
+
+	summaries := LoadDependentInterfaces("02", root)
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %v; want one for the upstream spec", summaries)
+	}
+	if _, ok := summaries[0]["glossary"]; !ok {
+		t.Errorf("the summary carries no glossary: %v", summaries[0])
+	}
+
+	if got := LoadDependentInterfaces("01", root); len(got) != 0 {
+		t.Errorf("a spec with no dependencies returned %v", got)
+	}
+	if got := LoadDependentInterfaces("02", filepath.Join(root, "nope")); got == nil || len(got) != 0 {
+		t.Errorf("an unreadable root should degrade to an empty slice, got %v", got)
 	}
 }

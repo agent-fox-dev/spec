@@ -2,7 +2,7 @@ package afspec
 
 import "testing"
 
-func TestCriterionBuildersSetTheRightFields(t *testing.T) {
+func TestCriterionBuilders_SetTheFieldsOfTheirPattern(t *testing.T) {
 	t.Run("ubiquitous carries neither condition nor guard", func(t *testing.T) {
 		c := UbiquitousCriterion("01-REQ-1.1", "loader", "return a Spec")
 		if c.Condition != nil || c.Guard != nil {
@@ -32,7 +32,7 @@ func TestCriterionBuildersSetTheRightFields(t *testing.T) {
 	})
 }
 
-func TestRenderEARSSentence(t *testing.T) {
+func TestRenderEARSSentence_WritesEachPattern(t *testing.T) {
 	cases := []struct {
 		name string
 		c    Criterion
@@ -83,9 +83,9 @@ func TestRenderEARSSentence(t *testing.T) {
 	}
 }
 
-// TestRenderEARSAlwaysShowsTheContract guards §11.2: a contract the coder
-// cannot see does not exist. Under v1 return_contract was never rendered.
-func TestRenderEARSAlwaysShowsTheContract(t *testing.T) {
+// §11.2: a contract the coder cannot see does not exist. Under v1
+// return_contract was never rendered.
+func TestRenderEARS_AlwaysShowsTheContract(t *testing.T) {
 	c := UnwantedCriterion("01-REQ-1.1", "the file is missing", "loader", "return an error", "a *LoadError naming the file")
 	got := c.RenderEARS()
 	want := "IF the file is missing, THEN THE loader SHALL return an error\n   → a *LoadError naming the file"
@@ -99,7 +99,7 @@ func TestRenderEARSAlwaysShowsTheContract(t *testing.T) {
 	}
 }
 
-func TestWithContract(t *testing.T) {
+func TestWithContract_ReturnsACopy(t *testing.T) {
 	base := UbiquitousCriterion("01-REQ-1.1", "loader", "do a thing")
 	withContract := base.WithContract("a nil error")
 	if base.Contract != nil {

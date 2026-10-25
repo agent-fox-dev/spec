@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Lint module data structures (05-REQ-6)
+// Lint module data structures
 // ---------------------------------------------------------------------------
 
 // LintFinding represents a single lint diagnostic result with severity, rule,
@@ -42,7 +42,8 @@ type LintResult struct {
 }
 
 // severityRank maps severity strings to sort ranks. Unknown severities
-// are treated as "hint" (rank 2) per 05-REQ-6.E1.
+// are treated as "hint" (rank 2), so a finding of a new severity sorts last
+// rather than breaking the sort.
 func severityRank(s string) int {
 	switch s {
 	case "error":
@@ -57,7 +58,7 @@ func severityRank(s string) int {
 }
 
 // ---------------------------------------------------------------------------
-// DiscoverLintSpecs — spec folder discovery (05-REQ-7)
+// DiscoverLintSpecs — spec folder discovery
 // ---------------------------------------------------------------------------
 
 // DiscoverLintSpecs scans specsDir for subdirectories whose names are valid
@@ -83,7 +84,7 @@ func DiscoverLintSpecs(specsDir, filterSpec string) ([]LintSpecInfo, error) {
 		}
 		name := entry.Name()
 
-		// 05-REQ-7.1: use IsSpecDirName to check validity.
+		// Only a directory named like a spec package is one.
 		if !IsSpecDirName(name) {
 			continue
 		}
@@ -95,7 +96,7 @@ func DiscoverLintSpecs(specsDir, filterSpec string) ([]LintSpecInfo, error) {
 			continue
 		}
 
-		// 05-REQ-7.E3: skip if ParseSpecDirName fails.
+		// A name that does not parse is not a package: skip it.
 		prefixStr, specName, parseErr := ParseSpecDirName(name)
 		if parseErr != nil {
 			continue
@@ -118,12 +119,12 @@ func DiscoverLintSpecs(specsDir, filterSpec string) ([]LintSpecInfo, error) {
 		})
 	}
 
-	// 05-REQ-7.E2: error if no specs discovered at all.
+	// A root with no package at all is an error, not an empty lint.
 	if len(infos) == 0 {
 		return nil, fmt.Errorf("no specs found in %q", specsDir)
 	}
 
-	// 05-REQ-7.2: filter by name when filterSpec is non-empty.
+	// Filter by name when filterSpec is non-empty.
 	if filterSpec != "" {
 		for _, info := range infos {
 			if info.Name == filterSpec {
@@ -146,7 +147,7 @@ func fileExists(path string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// SortFindings and ComputeExitCode (05-REQ-8)
+// SortFindings and ComputeExitCode
 // ---------------------------------------------------------------------------
 
 // SortFindings returns a new slice sorted primarily by SpecName ascending,
@@ -181,7 +182,7 @@ func ComputeExitCode(findings []LintFinding) int {
 }
 
 // ---------------------------------------------------------------------------
-// RunLintSpecs — full lint execution (05-REQ-9)
+// RunLintSpecs — full lint execution
 // ---------------------------------------------------------------------------
 
 // isFullyImplemented reports whether a spec's tasks.json exists and every
