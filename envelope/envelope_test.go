@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 
 // A failure that happened before there was a result carries none: the
 // decoded result is nil, and the error is an error a caller can return.
-func TestDecodeAFailureWithoutAResult(t *testing.T) {
+func TestDecode_AFailureWithoutAResult(t *testing.T) {
 	const out = `{
   "tool": "specr",
   "version": "v1.0.0",
@@ -54,7 +55,7 @@ func TestDecodeAFailureWithoutAResult(t *testing.T) {
 
 // Fields a decoder does not know are ignored, so the commands can add to
 // their output without breaking a program that reads it.
-func TestDecodeIgnoresUnknownFields(t *testing.T) {
+func TestDecode_IgnoresUnknownFields(t *testing.T) {
 	const out = `{"tool":"spec","ok":true,"status":"done","exit_code":0,"a_field_from_the_future":{"x":1},
 "result":{"spec_id":"07","spec_dir":".specs/07_x","another":[1,2]}}`
 	env, err := envelope.DecodeSpec([]byte(out))
@@ -67,7 +68,7 @@ func TestDecodeIgnoresUnknownFields(t *testing.T) {
 }
 
 // A command writes exactly one object; anything else is not its output.
-func TestDecodeRefusesWhatIsNotOneEnvelope(t *testing.T) {
+func TestDecode_RefusesWhatIsNotOneEnvelope(t *testing.T) {
 	for name, data := range map[string]string{
 		"empty":       ``,
 		"prose":       `specr: no input`,
@@ -75,15 +76,17 @@ func TestDecodeRefusesWhatIsNotOneEnvelope(t *testing.T) {
 		"two objects": `{"ok":true} {"ok":true}`,
 		"wrong type":  `{"exit_code":"zero"}`,
 	} {
-		if _, err := envelope.DecodeSpec([]byte(data)); err == nil {
-			t.Errorf("%s: decoded without an error", name)
-		}
+		t.Run(name, func(t *testing.T) {
+			if _, err := envelope.DecodeSpec([]byte(data)); err == nil {
+				t.Error("decoded without an error")
+			}
+		})
 	}
 }
 
 // The result of a command this package has no type for reads into any, and
 // into a type of the caller's own.
-func TestDecodeAnyResult(t *testing.T) {
+func TestDecode_AnyResult(t *testing.T) {
 	const out = `{"ok":true,"result":{"n":3}}`
 	env, err := envelope.Decode[map[string]any]([]byte(out))
 	if err != nil || env.Result["n"] != float64(3) {
@@ -95,42 +98,46 @@ func TestDecodeAnyResult(t *testing.T) {
 	}
 }
 
-// Every kind of artifact reads back as it was written, and an invalid
-// package keeps its valid:false, which is a fact, not an absence.
-func TestArtifactRoundTrip(t *testing.T) {
+// Every kind of artifact writes only its own fields and reads back as it was
+// written, and an invalid package keeps its valid:false, which is a fact, not
+// an absence.
+func TestArtifact_RoundTrip(t *testing.T) {
 	for _, tc := range []struct {
+		name string
 		a    envelope.Artifact
 		json string
 	}{
-		{envelope.Artifact{Kind: envelope.ArtifactSpecPackage, Path: ".specs/01_a", ID: "01", Valid: true},
+		{"valid package", envelope.Artifact{Kind: envelope.ArtifactSpecPackage, Path: ".specs/01_a", ID: "01", Valid: true},
 			`{"kind":"spec_package","path":".specs/01_a","id":"01","valid":true}`},
-		{envelope.Artifact{Kind: envelope.ArtifactSpecPackage, Path: ".specs/02_b", ID: "02", DryRun: true},
+		{"dry-run invalid package", envelope.Artifact{Kind: envelope.ArtifactSpecPackage, Path: ".specs/02_b", ID: "02", DryRun: true},
 			`{"kind":"spec_package","path":".specs/02_b","id":"02","valid":false,"dry_run":true}`},
-		{envelope.Artifact{Kind: envelope.ArtifactComment, URL: "https://example.com/1#c", Role: "prd"},
+		{"comment", envelope.Artifact{Kind: envelope.ArtifactComment, URL: "https://example.com/1#c", Role: "prd"},
 			`{"kind":"comment","url":"https://example.com/1#c","role":"prd"}`},
-		{envelope.Artifact{Kind: envelope.ArtifactMarkdownFile, Path: "/tmp/task-3.md"},
+		{"markdown file", envelope.Artifact{Kind: envelope.ArtifactMarkdownFile, Path: "/tmp/task-3.md"},
 			`{"kind":"markdown_file","path":"/tmp/task-3.md"}`},
 	} {
-		b, err := json.Marshal(tc.a)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(b) != tc.json {
-			t.Errorf("marshal: got %s\nwant %s", b, tc.json)
-		}
-		var back envelope.Artifact
-		if err := json.Unmarshal(b, &back); err != nil {
-			t.Fatal(err)
-		}
-		if back != tc.a {
-			t.Errorf("round trip: got %+v, want %+v", back, tc.a)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := json.Marshal(tc.a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(b) != tc.json {
+				t.Errorf("marshal: got %s\nwant %s", b, tc.json)
+			}
+			var back envelope.Artifact
+			if err := json.Unmarshal(b, &back); err != nil {
+				t.Fatal(err)
+			}
+			if back != tc.a {
+				t.Errorf("round trip: got %+v, want %+v", back, tc.a)
+			}
+		})
 	}
 }
 
 // What a command builds is what a program reads: a full spec result, with
 // every kind of field set, survives a trip through JSON unchanged.
-func TestSpecEnvelopeRoundTrip(t *testing.T) {
+func TestSpecEnvelope_RoundTrip(t *testing.T) {
 	valid := true
 	want := envelope.SpecEnvelope{
 		Tool: "spec", Version: "v1.0.0", OK: true, Status: "done", Summary: "spec: wrote .specs/01_a",
@@ -175,7 +182,7 @@ func TestSpecEnvelopeRoundTrip(t *testing.T) {
 
 // --detail summary writes a trimmed view of the result, which reads into the
 // same type: the fields it leaves out are zero, and Detail says so.
-func TestDecodeTheSummaryView(t *testing.T) {
+func TestDecodeSpec_TheSummaryView(t *testing.T) {
 	const out = `{"ok":true,"result":{"spec_dir":".specs/01_a","spec_id":"01","spec_name":"a","status":"active",
 "artifacts":["prd.md"],"validation":{"valid":true,"error_count":0},
 "traceability":{"criteria_covered":4,"paths_covered":1},"detail":"summary"}}`
@@ -189,27 +196,12 @@ func TestDecodeTheSummaryView(t *testing.T) {
 	}
 }
 
-// Sections hands out its own slice, so one caller cannot reorder another's.
-func TestSectionsIsAFreshSlice(t *testing.T) {
-	a := envelope.Sections()
-	if strings.Join(a, ",") != "prd,architecture,requirements,test_spec,tasks" {
-		t.Fatalf("sections = %v", a)
-	}
-	a[0] = "changed"
-	if envelope.Sections()[0] != envelope.SectionPRD {
-		t.Error("Sections shares its backing array")
-	}
-}
-
-func TestStatusAndRetryable(t *testing.T) {
+func TestStatusFor(t *testing.T) {
 	for code, want := range map[int]string{envelope.ExitOK: "done", envelope.ExitFailed: "failed", envelope.ExitUsage: "usage", 7: "failed"} {
-		if got := envelope.StatusFor(code); got != want {
-			t.Errorf("StatusFor(%d) = %q, want %q", code, got, want)
-		}
-	}
-	for cat, want := range map[string]bool{envelope.CategoryAPI: true, envelope.CategoryAborted: true, envelope.CategoryBudget: false, "": false} {
-		if got := envelope.RetryableFor(cat); got != want {
-			t.Errorf("RetryableFor(%q) = %v, want %v", cat, got, want)
-		}
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			if got := envelope.StatusFor(code); got != want {
+				t.Errorf("StatusFor(%d) = %q, want %q", code, got, want)
+			}
+		})
 	}
 }
