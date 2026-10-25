@@ -1,7 +1,6 @@
 package specpkg
 
 import (
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -9,53 +8,12 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-// loadedSpec is the repository's valid fixture relabelled as spec id, depending
-// on the specs in deps, with every step of its paths played by actor.
-func loadedSpec(t *testing.T, id, name, actor string, deps ...string) *afspec.Spec {
-	t.Helper()
-	s, err := afspec.LoadSpec(filepath.Join("..", "..", "afspec", "testdata", "valid_spec"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.SpecID, s.SpecName = id, name
-	for i := range s.Requirements.ExecutionPaths {
-		for j := range s.Requirements.ExecutionPaths[i].Steps {
-			s.Requirements.ExecutionPaths[i].Steps[j].Actor = actor
-		}
-	}
-	s.Tasks.Dependencies = nil
-	for _, d := range deps {
-		s.Tasks.Dependencies = append(s.Tasks.Dependencies, afspec.Dependency{Spec: d, Reason: "needs " + d})
-	}
-	return s
-}
-
-// savedSpec is loadedSpec written under root as its NN_name directory, and
-// loaded again from there.
-func savedSpec(t *testing.T, root, id, name, actor string, deps ...string) *afspec.Spec {
-	t.Helper()
-	dir := filepath.Join(root, id+"_"+name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := loadedSpec(t, id, name, actor, deps...).Save(dir); err != nil {
-		t.Fatal(err)
-	}
-	s, err := afspec.LoadSpec(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
-func rulesOf(r afspec.ValidationResult) []string { return Rules(r.Errors) }
-
 // The findings returned are the ones that concern the spec: the actor rule is
 // the downstream package's, and the upstream package it is about has none.
-func TestCrossSpecKeepsTheFindingsThatConcernTheSpec(t *testing.T) {
+func TestCrossSpec_KeepsTheFindingsThatConcernTheSpec(t *testing.T) {
 	root := t.TempDir()
-	a := savedSpec(t, root, "01", "a", "alpha")
-	b := savedSpec(t, root, "02", "b", "beta", "01")
+	a := saved(t, root, "01", "a", "alpha")
+	b := saved(t, root, "02", "b", "beta", "01")
 
 	got, err := crossSpec(root, b, nil)
 	if err != nil {
@@ -70,10 +28,10 @@ func TestCrossSpecKeepsTheFindingsThatConcernTheSpec(t *testing.T) {
 }
 
 // A shared actor satisfies the rule, whatever its case.
-func TestCrossSpecIsSatisfiedByASharedActor(t *testing.T) {
+func TestCrossSpec_IsSatisfiedByASharedActor(t *testing.T) {
 	root := t.TempDir()
-	savedSpec(t, root, "01", "a", "Alpha")
-	b := savedSpec(t, root, "02", "b", "alpha", "01")
+	saved(t, root, "01", "a", "Alpha")
+	b := saved(t, root, "02", "b", "alpha", "01")
 
 	if got, err := crossSpec(root, b, nil); err != nil || len(got.Errors) != 0 {
 		t.Errorf("%+v, %v; want no finding", got.Errors, err)
@@ -81,10 +39,10 @@ func TestCrossSpecIsSatisfiedByASharedActor(t *testing.T) {
 }
 
 // A dependency the spec root does not hold is found, whatever it is called.
-func TestCrossSpecFindsADependencyOnNoSpec(t *testing.T) {
+func TestCrossSpec_FindsADependencyOnNoSpec(t *testing.T) {
 	root := t.TempDir()
-	savedSpec(t, root, "01", "a", "alpha")
-	b := savedSpec(t, root, "02", "b", "alpha", "01_a")
+	saved(t, root, "01", "a", "alpha")
+	b := saved(t, root, "02", "b", "alpha", "01_a")
 
 	got, err := crossSpec(root, b, nil)
 	if err != nil {
@@ -95,12 +53,61 @@ func TestCrossSpecFindsADependencyOnNoSpec(t *testing.T) {
 	}
 }
 
+// The dependency cycle names no package: it is kept, with tasks.json as its
+// artifact, for every package with an edge, and for no package without one.
+func TestCrossSpec_KeepsACycleForThePackagesWithAnEdge(t *testing.T) {
+	root := t.TempDir()
+	a := saved(t, root, "01", "a", "alpha", "02")
+	saved(t, root, "02", "b", "alpha", "01")
+	c := saved(t, root, "03", "c", "alpha")
+
+	got, err := crossSpec(root, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rulesOf(got), []string{"cross_spec_cycle"}) || got.Errors[0].Artifact != "tasks.json" {
+		t.Errorf("for a package on the cycle: %+v; want cross_spec_cycle on tasks.json", got.Errors)
+	}
+	if got, err := crossSpec(root, c, nil); err != nil || len(got.Errors) != 0 {
+		t.Errorf("for a package with no edge: %+v, %v; want none", got.Errors, err)
+	}
+}
+
+// A glossary conflict is kept, under a rule of its own and on
+// requirements.json, for a package that defines the term.
+func TestCrossSpec_KeepsAGlossaryConflictForThePackagesThatDefineTheTerm(t *testing.T) {
+	root := t.TempDir()
+	other := loadedSpec(t, "01", "a", "alpha")
+	other.Requirements.Glossary["spec"] = "something else entirely"
+	savedSpec(t, root, other)
+	b := saved(t, root, "02", "b", "alpha")
+	undefining := loadedSpec(t, "03", "c", "alpha")
+	delete(undefining.Requirements.Glossary, "spec")
+	c := savedSpec(t, root, undefining)
+
+	got, err := crossSpec(root, b, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Warnings) == 0 {
+		t.Fatal("no glossary warning")
+	}
+	for _, w := range got.Warnings {
+		if w.Check != "cross_spec_glossary" || w.Artifact != "requirements.json" || w.EntityID != "spec" {
+			t.Errorf("warning = %+v; want cross_spec_glossary on requirements.json about spec", w)
+		}
+	}
+	if got, err := crossSpec(root, c, nil); err != nil || len(got.Warnings) != 0 {
+		t.Errorf("for a package that does not define the term: %+v, %v; want none", got.Warnings, err)
+	}
+}
+
 // A spec that is not in the spec root, an archived one or one a dry run has not
 // written, is checked with the packages in it. So is each package handed over
 // beside it: the packages of a dry run are in memory only.
-func TestCrossSpecTakesPackagesThatAreNotOnDisk(t *testing.T) {
+func TestCrossSpec_TakesPackagesThatAreNotOnDisk(t *testing.T) {
 	root := t.TempDir()
-	savedSpec(t, root, "01", "a", "alpha")
+	saved(t, root, "01", "a", "alpha")
 	b := loadedSpec(t, "02", "b", "beta", "01")
 	b.Dir = filepath.Join(root, "02_b") // where it would be written
 
@@ -121,10 +128,10 @@ func TestCrossSpecTakesPackagesThatAreNotOnDisk(t *testing.T) {
 
 // The package handed over replaces the one on disk at its directory: what is
 // validated is what the caller holds.
-func TestCrossSpecPrefersTheSpecHandedOverToTheOneOnDisk(t *testing.T) {
+func TestCrossSpec_PrefersTheSpecHandedOverToTheOneOnDisk(t *testing.T) {
 	root := t.TempDir()
-	savedSpec(t, root, "01", "a", "alpha")
-	onDisk := savedSpec(t, root, "02", "b", "beta") // no dependency on disk
+	saved(t, root, "01", "a", "alpha")
+	onDisk := saved(t, root, "02", "b", "beta") // no dependency on disk
 	edited := loadedSpec(t, "02", "b", "beta", "01")
 	edited.Dir = onDisk.Dir
 
@@ -134,22 +141,13 @@ func TestCrossSpecPrefersTheSpecHandedOverToTheOneOnDisk(t *testing.T) {
 	}
 }
 
-// A spec root that cannot be read is an error, not a verdict: the rules were
-// not run.
-func TestCrossSpecReportsAnUnreadableRoot(t *testing.T) {
-	s := loadedSpec(t, "01", "a", "alpha")
-	if _, err := crossSpec(filepath.Join(t.TempDir(), "missing"), s, nil); err == nil {
-		t.Error("want the error of reading the spec root")
-	}
-}
-
 // The verdict is the package's own findings and then the ones across specs, as
 // one result; a package that passes its own rules does not validate when one
 // across specs fails.
-func TestVerdictIsTheOwnFindingsAndThenTheCrossSpecOnes(t *testing.T) {
+func TestVerdict_IsTheOwnFindingsAndThenTheCrossSpecOnes(t *testing.T) {
 	root := t.TempDir()
-	savedSpec(t, root, "01", "a", "alpha")
-	b := savedSpec(t, root, "02", "b", "beta", "01")
+	saved(t, root, "01", "a", "alpha")
+	b := saved(t, root, "02", "b", "beta", "01")
 	own := b.Validate()
 
 	got, err := Verdict(root, b)
@@ -164,8 +162,9 @@ func TestVerdictIsTheOwnFindingsAndThenTheCrossSpecOnes(t *testing.T) {
 	}
 }
 
-// A spec root that cannot be read leaves the package's own verdict, and says why.
-func TestVerdictOfAnUnreadableRootIsThePackagesOwn(t *testing.T) {
+// A spec root that cannot be read leaves the package's own verdict, and says
+// why: the rules across specs were not run.
+func TestVerdict_OfAnUnreadableRootIsThePackagesOwn(t *testing.T) {
 	s := loadedSpec(t, "01", "a", "alpha")
 	own := s.Validate()
 

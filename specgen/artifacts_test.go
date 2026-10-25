@@ -2,454 +2,162 @@ package specgen
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/agentkit-go/core"
-	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/schema"
-	"github.com/agent-fox-dev/agentkit-go/workspace"
 
 	"github.com/agent-fox-dev/spec/afspec"
-	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/project"
 )
 
-// The tests here drive the REAL generation phase — the agent loop, the tool
-// schema converted from the format's own JSON Schema, the submit handler and
-// its validation — with a scripted provider in the vendor's place.
-
-func fauxRunner(t *testing.T, ws *workspace.Workspace, turns ...faux.Turn) (*agentrun.Runner, *faux.Provider) {
-	t.Helper()
-	p := faux.New(turns...)
-	r, err := agentrun.NewRunner(agentrun.Config{
-		Model:     agentrun.Model{Spec: "faux", Row: *faux.Model()},
-		Provider:  p,
-		Workspace: ws,
-		Bounds:    agentrun.Bounds{MaxTurns: 8, MaxBudgetUSD: 1},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r, p
-}
-
-func toolCall(id, name string, args any) faux.Turn {
-	raw, err := json.Marshal(args)
-	if err != nil {
-		panic(err)
-	}
-	return faux.Turn{
-		Blocks:     []core.ContentBlock{faux.FauxToolCall(id, name, string(raw))},
-		StopReason: core.StopReasonToolUse,
-	}
-}
-
-func goWorkspace(t *testing.T) *workspace.Workspace {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ws, err := workspace.Open(dir, workspace.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ws
-}
-
-// The repair loop IS the loop. A violation is a tool error the loop appends to
+// The repair loop is the agent loop: a violation is a tool error appended to
 // the transcript the model is already holding, and the model corrects itself
-// on the next turn — with the system prompt and tool schemas byte-identical
-// across the attempt and its correction, so the provider's cache prefix
-// survives the repair.
-func TestARejectedArtifactIsRepairedInTheLoop(t *testing.T) {
-	ws := goWorkspace(t)
-	artifacts, _ := loadFixture(t, "01", "test_feature")
-
-	// The first attempt cites a criterion that does not exist, breaking rule C3.
-	broken := deepCopy(t, artifacts[afspec.StepTestSpec])
-	first := broken["tests"].([]any)[0].(map[string]any)
-	first["verifies"] = []any{"01-REQ-99.1"}
-
-	runner, p := fauxRunner(t, ws,
-		toolCall("c1", ArtifactToolName(afspec.StepTestSpec), broken),
-		toolCall("c2", ArtifactToolName(afspec.StepTestSpec), artifacts[afspec.StepTestSpec]),
-	)
-
-	// Requirements have to be in place for the test-spec step's rules to have
-	// anything to check against.
-	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-	if err := validateArtifactContent(artifacts[afspec.StepRequirements], afspec.StepRequirements, &partial); err != nil {
-		t.Fatal(err)
-	}
-
-	a := &agentAuthor{runner: runner}
-	got, res, err := a.GenerateArtifact(context.Background(), artifactRequest{
-		Step: afspec.StepTestSpec, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
-	})
-	if err != nil {
-		t.Fatalf("GenerateArtifact: %v", err)
-	}
-	if got == nil || partial.TestSpec == nil {
-		t.Fatal("no artifact was recorded")
-	}
-	if len(partial.TestSpec.Tests) == 0 || partial.TestSpec.Tests[0].Verifies[0] == "01-REQ-99.1" {
-		t.Errorf("the rejected artifact was recorded: %+v", partial.TestSpec.Tests[0].Verifies)
-	}
-	if res.Turns < 2 {
-		t.Errorf("Turns = %d, want the rejection and the correction", res.Turns)
-	}
-
-	// The rejection reached the model as a tool error naming the rule.
-	reqs := p.Requests()
-	if len(reqs) < 2 {
-		t.Fatalf("requests = %d, want at least two", len(reqs))
-	}
-	if !strings.Contains(transcript(reqs[1]), "C3") {
-		t.Errorf("the second request should carry the C3 violation:\n%s", transcript(reqs[1]))
-	}
-	// The system prompt is byte-identical across the attempt and its repair,
-	// which is what keeps the provider's cache prefix alive.
-	if blocksText(reqs[0].System) != blocksText(reqs[1].System) {
-		t.Error("the system prompt changed between the attempt and the repair")
-	}
-}
-
-// A rejected submission must leave the accumulated state untouched, so the
-// next attempt validates against the same upstream artifacts as the one
-// before it.
-func TestARejectedArtifactDoesNotPoisonTheAccumulatedState(t *testing.T) {
-	artifacts, _ := loadFixture(t, "01", "test_feature")
-	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-	if err := validateArtifactContent(artifacts[afspec.StepRequirements], afspec.StepRequirements, &partial); err != nil {
-		t.Fatal(err)
-	}
-	before := partial.Requirements
-
-	broken := deepCopy(t, artifacts[afspec.StepTestSpec])
-	broken["tests"] = []any{}
-	if err := validateArtifactContent(broken, afspec.StepTestSpec, &partial); err == nil {
-		t.Fatal("an empty test list was accepted")
-	}
-	if partial.TestSpec != nil {
-		t.Error("a rejected artifact was recorded")
-	}
-	if partial.Requirements != before {
-		t.Error("the rejection disturbed the artifact before it")
+// on the next turn with the system prompt byte-identical, so the provider's
+// cache prefix survives the repair. The tasks step adds the project's own
+// check: a plan that names another ecosystem's runner hears the real one.
+func TestSubmitArtifact_ARejectionIsRepairedInTheLoop(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		step   afspec.GenerationStep
+		before []afspec.GenerationStep
+		breakf func(map[string]any)
+		want   []string
+	}{
+		{"a criterion that does not exist", afspec.StepTestSpec, []afspec.GenerationStep{afspec.StepRequirements},
+			func(c map[string]any) { c["tests"].([]any)[0].(map[string]any)["verifies"] = []any{"01-REQ-99.1"} },
+			[]string{"C3", PatchToolName(afspec.StepTestSpec)}},
+		{"another ecosystem's runner", afspec.StepTasks, []afspec.GenerationStep{afspec.StepRequirements, afspec.StepTestSpec},
+			func(c map[string]any) {
+				c["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
+			},
+			[]string{"project_mismatch", "pytest", "go test ./... -count=1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := newWorkspace(t)
+			artifacts, _ := loadFixture(t, "01", "test_feature")
+			broken := deepCopy(t, artifacts[tc.step])
+			tc.breakf(broken)
+			runner, p := fauxRunner(t, ws,
+				toolCall("c1", ArtifactToolName(tc.step), broken),
+				toolCall("c2", ArtifactToolName(tc.step), artifacts[tc.step]))
+			partial := acceptedArtifacts(t, artifacts, tc.before...)
+			a := &agentAuthor{runner: runner}
+			got, res, err := a.GenerateArtifact(context.Background(), artifactRequest{
+				Step: tc.step, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n",
+				Profile: project.DetectProfile(ws.Root()), Partial: partial,
+			})
+			if err != nil || got == nil {
+				t.Fatalf("GenerateArtifact: %v", err)
+			}
+			if res.Turns != 2 {
+				t.Errorf("Turns = %d, want the rejection and the correction", res.Turns)
+			}
+			reqs := p.Requests()
+			for _, want := range tc.want {
+				if !strings.Contains(transcript(reqs[1]), want) {
+					t.Errorf("the repair instruction lacks %q:\n%s", want, transcript(reqs[1]))
+				}
+			}
+			if blocksText(reqs[0].System) != blocksText(reqs[1].System) {
+				t.Error("the system prompt changed between the attempt and the repair")
+			}
+			switch tc.step {
+			case afspec.StepTestSpec:
+				if partial.TestSpec == nil || partial.TestSpec.Tests[0].Verifies[0] == "01-REQ-99.1" {
+					t.Errorf("the rejected artifact was recorded: %+v", partial.TestSpec)
+				}
+			case afspec.StepTasks:
+				if partial.Tasks == nil || partial.Tasks.TestCommands.AllTests != "go test ./... -count=1" {
+					t.Errorf("the accepted plan = %+v", partial.Tasks)
+				}
+			}
+		})
 	}
 }
 
-// The tasks step is the one with a project check on top of the format's
-// rules: a plan whose test commands belong to another ecosystem is refused
-// before the file is written, with the real commands in the message.
-func TestTheTasksStepRefusesAnotherEcosystemsCommands(t *testing.T) {
-	ws := goWorkspace(t)
-	artifacts, _ := loadFixture(t, "01", "test_feature")
-
-	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-	for _, step := range []afspec.GenerationStep{afspec.StepRequirements, afspec.StepTestSpec} {
-		if err := validateArtifactContent(artifacts[step], step, &partial); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	pythonic := deepCopy(t, artifacts[afspec.StepTasks])
-	pythonic["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
-
-	runner, p := fauxRunner(t, ws,
-		toolCall("c1", ArtifactToolName(afspec.StepTasks), pythonic),
-		toolCall("c2", ArtifactToolName(afspec.StepTasks), artifacts[afspec.StepTasks]),
-	)
-	a := &agentAuthor{runner: runner}
-	if _, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
-		Step: afspec.StepTasks, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root(), PRD: "## Intent\n\nx\n",
-		Profile: project.DetectProfile(ws.Root()), Partial: &partial,
-	}); err != nil {
-		t.Fatalf("GenerateArtifact: %v", err)
-	}
-	reqs := p.Requests()
-	if len(reqs) < 2 {
-		t.Fatalf("requests = %d", len(reqs))
-	}
-	second := transcript(reqs[1])
-	for _, want := range []string{"pytest", "go test ./... -count=1"} {
-		if !strings.Contains(second, want) {
-			t.Errorf("the repair instruction is missing %q:\n%s", want, second)
-		}
-	}
-	if partial.Tasks == nil || partial.Tasks.TestCommands.AllTests != "go test ./... -count=1" {
-		t.Errorf("the accepted plan's commands = %+v", partial.Tasks.TestCommands)
+// The artifact's $schema, the format version and the spec's identity are the
+// pipeline's to supply: the tool does not ask for them, a submission without
+// them is accepted, and one that sends them out of habit is stored with the
+// right values all the same.
+func TestSubmitArtifact_WritesTheFieldsThePipelineKnows(t *testing.T) {
+	programSupplied := []string{"$schema", "spec_id", "spec_name", "schema_version"}
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"left out", func(c map[string]any) {
+			for _, f := range programSupplied {
+				delete(c, f)
+			}
+		}},
+		{"sent wrong", func(c map[string]any) {
+			c["$schema"], c["spec_id"], c["spec_name"], c["schema_version"] = "https://example.com/x.json", "99", "other", "0.1"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := newWorkspace(t)
+			artifacts, _ := loadFixture(t, "01", "test_feature")
+			submitted := deepCopy(t, artifacts[afspec.StepRequirements])
+			tc.edit(submitted)
+			runner, _ := fauxRunner(t, ws, toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
+			partial := &afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
+			got, _, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
+				Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: partial,
+			})
+			if err != nil {
+				t.Fatalf("GenerateArtifact: %v", err)
+			}
+			const uri = "https://agent-fox.dev/schemas/requirements.v2.json"
+			if got["$schema"] != uri {
+				t.Errorf("the content carries $schema = %v, want %q", got["$schema"], uri)
+			}
+			r := partial.Requirements
+			if r == nil || r.Schema != uri || r.SpecId != "01" || r.SpecName != "test_feature" || r.SchemaVersion != afspec.SchemaVersion {
+				t.Errorf("the recorded artifact lacks the program-supplied fields: %+v", r)
+			}
+		})
 	}
 }
 
-// The tool schema is converted from the format's own JSON Schema rather than
-// re-authored, so the two cannot disagree.
-func TestArtifactSchemaCoversEveryStep(t *testing.T) {
+// Every artifact's tool schema has a strict form, the API's guarantee that the
+// first submission has the artifact's shape, and declares none of the fields
+// the handler writes. The $schema it writes is the schema document's own $id.
+func TestArtifactSchema_IsStrictAndLeavesOutWhatTheHandlerWrites(t *testing.T) {
 	for _, step := range afspec.GenerationSteps {
-		s, err := ArtifactSchema(step)
-		if err != nil {
-			t.Fatalf("%s: %v", step, err)
-		}
-		if s == nil || len(s.Properties) == 0 {
-			t.Fatalf("%s: empty schema", step)
-		}
-		// The property names the v2 test object uses are exactly the ones an
-		// earlier converter deleted by name at every depth.
-		if step == afspec.StepTestSpec {
-			raw, err := json.Marshal(s)
+		t.Run(string(step), func(t *testing.T) {
+			s, err := ArtifactSchema(step)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{`"title"`, `"then"`} {
-				if !strings.Contains(string(raw), want) {
-					t.Errorf("the test schema lost the %s property", want)
+			if !schema.StrictSubsetOK(s) {
+				t.Error("the tool schema has no strict form")
+			}
+			for _, f := range append([]string{schemaProperty}, programFields...) {
+				if s.Properties[f] != nil || slices.Contains(s.Required, f) || slices.Contains(s.PropertyOrder, f) {
+					t.Errorf("the tool schema declares %s, which the handler writes", f)
 				}
 			}
-		}
-	}
-	if _, err := ArtifactSchema(afspec.GenerationStep("nope")); err == nil {
-		t.Error("an unknown step should be an error")
-	}
-}
-
-func deepCopy(t *testing.T, m map[string]any) map[string]any {
-	t.Helper()
-	raw, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-// transcript renders a request's messages, so a test can assert on what the
-// model was actually shown.
-func transcript(req core.Request) string {
-	var b strings.Builder
-	for _, m := range req.Messages {
-		switch v := m.(type) {
-		case core.UserMessage:
-			b.WriteString(v.Content.Text())
-		case core.AssistantMessage:
-			b.WriteString(v.Content.Text())
-		case core.ToolResultMessage:
-			b.WriteString(v.Content.Text())
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func blocksText(blocks []core.ContentBlock) string {
-	var b strings.Builder
-	for _, block := range blocks {
-		if t, ok := block.(core.TextBlock); ok {
-			b.WriteString(t.Text)
-		}
-	}
-	return b.String()
-}
-
-// The model is never asked for the artifact's $schema — a tool schema cannot
-// declare a property by that name — so the submit handler writes it, and a
-// submission that leaves it out is accepted and stored with the right URI.
-func TestTheSubmitHandlerWritesTheArtifactsSchemaField(t *testing.T) {
-	ws := goWorkspace(t)
-	artifacts, _ := loadFixture(t, "01", "test_feature")
-
-	// What the model can actually submit: the fixture without the one field
-	// the tool schema does not declare.
-	submitted := deepCopy(t, artifacts[afspec.StepRequirements])
-	delete(submitted, "$schema")
-
-	runner, _ := fauxRunner(t, ws,
-		toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
-
-	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-	a := &agentAuthor{runner: runner}
-	got, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
-		Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
-	})
-	if err != nil {
-		t.Fatalf("GenerateArtifact: %v", err)
-	}
-	want := "https://agent-fox.dev/schemas/requirements.v2.json"
-	if got["$schema"] != want {
-		t.Errorf("the submitted content carries $schema = %v, want %q", got["$schema"], want)
-	}
-	if partial.Requirements == nil || partial.Requirements.Schema != want {
-		t.Errorf("the recorded artifact carries $schema = %+v", partial.Requirements)
-	}
-
-	// The tool the model was shown does not declare the field at all, so
-	// there is nothing for it to get wrong.
-	s, err := ArtifactSchema(afspec.StepRequirements)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Properties["$schema"] != nil {
-		t.Error("the tool schema declares $schema; a vendor rejects the whole request over it")
-	}
-}
-
-// The spec's identity and the format version are the pipeline's to supply
-// too: a submission without them is accepted and stored with the right
-// values, and the tool schema does not require them.
-func TestTheSubmitHandlerWritesTheSpecIdentityAndSchemaVersion(t *testing.T) {
-	ws := goWorkspace(t)
-	artifacts, _ := loadFixture(t, "01", "test_feature")
-
-	submitted := deepCopy(t, artifacts[afspec.StepRequirements])
-	for _, f := range []string{"$schema", "spec_id", "spec_name", "schema_version"} {
-		delete(submitted, f)
-	}
-
-	runner, _ := fauxRunner(t, ws,
-		toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
-
-	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-	a := &agentAuthor{runner: runner}
-	if _, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
-		Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-		Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
-	}); err != nil {
-		t.Fatalf("GenerateArtifact: %v", err)
-	}
-	r := partial.Requirements
-	if r == nil || r.SpecId != "01" || r.SpecName != "test_feature" || r.SchemaVersion != afspec.SchemaVersion {
-		t.Errorf("the recorded artifact lacks the program-supplied fields: %+v", r)
-	}
-
-	for _, step := range []afspec.GenerationStep{afspec.StepRequirements, afspec.StepTestSpec, afspec.StepTasks} {
-		s, err := ArtifactSchema(step)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range programFields {
-			if slices.Contains(s.Required, f) {
-				t.Errorf("%s: the tool schema still requires %s", step, f)
+			if uri := artifactSchemaURI(step); !strings.HasPrefix(uri, "https://") || !strings.Contains(uri, string(step)) {
+				t.Errorf("$schema would be filled in with %q", uri)
 			}
-		}
+		})
+	}
+	if _, err := ArtifactSchema(afspec.GenerationStep("nonsense")); err == nil || artifactSchemaURI("nonsense") != "" {
+		t.Errorf("an unknown step: err %v", err)
 	}
 }
 
-// The file tools are confined to the repository, so the prompts must not send
-// the model to read dependency source on disk, and must say what to do with a
-// symbol it cannot reach.
-func TestPromptsAdmitThatDependencySourceIsOutOfReach(t *testing.T) {
-	prd := prdSystemPrompt()
-	for _, want := range []string{"confined to the repository", "path_not_allowed", "unverified"} {
-		if !strings.Contains(prd, want) {
-			t.Errorf("the PRD prompt does not mention %q", want)
-		}
-	}
-	if strings.Contains(prd, "find the package on disk") || strings.Contains(prd, "installed source") {
-		t.Error("the PRD prompt still sends the model to read dependency source on disk")
-	}
-	if !strings.Contains(generationSystemPrompt(), `"verified": false`) {
-		t.Error("the generation prompt does not say how to record an unreachable package")
-	}
-}
-
-// A phase that ends without an accepted artifact says what it was stuck on
-// (#62).
-func TestRejectionDetailNamesTheCountAndTheLastFailure(t *testing.T) {
-	var sink artifactSink
-	if sink.rejectionDetail() != "" {
-		t.Error("nothing was rejected, so there is no detail")
-	}
-	sink.reject(nil, "the tasks artifact has 2 validation error(s):\n[C7] test TS-01-3 is not owned by any task\n[C8] criterion X")
-	sink.reject(nil, "the tasks artifact has 1 validation error(s):\n[C7] test TS-01-4 is not owned by any task")
-	got := sink.rejectionDetail()
-	for _, want := range []string{"2 submission(s) were rejected", "1 validation error(s)", "TS-01-4"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("detail lacks %q: %s", want, got)
-		}
-	}
-	err := withRejections(errors.New("no result"), &sink)
-	if errors.Unwrap(err) == nil || !strings.Contains(err.Error(), "no result (2 submission(s)") {
-		t.Errorf("err = %v", err)
-	}
-}
-
-// One rejection names every problem: a tasks artifact that breaks the
-// schema, orphans tests AND names another ecosystem's runner hears of all
-// three at once, instead of one per regenerated artifact.
-func TestARejectionNamesEveryProblemInOnePass(t *testing.T) {
-	ws := goWorkspace(t)
-	artifacts, _ := loadFixture(t, "01", "test_feature")
-	partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-	for _, step := range []afspec.GenerationStep{afspec.StepRequirements, afspec.StepTestSpec} {
-		if err := validateArtifactContent(artifacts[step], step, &partial); err != nil {
-			t.Fatal(err)
-		}
-	}
-	audit := project.DetectProfile(ws.Root()).AuditTasks
-
-	bad := deepCopy(t, artifacts[afspec.StepTasks])
-	bad["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
-	tasks := bad["tasks"].([]any)
-	first := tasks[0].(map[string]any)
-	first["title"] = ""
-	first["tests"] = []any{"TS-01-1"}
-
-	before := partial
-	code, err := checkArtifact(bad, afspec.StepTasks, &partial, audit, false)
-	if err == nil {
-		t.Fatal("a broken plan was accepted")
-	}
-	if code != "validation_failed" {
-		t.Errorf("code = %q", code)
-	}
-	msg := err.Error()
-	for _, want := range []string{"[json_schema]", "[C7]", "pytest", "go test ./... -count=1", "Cross-file rules"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the rejection lacks %q:\n%s", want, msg)
-		}
-	}
-	if strings.Index(msg, "[json_schema]") > strings.Index(msg, "[C7]") {
-		t.Errorf("schema errors should come first:\n%s", msg)
-	}
-	if partial.Tasks != before.Tasks {
-		t.Error("a rejected artifact was recorded")
-	}
-
-	// The audit alone is a project_mismatch.
-	pythonic := deepCopy(t, artifacts[afspec.StepTasks])
-	pythonic["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
-	if code, err := checkArtifact(pythonic, afspec.StepTasks, &partial, audit, false); err == nil || code != "project_mismatch" {
-		t.Errorf("audit only: code = %q, err = %v", code, err)
-	}
-}
-
-// Every artifact's tool schema has a strict form: strict mode cannot declare
-// a dictionary object, and a tool schema without a strict form loses the
-// API's guarantee that the first submission has the artifact's shape.
-func TestEveryArtifactToolSchemaHasAStrictForm(t *testing.T) {
+// The conversion is pure and runs once per step per process: two calls
+// return the same value.
+func TestArtifactSchema_IsConvertedOnce(t *testing.T) {
 	for _, step := range afspec.GenerationSteps {
-		s, err := ArtifactSchema(step)
-		if err != nil {
-			t.Fatalf("%s: %v", step, err)
-		}
-		if !schema.StrictSubsetOK(s) {
-			t.Errorf("%s: the tool schema has no strict form", step)
-		}
-		for _, f := range programFields {
-			if s.Properties[f] != nil {
-				t.Errorf("%s: the tool schema declares %s, which the handler writes", step, f)
-			}
+		a, _ := ArtifactSchema(step)
+		b, _ := ArtifactSchema(step)
+		if a == nil || a != b {
+			t.Errorf("%s: two calls returned different schema values", step)
 		}
 	}
 }
@@ -458,31 +166,121 @@ func TestEveryArtifactToolSchemaHasAStrictForm(t *testing.T) {
 // declare, and stored as the object the format defines. A submission in the
 // stored form, which a tool sent without the strict flag can receive, is
 // accepted too.
-func TestTheGlossaryIsSubmittedAsEntriesAndStoredAsAnObject(t *testing.T) {
+func TestSubmitArtifact_TakesTheGlossaryAsEntriesOrAnObject(t *testing.T) {
 	for name, glossary := range map[string]any{
 		"entries": []any{map[string]any{"term": "widget", "definition": "A counted thing."}},
 		"object":  map[string]any{"widget": "A counted thing."},
 	} {
 		t.Run(name, func(t *testing.T) {
-			ws := goWorkspace(t)
+			ws := newWorkspace(t)
 			artifacts, _ := loadFixture(t, "01", "test_feature")
 			submitted := deepCopy(t, artifacts[afspec.StepRequirements])
 			submitted["glossary"] = glossary
-			runner, _ := fauxRunner(t, ws,
-				toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
-			partial := afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
-			a := &agentAuthor{runner: runner}
-			got, _, err := a.GenerateArtifact(context.Background(), artifactRequest{
-				Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature",
-				Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: &partial,
+			runner, _ := fauxRunner(t, ws, toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
+			got, _, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
+				Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n",
+				Partial: &afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"},
 			})
 			if err != nil {
 				t.Fatalf("GenerateArtifact: %v", err)
 			}
-			g, ok := got["glossary"].(map[string]any)
-			if !ok || g["widget"] != "A counted thing." || len(g) != 1 {
+			if g, ok := got["glossary"].(map[string]any); !ok || g["widget"] != "A counted thing." || len(g) != 1 {
 				t.Errorf("glossary = %#v, want the object form", got["glossary"])
 			}
 		})
+	}
+}
+
+// An artifact that passes every rule but carries the validator's warnings is
+// sent back once with them, and the next submission is accepted with
+// whatever remains: here a patch with no operations keeps it as it is.
+func TestSubmitArtifact_SendsItsWarningsBackOnce(t *testing.T) {
+	ws := newWorkspace(t)
+	artifacts, _ := loadFixture(t, "01", "test_feature")
+	vague := deepCopy(t, artifacts[afspec.StepRequirements])
+	crit := vague["requirements"].([]any)[0].(map[string]any)["criteria"].([]any)[0].(map[string]any)
+	crit["action"] = "handle the input properly"
+	runner, p := fauxRunner(t, ws,
+		toolCall("c1", ArtifactToolName(afspec.StepRequirements), vague),
+		toolCall("c2", PatchToolName(afspec.StepRequirements), map[string]any{"operations": []any{}}))
+	partial := &afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"}
+	if _, _, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
+		Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: partial,
+	}); err != nil {
+		t.Fatalf("GenerateArtifact: %v", err)
+	}
+	if partial.Requirements == nil || partial.Requirements.Requirements[0].Criteria[0].Action != "handle the input properly" {
+		t.Fatalf("the artifact kept as it was is not recorded: %+v", partial.Requirements)
+	}
+	review := transcript(p.Requests()[1])
+	for _, want := range []string{codeReviewWarnings, "vague_language", "properly", "with no operations"} {
+		if !strings.Contains(review, want) {
+			t.Errorf("the review lacks %q:\n%s", want, review)
+		}
+	}
+}
+
+// A rejection costs the model a regeneration, so it names every problem at
+// once — the schema's first, then the rules across files, then the project's
+// tooling — and records nothing: the next attempt is checked against the same
+// upstream artifacts as this one.
+func TestCheckArtifact_NamesEveryProblemAtOnceAndKeepsNone(t *testing.T) {
+	ws := newWorkspace(t)
+	artifacts, _ := loadFixture(t, "01", "test_feature")
+	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec)
+	before := *partial
+	audit := project.DetectProfile(ws.Root()).AuditTasks
+
+	bad := deepCopy(t, artifacts[afspec.StepTasks])
+	bad["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
+	first := bad["tasks"].([]any)[0].(map[string]any)
+	first["title"] = ""
+	first["tests"] = []any{"TS-01-1"}
+	code, err := checkArtifact(bad, afspec.StepTasks, partial, audit, false)
+	if err == nil || code != "validation_failed" {
+		t.Fatalf("code %q, err %v", code, err)
+	}
+	msg := err.Error()
+	for _, want := range []string{"[json_schema]", "[C7]", "pytest", "go test ./... -count=1", "Cross-file rules", "The project's own tooling"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the rejection lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Index(msg, "[json_schema]") > strings.Index(msg, "[C7]") {
+		t.Errorf("schema errors should come first:\n%s", msg)
+	}
+	if *partial != before {
+		t.Error("a rejected artifact changed the accumulated state")
+	}
+
+	// The audit alone is a project mismatch, not a validation failure.
+	pythonic := deepCopy(t, artifacts[afspec.StepTasks])
+	pythonic["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
+	if code, err := checkArtifact(pythonic, afspec.StepTasks, partial, audit, false); err == nil || code != "project_mismatch" {
+		t.Errorf("audit only: code %q, err %v", code, err)
+	}
+	// An artifact that cannot be decoded is one problem among the rest.
+	if _, err := checkArtifact(map[string]any{"tasks": "not a list"}, afspec.StepTasks, partial, nil, false); err == nil {
+		t.Error("an undecodable artifact was accepted")
+	}
+}
+
+// A phase that ends without an accepted artifact says how many submissions
+// were turned back and the first problem of the last one.
+func TestArtifactSink_SaysWhatThePhaseWasStuckOn(t *testing.T) {
+	var sink artifactSink
+	if sink.rejectionDetail() != "" || withRejections(errors.New("no result"), &sink).Error() != "no result" {
+		t.Error("nothing was rejected, so there is no detail")
+	}
+	sink.reject(nil, "the tasks artifact has 2 problem(s):\n[C7] test TS-01-3 is not owned by any task\n[C8] criterion X")
+	sink.reject(nil, "the tasks artifact has 1 problem(s):\nCross-file rules:\n[C7] test TS-01-4 is not owned by any task\n[C8] y")
+	got := sink.rejectionDetail()
+	want := "2 submission(s) were rejected; the last failure: the tasks artifact has 1 problem(s): [C7] test TS-01-4 is not owned by any task"
+	if got != want {
+		t.Errorf("detail = %q, want %q", got, want)
+	}
+	err := withRejections(errors.New("no result"), &sink)
+	if errors.Unwrap(err) == nil || !strings.HasPrefix(err.Error(), "no result (2 submission(s)") {
+		t.Errorf("err = %v", err)
 	}
 }

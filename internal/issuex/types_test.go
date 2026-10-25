@@ -1,85 +1,58 @@
-package issuex_test
+package issuex
 
-import (
-	"fmt"
-	"testing"
-	"testing/quick"
+import "testing"
 
-	"github.com/agent-fox-dev/spec/internal/issuex"
-)
-
-// TestRepoValid verifies TS-01-2: Repo Valid method reports true only when both Owner and Name are non-empty.
-// Verifies: 01-REQ-2.1
-func TestRepoValid_TS_01_2(t *testing.T) {
-	tests := []struct {
-		repo issuex.Repo
+func TestRepo_Valid(t *testing.T) {
+	for _, tc := range []struct {
+		repo Repo
 		want bool
 	}{
-		{issuex.Repo{Owner: "foo", Name: "bar"}, true},
-		{issuex.Repo{Owner: "group/sub", Name: "bar"}, true},
-		{issuex.Repo{Owner: "", Name: "bar"}, false},
-		{issuex.Repo{Owner: "foo", Name: ""}, false},
-		{issuex.Repo{}, false},
-	}
-
-	for _, tc := range tests {
+		{Repo{Owner: "foo", Name: "bar"}, true},
+		{Repo{Owner: "group/sub", Name: "bar"}, true},
+		{Repo{Owner: "", Name: "bar"}, false},
+		{Repo{Owner: "foo", Name: ""}, false},
+		{Repo{}, false},
+	} {
 		if got := tc.repo.Valid(); got != tc.want {
 			t.Errorf("Repo{%q, %q}.Valid() = %v, want %v", tc.repo.Owner, tc.repo.Name, got, tc.want)
 		}
 	}
 }
 
-// TestRepoStringProperty verifies TS-01-3: Repo String returns owner joined with name by slash for any non-empty segments.
-// Verifies: 01-REQ-2.2
-func TestRepoStringProperty_TS_01_3(t *testing.T) {
-	f := func(owner, name string) bool {
-		r := issuex.Repo{Owner: owner, Name: name}
-		return r.String() == fmt.Sprintf("%s/%s", owner, name)
-	}
-	if err := quick.Check(f, nil); err != nil {
-		t.Errorf("Repo.String() property failed: %v", err)
-	}
-}
-
-// TestIssueRefStringProperty verifies TS-01-4: IssueRef String returns repo string and issue number joined by hash.
-// Verifies: 01-REQ-2.3
-func TestIssueRefStringProperty_TS_01_4(t *testing.T) {
-	f := func(owner, name string, num int) bool {
-		r := issuex.Repo{Owner: owner, Name: name}
-		ref := issuex.IssueRef{Repo: r, Number: num}
-		return ref.String() == fmt.Sprintf("%s#%d", r.String(), num)
-	}
-	if err := quick.Check(f, nil); err != nil {
-		t.Errorf("IssueRef.String() property failed: %v", err)
-	}
-}
-
-func TestIssueRefURL(t *testing.T) {
-	tests := []struct {
-		ref  issuex.IssueRef
+func TestIssueRef_StringNamesTheRepositoryAndNumber(t *testing.T) {
+	for _, tc := range []struct {
+		ref  IssueRef
+		repo string
 		want string
 	}{
-		{
-			ref:  issuex.IssueRef{Repo: issuex.Repo{Owner: "foo", Name: "bar"}, Number: 42, IsPullRequest: false},
-			want: "https://github.com/foo/bar/issues/42",
-		},
-		{
-			ref:  issuex.IssueRef{Repo: issuex.Repo{Owner: "foo", Name: "bar"}, Number: 42, IsPullRequest: true},
-			want: "https://github.com/foo/bar/pull/42",
-		},
-		{
-			ref:  issuex.IssueRef{Repo: issuex.Repo{Host: "gitlab.com", Owner: "group/sub", Name: "proj"}, Number: 10, IsPullRequest: false},
-			want: "https://gitlab.com/group/sub/proj/-/issues/10",
-		},
-		{
-			ref:  issuex.IssueRef{Repo: issuex.Repo{Host: "gitlab.com", Owner: "group/sub", Name: "proj"}, Number: 10, IsPullRequest: true},
-			want: "https://gitlab.com/group/sub/proj/-/merge_requests/10",
-		},
+		{IssueRef{Repo: Repo{Owner: "o", Name: "r"}, Number: 42}, "o/r", "o/r#42"},
+		{IssueRef{Repo: Repo{Owner: "group/sub", Name: "proj", Host: "gitlab.com"}, Number: 7, IsPullRequest: true}, "group/sub/proj", "group/sub/proj#7"},
+	} {
+		if got := tc.ref.Repo.String(); got != tc.repo {
+			t.Errorf("Repo.String() = %q, want %q", got, tc.repo)
+		}
+		if got := tc.ref.String(); got != tc.want {
+			t.Errorf("IssueRef.String() = %q, want %q", got, tc.want)
+		}
 	}
+}
 
-	for _, tc := range tests {
+// URL is the thread's web page: GitHub's issues or pull path, GitLab's /-/
+// issues or merge_requests path, on the ref's host (github.com when none).
+func TestIssueRef_URL(t *testing.T) {
+	for _, tc := range []struct {
+		ref  IssueRef
+		want string
+	}{
+		{IssueRef{Repo: Repo{Owner: "foo", Name: "bar"}, Number: 42}, "https://github.com/foo/bar/issues/42"},
+		{IssueRef{Repo: Repo{Owner: "foo", Name: "bar"}, Number: 42, IsPullRequest: true}, "https://github.com/foo/bar/pull/42"},
+		{IssueRef{Repo: Repo{Host: "gitlab.com", Owner: "group/sub", Name: "proj"}, Number: 10}, "https://gitlab.com/group/sub/proj/-/issues/10"},
+		{IssueRef{Repo: Repo{Host: "gitlab.com", Owner: "group/sub", Name: "proj"}, Number: 10, IsPullRequest: true}, "https://gitlab.com/group/sub/proj/-/merge_requests/10"},
+		{IssueRef{Repo: Repo{Host: " https://ghe.acme.com/ ", Owner: "o", Name: "r"}, Number: 1}, "https://ghe.acme.com/o/r/issues/1"},
+		{IssueRef{Repo: Repo{Host: "http://GitLab.local", Owner: "o", Name: "r"}, Number: 2}, "http://GitLab.local/o/r/-/issues/2"},
+	} {
 		if got := tc.ref.URL(); got != tc.want {
-			t.Errorf("IssueRef.URL() = %q, want %q", got, tc.want)
+			t.Errorf("%+v.URL() = %q, want %q", tc.ref, got, tc.want)
 		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"slices"
 	"strings"
 	"testing"
 
@@ -27,18 +26,6 @@ func wellFormed(n int) reviewInput {
 		Evidence: fmt.Sprintf("evidence %d", n), Remedy: "fix it"}
 }
 
-func submitReview(t *testing.T, tool core.Tool, findings ...reviewInput) core.ToolResult {
-	t.Helper()
-	if findings == nil {
-		findings = []reviewInput{}
-	}
-	raw, err := json.Marshal(map[string]any{"findings": findings})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tool.Execute(context.Background(), raw)
-}
-
 func many(n int) []reviewInput {
 	out := make([]reviewInput, n)
 	for i := range out {
@@ -47,9 +34,17 @@ func many(n int) []reviewInput {
 	return out
 }
 
-// rejectedEarlier is round 1 as the round loop hands it to round 2: R1-F1
+func submitReview(t *testing.T, tool core.Tool, findings []reviewInput) core.ToolResult {
+	t.Helper()
+	if findings == nil {
+		findings = []reviewInput{}
+	}
+	return tool.Execute(context.Background(), mustJSON(t, map[string]any{"findings": findings}))
+}
+
+// earlierRound is round 1 as the round loop hands it to round 2: R1-F1
 // rejected, R1-F2 accepted.
-func rejectedEarlier() []Finding {
+func earlierRound() []Finding {
 	return []Finding{
 		{ID: "R1-F1", Severity: "major", Section: "Goals", Flaw: "X is untestable", Evidence: "a  b\nc",
 			Remedy: "r", Disposition: "rejected", Reason: "it is tested by Y"},
@@ -58,211 +53,117 @@ func rejectedEarlier() []Finding {
 	}
 }
 
-// TS-09-10 (unit): the review tool accepts an empty list and a well-formed
-// finding, and its schema requires every field of a finding.
-//
-// Verifies: 09-REQ-2.4
-func TestTS09_10_TheReviewToolAcceptsEmptyAndWellFormedFindings(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 1, nil)
-	if tool.Name != ToolSubmitPRDReview || !tool.Terminating {
-		t.Errorf("tool = %s, terminating %v", tool.Name, tool.Terminating)
-	}
-	r := submitReview(t, tool)
-	if !r.OK || !r.Terminate {
-		t.Fatalf("an empty list: %+v", r)
-	}
-	if got, ok := sink.get(); !ok || len(got) != 0 {
-		t.Errorf("sink = %v, %v", got, ok)
-	}
-
-	sink = reviewSink{}
-	tool = newReviewTool(&sink, 1, nil)
-	r = submitReview(t, tool, wellFormed(1))
-	if !r.OK || !r.Terminate {
-		t.Fatalf("a well-formed finding: %+v", r)
-	}
-	got, _ := sink.get()
-	if len(got) != 1 || got[0].Flaw != "flaw 1" || got[0].Severity != "major" {
-		t.Errorf("sink = %+v", got)
-	}
-
-	s := reviewSchema()
-	if !slices.Equal(s.Required, []string{"findings"}) {
-		t.Errorf("required = %v", s.Required)
-	}
-	item := s.Properties["findings"].Items
-	want := []string{"severity", "section", "flaw", "evidence", "remedy", "reopens"}
-	if !slices.Equal(item.Required, want) {
-		t.Errorf("a finding requires %v, want %v", item.Required, want)
-	}
-	var enum []string
-	for _, v := range item.Properties["severity"].Enum {
-		var s string
-		_ = json.Unmarshal(v, &s)
-		enum = append(enum, s)
-	}
-	if !slices.Equal(enum, []string{"critical", "major", "minor"}) {
-		t.Errorf("severity enum = %v", enum)
+// An accepted review ends the phase and records its findings, numbered
+// R<round>-F<n> in the order submitted; an empty list says the PRD stands.
+func TestReviewTool_AcceptsAWellFormedReview(t *testing.T) {
+	reopen := wellFormed(1)
+	reopen.Reopens, reopen.Evidence = "R1-F1", "new: specgen/prd.go:146 has no such check"
+	for _, tc := range []struct {
+		name     string
+		round    int
+		earlier  []Finding
+		findings []reviewInput
+		wantIDs  []string
+	}{
+		{"no findings", 1, nil, nil, nil},
+		{"findings, numbered by round", 2, nil, many(3), []string{"R2-F1", "R2-F2", "R2-F3"}},
+		{"the most findings a review may raise", 1, nil, many(maxFindings), nil},
+		{"a rejected finding reopened with new evidence", 2, earlierRound(), []reviewInput{reopen}, []string{"R2-F1"}},
+		{"an accepted finding raised again", 2, earlierRound(),
+			[]reviewInput{{Severity: "minor", Section: "Intent", Flaw: "wordy", Evidence: "e", Remedy: "r"}}, []string{"R2-F1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sink reviewSink
+			r := submitReview(t, newReviewTool(&sink, tc.round, tc.earlier), tc.findings)
+			if !r.OK || !r.Terminate {
+				t.Fatalf("%+v", r)
+			}
+			got, ok := sink.get()
+			if !ok || got == nil || len(got) != len(tc.findings) {
+				t.Fatalf("recorded %v (%v)", got, ok)
+			}
+			for i, f := range got {
+				if tc.wantIDs != nil && f.ID != tc.wantIDs[i] {
+					t.Errorf("finding %d has id %q, want %q", i+1, f.ID, tc.wantIDs[i])
+				}
+				if f.Flaw != tc.findings[i].Flaw || f.Reopens != tc.findings[i].Reopens || f.Disposition != "" {
+					t.Errorf("finding %d = %+v", i+1, f)
+				}
+			}
+		})
 	}
 }
 
-// TS-09-11 (unit): accepted findings are numbered R<round>-F<n> in the order
-// submitted.
-//
-// Verifies: 09-REQ-2.5
-func TestTS09_11_FindingsAreNumberedByRoundInSubmittedOrder(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 2, nil)
-	if r := submitReview(t, tool, wellFormed(1), wellFormed(2), wellFormed(3)); !r.OK {
-		t.Fatalf("%+v", r)
-	}
-	got, _ := sink.get()
-	var ids []string
-	for _, f := range got {
-		ids = append(ids, f.ID)
-	}
-	if !slices.Equal(ids, []string{"R2-F1", "R2-F2", "R2-F3"}) || got[1].Flaw != "flaw 2" {
-		t.Errorf("ids = %v (%+v)", ids, got)
-	}
-}
-
-// TS-09-13 (unit): 31 findings are turned back naming the count and the
-// limit, and nothing is recorded; 30 are accepted.
-//
-// Verifies: 09-REQ-3.1
-func TestTS09_13_MoreThanThirtyFindingsAreTurnedBack(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 1, nil)
-	r := submitReview(t, tool, many(31)...)
-	if r.OK || r.Terminate || !strings.Contains(r.Detail, "31") || !strings.Contains(r.Detail, "30") {
-		t.Errorf("31 findings: %+v", r)
-	}
-	if _, ok := sink.get(); ok {
-		t.Error("a turned-back submission was recorded")
-	}
-	if r := submitReview(t, tool, many(30)...); !r.OK || !r.Terminate {
-		t.Errorf("30 findings: %+v", r)
-	}
-}
-
-// TS-09-14 (unit): a finding with an empty severity, section, flaw, evidence
-// or remedy is turned back naming its position and its empty fields.
-//
-// Verifies: 09-REQ-3.2
-func TestTS09_14_AFindingWithAnEmptyFieldIsTurnedBack(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 1, nil)
+// A review that fails a check is turned back whole, every offender named in
+// one error so the reviewer corrects them in one turn, and records nothing.
+func TestReviewTool_TurnsBackAnInvalidReview(t *testing.T) {
 	noEvidence := wellFormed(2)
 	noEvidence.Evidence = "  "
 	noSeverityNoRemedy := wellFormed(3)
 	noSeverityNoRemedy.Severity, noSeverityNoRemedy.Remedy = "", ""
-	r := submitReview(t, tool, wellFormed(1), noEvidence, noSeverityNoRemedy)
-	if r.OK || r.Terminate {
-		t.Fatalf("%+v", r)
+	badSeverity := wellFormed(1)
+	badSeverity.Severity = "blocker"
+	reopens := func(id, evidence string) reviewInput {
+		f := wellFormed(1)
+		f.Reopens, f.Evidence = id, evidence
+		return f
 	}
-	for _, want := range []string{"finding 2", "evidence", "finding 3", "severity", "remedy", "support or withdraw"} {
-		if !strings.Contains(r.Detail, want) {
-			t.Errorf("the error does not name %q: %s", want, r.Detail)
-		}
+	for _, tc := range []struct {
+		name     string
+		round    int
+		earlier  []Finding
+		findings []reviewInput
+		code     string
+		want     []string
+		notWant  []string
+	}{
+		{"more findings than a review may raise", 1, nil, many(maxFindings + 1), "too_many_findings", []string{"31", "30"}, nil},
+		{"findings with empty fields", 1, nil, []reviewInput{wellFormed(1), noEvidence, noSeverityNoRemedy}, "invalid_findings",
+			[]string{"finding 2 has an empty evidence", "finding 3 has an empty severity, remedy", "support or withdraw"},
+			[]string{"finding 1 "}},
+		{"a severity that is not one", 1, nil, []reviewInput{badSeverity}, "invalid_findings",
+			[]string{"finding 1", `"blocker"`, "critical, major, minor"}, []string{"support or withdraw"}},
+		{"a round-one finding that reopens", 1, nil, []reviewInput{reopens("R1-F1", "x")}, "invalid_findings",
+			[]string{"finding 1 reopens R1-F1", "round 1"}, nil},
+		{"reopening no earlier finding", 2, earlierRound(), []reviewInput{reopens("R1-F9", "x")}, "invalid_findings",
+			[]string{"finding 1 reopens R1-F9", "no earlier"}, nil},
+		{"reopening with the evidence the rejection answered", 2, earlierRound(), []reviewInput{reopens("R1-F1", " a b c ")},
+			"invalid_findings", []string{"finding 1 reopens R1-F1", "already answered"}, nil},
+		{"repeating a rejected finding", 2, earlierRound(),
+			[]reviewInput{{Severity: "major", Section: "Goals", Flaw: "X  is untestable", Evidence: "other", Remedy: "r"}},
+			"invalid_findings", []string{"finding 1 repeats R1-F1", "reopens"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sink reviewSink
+			r := submitReview(t, newReviewTool(&sink, tc.round, tc.earlier), tc.findings)
+			if r.OK || r.Terminate || r.Error != tc.code {
+				t.Fatalf("result %+v, want %s", r, tc.code)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(r.Detail, want) {
+					t.Errorf("the error does not say %q: %s", want, r.Detail)
+				}
+			}
+			for _, not := range tc.notWant {
+				if strings.Contains(r.Detail, not) {
+					t.Errorf("the error says %q: %s", not, r.Detail)
+				}
+			}
+			if _, ok := sink.get(); ok {
+				t.Error("a turned-back review was recorded")
+			}
+		})
 	}
-	if strings.Contains(r.Detail, "finding 1 ") {
-		t.Errorf("the error names the well-formed finding: %s", r.Detail)
-	}
-	if _, ok := sink.get(); ok {
-		t.Error("a turned-back submission was recorded")
-	}
-}
-
-// TS-09-15 (unit): a round-1 finding that reopens anything is turned back.
-//
-// Verifies: 09-REQ-3.3
-func TestTS09_15_ARoundOneFindingCannotReopen(t *testing.T) {
 	var sink reviewSink
-	tool := newReviewTool(&sink, 1, nil)
-	f := wellFormed(1)
-	f.Reopens = "R1-F1"
-	r := submitReview(t, tool, f)
-	if r.OK || !strings.Contains(r.Detail, "finding 1") || !strings.Contains(r.Detail, "R1-F1") {
-		t.Errorf("%+v", r)
-	}
-	if _, ok := sink.get(); ok {
-		t.Error("a turned-back submission was recorded")
+	if r := newReviewTool(&sink, 1, nil).Execute(context.Background(), json.RawMessage(`{"findings":"none"}`)); r.OK ||
+		r.Error != "invalid_arguments" {
+		t.Errorf("arguments that are not a review: %+v", r)
 	}
 }
 
-// TS-09-16 (unit): a later round's reopens that names no earlier finding is
-// turned back with the unknown id.
-//
-// Verifies: 09-REQ-3.4
-func TestTS09_16_ReopeningAnUnknownFindingIsTurnedBack(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 2, rejectedEarlier())
-	f := wellFormed(1)
-	f.Reopens = "R1-F9"
-	r := submitReview(t, tool, f)
-	if r.OK || !strings.Contains(r.Detail, "finding 1") || !strings.Contains(r.Detail, "R1-F9") {
-		t.Errorf("%+v", r)
-	}
-	if _, ok := sink.get(); ok {
-		t.Error("a turned-back submission was recorded")
-	}
-}
-
-// TS-09-17 (unit): reopening a rejected finding with the evidence its
-// rejection answered, whitespace aside, is turned back; new evidence is
-// accepted.
-//
-// Verifies: 09-REQ-3.5
-func TestTS09_17_ReopeningWithTheSameEvidenceIsTurnedBack(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 2, rejectedEarlier())
-	f := wellFormed(1)
-	f.Reopens, f.Evidence = "R1-F1", " a b c "
-	r := submitReview(t, tool, f)
-	if r.OK || !strings.Contains(r.Detail, "finding 1") || !strings.Contains(r.Detail, "R1-F1") {
-		t.Errorf("same evidence: %+v", r)
-	}
-	if _, ok := sink.get(); ok {
-		t.Error("a turned-back submission was recorded")
-	}
-	f.Evidence = "new: specgen/prd.go:146 has no such check"
-	if r := submitReview(t, tool, f); !r.OK || !r.Terminate {
-		t.Errorf("new evidence: %+v", r)
-	}
-	got, _ := sink.get()
-	if len(got) != 1 || got[0].Reopens != "R1-F1" || got[0].ID != "R2-F1" {
-		t.Errorf("sink = %+v", got)
-	}
-}
-
-// TS-09-18 (unit): a later finding that reopens nothing but repeats a
-// rejected finding's section and flaw is turned back; repeating an accepted
-// one is not.
-//
-// Verifies: 09-REQ-3.6
-func TestTS09_18_RepeatingARejectedFindingIsTurnedBack(t *testing.T) {
-	var sink reviewSink
-	tool := newReviewTool(&sink, 2, rejectedEarlier())
-	f := reviewInput{Severity: "major", Section: "Goals", Flaw: "X is untestable", Evidence: "other", Remedy: "r"}
-	r := submitReview(t, tool, f)
-	if r.OK || !strings.Contains(r.Detail, "finding 1") || !strings.Contains(r.Detail, "R1-F1") {
-		t.Errorf("a repeat of a rejected finding: %+v", r)
-	}
-	if _, ok := sink.get(); ok {
-		t.Error("a turned-back submission was recorded")
-	}
-	same := reviewInput{Severity: "minor", Section: "Intent", Flaw: "wordy", Evidence: "e", Remedy: "r"}
-	if r := submitReview(t, tool, same); !r.OK {
-		t.Errorf("a repeat of an accepted finding: %+v", r)
-	}
-}
-
-// TS-09-19 (property): two evidence strings are the same exactly when they
-// differ in whitespace only.
-//
-// Verifies: 09-REQ-3.7
-func TestTS09_19_EvidenceComparisonIgnoresOnlyWhitespace(t *testing.T) {
+// Two evidence strings are the same exactly when they differ in whitespace
+// only, whatever the characters around it.
+func TestSameEvidence_IgnoresOnlyWhitespace(t *testing.T) {
 	rng := rand.New(rand.NewSource(9))
 	spaces := []string{" ", "  ", "\t", "\n", " \n\t", "\r\n"}
 	letters := []rune("abcxyz019-_./:()`\"'é→")

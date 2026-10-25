@@ -321,9 +321,9 @@ type op struct {
 	dir  string
 }
 
-// operations lists the reduction in the order 14-REQ-3.2 fixes: drop
-// unexported declarations, drop test-file declarations, drop declarations
-// directory by directory, then collapse directories. Directories go deepest
+// operations lists the reduction in its fixed order, cheapest information
+// first: drop unexported declarations, drop test-file declarations, drop
+// declarations directory by directory, then collapse directories. Directories go deepest
 // first; at one depth the ones the input does not touch go before the ones it
 // touches, then by path.
 func (m *model) operations() []op {

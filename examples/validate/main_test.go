@@ -10,7 +10,7 @@ import (
 
 const fixture = "../../afspec/testdata/v2_example"
 
-func TestValidateReportsAValidSpec(t *testing.T) {
+func TestValidate_ReportsAValidSpec(t *testing.T) {
 	var out strings.Builder
 	valid, err := run(fixture, &out)
 	if err != nil || !valid {
@@ -21,7 +21,7 @@ func TestValidateReportsAValidSpec(t *testing.T) {
 	}
 }
 
-func TestValidateReportsBrokenRules(t *testing.T) {
+func TestValidate_ReportsABrokenRule(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"} {
 		data, err := os.ReadFile(filepath.Join(fixture, name))
@@ -47,7 +47,7 @@ func TestValidateReportsBrokenRules(t *testing.T) {
 	}
 }
 
-func TestValidateFailsOnAMissingDirectory(t *testing.T) {
+func TestValidate_FailsOnAMissingDirectory(t *testing.T) {
 	if _, err := run(filepath.Join(t.TempDir(), "missing"), io.Discard); err == nil {
 		t.Fatal("run = nil; want an error")
 	}

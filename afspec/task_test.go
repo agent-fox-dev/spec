@@ -7,38 +7,33 @@ import (
 	"testing"
 )
 
-// TestTaskStateMachine covers §8.3.1. The v1 states queued and
-// pending_reevaluation are gone; only the four listed states remain.
-func TestTaskStateMachine(t *testing.T) {
-	allowed := []struct{ from, to TaskState }{
-		{TaskStatePending, TaskStateInProgress},
-		{TaskStatePending, TaskStateDropped},
-		{TaskStateInProgress, TaskStateDone},
-		{TaskStateInProgress, TaskStatePending},
-		{TaskStateDone, TaskStatePending},
-	}
-	for _, tc := range allowed {
-		if !ValidTaskTransition(tc.from, tc.to) {
-			t.Errorf("%s → %s should be allowed", tc.from, tc.to)
-		}
-	}
-
-	rejected := []struct{ from, to TaskState }{
-		{TaskStatePending, TaskStateDone},
-		{TaskStateDone, TaskStateInProgress},
-		{TaskStateDone, TaskStateDropped},
-		{TaskStateDropped, TaskStatePending},
-		{TaskStateDropped, TaskStateInProgress},
-		{TaskStateInProgress, TaskStateDropped},
-	}
-	for _, tc := range rejected {
-		if ValidTaskTransition(tc.from, tc.to) {
-			t.Errorf("%s → %s should be rejected", tc.from, tc.to)
-		}
+// The task state machine of §8.3.1.
+func TestValidTaskTransition(t *testing.T) {
+	for _, tc := range []struct {
+		from, to TaskState
+		want     bool
+	}{
+		{TaskStatePending, TaskStateInProgress, true},
+		{TaskStatePending, TaskStateDropped, true},
+		{TaskStateInProgress, TaskStateDone, true},
+		{TaskStateInProgress, TaskStatePending, true},
+		{TaskStateDone, TaskStatePending, true},
+		{TaskStatePending, TaskStateDone, false},
+		{TaskStateDone, TaskStateInProgress, false},
+		{TaskStateDone, TaskStateDropped, false},
+		{TaskStateDropped, TaskStatePending, false},
+		{TaskStateDropped, TaskStateInProgress, false},
+		{TaskStateInProgress, TaskStateDropped, false},
+	} {
+		t.Run(string(tc.from)+" to "+string(tc.to), func(t *testing.T) {
+			if got := ValidTaskTransition(tc.from, tc.to); got != tc.want {
+				t.Errorf("ValidTaskTransition(%s, %s) = %v; want %v", tc.from, tc.to, got, tc.want)
+			}
+		})
 	}
 }
 
-func TestTransitionTaskReturnsANewCopy(t *testing.T) {
+func TestTransitionTask_ReturnsANewCopy(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	updated, err := spec.Tasks.TransitionTask(1, string(TaskStateInProgress))
@@ -59,7 +54,7 @@ func TestTransitionTaskReturnsANewCopy(t *testing.T) {
 	}
 }
 
-func TestTransitionTaskRejectsIllegalMoves(t *testing.T) {
+func TestTransitionTask_RefusesAnIllegalMove(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	_, err := spec.Tasks.TransitionTask(1, string(TaskStateDone))
@@ -72,7 +67,7 @@ func TestTransitionTaskRejectsIllegalMoves(t *testing.T) {
 	}
 }
 
-func TestTransitionTaskRejectsUnknownTaskAndState(t *testing.T) {
+func TestTransitionTask_RefusesAnUnknownTaskOrState(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	if _, err := spec.Tasks.TransitionTask(99, string(TaskStateInProgress)); err == nil {
@@ -83,7 +78,7 @@ func TestTransitionTaskRejectsUnknownTaskAndState(t *testing.T) {
 	}
 }
 
-func TestCompleteAndResetTaskStates(t *testing.T) {
+func TestCompleteAndResetTaskStates_SetTheNamedTasksOnACopy(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	done := spec.Tasks.CompleteTaskStates([]int{1, 2, 99})
@@ -103,7 +98,7 @@ func TestCompleteAndResetTaskStates(t *testing.T) {
 	}
 }
 
-func TestGetTaskReturnsACopy(t *testing.T) {
+func TestGetTask_ReturnsACopy(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	task, ok := spec.Tasks.GetTask(2)
@@ -123,7 +118,7 @@ func TestGetTaskReturnsACopy(t *testing.T) {
 	}
 }
 
-func TestIsOptionalDefaultsToFalse(t *testing.T) {
+func TestIsOptional_DefaultsToFalse(t *testing.T) {
 	if (Task{}).IsOptional() {
 		t.Error("a task with no optional field reported itself optional")
 	}
@@ -133,19 +128,9 @@ func TestIsOptionalDefaultsToFalse(t *testing.T) {
 	}
 }
 
-// plan builds a task plan in the order given.
-func plan(tasks ...Task) *TasksV2Json { return &TasksV2Json{Tasks: tasks} }
-
-// planTask is a task with the given state. A nil deps leaves depends_on
-// absent, which format v2 §8.3 reads as "the previous task"; a non-nil empty
-// slice is an explicit "none".
-func planTask(id int, state TaskState, deps []int) Task {
-	return Task{Id: id, Title: "task", Kind: TaskKindImplement, State: state, DependsOn: deps}
-}
-
-// TS-10-1: IsReady follows depends_on, an explicit empty list, and the
-// previous-task default.
-func TestIsReadyFollowsDependsOn_TS10_1(t *testing.T) {
+// IsReady follows depends_on, an explicit empty list, and the previous-task
+// default.
+func TestIsReady_FollowsDependsOn(t *testing.T) {
 	p := plan(
 		planTask(1, TaskStatePending, nil),
 		planTask(2, TaskStatePending, nil),
@@ -180,8 +165,8 @@ func TestIsReadyFollowsDependsOn_TS10_1(t *testing.T) {
 	}
 }
 
-// TS-10-2: a dependency the plan lacks, or one that is dropped, is not done.
-func TestIsReadyTreatsMissingAndDroppedDependenciesAsNotDone_TS10_2(t *testing.T) {
+// A dependency the plan lacks, or one that is dropped, is not done.
+func TestIsReady_TreatsMissingAndDroppedDependenciesAsNotDone(t *testing.T) {
 	missing := plan(planTask(1, TaskStateDone, nil), planTask(2, TaskStatePending, []int{99}))
 	if missing.IsReady(2) {
 		t.Error("a dependency that is not in the plan counts as done")
@@ -198,8 +183,8 @@ func TestIsReadyTreatsMissingAndDroppedDependenciesAsNotDone_TS10_2(t *testing.T
 	}
 }
 
-// TS-10-3: an unknown id or a nil receiver is not ready, and does not panic.
-func TestIsReadyOnAnUnknownIDOrANilReceiver_TS10_3(t *testing.T) {
+// An unknown id or a nil receiver is not ready, and does not panic.
+func TestIsReady_IsFalseForAnUnknownIDOrANilPlan(t *testing.T) {
 	p := plan(planTask(1, TaskStatePending, nil), planTask(2, TaskStatePending, nil))
 	for _, id := range []int{42, 0, -1} {
 		if p.IsReady(id) {
@@ -212,8 +197,7 @@ func TestIsReadyOnAnUnknownIDOrANilReceiver_TS10_3(t *testing.T) {
 	}
 }
 
-// TS-10-4: NextTask returns the first in_progress task, as a copy.
-func TestNextTaskReturnsACopyOfTheFirstInProgressTask_TS10_4(t *testing.T) {
+func TestNextTask_ReturnsACopyOfTheFirstInProgressTask(t *testing.T) {
 	optional := true
 	inProgress := planTask(2, TaskStateInProgress, []int{1})
 	inProgress.Optional = &optional
@@ -245,8 +229,8 @@ func TestNextTaskReturnsACopyOfTheFirstInProgressTask_TS10_4(t *testing.T) {
 	}
 }
 
-// TS-10-5: with no task in progress, NextTask returns the first ready task.
-func TestNextTaskReturnsTheFirstReadyTask_TS10_5(t *testing.T) {
+// With no task in progress, NextTask returns the first ready task.
+func TestNextTask_ReturnsTheFirstReadyTask(t *testing.T) {
 	p := plan(
 		planTask(1, TaskStateDone, nil),
 		planTask(2, TaskStateDropped, nil),
@@ -259,9 +243,7 @@ func TestNextTaskReturnsTheFirstReadyTask_TS10_5(t *testing.T) {
 	}
 }
 
-// TS-10-6: NextTask has nothing to return for a nil plan, an empty plan, a
-// finished plan and a blocked one.
-func TestNextTaskWithNothingToDo_TS10_6(t *testing.T) {
+func TestNextTask_ReturnsNothingWhenNoTaskCanRun(t *testing.T) {
 	var nilPlan *TasksV2Json
 	for name, p := range map[string]*TasksV2Json{
 		"nil receiver": nilPlan,
@@ -272,18 +254,20 @@ func TestNextTaskWithNothingToDo_TS10_6(t *testing.T) {
 			planTask(2, TaskStatePending, []int{99}),
 		),
 	} {
-		if got, ok := p.NextTask(); got != nil || ok {
-			t.Errorf("%s: NextTask = %+v, %v; want nil, false", name, got, ok)
-		}
+		t.Run(name, func(t *testing.T) {
+			if got, ok := p.NextTask(); got != nil || ok {
+				t.Errorf("NextTask = %+v, %v; want nil, false", got, ok)
+			}
+		})
 	}
 }
 
-// TS-10-8: for any plan, NextTask is the first in_progress task, else the
+// For any plan, NextTask is the first in_progress task, else the
 // earliest ready one, and returns nothing only when neither exists. The plans
 // are generated from a fixed seed: random states, ids in no particular order,
 // and a depends_on that is absent, empty or lists ids that may not be in the
 // plan.
-func TestNextTaskProperty_TS10_8(t *testing.T) {
+func TestNextTask_PicksTheFirstInProgressElseTheEarliestReadyTask(t *testing.T) {
 	rng := rand.New(rand.NewPCG(10, 8))
 	states := []TaskState{TaskStatePending, TaskStateInProgress, TaskStateDone, TaskStateDropped}
 	for range 3000 {

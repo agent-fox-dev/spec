@@ -2,20 +2,19 @@ package afspec
 
 import "testing"
 
-func TestComputeCoverageOnACompleteSpec(t *testing.T) {
+func TestComputeCoverage_CoversEverythingInACompleteSpec(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	report := spec.TestSpec.ComputeCoverage(spec.Requirements)
 
 	if len(report.Uncovered) != 0 {
 		t.Errorf("uncovered = %v; the canonical fixture covers everything", report.Uncovered)
 	}
-	// Four criteria plus one path.
 	if len(report.Covered) != 5 {
 		t.Errorf("covered = %v; want the four criteria and the one path", report.Covered)
 	}
 }
 
-func TestComputeCoverageReportsGaps(t *testing.T) {
+func TestComputeCoverage_ListsTheGapsInArtifactOrder(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	spec.TestSpec.Tests = spec.TestSpec.Tests[:1] // keep only TS-01-1
 
@@ -29,14 +28,14 @@ func TestComputeCoverageReportsGaps(t *testing.T) {
 	}
 	for i, id := range want {
 		if report.Uncovered[i] != id {
-			t.Errorf("uncovered[%d] = %q; want %q (artifact order is preserved)", i, report.Uncovered[i], id)
+			t.Errorf("uncovered[%d] = %q; want %q", i, report.Uncovered[i], id)
 		}
 	}
 }
 
-// TestComputeTraceabilityIsDerived guards §8.5: the matrix comes from
-// test.verifies and task.tests, so it cannot drift from the artifacts.
-func TestComputeTraceabilityIsDerived(t *testing.T) {
+// §8.5: the matrix comes from test.verifies and task.tests, so it cannot drift
+// from the artifacts.
+func TestComputeTraceability_DerivesLinksFromVerifiesAndTasks(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	matrix := spec.ComputeTraceability()
 
@@ -72,7 +71,7 @@ func TestComputeTraceabilityIsDerived(t *testing.T) {
 	}
 }
 
-func TestComputeTraceabilityMarksOrphans(t *testing.T) {
+func TestComputeTraceability_MarksACoveredButUnownedCriterion(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	// Orphan the property test: the criterion stays covered but unowned.
 	spec.Tasks.Tasks[0].Tests = []string{"TS-01-1", "TS-01-2"}
@@ -92,14 +91,39 @@ func TestComputeTraceabilityMarksOrphans(t *testing.T) {
 	t.Fatal("01-REQ-1.3 is missing from the matrix")
 }
 
-func TestComputeTraceabilityOnAnEmptySpec(t *testing.T) {
-	spec := CreateSpec("05", "empty")
-	if got := len(spec.ComputeTraceability().Links); got != 0 {
-		t.Errorf("links = %d; want none", got)
+// C5 asks for a smoke test on every execution path, so a path verified only by
+// another kind of test is not covered.
+func TestComputeTraceability_CoversAPathOnlyWithASmokeTest(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	covered := func() bool {
+		t.Helper()
+		for _, l := range spec.ComputeTraceability().Links {
+			if l.Kind == "path" && l.ID == "01-PATH-1" {
+				return l.Covered
+			}
+		}
+		t.Fatal("no link for 01-PATH-1")
+		return false
 	}
+	if !covered() {
+		t.Fatal("the smoke-tested path is not covered")
+	}
+	for i := range spec.TestSpec.Tests {
+		if spec.TestSpec.Tests[i].Kind == TestKindSmoke {
+			spec.TestSpec.Tests[i].Kind = TestKindUnit
+		}
+	}
+	if covered() {
+		t.Error("a path verified only by a unit test is reported covered")
+	}
+}
 
-	var nilReqs Spec
-	if got := len(nilReqs.ComputeTraceability().Links); got != 0 {
+func TestComputeTraceability_IsEmptyWithoutRequirements(t *testing.T) {
+	if got := len(CreateSpec("05", "empty").ComputeTraceability().Links); got != 0 {
+		t.Errorf("links = %d on a scaffold; want none", got)
+	}
+	var bare Spec
+	if got := len(bare.ComputeTraceability().Links); got != 0 {
 		t.Errorf("links = %d on a spec with no requirements; want none", got)
 	}
 }

@@ -2,7 +2,7 @@ package afspec
 
 import "testing"
 
-func TestNextIDsUseTheHighestSuffixInUse(t *testing.T) {
+func TestNextIDs_FollowTheHighestSuffixInUse(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	if got := NextRequirementID(*spec.Requirements); got != "01-REQ-3" {
@@ -22,7 +22,7 @@ func TestNextIDsUseTheHighestSuffixInUse(t *testing.T) {
 	}
 }
 
-func TestNextIDsStartAtOneWhenEmpty(t *testing.T) {
+func TestNextIDs_StartAtOneWhenEmpty(t *testing.T) {
 	spec := CreateSpec("05", "empty")
 
 	if got := NextRequirementID(*spec.Requirements); got != "05-REQ-1" {
@@ -42,9 +42,9 @@ func TestNextIDsStartAtOneWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestNextTestIDUsesOneSeriesForEveryKind guards the v2 change that collapsed
-// the four v1 test-ID families (TS-N, TS-EN, TS-PN, TS-SMOKE-N) into one.
-func TestNextTestIDUsesOneSeriesForEveryKind(t *testing.T) {
+// Format v2 collapsed the four v1 test-ID families (TS-N, TS-EN, TS-PN,
+// TS-SMOKE-N) into one series.
+func TestNextTestID_SharesOneSeriesAcrossKinds(t *testing.T) {
 	ts := TestSpecV2Json{
 		SpecId: "05",
 		Tests: []Test{
@@ -59,7 +59,7 @@ func TestNextTestIDUsesOneSeriesForEveryKind(t *testing.T) {
 	}
 }
 
-func TestNextIDsIgnoreMalformedIDs(t *testing.T) {
+func TestNextRequirementID_IgnoresMalformedIDs(t *testing.T) {
 	req := RequirementsV2Json{
 		SpecId: "05",
 		Requirements: []Requirement{
@@ -73,7 +73,7 @@ func TestNextIDsIgnoreMalformedIDs(t *testing.T) {
 	}
 }
 
-func TestNextIDsHandleAlphaPrefixes(t *testing.T) {
+func TestNextIDs_KeepAnAlphaPrefix(t *testing.T) {
 	spec := loadFixture(t, "testdata/alpha_prefix_spec")
 	if got := NextRequirementID(*spec.Requirements); got != "abc-REQ-3" {
 		t.Errorf("NextRequirementID = %q; want abc-REQ-3", got)

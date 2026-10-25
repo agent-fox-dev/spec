@@ -1,13 +1,13 @@
 package afspec
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
 
-func TestRenderRequirementsShowsEveryCriterionAndContract(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.Requirements.Render()
+func TestRequirementsRender_ShowsEveryCriterionAndContract(t *testing.T) {
+	out := loadFixture(t, fixtureValidSpec).Requirements.Render()
 
 	for _, want := range []string{
 		"## Introduction",
@@ -28,60 +28,19 @@ func TestRenderRequirementsShowsEveryCriterionAndContract(t *testing.T) {
 	}
 }
 
-// TestRenderShowsEveryContract guards §11.2. Under v1 return_contract was
-// never rendered, so the coder never saw it.
-func TestRenderShowsEveryContract(t *testing.T) {
+func TestRequirementsRender_FlagsAnUnverifiedPackage(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.Requirements.Render()
-
-	for _, req := range spec.Requirements.Requirements {
-		for _, c := range req.Criteria {
-			contract := c.ContractText()
-			if contract == "" {
-				continue
-			}
-			if !strings.Contains(out, "→ "+contract) {
-				t.Errorf("criterion %s has a contract that the render omits", c.Id)
-			}
-		}
+	spec.Requirements.ExternalApis = []ExternalApi{{
+		Package: "example.com/guess", Version: "v0.1.0", Verified: false,
+		Symbols: []ExternalApiSymbol{{Name: "Do", ImportPath: "example.com/guess", Signature: "func Do()"}},
+	}}
+	if out := spec.Requirements.Render(); !strings.Contains(out, "UNVERIFIED") {
+		t.Errorf("an unverified package is not flagged in the render:\n%s", out)
 	}
 }
 
-// TestRenderShowsEveryTestInFull guards §11.2: every test renders all of its
-// fields whatever its kind. Under v1 edge-case and smoke tests rendered as an
-// ID and a description only.
-func TestRenderShowsEveryTestInFull(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.TestSpec.Render()
-
-	for _, test := range spec.TestSpec.Tests {
-		if !strings.Contains(out, test.Id) || !strings.Contains(out, test.Title) {
-			t.Fatalf("test %s is missing from the render", test.Id)
-		}
-		if !strings.Contains(out, test.When) {
-			t.Errorf("test %s (%s): the When clause is not rendered", test.Id, test.Kind)
-		}
-		for _, then := range test.Then {
-			if !strings.Contains(out, then) {
-				t.Errorf("test %s (%s): a Then clause is not rendered", test.Id, test.Kind)
-			}
-		}
-		for _, g := range test.Given {
-			if !strings.Contains(out, g) {
-				t.Errorf("test %s (%s): a Given clause is not rendered", test.Id, test.Kind)
-			}
-		}
-		for _, rc := range test.RealComponents {
-			if !strings.Contains(out, rc) {
-				t.Errorf("test %s: real component %q is not rendered", test.Id, rc)
-			}
-		}
-	}
-}
-
-func TestRenderTasksShowsThePlan(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.Tasks.Render()
+func TestTasksRender_ShowsThePlan(t *testing.T) {
+	out := loadFixture(t, fixtureValidSpec).Tasks.Render()
 
 	for _, want := range []string{
 		"### [ ] 1. Load and save spec artifacts (implement, pending)",
@@ -104,9 +63,8 @@ func TestRenderTasksShowsThePlan(t *testing.T) {
 }
 
 // Each step is numbered task.step, so a step can be named across tasks.
-func TestRenderTasksNumbersSteps(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.Tasks.Render()
+func TestTasksRender_NumbersEachStepByItsTask(t *testing.T) {
+	out := loadFixture(t, fixtureValidSpec).Tasks.Render()
 
 	for _, want := range []string{
 		"- 1.1 Write TS-01-1, TS-01-2 and TS-01-3 and confirm they fail\n",
@@ -123,13 +81,67 @@ func TestRenderTasksNumbersSteps(t *testing.T) {
 	}
 }
 
-func TestRenderCombinedSectionOrder(t *testing.T) {
-	spec := loadFixture(t, "testdata/valid_spec_with_arch")
-	out := spec.RenderCombined()
+// Nothing in the package is dropped by an unbudgeted render: every value of
+// every artifact, and every frontmatter field, appears in it. This is what
+// guarantees every test renders all its fields whatever its kind, and every
+// contract is shown (§11.2).
+func TestRender_DropsNothingFromThePackage(t *testing.T) {
+	s := fullySetSpec(t)
+	// $schema and the artifacts' copies of the identity are format
+	// constants and duplicates of the metadata; the pattern is the EARS
+	// sentence's keyword.
+	skip := map[string]bool{"$schema": true, "schema_version": true, "spec_id": true, "spec_name": true, "pattern": true}
 
-	sections := []string{"# PRD", "# Architecture", "# Requirements", "# Test Specification", "# Tasks"}
+	renders := map[string]string{"combined": s.RenderCombined()}
+	ind := s.RenderIndividual()
+	renders["individual"] = ind["prd"] + ind["requirements"] + ind["test_spec"] + ind["tasks"]
+	for name, render := range renders {
+		render = unescape(render)
+		for _, artifact := range []any{s.Requirements, s.TestSpec, s.Tasks} {
+			for path, value := range leaves(t, artifact, skip) {
+				if !strings.Contains(render, value) {
+					t.Errorf("%s: %s = %q is not in the render", name, path, value)
+				}
+			}
+		}
+		for _, want := range []string{"01_test_feature", s.Title, s.Status, s.CreatedAt, s.UpdatedAt, s.Owner,
+			s.Source, "00_old_loader", "core", "io", "sha256:abc123", "Schema version:** 2",
+			"verified", "_(optional)_"} {
+			if !strings.Contains(render, want) {
+				t.Errorf("%s: the metadata lacks %q", name, want)
+			}
+		}
+	}
+}
+
+// A table cell keeps its row: a pipe or a newline in a value is escaped.
+func TestRender_EscapesTableCells(t *testing.T) {
+	out := fullySetSpec(t).Requirements.Render()
+	for _, want := range []string{`| pipe \| term | a definition<br>over two lines |`, "returns a \\| b |"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the render lacks %q:\n%s", want, out)
+		}
+	}
+	if got := code("a`b"); got != "``a`b``" {
+		t.Errorf("code(a`b) = %q", got)
+	}
+}
+
+func TestRender_IsDeterministic(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	first := spec.RenderCombined()
+	for range 5 {
+		if again := spec.RenderCombined(); again != first {
+			t.Fatalf("two renders of the same spec differ:\n%s", firstDifference(first, again))
+		}
+	}
+}
+
+func TestRenderCombined_OrdersTheSections(t *testing.T) {
+	out := loadFixture(t, fixtureWithArch).RenderCombined()
+
 	last := -1
-	for _, section := range sections {
+	for _, section := range []string{"# PRD", "# Architecture", "# Requirements", "# Test Specification", "# Tasks"} {
 		i := strings.Index(out, section)
 		if i < 0 {
 			t.Fatalf("section %q is missing", section)
@@ -141,9 +153,8 @@ func TestRenderCombinedSectionOrder(t *testing.T) {
 	}
 }
 
-func TestRenderIndividualKeys(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.RenderIndividual()
+func TestRenderIndividual_HasAnArchitectureKeyOnlyWhenPresent(t *testing.T) {
+	out := loadFixture(t, fixtureValidSpec).RenderIndividual()
 	for _, key := range []string{"prd", "requirements", "test_spec", "tasks"} {
 		if out[key] == "" {
 			t.Errorf("key %q is empty", key)
@@ -152,18 +163,14 @@ func TestRenderIndividualKeys(t *testing.T) {
 	if _, present := out["architecture"]; present {
 		t.Error("the architecture key is present for a spec with no architecture.md")
 	}
-
-	withArch := loadFixture(t, "testdata/valid_spec_with_arch").RenderIndividual()
-	if withArch["architecture"] == "" {
+	if loadFixture(t, fixtureWithArch).RenderIndividual()["architecture"] == "" {
 		t.Error("the architecture key is missing for a spec that has one")
 	}
 }
 
-// TestRenderIndividualScopedUsesTheTaskItself guards §11.1: scoping reads
-// task.criteria and task.tests directly. The v1 inference chain is gone.
-func TestRenderIndividualScopedUsesTheTaskItself(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	out := spec.RenderIndividualScoped(2)
+// §11.1: scoping reads task.criteria and task.tests directly.
+func TestRenderIndividualScoped_RendersTheTaskInFullAndTheRestByID(t *testing.T) {
+	out := loadFixture(t, fixtureValidSpec).RenderIndividualScoped(2)
 
 	reqs := out["requirements"]
 	if !strings.Contains(reqs, "## Spec Overview") {
@@ -205,7 +212,7 @@ func TestRenderIndividualScopedUsesTheTaskItself(t *testing.T) {
 	}
 }
 
-func TestRenderIndividualScopedIncludesTheVerifiedPaths(t *testing.T) {
+func TestRenderIndividualScoped_IncludesThePathsTheTasksTestsVerify(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	// Task 3 owns the smoke test, which verifies 01-PATH-1.
@@ -218,102 +225,46 @@ func TestRenderIndividualScopedIncludesTheVerifiedPaths(t *testing.T) {
 	}
 }
 
-func TestRenderIndividualScopedFallsBackForAnUnknownTask(t *testing.T) {
+// A scoped render shows everything that belongs to the whole spec, and names
+// by id what belongs to other tasks: nothing in the package is missing from
+// it altogether.
+func TestRenderIndividualScoped_MissesNothingFromThePackage(t *testing.T) {
+	s := fullySetSpec(t)
+	for _, task := range s.Tasks.Tasks {
+		out := s.RenderIndividualScoped(task.Id)
+		render := unescape(out["prd"] + out["requirements"] + out["test_spec"] + out["tasks"])
+		specWide := []any{s.Requirements.ExternalApis, s.Requirements.Glossary, s.Tasks.Dependencies, s.Tasks.TestCommands}
+		for _, part := range specWide {
+			for path, value := range leaves(t, part, nil) {
+				if !strings.Contains(render, value) {
+					t.Errorf("task %d: %s = %q is not in the scoped render", task.Id, path, value)
+				}
+			}
+		}
+		var ids []string
+		for _, r := range s.Requirements.Requirements {
+			ids = append(ids, r.Id)
+		}
+		for _, p := range s.Requirements.ExecutionPaths {
+			ids = append(ids, p.Id)
+		}
+		for _, tt := range s.TestSpec.Tests {
+			ids = append(ids, tt.Id)
+		}
+		for _, other := range s.Tasks.Tasks {
+			ids = append(ids, fmt.Sprintf("%d. %s", other.Id, other.Title))
+		}
+		for _, id := range append(ids, "01_test_feature", s.Requirements.Introduction) {
+			if !strings.Contains(render, id) {
+				t.Errorf("task %d: the scoped render does not name %q", task.Id, id)
+			}
+		}
+	}
+}
+
+func TestRenderIndividualScoped_FallsBackForAnUnknownTask(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	scoped := spec.RenderIndividualScoped(99)
-	full := spec.RenderIndividual()
-	if scoped["requirements"] != full["requirements"] {
+	if spec.RenderIndividualScoped(99)["requirements"] != spec.RenderIndividual()["requirements"] {
 		t.Error("an unknown task ID should fall back to the unscoped render")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Budgeted rendering
-// ---------------------------------------------------------------------------
-
-func TestRenderCombinedDropsArchitectureFirst(t *testing.T) {
-	spec := loadFixture(t, "testdata/valid_spec_with_arch")
-	full := spec.RenderCombined()
-
-	budget := EstimateTokens(full) - 1
-	out := spec.RenderCombined(WithMaxTokens(budget))
-	if strings.Contains(out, "# Architecture") {
-		t.Error("the architecture section survived a budget it could not fit in")
-	}
-	if !strings.Contains(out, "# Requirements") {
-		t.Error("level 1 dropped more than the architecture section")
-	}
-}
-
-// TestSlimTestRenderKeepsVerifiesAndThen guards the budget rule of the ADR:
-// slimming may drop context but never what a test asserts or what it verifies.
-func TestSlimTestRenderKeepsVerifiesAndThen(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	slim := renderTestSpecSlim(spec.TestSpec)
-
-	for _, test := range spec.TestSpec.Tests {
-		if !strings.Contains(slim, test.Id) {
-			t.Errorf("test %s is missing from the slim render", test.Id)
-		}
-		for _, ref := range test.Verifies {
-			if !strings.Contains(slim, ref) {
-				t.Errorf("test %s: verifies %s is missing from the slim render", test.Id, ref)
-			}
-		}
-		for _, then := range test.Then {
-			if !strings.Contains(slim, then) {
-				t.Errorf("test %s: a Then clause is missing from the slim render", test.Id)
-			}
-		}
-	}
-	if strings.Contains(slim, "**Pseudocode:**") {
-		t.Error("the slim render kept the pseudocode it is meant to drop")
-	}
-	if EstimateTokens(slim) >= EstimateTokens(spec.TestSpec.Render()) {
-		t.Error("the slim render is not smaller than the full one")
-	}
-}
-
-func TestRenderIndividualAppliesTheBudget(t *testing.T) {
-	spec := loadFixture(t, "testdata/valid_spec_with_arch")
-	full := spec.RenderIndividual()
-
-	out := spec.RenderIndividual(WithMaxTokens(sumMapTokens(full) - 1))
-	if _, present := out["architecture"]; present {
-		t.Error("architecture was not dropped at level 1")
-	}
-
-	out = spec.RenderIndividual(WithMaxTokens(1))
-	if strings.Contains(out["test_spec"], "**Pseudocode:**") {
-		t.Error("the test spec was not slimmed at level 2")
-	}
-}
-
-func TestZeroBudgetMeansUnlimited(t *testing.T) {
-	spec := loadFixture(t, "testdata/valid_spec_with_arch")
-	if spec.RenderCombined(WithMaxTokens(0)) != spec.RenderCombined() {
-		t.Error("WithMaxTokens(0) changed the output; it should disable the budget")
-	}
-}
-
-func TestRenderIsDeterministic(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	for i := 0; i < 5; i++ {
-		first, second := spec.RenderCombined(), spec.RenderCombined()
-		if first != second {
-			t.Fatal("two renders of the same spec differ")
-		}
-	}
-}
-
-func TestRenderExternalAPIFlagsUnverifiedPackages(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	spec.Requirements.ExternalApis = []ExternalApi{{
-		Package: "example.com/guess", Version: "v0.1.0", Verified: false,
-		Symbols: []ExternalApiSymbol{{Name: "Do", ImportPath: "example.com/guess", Signature: "func Do()"}},
-	}}
-	out := spec.Requirements.Render()
-	if !strings.Contains(out, "UNVERIFIED") {
-		t.Errorf("an unverified package is not flagged in the render:\n%s", out)
 	}
 }

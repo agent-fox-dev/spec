@@ -1,15 +1,14 @@
 package specgen
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-func findNext(ns []cli.Next, tool string) []cli.Next {
+func nextFor(r *Result, tool string) []cli.Next {
 	var out []cli.Next
-	for _, n := range ns {
+	for _, n := range r.Next() {
 		if n.Tool == tool {
 			out = append(out, n)
 		}
@@ -17,86 +16,74 @@ func findNext(ns []cli.Next, tool string) []cli.Next {
 	return out
 }
 
-// TS-06-32 (unit): spec suggests impl on every written package that
-// validates, in split order (06-REQ-6.2, widened by #57: the first package
-// alone left the rest of a split unmentioned).
-func TestTS06_32_NextSuggestsImplOnEveryValidPackage(t *testing.T) {
-	r := &Result{
-		Package: Package{SpecDir: ".specs/01_a", SpecID: "01_a"},
-		FollowOnSpecs: []Package{
-			{SpecDir: ".specs/02_b", SpecID: "02_b", Validation: ValidationReport{Valid: true}},
-			{SpecDir: ".specs/03_c", SpecID: "03_c", Validation: ValidationReport{Valid: true}},
-			{SpecDir: ".specs/04_d", SpecID: "04_d"},
-		},
+// impl is suggested on every written package that validates, in split order,
+// with the ready count when there are several.
+func TestNext_SuggestsImplOnEveryValidPackage(t *testing.T) {
+	valid := ValidationReport{Valid: true}
+	r := &Result{}
+	r.Package = Package{SpecDir: ".specs/01_a", SpecID: "01"}
+	r.FollowOnSpecs = []Package{
+		{SpecDir: ".specs/02_b", SpecID: "02", Validation: valid},
+		{SpecDir: ".specs/03_c", SpecID: "03", Validation: valid},
+		{SpecDir: ".specs/04_d", SpecID: "04"},
 	}
-	impl := findNext(r.Next(), "impl")
+	impl := nextFor(r, "impl")
 	if len(impl) != 2 || impl[0].Input != ".specs/02_b" || impl[1].Input != ".specs/03_c" {
 		t.Fatalf("impl entries = %+v, want 02_b then 03_c", impl)
 	}
-	if !strings.Contains(impl[0].Why, "2 of this run's packages are ready") {
-		t.Errorf("why = %q, want the ready count", impl[0].Why)
+	if want := "the package validates and is ready to implement (2 of this run's packages are ready, in split order)"; impl[0].Why != want {
+		t.Errorf("why = %q, want %q", impl[0].Why, want)
 	}
 	if impl[0].Flags == nil || len(impl[0].Flags) != 0 {
 		t.Errorf("flags = %#v, want a non-nil empty slice", impl[0].Flags)
 	}
 
-	// A single ready package keeps the plain reason.
-	r.FollowOnSpecs = r.FollowOnSpecs[:1]
-	r.Package.Validation.Valid = false
-	one := findNext(r.Next(), "impl")
-	if len(one) != 1 || one[0].Why != "the package validates and is ready to implement" {
-		t.Errorf("single ready package = %+v", one)
-	}
-
-	// The first package, when it validates, comes first.
+	// The first package, when it validates, comes first; one ready package
+	// keeps the plain reason.
 	r.Package.Validation.Valid = true
-	if got := findNext(r.Next(), "impl")[0].Input; got != ".specs/01_a" {
-		t.Errorf("input = %q, want .specs/01_a", got)
+	r.FollowOnSpecs = nil
+	if one := nextFor(r, "impl"); len(one) != 1 || one[0].Input != ".specs/01_a" ||
+		one[0].Why != "the package validates and is ready to implement" {
+		t.Errorf("a single ready package = %+v", one)
+	}
+
+	// A dry run wrote nothing to implement.
+	r.DryRun = true
+	if got := nextFor(r, "impl"); len(got) != 0 {
+		t.Errorf("a dry run suggests %+v", got)
 	}
 }
 
-// TS-06-33 (unit): an unfinished split suggests spec again on the literal
-// origin when the input had a file or issue origin (06-REQ-6.3).
-func TestTS06_33_NextSuggestsSpecAgainOnLiteralOrigin(t *testing.T) {
-	r := &Result{SplitPlan: ".specs/01_a.split.json", inputRef: "docs/brief.md"}
-	n := findNext(r.Next(), "spec")
-	if len(n) != 1 {
-		t.Fatalf("spec entries = %+v, want exactly one", n)
-	}
-	if n[0].Input != "docs/brief.md" {
-		t.Errorf("input = %q, want the literal file path", n[0].Input)
-	}
-}
-
-// TS-06-34 (unit): the resume suggestion uses the needs_human.resume
-// placeholder for raw text or stdin input (06-REQ-6.3).
-func TestTS06_34_NextSpecAgainUsesPlaceholderForTextInput(t *testing.T) {
-	for _, in := range []cli.Input{
-		{Kind: cli.KindText, Origin: "argument", Body: "a long brief"},
-		{Kind: cli.KindStdin, Origin: "stdin", Body: "a long brief"},
+// An unfinished split suggests spec again on the same input: the literal
+// origin when it has one, the placeholder for text and stdin.
+func TestNext_SuggestsSpecAgainOnAnUnfinishedSplit(t *testing.T) {
+	for _, tc := range []struct {
+		name, ref, want string
+	}{
+		{"a file", "docs/brief.md", "docs/brief.md"},
+		{"text", cli.ResumePlaceholder(cli.Input{Kind: cli.KindText, Origin: "argument", Body: "a long brief"}), "<same input>"},
+		{"stdin", cli.ResumePlaceholder(cli.Input{Kind: cli.KindStdin, Origin: "stdin", Body: "a long brief"}), "<same input>"},
+		{"an input never recorded", "", "<same input>"},
 	} {
-		r := &Result{SplitPlan: ".specs/01_a.split.json", inputRef: cli.ResumePlaceholder(in)}
-		n := findNext(r.Next(), "spec")
-		if len(n) != 1 || n[0].Input != "<same input>" {
-			t.Errorf("%s input: spec entries = %+v, want input <same input>", in.Kind, n)
-		}
-	}
-	// A Result that never recorded an origin falls back to the placeholder.
-	r := &Result{SplitPlan: ".specs/01_a.split.json"}
-	if n := findNext(r.Next(), "spec"); len(n) != 1 || n[0].Input != "<same input>" {
-		t.Errorf("unrecorded origin: %+v", n)
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Result{inputRef: tc.ref}
+			r.SplitPlan = ".specs/01_a.split.json"
+			if n := nextFor(r, "spec"); len(n) != 1 || n[0].Input != tc.want {
+				t.Errorf("spec entries = %+v, want input %q", n, tc.want)
+			}
+		})
 	}
 }
 
-// TS-06-39 (unit): spec omits next when nothing validates and no split is
-// unfinished (06-REQ-6.8).
-func TestTS06_39_SpecNextOmittedWhenNothingToSuggest(t *testing.T) {
-	r := &Result{Package: Package{SpecDir: ".specs/01_a"}}
+// With nothing that validates and no split unfinished there is nothing to
+// suggest.
+func TestNext_IsEmptyWithNothingToSuggest(t *testing.T) {
+	r := &Result{}
+	r.SpecDir = ".specs/01_a"
 	if n := r.Next(); n != nil {
 		t.Errorf("Next() = %+v, want nil", n)
 	}
-	var nilRes *Result
-	if n := nilRes.Next(); n != nil {
-		t.Errorf("nil Result Next() = %+v, want nil", n)
+	if n := (*Result)(nil).Next(); n != nil {
+		t.Errorf("a nil result's Next() = %+v, want nil", n)
 	}
 }
