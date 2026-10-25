@@ -1,20 +1,18 @@
-package issuex_test
+package issuex
 
 import (
 	"context"
 	"testing"
-
-	"github.com/agent-fox-dev/spec/internal/issuex"
 )
 
 // The no-op client a workspace with no forge gets reads nothing, writes
 // nothing and cannot write.
-func TestNoOpClientReadsAndWritesNothing(t *testing.T) {
-	c := issuex.NewNoOp()
+func TestNoOpClient_ReadsAndWritesNothing(t *testing.T) {
+	c := NewNoOp()
 	if c.Authenticated() {
 		t.Error("the no-op client must not report a credential")
 	}
-	ref := issuex.IssueRef{Repo: issuex.Repo{Owner: "o", Name: "r"}, Number: 1}
+	ref := IssueRef{Repo: Repo{Owner: "o", Name: "r"}, Number: 1}
 	thread, err := c.ReadIssue(context.Background(), ref)
 	if err != nil || thread.Issue.Number != 0 || len(thread.Comments) != 0 {
 		t.Errorf("ReadIssue = %+v, %v", thread, err)
