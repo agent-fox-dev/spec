@@ -241,8 +241,10 @@ When `contract` is present the renderer appends a second line:
 see does not exist.
 
 Correctness properties ("for any X, Y holds") are written as `ubiquitous`
-criteria whose action starts with "for any …" and are verified by a test
-of kind `property` (§7).
+criteria whose action starts with "for any …". They are verified by a test
+of kind `property` when the invariant is one a table of representative
+inputs cannot establish, and by a `unit` test over such a table otherwise
+(§7.3).
 
 ### 6.3 Execution paths
 
@@ -360,7 +362,7 @@ Kinds:
 - `unit` — exercises one component in isolation; collaborators may be stubbed.
 - `integration` — exercises two or more real components; only external I/O may be stubbed.
 - `property` — a property-based test; `when` names the generator, `then` states the invariant.
-- `smoke` — traverses a full execution path with real components; `verifies` must contain the path ID.
+- `smoke` — traverses a full execution path once with real components and asserts its end state; `verifies` must contain the path ID.
 
 ### 7.3 Coverage rules
 
@@ -369,6 +371,15 @@ Kinds:
 3. **[validator, error]** Every ID in `verifies` resolves to a criterion or a path of this spec.
 4. **[validator, warning]** A test verifies at most 4 criteria. Tests that verify more are usually two tests.
 5. **[generation instruction]** For every `unwanted` criterion, the test asserts the caller-observable outcome named in the `contract`, not merely "an error occurred".
+6. **[generation instruction]** One test per behaviour a caller can observe. Tests whose `then` differ only in the input are one test over a table of inputs; a test whose `then` restates another's is dropped and its criteria added to the other's `verifies`.
+7. **[generation instruction]** A `property` test is written only for an invariant over an input domain that a table of representative inputs cannot establish (a round trip, idempotence over arbitrary input, an algebraic law).
+8. **[generation instruction]** A `smoke` test proves the wiring of its path: it runs the path once with its `real_components` and asserts the end state, without asserting again the criteria the `unit` and `integration` tests verify. One per path.
+9. **[generation instruction]** No test checks an artefact (a struct's fields, a constant's value, a document's content, an import graph) rather than a behaviour. A behaviour an existing test of the repository already verifies keeps its entry, which names that test in `pseudocode`.
+
+Test ids are the package's own. The implementation names a test for the
+behaviour it checks and puts it in the test file of the code it exercises;
+the map from each test id to the test that covers it is recorded with the
+work that implements the task, not in the code.
 
 ---
 
