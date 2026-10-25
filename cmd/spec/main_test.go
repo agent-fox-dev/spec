@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -509,5 +510,50 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	}
 	if !strings.Contains(env.Summary, "review: 2 rounds, 1 finding, 1 accepted") {
 		t.Errorf("summary = %q", env.Summary)
+	}
+}
+
+// A review that the real Runner stops at its --budget leaves a high warning
+// naming the scope, the round, the phase and the budget, and the package is
+// generated from the PRD phase's PRD, with exit 0.
+func TestAdversarial_AReviewStoppedByTheBudgetKeepsThePackage(t *testing.T) {
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, artifacts := fixture(t)
+	expensive := submit("r1", "list_files", map[string]any{})
+	expensive.Usage = core.Usage{InputTokens: 2_000_000, OutputTokens: 10}
+	turns := []faux.Turn{
+		submit("p1", "submit_prd", map[string]any{"spec_name": "test_feature", "title": "Test Feature", "body": body}),
+		expensive,
+	}
+	turns = append(turns, generation(t, artifacts)...)
+	t.Cleanup(cli.SetProvider(faux.New(turns...)))
+
+	dir := goRepo(t)
+	code, env, stderr := runSpec(t, "--dir", dir, "--repo-map-tokens", "0", "--detail", "full",
+		"--budget", "1", "--adversarial", "build the test feature")
+	if code != cli.ExitOK || env.Result == nil {
+		t.Fatalf("code = %d: %+v\n%s", code, env.Error, stderr)
+	}
+	var w *envelope.Warning
+	for i := range env.Warnings {
+		if env.Warnings[i].Code == envelope.WarnPRDReviewIncomplete {
+			w = &env.Warnings[i]
+		}
+	}
+	if w == nil || w.Severity != "high" {
+		t.Fatalf("warnings = %+v", env.Warnings)
+	}
+	for _, want := range []string{"test_feature", "round 1", "prd_review", "budget"} {
+		if !strings.Contains(w.Message, want) {
+			t.Errorf("the warning does not name %q: %s", want, w.Message)
+		}
+	}
+	if env.Result.Review == nil || env.Result.Review.StopReason != envelope.ReviewStopIncomplete {
+		t.Errorf("review = %+v", env.Result.Review)
+	}
+	spec, err := afspec.LoadSpec(filepath.Join(dir, env.Result.SpecDir))
+	if err != nil || strings.TrimSpace(spec.PRDBody) != strings.TrimSpace(body) || !spec.Validate().Valid {
+		t.Errorf("the package is not the PRD phase's (%v)", err)
 	}
 }
