@@ -1,81 +1,37 @@
 package specgen
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-func artifactAsMap(t *testing.T, a cli.Artifact) map[string]any {
-	t.Helper()
-	b, err := json.Marshal(a)
-	if err != nil {
-		t.Fatalf("Marshal artifact: %v", err)
+// One spec_package artifact per package the run wrote, its validity read off
+// the package's own verdict, and a comment artifact for each comment posted;
+// nothing for a result that wrote nothing.
+func TestResult_Artifacts(t *testing.T) {
+	r := &Result{}
+	r.Package = Package{SpecDir: ".specs/06_trim", SpecID: "06", Validation: ValidationReport{Valid: true},
+		CommentURL: "https://github.com/o/r/issues/1#issuecomment-1"}
+	r.FollowOnSpecs = []Package{{SpecDir: ".specs/07_next", SpecID: "07"}}
+	want := []cli.Artifact{
+		{Kind: cli.ArtifactSpecPackage, Path: ".specs/06_trim", ID: "06", Valid: true},
+		{Kind: cli.ArtifactComment, URL: "https://github.com/o/r/issues/1#issuecomment-1", Role: "prd"},
+		{Kind: cli.ArtifactSpecPackage, Path: ".specs/07_next", ID: "07", Valid: false},
 	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("Unmarshal artifact: %v", err)
+	got := r.Artifacts()
+	if len(got) != len(want) {
+		t.Fatalf("artifacts = %+v, want %+v", got, want)
 	}
-	return m
-}
-
-// 06-REQ-4: specgen's Result.Artifacts() builds one spec_package entry per
-// written package — the first plus every FollowOnSpecs entry — with valid
-// read from that package's own Validation.Valid, and a comment entry when
-// CommentURL is set, never from a field the model authored on its own.
-func TestResultArtifactsBuildsOneSpecPackagePerWrittenPackage(t *testing.T) {
-	r := &Result{
-		Package: Package{
-			SpecDir:    "06_trim_and_chain_results",
-			SpecID:     "06",
-			Validation: ValidationReport{Valid: true},
-			CommentURL: "https://github.com/o/r/issues/1#issuecomment-1",
-		},
-		FollowOnSpecs: []Package{
-			{SpecDir: "07_next_spec", SpecID: "07", Validation: ValidationReport{Valid: false}},
-		},
-	}
-
-	artifacts := r.Artifacts()
-	var pkgs []map[string]any
-	var comments []map[string]any
-	for _, a := range artifacts {
-		switch a.Kind {
-		case cli.ArtifactSpecPackage:
-			pkgs = append(pkgs, artifactAsMap(t, a))
-		case cli.ArtifactComment:
-			comments = append(comments, artifactAsMap(t, a))
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("artifact %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
-
-	if len(pkgs) != 2 {
-		t.Fatalf("spec_package entries = %d, want 2: %+v", len(pkgs), pkgs)
+	if got := (&Result{}).Artifacts(); len(got) != 0 {
+		t.Errorf("an unwritten result's artifacts = %+v", got)
 	}
-	if pkgs[0]["path"] != r.SpecDir || pkgs[0]["valid"] != true {
-		t.Errorf("first spec_package = %v", pkgs[0])
-	}
-	if pkgs[1]["path"] != r.FollowOnSpecs[0].SpecDir || pkgs[1]["valid"] != false {
-		t.Errorf("follow-on spec_package = %v", pkgs[1])
-	}
-
-	if len(comments) != 1 || comments[0]["url"] != r.CommentURL {
-		t.Errorf("comment entries = %v, want one carrying %q", comments, r.CommentURL)
-	}
-}
-
-// A run that posted no comment produces no comment artifact, and a result
-// with nothing written produces no artifacts at all.
-func TestResultArtifactsOmitsCommentWhenNonePostedAndIsEmptyWhenNothingWasWritten(t *testing.T) {
-	r := &Result{Package: Package{SpecDir: "06_trim_and_chain_results", SpecID: "06"}}
-	for _, a := range r.Artifacts() {
-		if a.Kind == cli.ArtifactComment {
-			t.Errorf("unexpected comment artifact: %+v", a)
-		}
-	}
-
-	empty := &Result{}
-	if got := empty.Artifacts(); len(got) != 0 {
-		t.Errorf("Artifacts() for an unwritten result = %+v, want none", got)
+	if got := (*Result)(nil).Artifacts(); got != nil {
+		t.Errorf("a nil result's artifacts = %+v", got)
 	}
 }

@@ -2,465 +2,241 @@ package specgen
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/agent-fox-dev/agentkit-go/workspace"
-
-	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-// The tests below drive the real pipeline over an input the PRD phase reports
-// as three specs' worth of work. The scripted author answers the first PRD
-// phase with a split and every follow-on phase with the fixture under the
-// planned name, so what is exercised is the pipeline's own bookkeeping: the
-// plan, the numbering, the landscape, the resume.
-
-func threeScopes() []SplitScope {
-	return []SplitScope{
-		{Name: "widget_core", Scope: "The widget model and its loader."},
-		{Name: "widget_github", Scope: "The GitHub-backed widget store."},
-		{Name: "widget_adopt", Scope: "Switching the tools over to the new store."},
-	}
-}
-
-func splitAuthor(t *testing.T) *scriptedAuthor {
-	t.Helper()
-	a := newAuthor(t, "01", "widget_core")
-	a.prd.RecommendedSplit = threeScopes()
-	return a
-}
-
-func fileOptions(ws *workspace.Workspace, a author) Options {
-	o := newOptions(ws, a)
-	o.Input = cli.Input{Kind: cli.KindFile, Origin: "docs/drafts/widgets.md",
-		Body: "widgets: a model, a store, and the switch-over"}
-	return o
-}
-
-func specDirs(t *testing.T, root string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(root, ".specs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []string
-	for _, e := range entries {
-		out = append(out, e.Name())
-	}
-	return out
-}
-
-func TestASplitInputWritesEveryScope(t *testing.T) {
-	ws := newWorkspace(t)
-	a := splitAuthor(t)
-
-	got, err := Run(context.Background(), fileOptions(ws, a))
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// Three packages, numbered in the plan's order, each valid and active.
-	want := []string{"01_widget_core", "02_widget_github", "03_widget_adopt"}
-	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != strings.Join(want, ",") {
-		t.Fatalf("spec root holds %v, want %v and no plan file", dirs, want)
-	}
-	for _, dir := range want {
-		loaded, err := afspec.LoadSpec(filepath.Join(ws.Root(), ".specs", dir))
-		if err != nil {
-			t.Fatalf("%s: %v", dir, err)
-		}
-		if res := loaded.Validate(); !res.Valid || loaded.Status != "active" {
-			t.Errorf("%s: valid=%v status=%s", dir, res.Valid, loaded.Status)
-		}
-	}
-
-	// The first package is at the top level, the rest follow, and the plan
-	// reports every scope done.
-	if got.SpecDir != filepath.Join(".specs", "01_widget_core") {
-		t.Errorf("SpecDir = %q", got.SpecDir)
-	}
-	if len(got.FollowOnSpecs) != 2 || got.FollowOnSpecs[0].SpecID != "02" || got.FollowOnSpecs[1].SpecID != "03" {
-		t.Errorf("FollowOnSpecs = %+v", got.FollowOnSpecs)
-	}
-	if len(got.Split) != 3 {
-		t.Fatalf("Split = %+v", got.Split)
-	}
-	for i, s := range got.Split {
-		if s.Status != ScopeDone || s.SpecDir == "" || s.Name != threeScopes()[i].Name {
-			t.Errorf("Split[%d] = %+v", i, s)
-		}
-	}
-	if got.SplitPlan != "" {
-		t.Errorf("SplitPlan = %q after a complete split", got.SplitPlan)
-	}
-
-	// One PRD phase for the whole input, then one per remaining scope, each
-	// told which scope it writes and shown the packages before it.
-	if len(a.prdRequests) != 3 {
-		t.Fatalf("%d PRD phases", len(a.prdRequests))
-	}
-	if a.prdRequests[0].Split != nil {
-		t.Error("the first PRD phase must see the whole input, not a scope")
-	}
-	third := a.prdRequests[2]
-	if third.Split == nil || third.Split.Index != 2 || third.Split.Scope().Name != "widget_adopt" {
-		t.Fatalf("third PRD request: %+v", third.Split)
-	}
-	if !third.Split.Plan.Scopes[1].Written() {
-		t.Error("the third scope's PRD phase should see the second scope as written")
-	}
-	var names []string
-	for _, m := range third.Landscape {
-		names = append(names, m.SpecID+"_"+m.SpecName)
-	}
-	if strings.Join(names, ",") != "01_widget_core,02_widget_github" {
-		t.Errorf("the third scope's landscape lists %v", names)
-	}
-	block := splitBlock(third.Split)
-	for _, want := range []string{"`01_widget_core`", "`02_widget_github`", "**this PRD**",
-		"`spec_name` is `widget_adopt`"} {
-		if !strings.Contains(block, want) {
-			t.Errorf("the scope block lacks %q:\n%s", want, block)
-		}
-	}
-	if strings.Contains(block, "not yet written") {
-		t.Errorf("nothing follows the last scope, so the block must not say so:\n%s", block)
-	}
-
-	// The first package's fields are at the top level of the JSON, as they
-	// are for an undivided input.
-	raw, err := json.Marshal(got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var shape map[string]any
-	if err := json.Unmarshal(raw, &shape); err != nil {
-		t.Fatal(err)
-	}
-	if shape["spec_dir"] != got.SpecDir || shape["spec_id"] != "01" {
-		t.Errorf("the top level of the result should describe the first package: %v", shape["spec_dir"])
-	}
-	if _, ok := shape["follow_on_specs"].([]any); !ok {
-		t.Errorf("follow_on_specs missing: %s", raw)
-	}
-	if _, ok := shape["split"].([]any); !ok {
-		t.Errorf("split missing: %s", raw)
-	}
-}
-
-// A scope whose generation fails before its package is written is reported as
-// failed in the split and has no package in the result: its reservation was
-// removed.
-func TestAScopeThatFailsBeforeItIsWrittenHasNoPackageInTheResult(t *testing.T) {
-	ws := newWorkspace(t)
-	a := splitAuthor(t)
-	a.artifactErr[afspec.StepRequirements] = errors.New("grammar too large")
-
-	got, err := Run(context.Background(), fileOptions(ws, a))
-	if err == nil || got == nil {
-		t.Fatalf("want a result and an error, got %v, %v", got, err)
-	}
-	if got.SpecDir != "" || len(got.FollowOnSpecs) != 0 {
-		t.Errorf("the result names packages that were not written: %q, %+v", got.SpecDir, got.FollowOnSpecs)
-	}
-	if got.Split[0].Status != ScopeFailed || got.Split[0].SpecDir != "" {
-		t.Errorf("scope 1 = %+v, want failed with no directory", got.Split[0])
-	}
-	// Only the plan to resume from is left: no package directory.
-	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != "widget_core"+SplitPlanSuffix {
-		t.Errorf("the spec root holds %v", dirs)
-	}
-}
-
-// A run that stops on a scope leaves the plan behind, and the next run on the
-// same input continues from that scope without re-deciding the split.
-func TestAFailedScopeLeavesAPlanTheNextRunResumesFrom(t *testing.T) {
-	ws := newWorkspace(t)
-	a := splitAuthor(t)
-	a.followOnErr["widget_github"] = errors.New("budget exceeded")
-
-	got, err := Run(context.Background(), fileOptions(ws, a))
-	if err == nil {
-		t.Fatal("want an error from the second scope")
-	}
-	var f *Failure
-	if !errors.As(err, &f) || f.Stage != "prd" {
-		t.Fatalf("err = %v", err)
-	}
-	if !strings.Contains(err.Error(), "scope 2 of 3 (widget_github)") {
-		t.Errorf("the error should name the scope: %v", err)
-	}
-	if got == nil || got.SpecID != "01" || !got.Validation.Valid {
-		t.Fatalf("the first package should be reported: %+v", got)
-	}
-	planPath := filepath.Join(ws.Root(), ".specs", "widget_core"+SplitPlanSuffix)
-	if _, err := os.Stat(planPath); err != nil {
-		t.Fatalf("the plan should remain: %v", err)
-	}
-	if got.SplitPlan != filepath.Join(".specs", "widget_core"+SplitPlanSuffix) {
-		t.Errorf("SplitPlan = %q", got.SplitPlan)
-	}
-	states := []string{got.Split[0].Status, got.Split[1].Status, got.Split[2].Status}
-	if strings.Join(states, ",") != "done,failed,pending" {
-		t.Errorf("scope states = %v", states)
-	}
-
-	// The next run, same input: no first PRD phase, the remaining two
-	// scopes written, the plan gone.
-	b := splitAuthor(t)
-	o := fileOptions(ws, b)
-	o.Name = "ignored_on_resume"
-	got, err = Run(context.Background(), o)
-	if err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-	if len(b.prdRequests) != 2 || b.prdRequests[0].Split == nil || b.prdRequests[0].Split.Index != 1 {
-		t.Fatalf("the resumed run should start at scope 2 with the plan; requests: %d", len(b.prdRequests))
-	}
-	want := []string{"01_widget_core", "02_widget_github", "03_widget_adopt"}
-	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != strings.Join(want, ",") {
-		t.Fatalf("spec root holds %v, want %v", dirs, want)
-	}
-	if got.SpecID != "02" || len(got.FollowOnSpecs) != 1 || got.FollowOnSpecs[0].SpecID != "03" {
-		t.Errorf("the resumed run wrote %s and %+v", got.SpecID, got.FollowOnSpecs)
-	}
-	if got.Split[0].Status != ScopeDone || got.Split[0].SpecID != "01" {
-		t.Errorf("the earlier run's package should be reported as done: %+v", got.Split[0])
-	}
-	if got.SplitPlan != "" {
-		t.Error("a finished split should have no plan")
-	}
-	if warnings := strings.Join(cli.WarningMessages(o.Run.Warnings()), "\n"); !strings.Contains(warnings, "--name") {
-		t.Errorf("--name should be reported as ignored on resume; warnings: %q", warnings)
-	}
-}
-
-// A resumed split that stops again leaves the plan on disk, and the result
-// says so: SplitPlan names it, Resumable() is true and next[] suggests spec on
-// the same input, whichever scope the second run stops on (06-REQ-6.3,
-// 06-REQ-6.8).
-func TestAResumedSplitThatStopsAgainIsStillResumable(t *testing.T) {
-	cases := []struct {
-		name       string
-		failScope  string // the scope the resumed run stops on
-		wantStates string
+// A file or issue input resumes by where it came from, so an input edited
+// between runs still resumes; text has no origin worth matching, so it
+// resumes by content only.
+func TestSplitPlan_MatchesItsInput(t *testing.T) {
+	text := cli.Input{Kind: cli.KindText, Origin: "argument", Body: "one"}
+	file := cli.Input{Kind: cli.KindFile, Origin: "a.md", Body: "one"}
+	issue := cli.Input{Kind: cli.KindIssue, Origin: "https://github.com/a/b/issues/1", Body: "one"}
+	for _, tc := range []struct {
+		name        string
+		planned, in cli.Input
+		ok, changed bool
 	}{
-		{"at the first pending scope", "widget_github", "done,failed,pending"},
-		{"after writing one more", "widget_adopt", "done,done,failed"},
-	}
-	for _, tc := range cases {
+		{"the same text", text, text, true, false},
+		{"another text", text, cli.Input{Kind: cli.KindText, Origin: "argument", Body: "two"}, false, false},
+		{"the same text from stdin", text, cli.Input{Kind: cli.KindStdin, Origin: "stdin", Body: "one"}, true, false},
+		{"an edited file", file, cli.Input{Kind: cli.KindFile, Origin: "a.md", Body: "two"}, true, true},
+		{"another file", file, cli.Input{Kind: cli.KindFile, Origin: "b.md", Body: "two"}, false, false},
+		{"an edited issue", issue, cli.Input{Kind: cli.KindIssue, Origin: issue.Origin, Body: "two"}, true, true},
+		{"a file at an issue's origin", issue, cli.Input{Kind: cli.KindFile, Origin: issue.Origin, Body: "two"}, false, false},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ws := newWorkspace(t)
-			first := splitAuthor(t)
-			first.followOnErr["widget_github"] = errors.New("first run stops here")
-			if _, err := Run(context.Background(), fileOptions(ws, first)); err == nil {
-				t.Fatal("want an error from the first run")
-			}
-			planPath := filepath.Join(".specs", "widget_core"+SplitPlanSuffix)
-
-			resumed := splitAuthor(t)
-			resumed.followOnErr[tc.failScope] = errors.New("the resumed run stops here")
-			got, err := Run(context.Background(), fileOptions(ws, resumed))
-			if err == nil {
-				t.Fatal("want an error from the resumed run")
-			}
-			if len(resumed.prdRequests) == 0 || resumed.prdRequests[0].Split == nil {
-				t.Fatalf("the second run should resume the plan, not plan again; requests: %d", len(resumed.prdRequests))
-			}
-			if _, statErr := os.Stat(filepath.Join(ws.Root(), planPath)); statErr != nil {
-				t.Fatalf("the plan should remain on disk: %v", statErr)
-			}
-			states := []string{got.Split[0].Status, got.Split[1].Status, got.Split[2].Status}
-			if strings.Join(states, ",") != tc.wantStates {
-				t.Errorf("scope states = %v, want %s", states, tc.wantStates)
-			}
-
-			if got.SplitPlan != planPath {
-				t.Errorf("SplitPlan = %q, want %q", got.SplitPlan, planPath)
-			}
-			if !got.Resumable() {
-				t.Error("Resumable() = false, but the plan is still on disk")
-			}
-			var spec *cli.Next
-			for _, n := range got.Next() {
-				if n.Tool == "spec" {
-					spec = &n
-				}
-			}
-			if spec == nil {
-				t.Fatalf("next[] has no spec entry: %+v", got.Next())
-			}
-			if spec.Input != cli.ResumePlaceholder(fileOptions(ws, resumed).Input) {
-				t.Errorf("the spec entry's input = %q", spec.Input)
+			plan := newSplitPlan(tc.planned, threeScopes())
+			if ok, changed := plan.matches(tc.in); ok != tc.ok || changed != tc.changed {
+				t.Errorf("matches = %v, %v; want %v, %v", ok, changed, tc.ok, tc.changed)
 			}
 		})
 	}
 }
 
-// An edited file resumes by origin; the plan names the package whatever the
-// model called it.
-func TestResumeMatchesByOriginAndNamesFromThePlan(t *testing.T) {
-	ws := newWorkspace(t)
-	a := splitAuthor(t)
-	a.followOnErr["widget_github"] = errors.New("api down")
-	if _, err := Run(context.Background(), fileOptions(ws, a)); err == nil {
-		t.Fatal("want the first run to stop")
-	}
-
-	b := splitAuthor(t)
-	renamed := b.prd
-	renamed.SpecName, renamed.Title = "github_store", "Renamed by the model"
-	b.followOn["widget_github"] = renamed
-	o := fileOptions(ws, b)
-	o.Input.Body += "\n\nedited after the first run"
-	got, err := Run(context.Background(), o)
-	if err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-	if got.SpecName != "widget_github" || got.SpecDir != filepath.Join(".specs", "02_widget_github") {
-		t.Errorf("the plan's name must win: %q at %q", got.SpecName, got.SpecDir)
-	}
-	warnings := strings.Join(cli.WarningMessages(o.Run.Warnings()), "\n")
-	if !strings.Contains(warnings, "input changed") || !strings.Contains(warnings, `"github_store"`) {
-		t.Errorf("warnings = %q", warnings)
-	}
-}
-
-// A text input has no origin worth matching, so it resumes by content only.
-func TestATextInputResumesByContentOnly(t *testing.T) {
-	plan := newSplitPlan(cli.Input{Kind: cli.KindText, Origin: "argument", Body: "one"}, threeScopes())
-	if ok, _ := plan.matches(cli.Input{Kind: cli.KindText, Origin: "argument", Body: "two"}); ok {
-		t.Error("a different text matched by its shared origin")
-	}
-	if ok, changed := plan.matches(cli.Input{Kind: cli.KindText, Origin: "argument", Body: "one"}); !ok || changed {
-		t.Error("the same text did not match")
-	}
-	file := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "a.md", Body: "one"}, threeScopes())
-	if ok, _ := file.matches(cli.Input{Kind: cli.KindFile, Origin: "b.md", Body: "two"}); ok {
-		t.Error("another file matched")
-	}
-	if ok, changed := file.matches(cli.Input{Kind: cli.KindFile, Origin: "a.md", Body: "two"}); !ok || !changed {
-		t.Error("the edited file did not resume by origin")
-	}
-}
-
-// A package that does not validate is on disk and stops nothing; the run
-// still fails, naming it, and the plan does not write it again.
-func TestAnInvalidScopeDoesNotStopTheSplit(t *testing.T) {
-	ws := newWorkspace(t)
-	a := splitAuthor(t)
-	a.breakScope = "widget_github"
-
-	got, err := Run(context.Background(), fileOptions(ws, a))
-	var f *Failure
-	if !errors.As(err, &f) || f.Category != CategoryInvalid {
-		t.Fatalf("err = %v", err)
-	}
-	if !strings.Contains(err.Error(), "02_widget_github") {
-		t.Errorf("the error should name the invalid package: %v", err)
-	}
-	want := []string{"01_widget_core", "02_widget_github", "03_widget_adopt"}
-	if dirs := specDirs(t, ws.Root()); strings.Join(dirs, ",") != strings.Join(want, ",") {
-		t.Fatalf("spec root holds %v, want %v", dirs, want)
-	}
-	states := []string{got.Split[0].Status, got.Split[1].Status, got.Split[2].Status}
-	if strings.Join(states, ",") != "done,invalid,done" {
-		t.Errorf("scope states = %v", states)
-	}
-	if got.FollowOnSpecs[0].Validation.Valid || got.FollowOnSpecs[0].Status == "active" {
-		t.Errorf("the invalid package must be reported as such and not activated: %+v", got.FollowOnSpecs[0])
-	}
-	if got.SplitPlan != "" {
-		t.Error("every scope exists, so the plan should be gone")
+// Every plan in the spec root that is not this input's is reported rather
+// than passed over: an unreadable one, another input's, and this input's
+// planned from text that has changed since.
+func TestFindSplitPlan_ReportsEveryPlanItDoesNotResume(t *testing.T) {
+	in := cli.Input{Kind: cli.KindFile, Origin: "docs/widgets.md", Body: "widgets"}
+	for _, tc := range []struct {
+		name  string
+		file  string
+		write func(t *testing.T, specs string)
+		code  cli.WarnCode
+		found bool
+	}{
+		{"a plan that is not JSON", "broken.split.json", func(t *testing.T, specs string) {
+			writeFiles(t, specs, map[string]string{"broken.split.json": "{"})
+		}, cli.WarnSplitPlanUnreadable, false},
+		{"a plan of one scope", "one.split.json", func(t *testing.T, specs string) {
+			writeFiles(t, specs, map[string]string{"one.split.json": `{"scopes":[{"name":"one","scope":"s"}]}`})
+		}, cli.WarnSplitPlanUnreadable, false},
+		{"a plan with an unusable scope name", "bad.split.json", func(t *testing.T, specs string) {
+			writeFiles(t, specs, map[string]string{"bad.split.json": `{"scopes":[{"name":"bad","scope":"s"},{"name":"Bad Name","scope":"t"}]}`})
+		}, cli.WarnSplitPlanUnreadable, false},
+		{"another input's plan", "other_core.split.json", func(t *testing.T, specs string) {
+			p := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "docs/other.md", Body: "other"},
+				[]SplitScope{{Name: "other_core", Scope: "x"}, {Name: "other_rest", Scope: "y"}})
+			if err := p.save(specs); err != nil {
+				t.Fatal(err)
+			}
+		}, cli.WarnSplitPlanForeign, false},
+		{"this input's plan, planned from other text", "widget_core.split.json", func(t *testing.T, specs string) {
+			if err := newSplitPlan(cli.Input{Kind: in.Kind, Origin: in.Origin, Body: "older text"}, threeScopes()).save(specs); err != nil {
+				t.Fatal(err)
+			}
+		}, cli.WarnSplitPlanStale, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			specs := t.TempDir()
+			tc.write(t, specs)
+			run := cli.NewRun("spec", "test")
+			plan, err := findSplitPlan(specs, in, run)
+			if err != nil || (plan != nil) != tc.found {
+				t.Fatalf("plan %+v, err %v; want found %v", plan, err, tc.found)
+			}
+			if w, ok := warning(run, tc.code); !ok || !strings.Contains(w.Message, tc.file) {
+				t.Errorf("warnings = %+v, want %s naming %s", run.Warnings(), tc.code, tc.file)
+			}
+			if !exists(filepath.Join(specs, tc.file)) {
+				t.Error("the plan was removed")
+			}
+		})
 	}
 }
 
-// A dry run generates every scope, numbers them as a real run would, and
-// leaves neither packages nor a plan behind.
-func TestDryRunOfASplitWritesNothing(t *testing.T) {
-	ws := newWorkspace(t)
-	o := fileOptions(ws, splitAuthor(t))
-	o.DryRun = true
+// Someone else's unfinished split is reported and left alone — by a run, a
+// dry run and a dry-run preflight alike — and a fresh split is not planned
+// over its file.
+func TestRun_LeavesAnotherInputsPlanAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, Options) (*Result, error)
+		dry  bool
+	}{
+		{"a run", Run, false},
+		{"a dry run", Run, true},
+		{"a dry-run preflight", RunPreflight, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := newWorkspace(t)
+			specs := filepath.Join(ws.Root(), ".specs")
+			other := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "docs/other.md", Body: "other"},
+				[]SplitScope{{Name: "other_core", Scope: "x"}, {Name: "other_rest", Scope: "y"}})
+			if err := other.save(specs); err != nil {
+				t.Fatal(err)
+			}
+			o := preflightOptions(t)
+			o.Workspace, o.DryRun = ws, tc.dry
+			got, err := tc.run(context.Background(), o)
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if len(got.Split) != 0 || !exists(other.Path(specs)) {
+				t.Errorf("split %+v; the other plan should be left in place", got.Split)
+			}
+			if w := warningText(o.Run); !strings.Contains(w, "docs/other.md") {
+				t.Errorf("the stray plan should be reported: %q", w)
+			}
+		})
+	}
 
-	got, err := Run(context.Background(), o)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(ws.Root(), ".specs")); !os.IsNotExist(err) {
-		t.Error("--dry-run created the spec root")
-	}
-	ids := []string{got.SpecID, got.FollowOnSpecs[0].SpecID, got.FollowOnSpecs[1].SpecID}
-	if strings.Join(ids, ",") != "01,02,03" {
-		t.Errorf("ids = %v", ids)
-	}
-	if got.SplitPlan != "" || len(got.Split) != 3 {
-		t.Errorf("SplitPlan = %q, Split = %+v", got.SplitPlan, got.Split)
-	}
+	t.Run("a split planned over its file", func(t *testing.T) {
+		ws := newWorkspace(t)
+		specs := filepath.Join(ws.Root(), ".specs")
+		other := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "docs/other.md", Body: "other"}, threeScopes())
+		if err := other.save(specs); err != nil {
+			t.Fatal(err)
+		}
+		a := splitAuthor(t)
+		_, err := Run(context.Background(), fileOptions(ws, a))
+		if f := asFailure(t, err); f.Stage != "plan" || f.Category != "usage" || !strings.Contains(f.Error(), "different input") {
+			t.Errorf("err = %v", err)
+		}
+		if len(a.steps) != 0 {
+			t.Errorf("a package was generated: %v", a.steps)
+		}
+	})
 }
 
-// Someone else's unfinished split is reported and left alone.
-func TestAPlanForAnotherInputIsLeftAlone(t *testing.T) {
-	ws := newWorkspace(t)
-	other := newSplitPlan(cli.Input{Kind: cli.KindFile, Origin: "docs/other.md", Body: "other"},
-		[]SplitScope{{Name: "other_core", Scope: "x"}, {Name: "other_rest", Scope: "y"}})
-	if err := other.save(filepath.Join(ws.Root(), ".specs")); err != nil {
-		t.Fatal(err)
-	}
-
-	o := newOptions(ws, newAuthor(t, "01", "test_feature"))
-	got, err := Run(context.Background(), o)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got.SpecID != "01" || len(got.Split) != 0 {
-		t.Errorf("a fresh run was expected: %+v", got)
-	}
-	if _, err := os.Stat(other.Path(filepath.Join(ws.Root(), ".specs"))); err != nil {
-		t.Error("the other plan was removed")
-	}
-	if warnings := strings.Join(cli.WarningMessages(o.Run.Warnings()), "\n"); !strings.Contains(warnings, "docs/other.md") {
-		t.Errorf("the stray plan should be reported: %q", warnings)
-	}
-}
-
-// A later scope is told where the specs live and what the earlier ones
-// deliver, so it does not go looking for them (#58).
-func TestSplitBlockNamesTheSpecRootAndInlinesEarlierScopes(t *testing.T) {
+// A follow-on PRD phase is told the decided split as a fact: every scope and
+// its state, where the written packages live, what the earlier scopes deliver
+// — their Intent, Goals and Non-goals only, from disk or this run's drafts —
+// and what the earlier PRD phases learned, nearest first, within a bound.
+func TestSplitBlock_StatesTheDecidedSplit(t *testing.T) {
 	specsDir := t.TempDir()
-	dir := "01_widget_core"
-	if err := os.MkdirAll(filepath.Join(specsDir, dir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	prd := "---\nspec_id: \"01\"\n---\n\n## Intent\n\nA widget core.\n\n## Goals\n\n- ship it\n\n## Design Decisions\n\n1. SECRET-DETAIL\n\n## Non-goals\n\n- no UI\n"
-	if err := os.WriteFile(filepath.Join(specsDir, dir, "prd.md"), []byte(prd), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	long := strings.Repeat("A widget core sentence. ", 200)
+	writeFiles(t, specsDir, map[string]string{"01_widget_core/prd.md": "---\nspec_id: \"01\"\n---\n\n## Intent\n\nA widget core.\n\n" +
+		"## Goals\n\n- ship it\n\n" + long + "\n\n## Design Decisions\n\n1. SECRET-DETAIL\n\n## Non-goals\n\n- no UI\n"})
 	plan := &SplitPlan{Scopes: []PlanScope{
-		{Name: "widget_core", Scope: "core", SpecID: "01", Dir: dir},
-		{Name: "widget_github", Scope: "github"},
+		{Name: "widget_core", Scope: "core", SpecID: "01", Dir: "01_widget_core"},
+		{Name: "widget_github", Scope: "the  github\nstore"},
+		{Name: "widget_adopt", Scope: "adoption"},
+		{Name: "widget_later", Scope: "later"},
 	}}
-	block := splitBlock(&splitContext{Plan: plan, Index: 1, SpecsDir: specsDir, SpecRoot: ".specs"})
-	for _, want := range []string{"under `.specs/`", "A widget core.", "ship it", "no UI"} {
+	ctx := &splitContext{Plan: plan, Index: 2, SpecsDir: specsDir, SpecRoot: ".specs",
+		Drafts: map[int]PRD{1: {Body: "## Intent\n\nGITHUB-DRAFT\n\n## Background\n\nNOT-SHOWN\n"}},
+		Notes:  map[int]string{0: "core: model.go", 1: "github: store.go"}}
+	block := splitBlock(ctx)
+	for _, want := range []string{
+		"| 1 | `01_widget_core` | core | written |", "| 2 | `widget_github` | the github store | PRD written; its package is being generated |",
+		"| 3 | `widget_adopt` | adoption | **this PRD** |", "| 4 | `widget_later` | later | not yet written |",
+		"under `.specs/`", "A widget core.", "ship it", "GITHUB-DRAFT", "[…cut; the full PRD is in 01_widget_core/prd.md]",
+		"Write the PRD for scope 3 only: **widget_adopt** — adoption", "`spec_name` is `widget_adopt`",
+	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("the block lacks %q:\n%s", want, block)
 		}
 	}
-	if strings.Contains(block, "SECRET-DETAIL") {
-		t.Error("a section outside intent, goals and non-goals was inlined")
+	for _, not := range []string{"SECRET-DETAIL", "NOT-SHOWN", "no UI"} {
+		if strings.Contains(block, not) {
+			t.Errorf("the block carries %q, past what an earlier scope contributes", not)
+		}
+	}
+	if core, gh := strings.Index(block, "core: model.go"), strings.Index(block, "github: store.go"); core < 0 || gh < 0 || gh > core {
+		t.Errorf("the earlier notes are missing or not nearest first:\n%s", block)
+	}
+
+	// Notes past the bound are left out rather than cut.
+	ctx.Notes = map[int]string{0: strings.Repeat("y", maxEarlierNotes), 1: "github: store.go"}
+	if b := splitBlock(ctx); strings.Contains(b, "yyy") || !strings.Contains(b, "github: store.go") {
+		t.Error("the notes past the bound were not left out")
+	}
+	if splitBlock(nil) != "" {
+		t.Error("an undivided input has a split block")
 	}
 }
 
-func TestLandscapeBlockNamesTheDirectoryOfEachSpec(t *testing.T) {
-	got := landscapeBlock([]afspec.SpecMeta{{SpecID: "01", SpecName: "core", Status: "draft"}}, ".specs")
-	for _, want := range []string{"under `.specs/`", "`.specs/01_core/`"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("the landscape lacks %q:\n%s", want, got)
+// The review of a split scope is told the split and what the earlier scopes
+// deliver, and that another scope's work is not a dropped ask, without the
+// instructions for writing the PRD.
+func TestSplitReviewBlock_TellsTheReviewTheSplitButNotToWriteAPRD(t *testing.T) {
+	block := splitReviewBlock(scopeTwoOfThree())
+	for _, want := range []string{"widget_store", "widget_cache", "widget_evict", "STORE-SCOPE", "CACHE-SCOPE",
+		"EVICT-SCOPE", "This PRD covers scope 2 only", "DELIVERS-MARK", "EARLIER-NOTES-MARK", "not a dropped ask"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the review's split block has no %q:\n%s", want, block)
 		}
+	}
+	for _, instruction := range []string{"Write the PRD for scope", "Submit exactly that name", "recommended_split"} {
+		if strings.Contains(block, instruction) {
+			t.Errorf("the review's split block carries the PRD-writing instruction %q", instruction)
+		}
+	}
+	if splitReviewBlock(nil) != "" {
+		t.Error("an undivided input has a split block")
+	}
+}
+
+// A plan already gone is not an error to remove, and a plan in a spec root
+// that cannot be written is.
+func TestSplitPlan_SaveAndRemove(t *testing.T) {
+	specs := filepath.Join(t.TempDir(), ".specs")
+	plan := newSplitPlan(cli.Input{Kind: cli.KindText, Body: "x"}, threeScopes())
+	if err := plan.save(specs); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadSplitPlan(plan.Path(specs))
+	if err != nil || loaded.Pending() != 3 || loaded.Done() || loaded.Input != plan.Input {
+		t.Errorf("loaded %+v, %v", loaded, err)
+	}
+	for range 2 {
+		if err := plan.remove(specs); err != nil {
+			t.Errorf("remove: %v", err)
+		}
+	}
+	blocked := filepath.Join(t.TempDir(), "file")
+	writeFiles(t, filepath.Dir(blocked), map[string]string{"file": ""})
+	if err := plan.save(filepath.Join(blocked, ".specs")); err == nil {
+		t.Error("a plan was saved under a file")
+	}
+	if _, err := os.Stat(plan.Path(specs)); !os.IsNotExist(err) {
+		t.Error("the plan is still there")
 	}
 }
