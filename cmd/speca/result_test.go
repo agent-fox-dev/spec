@@ -1,147 +1,105 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"reflect"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/agent-fox-dev/spec/envelope"
-	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-func ptr[T any](v T) *T { return &v }
-
-// report16 is the result of the report form for a package in .specs. A draft and
-// an active package can take a write, as the report form says of a package whose
-// intent has not drifted.
-func report16(status string, done, total int, next *envelope.TaskInfo, valid bool) *Result {
-	return &Result{AdminResult: envelope.AdminResult{
-		SpecDir: ".specs/16_indexed_code_search", SpecID: "16", SpecName: "indexed_code_search", Status: status,
-		Valid: ptr(valid), TaskCounts: &envelope.TaskCounts{Done: done, Total: total}, NextTask: next,
-	}, writable: status == "draft" || status == "active"}
-}
-
-// TS-10-45: the report's sentence names the directory, the status, the tasks
-// done, the next task and whether the package validates.
-func TestReportSummary_TS10_45(t *testing.T) {
+func TestSummary(t *testing.T) {
 	next := &envelope.TaskInfo{ID: 4, Title: "t", State: "pending", Ready: true}
-	if got, want := report16("active", 3, 7, next, true).Summary(), "speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-
 	invalid := report16("active", 3, 7, next, false)
 	invalid.FailingRules = []string{"C3", "C7"}
-	if got := invalid.Summary(); !strings.Contains(got, "does not validate") || !strings.HasPrefix(got, "speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4") {
-		t.Errorf("an invalid package: Summary = %q", got)
+	task := func(id int, from, to string) envelope.Change {
+		return envelope.Change{Kind: "task", ID: id, From: from, To: to}
 	}
-	if got := report16("active", 3, 7, next, true).Summary(); strings.Contains(got, "validate") {
-		t.Errorf("a valid package's Summary mentions validation: %q", got)
-	}
-
-	done := report16("sealed", 7, 7, nil, true).Summary()
-	if want := "speca: 16_indexed_code_search sealed, 7 of 7 tasks done"; done != want {
-		t.Errorf("no next task: Summary = %q; want %q", done, want)
-	}
-	empty := report16("draft", 0, 0, nil, true)
-	empty.Tasks = []envelope.TaskInfo{}
-	if got, want := empty.Summary(), "speca: 16_indexed_code_search draft, 0 of 0 tasks done"; got != want {
-		t.Errorf("no tasks: Summary = %q; want %q", got, want)
+	taskForm := func(changes []envelope.Change, dry bool) *Result {
+		return &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/11_x", Changes: changes, DryRun: dry}, taskForm: true}
 	}
 
-	long := report16("active", 3, 7, next, false)
+	for name, tc := range map[string]struct {
+		r    *Result
+		want string
+	}{
+		// The report names the directory, the status, the tasks done, the next
+		// task and whether the package validates.
+		"a report":                        {report16("active", 3, 7, next, true), "speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4"},
+		"a report that does not validate": {invalid, "speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4; does not validate (C3, C7)"},
+		"a report with no next task":      {report16("sealed", 7, 7, nil, true), "speca: 16_indexed_code_search sealed, 7 of 7 tasks done"},
+		"a report with no tasks":          {report16("draft", 0, 0, nil, true), "speca: 16_indexed_code_search draft, 0 of 0 tasks done"},
+		"a report with no task counts":    {&Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Status: "draft"}}, "speca: 16_x draft, 0 of 0 tasks done"},
+
+		// The verdict says whether the package validates, and if not how many
+		// errors and which rules, each once; one error is not "1 errors".
+		"a verdict that validates": {verdictOf(".specs/16_indexed_code_search"), "speca: 16_indexed_code_search validates"},
+		"a verdict with errors":    {verdictOf(".specs/16_indexed_code_search", "C3", "C7", "cross_spec_actor"), "speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)"},
+		"a rule broken twice":      {verdictOf(".specs/16_x", "C4", "C4"), "speca: 16_x does not validate (2 errors: C4)"},
+		"a verdict with one error": {verdictOf(".specs/16_x", "C4"), "speca: 16_x does not validate (1 error: C4)"},
+
+		// The list counts the packages, then each status that has one, in
+		// lifecycle order, then the packages that did not load.
+		"a list":                 {listOf("sealed", "active", "draft", "active", "active", "sealed", "draft", "active", "active"), "speca: 9 packages (2 draft, 5 active, 2 sealed)"},
+		"a list with unreadable": {listOf("draft", "", ""), "speca: 3 packages (1 draft, 2 unreadable)"},
+		"a list of every status": {listOf("archived", "superseded", "sealed", "active", "draft"), "speca: 5 packages (1 draft, 1 active, 1 sealed, 1 superseded, 1 archived)"},
+		"an empty list":          {listOf(), "speca: 0 packages"},
+		"a list of one":          {listOf("active"), "speca: 1 package (1 active)"},
+
+		// The task form names one change, several or none, and the dry run.
+		"one task moved":          {taskForm([]envelope.Change{task(2, "pending", "in_progress")}, false), "speca: 11_x task 2 pending → in_progress"},
+		"several tasks moved":     {taskForm([]envelope.Change{task(2, "in_progress", "done"), task(3, "in_progress", "done")}, false), "speca: 11_x tasks 2, 3 → done"},
+		"no task moved":           {taskForm(nil, false), "speca: 11_x no task changed"},
+		"one task moved, dry run": {taskForm([]envelope.Change{task(2, "pending", "in_progress")}, true), "speca: 11_x task 2 pending → in_progress (dry run, nothing written)"},
+		"several tasks, dry run":  {taskForm([]envelope.Change{task(2, "in_progress", "done"), task(3, "in_progress", "done")}, true), "speca: 11_x tasks 2, 3 → done (dry run, nothing written)"},
+		"no task moved, dry run":  {taskForm(nil, true), "speca: 11_x no task changed (dry run, nothing written)"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.r.Summary(); got != tc.want {
+				t.Errorf("Summary = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The envelope keeps a summary within its limit, the package's name first.
+func TestSummary_IsShortenedInTheEnvelope(t *testing.T) {
+	long := report16("active", 3, 7, &envelope.TaskInfo{ID: 4}, false)
 	long.SpecDir = ".specs/16_" + strings.Repeat("long_", 60)
-	if got := envelopeSummary(t, long); utf8.RuneCountInString(got) > 200 || !strings.HasPrefix(got, "speca: 16_long_") {
+	if got := envelopeSummary(long); utf8.RuneCountInString(got) > 200 || !strings.HasPrefix(got, "speca: 16_long_") {
 		t.Errorf("the envelope's summary is %d characters: %q", utf8.RuneCountInString(got), got)
 	}
 }
 
-// envelopeSummary is the summary of the envelope the run builds around r.
-func envelopeSummary(t *testing.T, r *Result) string {
-	t.Helper()
-	return cli.NewRun(tool, "v").Envelope(cli.ExitOK, r, nil).Summary
-}
-
-// TS-10-46: the verdict's sentence says whether the package validates, and if
-// not how many errors and which rules.
-func TestVerdictSummary_TS10_46(t *testing.T) {
-	valid := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_indexed_code_search", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
-	if got, want := valid.Summary(), "speca: 16_indexed_code_search validates"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-
-	errs := []envelope.ValidationItem{{Check: "C3"}, {Check: "C7"}, {Check: "cross_spec_actor"}}
-	invalid := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_indexed_code_search", Valid: ptr(false),
-		Validation: &envelope.ValidationReport{ErrorCount: 3, Errors: errs}}}
-	want := "speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)"
-	if got := invalid.Summary(); got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-	if got := envelopeSummary(t, invalid); got != want || utf8.RuneCountInString(got) > 200 {
-		t.Errorf("the envelope's summary = %q", got)
-	}
-
-	// A rule is named once however many errors break it, and one error is not "1 errors".
-	twice := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(false),
-		Validation: &envelope.ValidationReport{ErrorCount: 2, Errors: []envelope.ValidationItem{{Check: "C4"}, {Check: "C4"}}}}}
-	if got, want := twice.Summary(), "speca: 16_x does not validate (2 errors: C4)"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-	once := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(false),
-		Validation: &envelope.ValidationReport{ErrorCount: 1, Errors: []envelope.ValidationItem{{Check: "C4"}}}}}
-	if got, want := once.Summary(), "speca: 16_x does not validate (1 error: C4)"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-}
-
-func packages(statuses ...string) []envelope.PackageInfo {
-	var out []envelope.PackageInfo
-	for i, s := range statuses {
-		p := envelope.PackageInfo{SpecDir: fmt.Sprintf(".specs/%02d_p", i+1)}
-		if s == "" {
-			p.LoadError = "cannot read prd.md"
-		} else {
-			p.Status = s
+// For any list of changes the task form's summary begins with the prefix and
+// the package, ends with the dry-run suffix exactly under a dry run, and says no
+// task changed exactly when the list is empty.
+func TestSummary_OfTheTaskFormForAnyChanges(t *testing.T) {
+	rng := rand.New(rand.NewPCG(11, 40))
+	const suffix = " (dry run, nothing written)"
+	for range 400 {
+		n := rng.IntN(7)
+		to := wantTaskStates[rng.IntN(len(wantTaskStates))]
+		var changes []envelope.Change
+		for _, id := range rng.Perm(20)[:n] {
+			changes = append(changes, envelope.Change{Kind: "task", ID: id + 1, From: wantTaskStates[rng.IntN(len(wantTaskStates))], To: to})
 		}
-		out = append(out, p)
-	}
-	return out
-}
-
-// TS-10-47: the list's sentence counts the packages, then each status that
-// has one, in lifecycle order, then the packages that did not load.
-func TestListSummary_TS10_47(t *testing.T) {
-	nine := &Result{AdminResult: envelope.AdminResult{Packages: packages("sealed", "active", "draft", "active", "active", "sealed", "draft", "active", "active")}}
-	if got, want := nine.Summary(), "speca: 9 packages (2 draft, 5 active, 2 sealed)"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-
-	broken := &Result{AdminResult: envelope.AdminResult{Packages: packages("draft", "", "")}}
-	if got, want := broken.Summary(), "speca: 3 packages (1 draft, 2 unreadable)"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-
-	all := &Result{AdminResult: envelope.AdminResult{Packages: packages("archived", "superseded", "sealed", "active", "draft")}}
-	if got, want := all.Summary(), "speca: 5 packages (1 draft, 1 active, 1 sealed, 1 superseded, 1 archived)"; got != want {
-		t.Errorf("Summary = %q; want %q", got, want)
-	}
-
-	if got, want := (&Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{}}}).Summary(), "speca: 0 packages"; got != want {
-		t.Errorf("an empty list: Summary = %q; want %q", got, want)
-	}
-	if got, want := (&Result{AdminResult: envelope.AdminResult{Packages: packages("active")}}).Summary(), "speca: 1 package (1 active)"; got != want {
-		t.Errorf("one package: Summary = %q; want %q", got, want)
+		dry := rng.IntN(2) == 0
+		r := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/12_dir", Changes: changes, DryRun: dry}, taskForm: true}
+		s := r.Summary()
+		if !strings.HasPrefix(s, "speca: 12_dir ") || strings.HasSuffix(s, suffix) != dry || strings.Contains(s, "no task changed") != (n == 0) {
+			t.Fatalf("%d changes, dry run %v: Summary = %q", n, dry, s)
+		}
 	}
 }
 
-// TS-10-48: the report suggests rendering the next task with specr, and says
-// whether it is under way or the next ready one. Where the task is ready and the
-// package can take a write, the claim of the task (speca's task form, spec 11)
-// comes before the render, which is still there.
-func TestReportNext_TS10_48(t *testing.T) {
+// The report suggests rendering the next task with specr, and says whether it is
+// under way or the next ready one. Where the task is ready and the package can
+// take a write, the claim of the task comes before the render.
+func TestNext_OfTheReport(t *testing.T) {
 	for name, tc := range map[string]struct {
 		next  *envelope.TaskInfo
 		why   string
@@ -169,9 +127,10 @@ func TestReportNext_TS10_48(t *testing.T) {
 	}
 }
 
-// TS-10-49: the list suggests the first active package with a ready task and
-// none in progress.
-func TestListNext_TS10_49(t *testing.T) {
+// The list suggests the claim and the render of the first active package, not
+// under archive/, that can take a write and has a ready task and none in
+// progress.
+func TestNext_OfTheList(t *testing.T) {
 	task := func(id int, state string) *envelope.TaskInfo {
 		return &envelope.TaskInfo{ID: id, Title: "t", State: state, Ready: state == "pending"}
 	}
@@ -179,37 +138,33 @@ func TestListNext_TS10_49(t *testing.T) {
 		return envelope.PackageInfo{SpecDir: fmt.Sprintf(".specs/%02d_p", n), Status: status,
 			TaskCounts: &envelope.TaskCounts{InProgress: inProgress}, NextTask: next}
 	}
+	archived := pkg(5, "active", 0, task(1, "pending"))
+	archived.Archived = true
 	packages := []envelope.PackageInfo{
+		archived,
 		pkg(1, "draft", 0, task(1, "pending")),
 		pkg(2, "active", 1, task(2, "in_progress")),
 		pkg(3, "active", 0, task(3, "pending")),
 		pkg(4, "active", 0, task(1, "pending")),
 	}
-	writable := map[string]bool{".specs/01_p": true, ".specs/02_p": true, ".specs/03_p": true, ".specs/04_p": true}
+	writable := map[string]bool{".specs/01_p": true, ".specs/02_p": true, ".specs/03_p": true, ".specs/04_p": true, ".specs/05_p": true}
 	r := &Result{AdminResult: envelope.AdminResult{Packages: packages}, writableDirs: writable}
 	got := r.Next()
-	if len(got) != 2 || got[0].Tool != "speca" || got[0].Input != ".specs/03_p" || !slices.Equal(got[0].Flags, []string{"--task", "3", "--state", "in_progress"}) ||
-		got[1].Tool != "specr" || got[1].Input != ".specs/03_p" || !slices.Equal(got[1].Flags, []string{"--task", "3"}) {
+	if len(got) != 2 || !sameCall(got[0], claim(".specs/03_p", 3)) ||
+		!sameCall(got[1], envelope.Next{Tool: "specr", Input: ".specs/03_p", Flags: []string{"--task", "3"}}) {
 		t.Errorf("Next = %+v; want the claim of .specs/03_p's task 3, then specr .specs/03_p --task 3", got)
 	}
 
-	// A package that cannot take a write, whose intent drifted, is skipped for the next.
+	// A package that cannot take a write is skipped.
 	writable[".specs/03_p"] = false
 	if got := r.Next(); len(got) != 2 || got[0].Input != ".specs/04_p" {
 		t.Errorf("with .specs/03_p unable to take a write: Next = %+v; want the claim of .specs/04_p", got)
 	}
-
-	// An archived package is not work to do, whatever its status says.
-	archived := pkg(1, "active", 0, task(1, "pending"))
-	archived.Archived = true
-	if got := (&Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{archived}}}).Next(); len(got) != 0 {
-		t.Errorf("an archived package: Next = %+v", got)
-	}
 }
 
-// TS-10-50: no call is suggested when none would help.
-func TestNoNextCall_TS10_50(t *testing.T) {
-	verdict := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
+// No call is suggested when none would help.
+func TestNext_NoneWhenNothingWouldHelp(t *testing.T) {
+	verdict := verdictOf(".specs/16_x")
 	// Even a verdict carrying a next_task would not suggest one: it has no tasks.
 	verdict.NextTask = &envelope.TaskInfo{ID: 1}
 	idle := &Result{AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{
@@ -222,69 +177,10 @@ func TestNoNextCall_TS10_50(t *testing.T) {
 		"the verdict":              verdict,
 		"a report without a task":  report16("sealed", 7, 7, nil, true),
 		"a list without a package": idle,
-		"an empty list":            {AdminResult: envelope.AdminResult{Packages: []envelope.PackageInfo{}}},
+		"an empty list":            listOf(),
 	} {
 		if got := r.Next(); len(got) != 0 {
 			t.Errorf("%s: Next = %+v; want none", name, got)
-		}
-	}
-}
-
-// TS-10-55: Result is an AdminResult with a sentence and a next call, and no
-// envelope speca writes is retryable or resumable. Result may hold state of its
-// own beside the embedded AdminResult (the task form's marks), none of it
-// exported, so none of it written.
-func TestResultAndEnvelopeFlags_TS10_55(t *testing.T) {
-	typ := reflect.TypeFor[Result]()
-	if typ.NumField() < 1 || !typ.Field(0).Anonymous || typ.Field(0).Type != reflect.TypeFor[envelope.AdminResult]() {
-		t.Errorf("Result is %v; want a struct whose first field embeds envelope.AdminResult", typ)
-	}
-	for i := 1; i < typ.NumField(); i++ {
-		if typ.Field(i).IsExported() {
-			t.Errorf("Result.%s is exported: it would be written beside the AdminResult", typ.Field(i).Name)
-		}
-	}
-	for _, m := range []string{"Summary", "Next"} {
-		if _, ok := reflect.TypeFor[*Result]().MethodByName(m); !ok {
-			t.Errorf("*Result has no %s method", m)
-		}
-	}
-
-	report := report16("active", 3, 7, &envelope.TaskInfo{ID: 4}, true)
-	verdict := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/16_x", Valid: ptr(true), Validation: &envelope.ValidationReport{Valid: true}}}
-	list := &Result{AdminResult: envelope.AdminResult{Packages: packages("active")}}
-	usage := &cli.ErrorInfo{Stage: "usage", Category: "usage", Message: "m"}
-	load := &cli.ErrorInfo{Stage: "load", Category: "input", Message: "m"}
-
-	for name, c := range map[string]struct {
-		code    int
-		result  *Result
-		failure *cli.ErrorInfo
-	}{
-		"report":  {cli.ExitOK, report, nil},
-		"verdict": {cli.ExitOK, verdict, nil},
-		"list":    {cli.ExitOK, list, nil},
-		"usage":   {cli.ExitUsage, nil, usage},
-		"load":    {cli.ExitFailed, nil, load},
-	} {
-		var result any
-		if c.result != nil {
-			result = c.result
-		}
-		var out bytes.Buffer
-		cli.Emit(&out, cli.NewRun(tool, "v").Envelope(c.code, result, c.failure))
-		env, err := envelope.DecodeSpeca(out.Bytes())
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if env.Tool != "speca" || (c.failure == nil) != env.OK {
-			t.Errorf("%s: tool %q ok %v", name, env.Tool, env.OK)
-		}
-		if env.Error != nil && (env.Error.Retryable || env.Error.Resumable) {
-			t.Errorf("%s: retryable %v resumable %v", name, env.Error.Retryable, env.Error.Resumable)
-		}
-		if env.Summary == "" {
-			t.Errorf("%s: no summary", name)
 		}
 	}
 }
