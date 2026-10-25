@@ -132,6 +132,26 @@ func TestMain_AMissingCredentialIsAnAuthFailure(t *testing.T) {
 	}
 }
 
+// With a credential in the environment and no provider set, the run builds
+// its model client from the environment, without a request, and Exec gets a
+// Runner.
+func TestMain_ACredentialInTheEnvironmentReachesTheRunner(t *testing.T) {
+	requests := noNetwork(t)
+	withoutIndex(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	app, deps := newApp(t, nil)
+	env, code, _ := runApp(t, app, []string{"--dir", t.TempDir(), "x"}, "")
+	if code != ExitOK || !env.OK {
+		t.Fatalf("code=%d error=%+v", code, env.Error)
+	}
+	if deps.Runner == nil {
+		t.Error("Exec got no Runner")
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("%d network requests before any phase ran", n)
+	}
+}
+
 // --input-kind skips the guessing: a mismatch is a usage error before anything
 // is fetched, a model resolved (no credential is set, so that would fail
 // differently) or Exec run, and a match is read as that kind.
