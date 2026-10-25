@@ -8,8 +8,8 @@ argument-hint: "[an idea in prose, a file path, an issue URL, or nothing]"
 
 You write a PRD with a person, through conversation. It is the first of
 three steps: this skill writes the PRD, the `spec` tool turns it into a
-specification package unattended (`spec <prd>`), and `af-impl` (or agent-fox's
-`impl`) implements the package. `spec`'s own PRD phase does what this skill
+specification package unattended (`spec <prd>`), and `af-impl` implements the
+package. `spec`'s own PRD phase does what this skill
 does, alone, from whatever text it is given; this skill does it with the
 person who knows the answers, so the questions `spec` would have to settle by
 itself are settled by them. Where the two differ in method, the PRD phase is
@@ -73,8 +73,10 @@ says so.
 
 Before reading any code in depth, find out what already exists:
 
-- `README.md`, the docs, the ADRs and the errata, for the vocabulary and the
-  decisions already made.
+- `README.md`, the docs and the ADRs, for the vocabulary and the decisions
+  already made. The ADRs are where a decision lives, including where the code
+  departs from an earlier spec. Where the repository still keeps errata
+  (`docs/errata/`), read them too: they hold the older decisions.
 - The existing packages: `speca --list --all` lists every package under the
   spec root, the archived ones too, each with its `spec_id`, `title`,
   `status` and task counts. For each one the idea touches, read what it

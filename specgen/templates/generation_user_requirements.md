@@ -29,7 +29,7 @@ A requirement may carry a one-sentence `rationale` explaining why it exists. The
 ## What used to be separate sections
 
 - **Edge cases** are ordinary criteria, usually `unwanted` or `complex_event`. There is no `edge_cases` array.
-- **Correctness properties** are `ubiquitous` criteria whose `action` starts with "for any …". They are verified by a test of kind `property`.
+- **Correctness properties** are `ubiquitous` criteria whose `action` starts with "for any …". The test step verifies one with a `property` test when it is an invariant a table of representative inputs cannot establish (a round trip, idempotence, an algebraic law), and with a `unit` test over such a table otherwise.
 - **Error handling** is an `unwanted` criterion with a `contract`. There is no `error_handling` array.
 
 ## Edge-case checklist

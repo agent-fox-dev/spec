@@ -10,13 +10,15 @@ The complete requirements artifact and the full table of tests are above. Use th
 - `criteria` — requirement or criterion IDs this task satisfies. Non-empty for `implement`; a requirement ID means all of its criteria. May be empty for `integration`.
 - `tests` — non-empty. The test IDs this task must make pass.
 - `steps` — non-empty, in order, concrete enough that a coder who sees only this task, its criteria and its tests needs nothing else.
-- `touches` — optional. The files, packages or modules the task creates or modifies.
+- `touches` — optional. The files, packages or modules the task creates or modifies, the test files it extends among them.
 - `depends_on` — optional. Task IDs that must be done first; must reference lower IDs. Absent means "the previous task". Use it to let independent tasks run in parallel.
 - `done_when` — optional. Extra completion checks beyond the implicit ones.
 - `state` — `pending` for a freshly generated plan.
 - `optional` — optional boolean, default false.
 
 Every task carries an implicit definition of done that you do not need to write out: the listed tests exist, are executable and pass; `test_commands.all_tests` passes; `test_commands.linter` passes. The coder works test-first, so **there are no separate "write the tests" tasks** — tests are written inside the task that owns them.
+
+A task's tests extend the test files of the code in its `touches`: the test file of each handler, store, command or function it changes, created only when there is none. A task does not create a test file of its own, or one named after itself, the spec or a test kind. Write steps that say the behaviours to add, not the test ids to write: the ids stay in the spec, and the coder records which test covers each one outside the code.
 
 ## Dependencies on other specs
 
@@ -69,12 +71,12 @@ The example is a Go project's. In this project, use this project's own commands,
       "criteria": ["07-REQ-1"],
       "tests": ["TS-07-1", "TS-07-2", "TS-07-3"],
       "steps": [
-        "Write TS-07-1, TS-07-2 and TS-07-3 and confirm they fail",
+        "Add the task's behaviours to catalog/store_test.go and http/handlers_test.go and confirm they fail",
         "Add the recipe row type and the catalog Insert and Get methods",
         "Wire POST /recipes to Insert; return 201 with the assigned id",
         "Reject a body with no name with 400 and an error string, writing nothing"
       ],
-      "touches": ["catalog/recipe.go", "catalog/store.go", "http/handlers.go"],
+      "touches": ["catalog/recipe.go", "catalog/store.go", "catalog/store_test.go", "http/handlers.go", "http/handlers_test.go"],
       "state": "pending"
     },
     {
@@ -84,12 +86,12 @@ The example is a Go project's. In this project, use this project's own commands,
       "criteria": [],
       "tests": ["TS-07-4"],
       "steps": [
-        "Write TS-07-4 against the running service and a real database and confirm it passes",
+        "Extend the end-to-end test in http/server_test.go to save a recipe and read it back against the running service and a real database, and confirm it passes",
         "Trace 07-PATH-1 from the HTTP handler through the catalog to the database; confirm each step calls the next",
         "Confirm the identifier returned by Insert is consumed by the handler in production code, not only in tests",
         "Grep catalog/ and http/ for TODO and panic(\"not implemented\") and remove any that remain"
       ],
-      "touches": ["http/smoke_test.go"],
+      "touches": ["http/server_test.go"],
       "depends_on": [1],
       "done_when": ["`go test ./... -count=1` passes against a real database"],
       "state": "pending"
