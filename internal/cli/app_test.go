@@ -86,10 +86,7 @@ func TestMain_ChecksOutputBeforeAnythingElse(t *testing.T) {
 	app.PreCheck = func(*Common) error { preCheck = true; return nil }
 	app.CheckInput = func(Input) error { checkInput = true; return nil }
 
-	var stdout, stderr bytes.Buffer
-	code := app.Main(context.Background(),
-		[]string{"--dir", filepath.Join(t.TempDir(), "missing"), "--output", "-", "x"},
-		strings.NewReader(""), &stdout, &stderr)
+	_, stderr, code := runMain(t, app, []string{"--dir", filepath.Join(t.TempDir(), "missing"), "--output", "-", "x"}, "")
 	if code != ExitUsage {
 		t.Fatalf("code = %d, want %d", code, ExitUsage)
 	}
@@ -330,8 +327,7 @@ func TestMain_DetailPicksTheResultView(t *testing.T) {
 		t.Run(detail, func(t *testing.T) {
 			scripted(t)
 			app, _ := newApp(t, exec)
-			var stdout bytes.Buffer
-			app.Main(context.Background(), []string{"--dir", t.TempDir(), "--detail", detail, "x"}, strings.NewReader(""), &stdout, &bytes.Buffer{})
+			stdout, _, _ := runMain(t, app, []string{"--dir", t.TempDir(), "--detail", detail, "x"}, "")
 			var raw struct {
 				Result json.RawMessage `json:"result"`
 			}
@@ -353,8 +349,7 @@ func TestMain_OutputWritesTheSameEnvelopeBeforeStdout(t *testing.T) {
 	scripted(t)
 	out := filepath.Join(t.TempDir(), "nested", "env.json")
 	app, _ := newApp(t, nil)
-	var stdout bytes.Buffer
-	code := app.Main(context.Background(), []string{"--dir", t.TempDir(), "--output", out, "x"}, strings.NewReader(""), &stdout, &bytes.Buffer{})
+	stdout, _, code := runMain(t, app, []string{"--dir", t.TempDir(), "--output", out, "x"}, "")
 	if code != ExitOK {
 		t.Fatalf("code = %d", code)
 	}
@@ -408,8 +403,7 @@ func TestMain_HelpAndVersionPrintNoEnvelope(t *testing.T) {
 		flag, stdout string
 	}{{"--help", ""}, {"--version", "tool test\n"}} {
 		t.Run(tc.flag, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			if code := refusingApp(t).Main(context.Background(), []string{tc.flag}, strings.NewReader(""), &stdout, &stderr); code != ExitOK || stdout.String() != tc.stdout {
+			if stdout, _, code := runMain(t, refusingApp(t), []string{tc.flag}, ""); code != ExitOK || stdout.String() != tc.stdout {
 				t.Errorf("code=%d stdout=%q", code, stdout.String())
 			}
 		})

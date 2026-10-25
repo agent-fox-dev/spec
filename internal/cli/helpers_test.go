@@ -50,11 +50,29 @@ func refusingApp(t *testing.T) *App {
 	return app
 }
 
+// isolateHome points the state directory and the home directory at temporary
+// ones, so a run reads no file of the user's (a global ignore file, a forge
+// credential) and writes nothing under their real state directory.
+func isolateHome(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+}
+
+// runMain runs app's Main in an isolated home and returns what it printed and
+// its exit code. Every test that runs Main goes through it.
+func runMain(t *testing.T, app *App, argv []string, stdin string) (stdout, stderr *bytes.Buffer, code int) {
+	t.Helper()
+	isolateHome(t)
+	stdout, stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	code = app.Main(context.Background(), argv, strings.NewReader(stdin), stdout, stderr)
+	return stdout, stderr, code
+}
+
 // runApp runs app's Main and decodes the one JSON object it printed.
 func runApp(t *testing.T, app *App, argv []string, stdin string) (Envelope, int, string) {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
-	code := app.Main(context.Background(), argv, strings.NewReader(stdin), &stdout, &stderr)
+	stdout, stderr, code := runMain(t, app, argv, stdin)
 	var env Envelope
 	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
 		t.Fatalf("stdout is not one JSON object (%v):\n%s", err, stdout.String())
