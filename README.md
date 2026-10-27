@@ -191,12 +191,13 @@ makes no model or network call and reads no credential. Everything is in
 
 ## Agent Skills
 
-`skills/` holds two Claude Code skills that put the three commands to work in
-a person's own session, one on each side of `spec`:
+`skills/` holds three Claude Code skills that put the three commands to work
+in a person's own session, one for each step around `spec`:
 
 | Skill | Step | What it does |
 | --- | --- | --- |
 | `af-prd` | before `spec` | writes a PRD with the user, in the shape `spec`'s own PRD phase writes, checked against what the format demands, and saves it where `spec <prd>` takes it |
+| `af-spec` | instead of `spec` | writes the package itself, in the session: the four artifacts in the pipeline's own order, `speca --validate` after each one, and activation only on a clean verdict |
 | `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request, with an issue for each item it leaves open (through aflib's `issue` command) |
 
 `make install-skills` copies each one to `~/.claude/skills/<name>/SKILL.md`;

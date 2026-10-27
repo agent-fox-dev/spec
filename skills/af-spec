@@ -1,0 +1,746 @@
+---
+name: af-spec
+description: Write a version 2 specification package in the session, as the spec command's own pipeline writes one, without an unattended model run. Reads a PRD, orients itself in the spec root and the code, reserves the next number, then writes prd.md, requirements.json, test_spec.json and tasks.json in that order, taking speca's verdict after each one, and activates the package only on a clean verdict. Never writes the code the package specifies and never edits another package.
+argument-hint: "[a PRD path, an idea, an issue URL, a draft package to finish, or nothing]"
+---
+
+# af-spec
+
+You write a specification package — the four files of format version 2 — with
+a person watching. It is the middle of three steps: `af-prd` writes the PRD,
+this skill turns it into a package, `af-impl` implements it. The `spec`
+command does the same work in one unattended model run; this skill does it in
+the session, so that the person reads each artifact as it appears and the
+code the package is written against is the code you have just read. Where the
+two differ in method, `spec`'s pipeline is right: it implements the format's
+generation contract (§12 of `spec-format-v2.md`), and so does everything
+below.
+
+Five rules shape it. **The plan is the product**: every criterion is verified
+by a test, every test is owned by a task, every execution path is exercised
+by a smoke test, and a package that breaks one of those is not a draft to
+improve later — it is invalid. **One order, one gate**: `requirements.json`,
+then `test_spec.json`, then `tasks.json`, each written against the complete
+text of the ones before it, each followed by `speca --validate`. **The
+verdict is the format's**: `speca` decides whether the package is valid, not
+your reading of it; you fix what it names and ask again. **Draft until it
+validates**: the package is written in `draft` and activated only on a clean
+verdict, because activation hashes the intent and closes the package to
+edits. **Behaviour from the PRD, names from the code**: what the system must
+do comes from the PRD and nothing else; the files, commands, types and test
+commands the package names are the ones the repository really has.
+
+Two commands from the `spec` repository do the bookkeeping, and each writes
+one JSON object to stdout: `speca` reports a package's state and gives the
+format's verdict on it, and `specr` renders a package as Markdown. Read their
+JSON; do not work out a package's number, scope or verdict by reading files
+by hand while the commands are there to ask. `make build` in a checkout of
+`github.com/agent-fox-dev/spec` installs both. Without them, §10 says what to
+do instead, and the report says you did.
+
+If `.specs/steering.md` exists, read it first and let it answer every
+question it answers — it is the project's own directive to every agent, and
+`spec`'s phases are given it too. Follow the repository's own agent
+instructions (`CLAUDE.md`, `AGENTS.md`) for where documents live, numbering
+and commits; where they say nothing, the defaults below apply.
+
+## How the run goes
+
+One direction: input, orientation, the number, the size, the PRD, the three
+artifacts in order, the verdict, activation, the report. You stop for the
+person's answers in §1 and §4 and for nothing else. Do not ask whether to
+start an artifact, whether a requirement reads well, or whether to go on to
+the next file. Show each artifact as you write it; the person steers by
+answering and interrupting.
+
+You stop short of a written package, and say why, for these reasons only:
+
+- the idea is not yet a PRD and the person wants one written properly first
+  (§1): `af-prd` is that step;
+- the PRD's intent is already an active or sealed package's intent, and the
+  person has not said what this package changes (§2);
+- the work does not fit one package and the person has not chosen the scope
+  to write first (§4);
+- `speca` refuses to read the spec root, or the spec root is not writable.
+
+Everything else is information, not a stop: a dependency that is not sealed,
+a warning, a repair loop, a PRD with a gap you can close from the code.
+
+## 1. Read the input
+
+`$ARGUMENTS` is one of:
+
+- **a path to a PRD** — the normal case, and what `af-prd` leaves behind. Its
+  body is the intent of the package and the source of every requirement;
+- **a path to a draft package** (`.specs/17_name`, or `17`) — a package to
+  finish or repair. Read it with `specr`, take its verdict (§10), and write
+  only what is missing or broken. An `active` or `sealed` package is not
+  this: say so and stop (§2);
+- **an idea in prose, or an issue URL** — no PRD exists yet. Read the issue
+  and its comments where it is one (with `gh` or `glab` when installed). Say,
+  in one line, that `/af-prd` writes the PRD with them and that this run can
+  instead write the PRD itself, deciding the open questions and recording
+  each in `## Design Decisions`, and let them choose. If they choose this
+  run, write the body of §5 to `af-prd`'s shape, asking the questions that
+  change the shape of the work in batches of three or four;
+- **absent** — run `speca --list` and ask which draft package to finish, or
+  which PRD to turn into a package.
+
+Say in one line, once, that `spec <prd>` does the whole of this run
+unattended where it is installed and a model credential is set, and that here
+every artifact is written in this session instead, in view. Then get on with
+it. Do not run `spec`: it would write a second package beside the one you are
+writing.
+
+A PRD that is already the `source` of a package in the spec root has been
+specified. Name that package and ask what this one changes before writing
+anything.
+
+## 2. Orient
+
+Before writing anything, find out what exists. This is the step that decides
+whether the package's ids, names and dependencies are real.
+
+```sh
+speca --list --all > "${TMPDIR:-/tmp}/af-spec-list.json"
+```
+
+Every package under the spec root, archived ones included, each with its
+`spec_id`, `spec_name`, `status`, verdict and task counts. From it:
+
+- **the number to use** (§3) and the names already taken;
+- **the packages this one touches.** For each, `specr <NN> --section prd` for
+  what it promises and excludes, and `specr <NN> --section requirements` for
+  its glossary and its **execution-path actors**. Both matter later: a
+  glossary term this package redefines is a warning across specs, and an
+  actor it fails to share with a dependency is an error no later artifact can
+  repair (§6);
+- **the intent already specified.** A `sealed` or `active` package whose
+  intent covers this PRD means the work is done or in progress. Name it and
+  ask what this package changes; a change to an active package's intent is a
+  new package that supersedes it, never an edit to that one.
+
+Then read the repository, read-only, over the files `git ls-files` lists:
+
+- `README.md`, the docs and the ADRs, for the vocabulary and the decisions
+  already made; the errata where the repository keeps them;
+- **where things live**: the commands, modules, files and types the behaviour
+  touches, with their paths, and what each does today. Every name the package
+  writes into `touches`, `pseudocode` or a criterion comes from here;
+- **what already exists**: the part of the PRD the code already does. It is
+  either out of scope or it is what changes;
+- **the checks**: the project's real test and lint commands, from its
+  `Makefile`, `package.json`, `pyproject.toml` or CI config. They become
+  `test_commands` in §8, and a command from another ecosystem is a defect in
+  the package;
+- **the external API**: for every library the work calls, the real signatures
+  of the symbols it will call, read where they are defined (`go doc
+  <pkg>.<Symbol>`, the installed package's source, the lockfile for the
+  version). `spec`'s own phases cannot read outside the repository and have
+  to mark those signatures unverified; you usually can, and a signature you
+  read is one the package carries as verified (§6).
+
+Note the project's language and its stub marker (`panic("not implemented")`,
+`TODO`, `NotImplementedError`, `todo!()`): the integration task's steps name
+them in §8.
+
+## 3. Reserve the number, the name and the directory
+
+- **The number** is the highest numeric prefix in the spec root **and under
+  `archive/`**, plus one, as a string zero-padded to two digits — three once
+  past 99, so the directories keep sorting lexically. An archived package
+  keeps its number; reusing it would make two packages answer to one id.
+- **The name** is `snake_case`, derived from the PRD title:
+  `^[a-z][a-z0-9]*(_[a-z0-9]+)*$`. No uppercase, no hyphen, no double or
+  trailing underscore. A name the person gives wins.
+- **The directory** is `<spec root>/{NN}_{name}`. The spec root is
+  `$AF_SPEC_DIR` where it is set, else `.specs/`; where the project keeps it
+  somewhere else, every `speca` and `specr` call below takes `--specs-dir`.
+  `spec_id` and `spec_name` must agree with the two halves of the directory
+  name in all four files (rule C1), so settle both before you write a line.
+
+Create the directory and write nothing else into it: a package holds the four
+artifacts, `architecture.md` when there is one, and nothing more — no session
+file, no notes, no scratch copies.
+
+## 4. Size the work, and split before you write
+
+A package is **one cohesive feature**: at most 10 requirements, at most 8
+criteria each, at most 12 tasks. The validator warns past those; the warnings
+are a sign the work was not split, not a formatting nit.
+
+Count the areas of the PRD's `## Requirements`. If the work is plainly
+larger — three or more areas that could be built and tested on their own, or
+unrelated stories serving different actors — do not write an oversized
+package. Propose the split: every scope in order, each with the `snake_case`
+name its package will carry and a sentence of what it covers, the
+**foundational one first**, and ask which to write now. Then write that scope
+alone, name the later scopes in the PRD's `## Non-goals`, and say in the
+report which remain and that each is its own package, written by its own run
+of this skill (`spec` splits a large PRD by itself; here the person chooses).
+
+## 5. `prd.md`
+
+The package's PRD is the input PRD's body with frontmatter the format
+defines. Write the frontmatter exactly in this order and spelling:
+
+```yaml
+---
+spec_id: "17"
+spec_name: "indexed_code_search"
+title: "Search the repository by symbol from the shell"
+status: "draft"
+created_at: "2026-10-27T09:12:44Z"
+updated_at: "2026-10-27T09:12:44Z"
+intent_hash: null
+schema_version: 2
+source: "docs/prd/03-search-the-repository-by-symbol.md"
+---
+```
+
+| Field | Value |
+|---|---|
+| `spec_id`, `spec_name` | the two halves of the directory name, quoted strings; `spec_id` keeps its leading zero |
+| `title` | the PRD's title, an imperative verb phrase |
+| `status` | `"draft"`. §11 changes it, through `speca` |
+| `created_at`, `updated_at` | the same ISO 8601 UTC instant, now |
+| `intent_hash` | `null`. Activation computes it; a hash you write by hand is one the library will refuse |
+| `schema_version` | `2` |
+| `source` | where the idea came from: the PRD's path, the issue URL, or `"interactive"` when the person typed it. It is the first question anyone asks of a package |
+| `owner`, `supersedes`, `tags` | optional; omit them rather than writing empty values. `supersedes` carries the spec ids this package replaces |
+
+Then the body, which is the PRD's own text: `# {title}`, then `## Intent`,
+then the rest. Two rules about it:
+
+- **`## Intent` is required**, spelled exactly so, on a line of its own. It
+  is the only machine-read section: activation hashes its text, every later
+  write of the package is refused while the section no longer matches the
+  hash, and a package without it cannot be activated at all. One short
+  paragraph of stable purpose, not a summary of the current plan.
+- **No frontmatter inside the body**, and nothing architectural. Design
+  belongs in `architecture.md` (§9); behaviour belongs in the requirements.
+
+Keep the PRD's sections as `af-prd` writes them — `## Intent`, `## Goals`,
+`## Non-goals`, `## Background`, `## Requirements`, `## Design Decisions`,
+`## Dependencies`, `## Verified External API`. Where this run settled a
+question the PRD left open, add it to `## Design Decisions`, numbered, with
+one line of why: the PRD in the package is the record of what was decided,
+and a question answered in your head is a question the next reader asks
+again.
+
+Now write the three JSON files as a scaffold — the identity fields with empty
+bodies — so the package loads from here on:
+
+```json
+{ "$schema": "https://agent-fox.dev/schemas/requirements.v2.json", "spec_id": "17", "spec_name": "indexed_code_search", "schema_version": 2,
+  "introduction": "…", "glossary": {}, "requirements": [], "execution_paths": [] }
+```
+
+and the same identity in `test_spec.json` (`"tests": []`) and `tasks.json`
+(`test_commands`, `"dependencies": []`, `"tasks": []`), each with its own
+`$schema` URI — `https://agent-fox.dev/schemas/test_spec.v2.json` and
+`https://agent-fox.dev/schemas/tasks.v2.json`. `spec_id`, `spec_name` and
+`schema_version` are identical in all three files and agree with `prd.md` and
+the directory name; `$schema` is the one of the file it heads.
+
+`speca <NN> --validate` on a scaffold answers with exactly one error,
+`completeness`: "spec is an empty scaffold". That is the gate for §5 — the
+four files parse, the frontmatter is readable and the package resolves by its
+number. Any other error, or a load failure (exit 1), is a defect in what you
+just wrote; fix it before writing content. While the package is a scaffold
+nothing else is checked, so do not read that one error as a clean bill.
+
+Encode every JSON file with two-space indentation, the fields in the order
+the shapes below give them, and a trailing newline. That is the library's own
+encoding, and §11 rewrites all four files in it anyway.
+
+## 6. `requirements.json`
+
+What the system must do: one flat list of criteria per requirement, plus the
+end-to-end execution paths. Everything comes from the PRD; nothing comes from
+your view of how it should be built.
+
+```json
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "07",
+  "spec_name": "recipe_catalog",
+  "schema_version": 2,
+  "introduction": "The recipe catalog stores user-created recipes and their ingredients.",
+  "glossary": { "recipe": "A named collection of ingredients and preparation steps in the catalog." },
+  "requirements": [
+    {
+      "id": "07-REQ-1",
+      "title": "Recipe creation",
+      "rationale": "A cook who cannot save a recipe has no reason to open the app twice.",
+      "criteria": [
+        { "id": "07-REQ-1.1", "pattern": "event_driven",
+          "condition": "a client submits POST /recipes with a body carrying a name and at least one ingredient",
+          "system": "recipe catalog",
+          "action": "persist the recipe and return its assigned identifier",
+          "contract": "HTTP 201 with body {id: string, name: string}" },
+        { "id": "07-REQ-1.2", "pattern": "unwanted",
+          "condition": "the submitted body has no name field",
+          "system": "recipe catalog",
+          "action": "reject the request and persist nothing",
+          "contract": "HTTP 400 with body {error: string}; the catalog row count is unchanged" },
+        { "id": "07-REQ-1.3", "pattern": "ubiquitous",
+          "system": "recipe catalog",
+          "action": "for any persisted recipe, return the same identifier for every subsequent read of it" }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "07-PATH-1",
+      "title": "A cook saves a recipe and reads it back",
+      "steps": [
+        { "actor": "cook", "action": "submits POST /recipes with a recipe body" },
+        { "actor": "recipe catalog", "action": "validates the body and writes a row" },
+        { "actor": "recipe catalog", "action": "returns 201 with the assigned identifier" },
+        { "actor": "cook", "action": "reads GET /recipes/{id} and receives the saved recipe" }
+      ]
+    }
+  ]
+}
+```
+
+The example is the shape `spec`'s own prompt carries; the domain is yours.
+
+**Ids.** `{spec_id}-REQ-{N}` for a requirement, `{spec_id}-REQ-{N}.{C}` for a
+criterion with C restarting at 1 inside each requirement,
+`{spec_id}-PATH-{N}` for a path. N and C are sequential from 1. Every id
+carries this package's `spec_id` and is unique in its family (rule C2).
+
+**The criterion is one EARS sentence in fields.** Choose the pattern first,
+then fill only the fields it allows — the schema enforces the combination,
+and it reports a wrong one as `'not' failed` on that criterion, which means
+`condition` or `guard` is present where the pattern forbids it or absent
+where it requires it.
+
+| `pattern` | `condition` | `guard` | Rendered sentence |
+|---|---|---|---|
+| `ubiquitous` | absent | absent | THE {system} SHALL {action} |
+| `event_driven` | the trigger | absent | WHEN {condition}, THE {system} SHALL {action} |
+| `complex_event` | the trigger | required | WHEN {condition} AND {guard}, THE {system} SHALL {action} |
+| `state_driven` | the state | absent | WHILE {condition}, THE {system} SHALL {action} |
+| `unwanted` | the error case | absent | IF {condition}, THEN THE {system} SHALL {action} |
+| `optional` | the feature | absent | WHERE {condition}, THE {system} SHALL {action} |
+
+`action` is required and is what the system must do, testably. `system` is
+optional and names the component that acts. `contract` is what the caller
+observes — the return value, the exit code, the status code, the emitted
+event — **required for every `unwanted` criterion** (rule C10) and expected
+wherever something else consumes the result. "It reports an error" is not a
+contract; "exit code 2 and nothing written to stdout" is.
+
+**There are no other sections.** An edge case is a criterion, usually
+`unwanted` or `complex_event`. A correctness property is a `ubiquitous`
+criterion whose action begins "for any …". Error handling is an `unwanted`
+criterion with a contract. There is no `edge_cases`, no
+`correctness_properties`, no `error_handling` and no `user_story`: a
+requirement carries an optional one-sentence `rationale` instead.
+
+**For every requirement, consider** — and write a criterion where it
+applies: empty or null input; boundary values, with numbers; the operation
+failing; authorization failing; a concurrent operation. For anything that
+spawns processes, loops, retries or calls a service, also: a timeout,
+resource cleanup on failure, an iteration cap, and that library code returns
+an error instead of terminating the process.
+
+**Language.** Prefer a measurable constraint to an adjective. The validator
+warns on `appropriate`, `properly`, `correctly`, `reasonable`, `relevant`,
+`adequate`, `suitable`, `as needed`, `if necessary` and `etc` — each of them
+makes a criterion untestable, so say what the word stands for.
+
+**The glossary is an object**, term → definition, for project-specific
+vocabulary a newcomer would not know. Not every identifier: it is
+documentation, and the validator only warns about a backticked term used in
+three or more criteria with no entry. A term an existing package defines
+keeps that definition.
+
+**Execution paths** are the end-to-end scenarios, at least one, each with at
+least two `{actor, action}` steps. A path starts at a user action, a CLI
+command, an API call or a scheduled trigger, ends at a concrete side effect,
+and uses logical actors. Each one becomes a smoke test in §7 and work in the
+integration task in §8, so write paths you can watch happen.
+
+**Paths across packages.** For every package this one depends on, at least
+one step of this package's paths must be played by an actor that also plays a
+step in one of that package's paths — the same name, ignoring case. A
+dependency with no shared actor is an **error** across specs, and no later
+artifact can repair it: decide it here, with the actors you read in §2, and
+name a component the other package owns as that package names it.
+
+**`external_apis`** is optional and holds the signatures the work relies on:
+`{package, version, verified, symbols: [{name, import_path, signature}]}`.
+Set `verified` to `true` only for a symbol whose source you read in §2;
+otherwise `false`, with the signature the PRD implies. Never write
+"unverified" into `version` or a note — the flag is the record, and `af-impl`
+reads it to know what to confirm before use.
+
+Write the file, then take the verdict: `speca <NN> --validate`. With
+`test_spec.json` and `tasks.json` still empty you will see two expected
+errors — `at '/tests': minItems: got 0, want 1` and `at '/tasks': minItems:
+got 0, want 2`. Every other error is yours to fix now. Note that the
+cross-file rules C1–C11 do **not** run while any file fails its schema, so
+this gate checks the requirements' shape, not yet their coverage.
+
+## 7. `test_spec.json`
+
+How each criterion is verified: **one flat list** of tests, written against
+the complete requirements artifact — its real ids, never an invented one.
+
+```json
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "07",
+  "spec_name": "recipe_catalog",
+  "schema_version": 2,
+  "tests": [
+    { "id": "TS-07-1", "kind": "unit", "verifies": ["07-REQ-1.1"],
+      "title": "A valid recipe body is persisted and its identifier returned",
+      "given": ["an empty catalog"],
+      "when": "POST /recipes is called with a name and one ingredient",
+      "then": ["the status is 201", "the body carries a non-empty id", "the catalog holds one row"],
+      "pseudocode": "in http/handlers_test.go: r = post('/recipes', body); assert r.status == 201; assert count(catalog) == 1" },
+    { "id": "TS-07-4", "kind": "smoke", "verifies": ["07-PATH-1"],
+      "title": "A cook saves a recipe and reads it back through the running service",
+      "given": ["the service is running against a real database"],
+      "when": "a recipe is posted and then fetched by its returned identifier",
+      "then": ["the fetch returns the recipe that was posted"],
+      "pseudocode": "extends the end-to-end test in http/server_test.go: id = post('/recipes', rec).json.id; assert get('/recipes/' + id).json == rec",
+      "real_components": ["HTTP handler", "recipe catalog", "database"] }
+  ]
+}
+```
+
+The example shows two of the four tests this package needs; `TS-07-2` and
+`TS-07-3`, which verify the other two criteria, are left out for length. In
+the file the series has no gaps.
+
+**Fields.** `id` is `TS-{spec_id}-{N}`, N sequential from 1 — **one number
+series for all four kinds**, with no `E`, `P` or `SMOKE` variant. `kind` is
+`unit` (one component, collaborators may be stubbed), `integration` (two or
+more real components, only external I/O stubbed), `property` (the generator
+in `when`, the invariant in `then`) or `smoke` (one full execution path with
+real components). `verifies` is non-empty: criterion ids for `unit`,
+`integration` and `property`, a path id for `smoke`, which may also list
+criterion ids. `title` says what is verified as a caller sees it. `given` may
+be empty; `when` is the action or input; `then` is non-empty and observable.
+`pseudocode` is optional, language-agnostic, and may name concrete functions
+and files. `real_components` is required and non-empty for `smoke` and
+**must be absent for every other kind** (rule C11).
+
+**Coverage, which the format enforces.** Every criterion is in the `verifies`
+of at least one test (C4). Every path is in the `verifies` of at least one
+`smoke` test, and every `smoke` test verifies at least one path (C5). Every
+id in `verifies` resolves in this package (C3). There is no `coverage`
+object: coverage is computed, never authored.
+
+**One test per behaviour.** A behaviour is one thing a caller can observe: a
+request answered with a status and a body, a store that refuses a duplicate,
+a command that exits with a code and writes a file.
+
+- A test lists every criterion its behaviour satisfies, up to four; more is
+  usually two behaviours, and the validator warns past four.
+- **Variants are a table.** Two tests whose `then` differ only in the input
+  are one test over a table: name the cases in `when` and their outcomes in
+  `then`.
+- A test whose `then` only restates another's is a duplicate: drop it and add
+  its criteria to the other's `verifies`.
+- For every `unwanted` criterion, assert the caller-observable outcome its
+  `contract` names, not that "an error occurred".
+- A `property` test is only for an invariant a table of representative
+  inputs cannot establish — a round trip, idempotence, an algebraic law. A
+  "for any …" criterion is otherwise a `unit` test over such a table, its
+  boundaries among them.
+- A `smoke` test proves the wiring of its path: it runs the path once with
+  its `real_components` and asserts the end state, without asserting again
+  what the unit tests verify. One per path, and its `verifies` lists the
+  path alone.
+- **No artifact tests.** Nothing checks that a struct has a field, a constant
+  has a value, a document mentions something, an import graph holds or a
+  helper exists.
+- **Look at the tests the repository already has** for the code each test
+  exercises. Where one already verifies the behaviour, keep the entry — its
+  criteria still need a test — and name that test's file and name in
+  `pseudocode`, so `af-impl` extends it instead of writing the behaviour
+  again under a new name.
+
+The ids stay in this file. `af-impl` writes each test into the test file of
+the code it exercises, named for the behaviour it checks
+(`TestCreate_RejectsDuplicateSlug`), and records the map from test id to test
+in the commit. Write `title` and `pseudocode` so that is possible: say the
+behaviour, name the file, never the id.
+
+Take the verdict again. Only the `tasks.json` `minItems` error should remain
+beside anything the tests broke.
+
+## 8. `tasks.json`
+
+What work to do, in what order: **one flat, ordered list**. A task is the
+unit of dispatch — one coder session, one task. Write it against the complete
+requirements and the complete test list.
+
+```json
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "07",
+  "spec_name": "recipe_catalog",
+  "schema_version": 2,
+  "test_commands": { "all_tests": "go test ./... -count=1", "linter": "go vet ./...", "spec_tests": "go test ./catalog/... -count=1" },
+  "dependencies": [ { "spec": "06", "reason": "uses the HTTP router and the database handle it sets up" } ],
+  "tasks": [
+    { "id": 1, "kind": "implement", "title": "Persist and read back recipes",
+      "criteria": ["07-REQ-1"], "tests": ["TS-07-1", "TS-07-2", "TS-07-3"],
+      "steps": [
+        "Add the task's behaviours to catalog/store_test.go and http/handlers_test.go and confirm they fail",
+        "Add the recipe row type and the catalog Insert and Get methods",
+        "Wire POST /recipes to Insert; return 201 with the assigned id",
+        "Reject a body with no name with 400 and an error string, writing nothing"
+      ],
+      "touches": ["catalog/store.go", "catalog/store_test.go", "http/handlers.go", "http/handlers_test.go"],
+      "state": "pending" },
+    { "id": 2, "kind": "integration", "title": "Verify the save-and-read path end to end",
+      "criteria": [], "tests": ["TS-07-4"],
+      "steps": [
+        "Extend the end-to-end test in http/server_test.go to save a recipe and read it back against the running service and a real database, and confirm it passes",
+        "Trace 07-PATH-1 from the HTTP handler through the catalog to the database; confirm each step calls the next",
+        "Confirm the identifier Insert returns is consumed by the handler in production code, not only in tests",
+        "Grep catalog/ and http/ for TODO and panic(\"not implemented\") and remove any that remain"
+      ],
+      "touches": ["http/server_test.go"], "depends_on": [1],
+      "done_when": ["`go test ./... -count=1` passes against a real database"],
+      "state": "pending" }
+  ]
+}
+```
+
+**Fields.** `id` is an integer from 1, and array order is the default
+execution order. `kind` is `implement` or `integration`. `title` is
+imperative and specific. `criteria` holds requirement or criterion ids —
+non-empty for `implement`, where a requirement id means all its criteria; it
+may be empty for `integration`. `tests` is non-empty. `steps` is non-empty,
+in order, and concrete enough that a coder who sees only this task, its
+criteria and its tests needs nothing else. `touches` is optional: the files,
+packages and modules the task creates or changes, the test files it extends
+among them. `depends_on` is optional, references lower ids, and absent means
+"the previous task" — use it to let independent tasks run in parallel.
+`done_when` is optional, for checks beyond the implicit ones. `state` is
+`pending` for every task of a new plan. `optional` defaults to false.
+
+Every task carries an implicit definition of done you do not write out: the
+listed tests exist, are executable and pass; `all_tests` passes; `linter`
+passes. The coder works test-first, so **there are no "write the tests"
+tasks** — tests are written inside the task that owns them, into the test
+files of the code in `touches`. Write steps that say the behaviours to add,
+not the test ids to write.
+
+**`test_commands`** are the project's real commands, from §2: `all_tests`
+and `linter` are required, `spec_tests` is optional and narrows the run to
+this package's area. A default from another ecosystem makes the plan wrong
+for the repository it will be run in.
+
+**`dependencies`** lists the packages the PRD's `## Dependencies` names, each
+`{spec, reason}`, where `spec` is the other package's **number alone**
+(`"06"`, never `06_router` or its name). A number that names no package in
+the spec root makes the package invalid, and so does a dependency whose paths
+share no actor with this one (§6).
+
+**Rules that make the plan invalid.** Every test in `test_spec.json` is
+listed in the `tests` of at least one task (C7). Every criterion is covered
+by the `criteria` of at least one **`implement`** task, directly or through
+its requirement id (C8). Every id in `criteria`, `tests` and `depends_on`
+resolves, and `depends_on` points at lower ids (C6). Exactly one task has
+kind `integration`, it is last, and its `tests` include **every** `smoke`
+test (C9).
+
+**Check ownership before you take the verdict.** Go through the test list and
+write each test id against the task whose `tests` holds it; then through the
+requirements and each criterion id against the `implement` task whose
+`criteria` holds it. An id with no owner is the commonest way a plan ships
+with a hole. Criteria belong to implement tasks; the integration task owns
+the smoke tests.
+
+Keep a task to at most 10 tests and 12 steps, and the plan to at most 12
+tasks. **Group by requirement, not by layer**: a task delivers one or two
+requirements end to end — data, logic, interface and tests — so each one
+leaves the system working.
+
+**The integration task** is last and exists to catch the wiring gaps
+component tests cannot see. Its steps cover, in the project's own vocabulary:
+trace every execution path through the real code and confirm each step calls
+the next with no stub left; for every criterion with a `contract`, confirm a
+caller in production code consumes the producer's result, not only a test;
+search the files every task's `touches` lists for the project's stub marker
+and the common ones; and for any path whose entry point belongs to another
+package, confirm that entry point is called from production code. An
+execution path that is not live in production code fails this task, and no
+erratum satisfies it.
+
+## 9. `architecture.md` (optional)
+
+Write it only when the person asks, or when the PRD carries design detail
+that is neither intent nor a criterion: modules and their responsibilities,
+the interfaces between them with real signatures, the data models, the
+technology choices and their reasons. Sections: `# Architecture: {spec_name}`,
+`## Overview`, `## Architecture` (a Mermaid flowchart, then one line of
+responsibility per module), `## Components and Interfaces`, `## Data
+Models`, `## Technology Stack`, `## Definition of Done`.
+
+Two constraints. It fits the code that exists — the project's module names,
+vocabulary and libraries. And **nothing in it is load-bearing**: a renderer
+working to a token budget drops it first, so every fact a coder needs to
+implement belongs in a criterion or a task step. It has no frontmatter and is
+not validated.
+
+## 10. The verdict
+
+```sh
+speca <NN> --validate
+```
+
+This is the format's whole verdict: the four schemas, the cross-file rules
+C1–C11, and the rules across packages. Read `result.validation.errors` — each
+entry names its `check`, the `artifact` and the `entity`, and most carry the
+repair in the message. `result.traceability` gives the criteria and paths
+covered, and `result.valid` is the answer. Exit code 0 reports a verdict,
+valid or not; exit 1 means the package could not be **read** at all (a
+missing file, malformed JSON or YAML — `error.message` says which) and exit 2
+is a reference that names no package.
+
+Work in that order, because the stages gate each other:
+
+1. **`completeness`** — "an empty scaffold" while all three bodies are still
+   empty (§5), or "incomplete: <files>" while one of the three is missing.
+   A `schema_version` that is not `2` is refused here too, before anything
+   else is read.
+2. **`json_schema`** — a missing or misspelled field, a wrong type, an
+   unknown key, a value outside an enum, `minItems` on a list you left empty.
+   `'not' failed` on a criterion is the EARS combination of §6. The
+   cross-file rules do not run until every file passes its schema, so a
+   schema-clean verdict can still uncover a dozen C-rule errors.
+3. **`C1`–`C11`** — the integrity of the ids and the coverage, in the package.
+4. **`cross_spec_*`** — an unknown dependency, a cycle, a dependency with no
+   actor in common. These need the other packages and are **not** checked by
+   anything else, so this is the only call that catches them.
+
+Fix, ask again, and do not go on until `valid` is true. Then read the
+warnings: they never block, and three of them are worth acting on anyway.
+`vague_language` names the criterion and the word it cannot be tested
+through. `missing_contract` names a criterion that describes an error outcome
+and has no contract; give it one. `scope_limit` means the work wanted a split
+(§4). Say in the report which warnings you left, and why.
+
+Then read the package back as a coder will receive it:
+
+```sh
+specr <NN> --markdown-file "${TMPDIR:-/tmp}/af-spec-<NN>.md" > "${TMPDIR:-/tmp}/af-spec-<NN>.json"
+```
+
+Both files go outside the repository, so the tree stays clean, and stdout
+goes to a file because the envelope repeats the whole Markdown.
+
+Read that Markdown, not your own drafts. It renders every criterion as its
+EARS sentence with its contract, each test under what it verifies, and each
+task with what it owns — which is where a criterion that reads as two
+behaviours, a task with no steps a stranger could follow, or a test that
+restates another becomes obvious. Fix what you find and validate again.
+
+Without `speca` and `specr` installed, validate against the schemas in
+`specification/schemas/*.v2.json` of a `spec` checkout with any JSON Schema
+validator, check C1–C11 and the actor rule by hand from §6 to §8, leave the
+package in `draft`, and say in the report that no verdict was taken.
+
+## 11. Activate
+
+A package that validates is activated; one that does not stays in `draft`
+with its errors named in the report. Activation is a lifecycle move, so it
+goes through `speca`, never through an edit of the frontmatter:
+
+```sh
+speca <NN> --status active
+```
+
+It computes the hash of the `## Intent` section, writes it into
+`intent_hash`, and rewrites **all four artifacts** in the library's canonical
+encoding — which is also what normalises anything your hand-written files
+spelled differently. Three things to know about it. It refuses a package with
+no `## Intent` to hash, and one that fails the package's **own** rules
+(`--force` overrides the second; this run does not use it). It does **not**
+apply the rules across packages, so it will activate a package with an
+unknown dependency that `speca --validate` rejects — which is why the verdict
+comes first, always. And the files it writes are left with mode `0600`,
+because it writes them through private temporary files; `chmod` them to the
+repository's usual mode before committing where that matters.
+
+After activation the `## Intent` section is closed: every write of the
+package is refused while its text no longer hashes to `intent_hash`. Changing
+the intent then means a new package that supersedes this one — so if the
+person is still weighing the intent, leave the package in `draft`, say so,
+and give them the one call that activates it.
+
+Leave the package in `draft` when the person asks (`spec --no-activate` does
+the same), and when the verdict is not clean.
+
+Commit as the repository's instructions say — package and PRD together, on a
+branch of its own, where they call for one. Where they say nothing, leave the
+files uncommitted and say so.
+
+## Never
+
+- **Write the code.** This run writes a specification, not an
+  implementation. No source file, no test file, no fix "while here".
+  `af-impl` implements the package.
+- **Touch another package.** No edit, no state change, no renumbering. A
+  change to an active package's intent is a new package that supersedes it.
+- **Hand-edit the lifecycle.** `status` and `intent_hash` change through
+  `speca --status`, and a task's state through `speca --task`. A hash or a
+  status written by hand is drift the library refuses.
+- **Write derived or v1 structures.** No `coverage`, no `traceability`, no
+  task groups, no subtasks, no `edge_cases`, `correctness_properties`,
+  `error_handling` or `user_story`, no `TS-E`/`TS-P`/`TS-SMOKE` id variants,
+  no `_session.json` or any other file in the package directory.
+- **Invent an id, a name or a signature.** Every id carries this package's
+  prefix and resolves; every file, command and module the package names
+  exists under that name or is said to be new; a signature nobody read is
+  `verified: false`.
+- **Put design in the PRD, or behaviour only in `architecture.md`.** The PRD
+  is intent and behaviour; the criteria are the contract; the architecture is
+  optional and load-bearing for nothing.
+- **Leave a question open.** A package is the input to an unattended coder.
+  Decide it with the person, or decide it from the code and record it in
+  `## Design Decisions`.
+- **Run `spec`.** It writes a package of its own beside yours. `speca` and
+  `specr` are the commands this run uses.
+- **Activate on an unclean verdict**, or activate a package whose intent the
+  person is still weighing.
+- **Reuse an archived number**, or renumber a package to close a gap.
+
+## 12. Report
+
+- **The package**: its directory, `spec_id`, `spec_name`, title, status, and
+  the artifacts written.
+- **The counts**: requirements, criteria, execution paths, tests by kind,
+  tasks, and the criteria and paths covered, from `speca`'s `traceability`.
+- **The verdict**: `valid`, and where it is false every error by its rule.
+  Then the warnings you left, each with why.
+- **The decisions** this run made that the PRD had left open, and anything
+  the person settled.
+- **The dependencies**: each package named, with its status, and any that is
+  neither sealed nor has its integration task done — `af-impl` refuses to
+  implement before such a package, so it belongs in the report, not in a
+  footnote.
+- **The external API**: what was verified, and what is `verified: false` for
+  `af-impl` to confirm.
+- **The split**, where §4 found one: the scopes that remain, in order, and
+  that each is its own package.
+- **The next steps**:
+
+  ```sh
+  speca <NN>                   # the package's state, its next task and its verdict
+  speca <NN> --status active   # activate it, where it was left in draft
+  specr <NN>                   # read it as a coder receives it
+  /af-impl <NN>                # implement it
+  ```
