@@ -266,6 +266,7 @@ and no API key: the command's tests run against a scripted model.
 - [The speca command](docs/speca.md) — the report, the verdict and the list, the reference it takes, the output and `--schema`
 - [Configuration](docs/configuration.md) — environment variables and limits
 - [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
+- [Comparison with other spec kits](docs/spec-kit-comparison.md) — this kit against GitHub Spec Kit, OpenSpec and EGM: what each does, where this one is stronger or weaker, and what to borrow
 - [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
 - [ADR 06](docs/adr/06-build-against-the-latest-agentkit-go.md) — why every build moves to the latest agentkit-go
 - [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports
