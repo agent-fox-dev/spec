@@ -10,15 +10,59 @@ type agent struct {
 	keys []string
 	// invoke is the prefix an invocation of another skill takes.
 	invoke string
+	// userDir is this agent's user skill directory, relative to the home
+	// directory, and projectDir its directory inside a repository.
+	userDir    string
+	projectDir string
+	// homeEnv names an environment variable that, when set, replaces the home
+	// directory with its value plus "skills". Only codex has one.
+	homeEnv string
+	// alsoUser and alsoProject are the other directories this agent also loads,
+	// so an install can warn that it will see a skill twice. They come from the
+	// vendors' own documentation, as ADR 12 records.
+	alsoUser    []string
+	alsoProject []string
 }
 
 // agents is the table the render walks, in this order, so the output of a run
 // does not depend on map iteration.
-var agents = []agent{
-	{"claude", []string{"name", "description", "argument-hint", "disable-model-invocation"}, "/"},
-	{"codex", []string{"name", "description"}, "$"},
-	{"cursor", []string{"name", "description", "disable-model-invocation"}, "/"},
-	{"copilot", []string{"name", "description"}, "/"},
+var agents = []agent{{
+	name:       "claude",
+	keys:       []string{"name", "description", "argument-hint", "disable-model-invocation"},
+	invoke:     "/",
+	userDir:    ".claude/skills",
+	projectDir: ".claude/skills",
+}, {
+	name:       "codex",
+	keys:       []string{"name", "description"},
+	invoke:     "$",
+	userDir:    ".codex/skills",
+	projectDir: ".agents/skills",
+	homeEnv:    "CODEX_HOME",
+}, {
+	name:        "cursor",
+	keys:        []string{"name", "description", "disable-model-invocation"},
+	invoke:      "/",
+	userDir:     ".cursor/skills",
+	projectDir:  ".cursor/skills",
+	alsoProject: []string{".agents/skills", ".claude/skills", ".codex/skills"},
+}, {
+	name:        "copilot",
+	keys:        []string{"name", "description"},
+	invoke:      "/",
+	userDir:     ".copilot/skills",
+	projectDir:  ".github/skills",
+	alsoUser:    []string{".claude/skills", ".agents/skills"},
+	alsoProject: []string{".claude/skills", ".agents/skills"},
+}}
+
+// agentNames lists the agents for the message that names the ones it accepts.
+func agentNames() []string {
+	names := make([]string, 0, len(agents))
+	for _, a := range agents {
+		names = append(names, a.name)
+	}
+	return names
 }
 
 // lookupAgent finds an agent by name. found is false for a name outside the
