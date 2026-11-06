@@ -2,20 +2,46 @@
 
 package afspec
 
-// One EARS statement. The rendered sentence is derived from pattern, condition,
-// guard, system and action.
+// How a criterion is verified: its own check (kind, setup, pseudocode), or the
+// same as another criterion's check or a path's smoke check (same_as).
+type Check struct {
+	// unit exercises one component with its collaborators stubbed; integration two or
+	// more real components; property an invariant over an input domain.
+	Kind *CheckKind `json:"kind,omitempty,omitzero" yaml:"kind,omitempty" mapstructure:"kind,omitempty"`
+
+	// Language-agnostic assertions. May name the function, file and existing test the
+	// check extends.
+	Pseudocode *string `json:"pseudocode,omitempty,omitzero" yaml:"pseudocode,omitempty" mapstructure:"pseudocode,omitempty"`
+
+	// The criterion whose own check verifies this one too, or the path whose smoke
+	// check does.
+	SameAs *string `json:"same_as,omitempty,omitzero" yaml:"same_as,omitempty" mapstructure:"same_as,omitempty"`
+
+	// The preconditions the criterion's condition does not state.
+	Setup []string `json:"setup,omitempty,omitzero" yaml:"setup,omitempty" mapstructure:"setup,omitempty"`
+}
+
+type CheckKind string
+
+const CheckKindIntegration CheckKind = "integration"
+const CheckKindProperty CheckKind = "property"
+const CheckKindUnit CheckKind = "unit"
+
+// One EARS statement with its check. The rendered sentence is derived from
+// pattern, condition, system and action.
 type Criterion struct {
 	// Action corresponds to the JSON schema field "action".
 	Action string `json:"action" yaml:"action" mapstructure:"action"`
 
-	// The WHEN / WHILE / IF / WHERE clause. Absent for ubiquitous.
+	// Check corresponds to the JSON schema field "check".
+	Check Check `json:"check" yaml:"check" mapstructure:"check"`
+
+	// The WHEN / WHILE / IF / WHERE clause. Absent for ubiquitous. A second condition
+	// is written into it, joined with and.
 	Condition *string `json:"condition,omitempty,omitzero" yaml:"condition,omitempty" mapstructure:"condition,omitempty"`
 
-	// What the caller observes. Required for unwanted.
+	// What the caller observes, and what the check asserts. Required for unwanted.
 	Contract *string `json:"contract,omitempty,omitzero" yaml:"contract,omitempty" mapstructure:"contract,omitempty"`
-
-	// The AND clause. complex_event only.
-	Guard *string `json:"guard,omitempty,omitzero" yaml:"guard,omitempty" mapstructure:"guard,omitempty"`
 
 	// Id corresponds to the JSON schema field "id".
 	Id string `json:"id" yaml:"id" mapstructure:"id"`
@@ -23,13 +49,13 @@ type Criterion struct {
 	// Pattern corresponds to the JSON schema field "pattern".
 	Pattern CriterionPattern `json:"pattern" yaml:"pattern" mapstructure:"pattern"`
 
-	// The acting component. Defaults to "system" when rendering.
+	// The acting component. Defaults to the requirement's system, then to "system",
+	// when rendering.
 	System *string `json:"system,omitempty,omitzero" yaml:"system,omitempty" mapstructure:"system,omitempty"`
 }
 
 type CriterionPattern string
 
-const CriterionPatternComplexEvent CriterionPattern = "complex_event"
 const CriterionPatternEventDriven CriterionPattern = "event_driven"
 const CriterionPatternOptional CriterionPattern = "optional"
 const CriterionPatternStateDriven CriterionPattern = "state_driven"
@@ -39,6 +65,9 @@ const CriterionPatternUnwanted CriterionPattern = "unwanted"
 type ExecutionPath struct {
 	// Id corresponds to the JSON schema field "id".
 	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// Smoke corresponds to the JSON schema field "smoke".
+	Smoke Smoke `json:"smoke" yaml:"smoke" mapstructure:"smoke"`
 
 	// Steps corresponds to the JSON schema field "steps".
 	Steps []PathStep `json:"steps" yaml:"steps" mapstructure:"steps"`
@@ -93,26 +122,23 @@ type Requirement struct {
 	// Rationale corresponds to the JSON schema field "rationale".
 	Rationale *string `json:"rationale,omitempty,omitzero" yaml:"rationale,omitempty" mapstructure:"rationale,omitempty"`
 
+	// The acting component of every criterion that names none.
+	System *string `json:"system,omitempty,omitzero" yaml:"system,omitempty" mapstructure:"system,omitempty"`
+
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
 }
 
-// Schema for requirements.json spec artifact (format version 2)
-type RequirementsV2Json struct {
+// Schema for requirements.json spec artifact (format version 3)
+type RequirementsV3Json struct {
 	// Schema corresponds to the JSON schema field "$schema".
 	Schema string `json:"$schema" yaml:"$schema" mapstructure:"$schema"`
 
-	// ExecutionPaths corresponds to the JSON schema field "execution_paths".
-	ExecutionPaths []ExecutionPath `json:"execution_paths" yaml:"execution_paths" mapstructure:"execution_paths"`
+	// The end-to-end paths. A full package has at least one; a lite package has none.
+	ExecutionPaths []ExecutionPath `json:"execution_paths,omitempty,omitzero" yaml:"execution_paths,omitempty" mapstructure:"execution_paths,omitempty"`
 
 	// ExternalApis corresponds to the JSON schema field "external_apis".
 	ExternalApis []ExternalApi `json:"external_apis,omitempty,omitzero" yaml:"external_apis,omitempty" mapstructure:"external_apis,omitempty"`
-
-	// Glossary corresponds to the JSON schema field "glossary".
-	Glossary RequirementsV2JsonGlossary `json:"glossary,omitempty,omitzero" yaml:"glossary,omitempty" mapstructure:"glossary,omitempty"`
-
-	// Introduction corresponds to the JSON schema field "introduction".
-	Introduction string `json:"introduction" yaml:"introduction" mapstructure:"introduction"`
 
 	// Requirements corresponds to the JSON schema field "requirements".
 	Requirements []Requirement `json:"requirements" yaml:"requirements" mapstructure:"requirements"`
@@ -127,4 +153,19 @@ type RequirementsV2Json struct {
 	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
 }
 
-type RequirementsV2JsonGlossary map[string]string
+// The smoke check of a path: it runs the path once with its real components and
+// asserts the end state.
+type Smoke struct {
+	// The side effects at the end of the path.
+	EndState []string `json:"end_state" yaml:"end_state" mapstructure:"end_state"`
+
+	// Language-agnostic assertions. May name the existing end-to-end test the check
+	// extends.
+	Pseudocode *string `json:"pseudocode,omitempty,omitzero" yaml:"pseudocode,omitempty" mapstructure:"pseudocode,omitempty"`
+
+	// The components that must not be mocked.
+	RealComponents []string `json:"real_components" yaml:"real_components" mapstructure:"real_components"`
+
+	// The preconditions.
+	Setup []string `json:"setup,omitempty,omitzero" yaml:"setup,omitempty" mapstructure:"setup,omitempty"`
+}

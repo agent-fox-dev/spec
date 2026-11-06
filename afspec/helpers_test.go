@@ -11,11 +11,16 @@ import (
 	"time"
 )
 
-// fixtureValidSpec is the canonical positive fixture: spec 01, a complete v2
+// fixtureValidSpec is the canonical positive fixture: spec 01, a complete v3
 // package that satisfies every rule of §10.2.
 const fixtureValidSpec = "testdata/valid_spec"
 
-// fixtureV2Example is the worked example from the format specification.
+// fixtureV3Example is the worked example of the format specification, as the
+// migration of fixtureV2Example writes it.
+const fixtureV3Example = "testdata/v3_example"
+
+// fixtureV2Example is the worked example of format version 2: the input of
+// the migration tests.
 const fixtureV2Example = "testdata/v2_example"
 
 // fixtureWithArch is the canonical fixture with an architecture.md beside it.
@@ -27,11 +32,15 @@ const fixtureDraft = "testdata/draft_spec"
 // validFixtures are the checked-in packages that satisfy every rule.
 var validFixtures = []string{
 	fixtureValidSpec,
-	fixtureV2Example,
+	fixtureV3Example,
 	fixtureDraft,
 	"testdata/alpha_prefix_spec",
 	fixtureWithArch,
 }
+
+// contractFiles are the files of a v3 package a save writes beside the
+// progress and the render.
+var contractFiles = []string{"prd.md", RequirementsFileName, TasksFileName}
 
 // loadFixture loads a spec fixture or fails the test.
 func loadFixture(t *testing.T, dir string) *Spec {
@@ -89,18 +98,38 @@ func specRoot(t *testing.T, fixtures map[string]string) string {
 }
 
 // editTasks rewrites the tasks.json at path through edit.
-func editTasks(t *testing.T, path string, edit func(*TasksV2Json)) {
+func editTasks(t *testing.T, path string, edit func(*TasksV3Json)) {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tasks TasksV2Json
+	var tasks TasksV3Json
 	if err := json.Unmarshal(data, &tasks); err != nil {
 		t.Fatal(err)
 	}
 	edit(&tasks)
 	out, err := MarshalJSON(&tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// editProgress rewrites the progress.json at path through edit, from an empty
+// progress when there is none.
+func editProgress(t *testing.T, path string, edit func(*ProgressV3Json)) {
+	t.Helper()
+	var p ProgressV3Json
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit(&p)
+	out, err := MarshalJSON(&p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +163,6 @@ func bootstrapFrom(t *testing.T, specID, specName string) *BootstrapSpec {
 	source := loadFixture(t, fixtureValidSpec)
 	b := NewBootstrapSpec(specID, specName)
 	b.Requirements = source.Requirements
-	b.TestSpec = source.TestSpec
 	b.Tasks = source.Tasks
 	b.PRDBody = source.PRDBody
 	return b
@@ -371,14 +399,30 @@ func readOnly(t *testing.T, dir string) {
 // Task plans
 // ---------------------------------------------------------------------------
 
-// plan builds a task plan in the order given.
-func plan(tasks ...Task) *TasksV2Json { return &TasksV2Json{Tasks: tasks} }
+// plannedState pairs a task with the state its progress entry records.
+type plannedState struct {
+	task  Task
+	state TaskState
+}
 
 // planTask is a task with the given state. A nil deps leaves depends_on
-// absent, which format v2 §8.3 reads as "the previous task"; a non-nil empty
+// absent, which format v3 §8.2 reads as "the previous task"; a non-nil empty
 // slice is an explicit "none".
-func planTask(id int, state TaskState, deps []int) Task {
-	return Task{Id: id, Title: "task", Kind: TaskKindImplement, State: state, DependsOn: deps}
+func planTask(id int, state TaskState, deps []int) plannedState {
+	return plannedState{Task{Id: id, Title: "task", Criteria: []string{"REQ-1"}, Steps: []string{"s"}, DependsOn: deps}, state}
+}
+
+// plan builds a lite package (so that it has no integration task) whose plan
+// is the given tasks, in order, with their states in the progress.
+func plan(tasks ...plannedState) *Spec {
+	s := CreateSpec("05", "plan")
+	s.Profile = ProfileLite
+	s.Progress = &ProgressV3Json{}
+	for _, pt := range tasks {
+		s.Tasks.Tasks = append(s.Tasks.Tasks, pt.task)
+		s.Progress.Tasks = append(s.Progress.Tasks, TaskProgress{Id: pt.task.Id, State: pt.state})
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
@@ -410,8 +454,6 @@ func partialFrom(t *testing.T, steps ...GenerationStep) PartialSpec {
 		switch step {
 		case StepRequirements:
 			partial.Requirements = source.Requirements
-		case StepTestSpec:
-			partial.TestSpec = source.TestSpec
 		case StepTasks:
 			partial.Tasks = source.Tasks
 		}
@@ -441,20 +483,20 @@ func fullySetSpec(t *testing.T) *Spec {
 	t.Helper()
 	s := loadFixture(t, fixtureValidSpec)
 	str := func(v string) *string { return &v }
-	s.Owner, s.Source = "team-widgets", "https://example.com/issues/7"
+	s.Source = "https://example.com/issues/7"
 	s.SteeringVersion = "3.1.4"
-	s.Supersedes, s.Tags = []string{"00_old_loader"}, []string{"core", "io"}
+	s.Supersedes = []string{"00_old_loader"}
 	s.IntentHash = str("sha256:abc123")
-	s.Requirements.Glossary = RequirementsV2JsonGlossary{"pipe | term": "a definition\nover two lines"}
 	s.Requirements.ExternalApis = []ExternalApi{{
 		Package: "example.com/lib", Version: "v1.2.3", Verified: true,
 		Symbols: []ExternalApiSymbol{{Name: "Union", ImportPath: "example.com/lib/u",
 			Signature: "func Union(a, b T) T", Notes: str("returns a | b")}},
 	}}
+	s.Requirements.ExecutionPaths[0].Smoke.Pseudocode = str("run the path; assert the end state")
+	s.Requirements.Requirements[1].Criteria[0].Check = SameAs("REQ-1.1")
 	s.Tasks.Dependencies = []Dependency{{Spec: "00_bootstrap", Reason: "uses its loader"}}
 	s.Tasks.TestCommands.SpecTests = str("go test ./afspec/... -run TestSpec01")
-	opt := true
-	s.Tasks.Tasks[0].Optional = &opt
+	s.Tasks.Tasks[0].DoneWhen = []string{"the loader is documented"}
 	return s
 }
 
@@ -517,4 +559,10 @@ func withRender(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// scopedRender joins the parts of a scoped render in the order of a whole
+// render.
+func scopedRender(parts map[string]string) string {
+	return parts["prd"] + parts["architecture"] + parts["requirements"] + parts["tasks"]
 }

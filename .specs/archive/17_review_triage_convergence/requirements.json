@@ -1,316 +1,478 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
   "spec_id": "17",
   "spec_name": "review_triage_convergence",
-  "schema_version": 2,
-  "introduction": "The adversarial PRD review gains the triage and convergence rules of EGM. Every finding is answered one of four ways instead of two: fixed, contested, escalated or declined. A contest must show counter-evidence the run can find; an escalation takes a provisional decision, writes it into the PRD and hands the question to the caller; a decline gives a reason and is refused for the findings that must not be deferred. The rounds stop once two consecutive rounds raise nothing serious. The reviewer also checks the PRD against the project's steering directives, and a contradiction is a finding that cannot be declined. The record in the envelope changes with the vocabulary.",
-  "glossary": {
-    "clean round": "A round whose review raised no critical and no major finding. A round whose review raised only minor findings is clean, and so is one whose review raised none at all.",
-    "counter-evidence": "What a contested answer must carry so that the run can check it rather than take the reviser's word: either a quote that appears in the PRD or the input verbatim, whitespace aside, or a repository path that exists, with what it shows.",
-    "escalation": "A finding the reviser answers escalated: it holds, and remedying it takes a decision the input, the steering and the code do not make — a trade-off a person should own.",
-    "provisional decision": "The option an escalation takes so that the package stays complete rather than carrying an open choice: written into the PRD under its Design Decisions section opening with the word Provisional, and handed to the caller as an open question.",
-    "rubric": "The written standard a finding applies, named in a field of the finding. For the PRD review it is prd, the PRD's own flaws, or steering, a contradiction of a project directive. The reviewer sets it and the reviser cannot change it."
-  },
+  "schema_version": 3,
   "requirements": [
     {
-      "id": "17-REQ-1",
+      "id": "REQ-1",
       "title": "The four dispositions",
       "rationale": "One word for refuting a reviewer, for deferring work and for a decision a person should own tells a reader of the record none of the three apart.",
       "criteria": [
         {
-          "id": "17-REQ-1.1",
+          "id": "REQ-1.1",
           "pattern": "ubiquitous",
           "system": "revision phase",
           "action": "for any round, answer every finding of that round with exactly one of the four dispositions fixed, contested, escalated and declined",
-          "contract": "a submission that uses a disposition outside those four, or that answers a finding twice, not at all, or by an id that is not of this round, is turned back with one error naming every offending id and the four values, and nothing is recorded"
+          "contract": "a submission that uses a disposition outside those four, or that answers a finding twice, not at all, or by an id that is not of this round, is turned back with one error naming every offending id and the four values, and nothing is recorded",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round with three findings and a reviser submission that varies only in its answers"
+            ],
+            "pseudocode": "table in specgen/revision_tool_test.go, extending the checkDispositions cases: tool = newRevisionTool(sink, current, findings, ws); res = tool.Execute(ctx, case.args); assert res.IsError == case.refused; assert res.Content names each id in case.names; assert sink.get() reports nothing done for a refused case"
+          }
         },
         {
-          "id": "17-REQ-1.2",
+          "id": "REQ-1.2",
           "pattern": "event_driven",
           "condition": "a revision answers at least one finding fixed and leaves the PRD as it was",
           "system": "revision phase",
           "action": "turn the revision back, saying that answering a finding fixed means changing the PRD to remedy it",
-          "contract": "the submission is refused when the body, the open questions, the relevant files and the codebase notes are all the PRD's as it was; nothing is recorded; a revision that answers no finding fixed may leave the PRD as it was"
+          "contract": "the submission is refused when the body, the open questions, the relevant files and the codebase notes are all the PRD's as it was; nothing is recorded; a revision that answers no finding fixed may leave the PRD as it was",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round with two findings and the PRD as the review saw it"
+            ],
+            "pseudocode": "in specgen/revision_tool_test.go, beside the unchanged_prd case: submit with the body of current and one fixed answer; assert the error mentions remedying; submit again with every answer contested and valid counter-evidence; assert accepted"
+          }
         },
         {
-          "id": "17-REQ-1.3",
+          "id": "REQ-1.3",
           "pattern": "unwanted",
           "condition": "a contested answer carries no counter-evidence, or counter-evidence that is neither a quote appearing in the PRD or the input verbatim, whitespace aside, nor a repository path that exists",
           "system": "revision phase",
           "action": "turn the revision back, naming every such finding and which of the two it failed",
-          "contract": "one error naming each offending id and saying for each whether the quote was not found in the PRD or the input, or the path does not exist under the repository; nothing is recorded; a path that resolves outside the repository counts as not existing"
+          "contract": "one error naming each offending id and saying for each whether the quote was not found in the PRD or the input, or the path does not exist under the repository; nothing is recorded; a path that resolves outside the repository counts as not existing",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a PRD and an input with known sentences in them, and a repository with a known file and a known directory",
+              "a round with one finding"
+            ],
+            "pseudocode": "table in specgen/revision_tool_test.go: ws = workspace over a temp repository holding the known file and directory; for each case — submit one contested answer with case.evidence; assert res.IsError == case.refused and that the message names the id and case.says"
+          }
         },
         {
-          "id": "17-REQ-1.4",
+          "id": "REQ-1.4",
           "pattern": "unwanted",
           "condition": "a declined answer gives no reason",
           "system": "revision phase",
           "action": "turn the revision back, naming every such finding",
-          "contract": "one error naming each offending id and saying that a decline must say the finding is outside this package's scope or name the later package that carries it; nothing is recorded"
+          "contract": "one error naming each offending id and saying that a decline must say the finding is outside this package's scope or name the later package that carries it; nothing is recorded",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round holding one minor finding with the prd rubric, one critical finding, and one major finding with the steering rubric"
+            ],
+            "pseudocode": "table in specgen/revision_tool_test.go: for each case — submit the answers; assert res.IsError == case.refused; assert the message names case.id and case.says"
+          }
         },
         {
-          "id": "17-REQ-1.5",
+          "id": "REQ-1.5",
           "pattern": "unwanted",
           "condition": "a critical finding, or a finding whose rubric is steering, is answered declined",
           "system": "revision phase",
           "action": "turn the revision back, naming every such finding and why it cannot be declined",
-          "contract": "one error naming each offending id with its severity or its rubric, and saying that such a finding is fixed, contested or escalated; nothing is recorded"
+          "contract": "one error naming each offending id with its severity or its rubric, and saying that such a finding is fixed, contested or escalated; nothing is recorded",
+          "check": {
+            "same_as": "REQ-1.4"
+          }
         },
         {
-          "id": "17-REQ-1.6",
+          "id": "REQ-1.6",
           "pattern": "ubiquitous",
           "system": "revision phase",
           "action": "for any round, leave every finding's severity and rubric as the reviewer submitted them",
-          "contract": "the revision's contract has no field for either, so a reviser has nowhere to put them, and every finding of the record carries the severity and the rubric the review phase gave it"
+          "contract": "the revision's contract has no field for either, so a reviser has nowhere to put them, and every finding of the record carries the severity and the rubric the review phase gave it",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round with one major finding whose rubric is steering"
+            ],
+            "pseudocode": "in specgen/revision_tool_test.go: submit raw JSON with severity and rubric inside the disposition object; assert accepted; after answer() runs, assert findings[0].Severity == \"major\" and findings[0].Rubric == \"steering\""
+          }
         },
         {
-          "id": "17-REQ-1.7",
+          "id": "REQ-1.7",
           "pattern": "event_driven",
           "condition": "a round's revision does not finish, through a budget, a turn limit, a timeout, or a model or API error",
           "system": "round loop",
           "action": "mark every finding of that round unanswered",
-          "contract": "each finding of that round carries the disposition unanswered and none of the answer fields; the findings of the rounds before it keep the answers they had"
+          "contract": "each finding of that round carries the disposition unanswered and none of the answer fields; the findings of the rounds before it keep the answers they had",
+          "check": {
+            "same_as": "REQ-4.4"
+          }
         }
       ]
     },
     {
-      "id": "17-REQ-2",
+      "id": "REQ-2",
       "title": "An escalation takes a provisional decision and hands the question on",
       "rationale": "A run nobody is watching cannot ask, and a question it neither answers nor passes on is a hole in the package.",
       "criteria": [
         {
-          "id": "17-REQ-2.1",
+          "id": "REQ-2.1",
           "pattern": "unwanted",
           "condition": "an escalated answer has no question, has fewer than two or more than three options, has no decision, or has no reason the reviser is unsure of it",
           "system": "revision phase",
           "action": "turn the revision back, naming every such finding and the fields it is missing",
-          "contract": "one error naming each offending id with the fields missing, and saying an escalation carries a question, two or three options each in one sentence, the decision taken and the reason it is uncertain; nothing is recorded"
+          "contract": "one error naming each offending id with the fields missing, and saying an escalation carries a question, two or three options each in one sentence, the decision taken and the reason it is uncertain; nothing is recorded",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round with one major finding and a revised body that holds the decision text"
+            ],
+            "pseudocode": "table in specgen/revision_tool_test.go: for each case — submit one escalated answer built from case; assert res.IsError == case.refused; assert the message names the id and each missing field"
+          }
         },
         {
-          "id": "17-REQ-2.2",
+          "id": "REQ-2.2",
           "pattern": "unwanted",
           "condition": "an escalated answer's decision does not appear in the revised PRD body, whitespace aside",
           "system": "revision phase",
           "action": "turn the revision back, naming every such finding and saying the decision must be written into the PRD",
-          "contract": "one error naming each offending id and saying the decision belongs under the PRD's Design Decisions section, opening with the word Provisional; nothing is recorded"
+          "contract": "one error naming each offending id and saying the decision belongs under the PRD's Design Decisions section, opening with the word Provisional; nothing is recorded",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round with one major finding and an escalation whose decision is a known sentence"
+            ],
+            "pseudocode": "in specgen/revision_tool_test.go, beside the counter-evidence cases, using the same whitespace normalisation sameEvidence applies: submit each body; assert res.IsError == case.refused and the message for the refusal"
+          }
         },
         {
-          "id": "17-REQ-2.3",
+          "id": "REQ-2.3",
           "pattern": "event_driven",
           "condition": "the rounds of a PRD stop and at least one finding of any round was escalated",
           "system": "specgen pipeline",
           "action": "add every escalation to the open questions of the package generated from that PRD, as the question, the decision taken and the reason the reviser was unsure",
-          "contract": "one open question per escalation, in round order and then in the order the reviser answered them, skipping one whose question already appears among the open questions whitespace aside; they are added after the rounds have stopped, so a later round's revision replacing the open questions cannot drop an earlier round's escalation; the result's open questions hold them and the run's summary counts them"
+          "contract": "one open question per escalation, in round order and then in the order the reviser answered them, skipping one whose question already appears among the open questions whitespace aside; they are added after the rounds have stopped, so a later round's revision replacing the open questions cannot drop an earlier round's escalation; the result's open questions hold them and the run's summary counts them",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a pipeline run over a scripted model whose rounds escalate two findings in round 1 and one in round 2, one of them repeating a question the PRD phase already recorded"
+            ],
+            "pseudocode": "in specgen/pipeline_test.go, beside the open-questions cases: run the pipeline with the scripted reviewer and reviser; assert got.OpenQuestions equals the expected list in order; assert the count in the summary"
+          }
         }
       ]
     },
     {
-      "id": "17-REQ-3",
+      "id": "REQ-3",
       "title": "Repeats across rounds",
       "rationale": "A reviewer that may raise the same finding every round turns the round limit into the only thing that stops it.",
       "criteria": [
         {
-          "id": "17-REQ-3.1",
+          "id": "REQ-3.1",
           "pattern": "event_driven",
           "condition": "a round after the first is reviewed",
           "system": "round loop",
           "action": "hand the review phase every finding of the earlier rounds with its disposition and the answer that disposition carries",
-          "contract": "the prompt holds, for each earlier finding, its id, severity, rubric, section, flaw, evidence, remedy, any reopens id, its disposition, and the fields that disposition has: the reason and the counter-evidence of a contest, the question, options, decision and reason of an escalation, and the reason of a decline"
+          "contract": "the prompt holds, for each earlier finding, its id, severity, rubric, section, flaw, evidence, remedy, any reopens id, its disposition, and the fields that disposition has: the reason and the counter-evidence of a contest, the question, options, decision and reason of an escalation, and the reason of a decline",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "five earlier findings, one answered fixed, one contested, one escalated, one declined and one unanswered, every field filled with a distinctive value"
+            ],
+            "pseudocode": "in specgen/prompts_test.go, beside the earlierRoundsBlock cases: got = earlierRoundsBlock(findings, forReviewer); assert every distinctive value of each finding is in got, and that the unanswered finding's block holds none of the answer labels"
+          }
         },
         {
-          "id": "17-REQ-3.2",
+          "id": "REQ-3.2",
           "pattern": "event_driven",
           "condition": "a review raises a finding whose section and flaw repeat those of a contested finding of an earlier round, whitespace aside",
           "system": "review phase",
           "action": "accept it only when it names that finding in its reopens field and its evidence is not the evidence the contest answered",
-          "contract": "a repeat without a reopens id, and a reopen whose evidence is the one the contest already answered whitespace aside, are turned back with one error naming the earlier finding's id; a reopen with evidence the contest did not answer is accepted and recorded with that reopens id"
+          "contract": "a repeat without a reopens id, and a reopen whose evidence is the one the contest already answered whitespace aside, are turned back with one error naming the earlier finding's id; a reopen with evidence the contest did not answer is accepted and recorded with that reopens id",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the findings of round 1, one answered fixed, one contested, one declined, one escalated and one unanswered, each with a known section, flaw and evidence"
+            ],
+            "pseudocode": "table in specgen/review_tool_test.go, extending the checkFinding reopen cases: tool = newReviewTool(sink, 2, earlier); res = tool.Execute(ctx, case.args); assert res.IsError == case.refused; assert the message names case.names; assert sink records nothing for a refusal"
+          }
         },
         {
-          "id": "17-REQ-3.3",
+          "id": "REQ-3.3",
           "pattern": "unwanted",
           "condition": "a review raises a finding whose section and flaw repeat those of a declined or an escalated finding of an earlier round, whitespace aside",
           "system": "review phase",
           "action": "turn the review back, naming the earlier finding and its disposition, whether or not the new finding names it in its reopens field",
-          "contract": "one error naming each offending position, the earlier id and its disposition, and saying such a finding cannot be raised again; nothing is recorded"
+          "contract": "one error naming each offending position, the earlier id and its disposition, and saying such a finding cannot be raised again; nothing is recorded",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
         },
         {
-          "id": "17-REQ-3.4",
+          "id": "REQ-3.4",
           "pattern": "ubiquitous",
           "system": "review phase",
           "action": "for any round, accept a reopens id only when it names a contested finding of an earlier round of this same review",
-          "contract": "a reopens id in round 1, one that names no earlier finding of this PRD, and one that names a finding that was fixed, declined, escalated or unanswered are each turned back with one error naming the id and what is wrong; a PRD whose flaw an earlier round fixed and which still has it is raised as a new finding with no reopens id"
+          "contract": "a reopens id in round 1, one that names no earlier finding of this PRD, and one that names a finding that was fixed, declined, escalated or unanswered are each turned back with one error naming the id and what is wrong; a PRD whose flaw an earlier round fixed and which still has it is raised as a new finding with no reopens id",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
         }
       ]
     },
     {
-      "id": "17-REQ-4",
+      "id": "REQ-4",
       "title": "When the rounds stop",
       "rationale": "One clean review is a single sample, and the cost of a second is the price of believing the first.",
+      "system": "round loop",
       "criteria": [
         {
-          "id": "17-REQ-4.1",
+          "id": "REQ-4.1",
           "pattern": "ubiquitous",
-          "system": "round loop",
           "action": "for any round, treat it as clean exactly when its review raised no critical and no major finding",
-          "contract": "a round whose review raised only minor findings is clean; a round whose review raised none is clean; a round whose review raised one or more critical or major findings is not"
+          "contract": "a round whose review raised only minor findings is clean; a round whose review raised none is clean; a round whose review raised one or more critical or major findings is not",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round limit of 3 and a scripted reviewer and reviser"
+            ],
+            "pseudocode": "table in specgen/rounds_test.go, beside TestRunRounds_StopForTheRightReason: script the reviewer per round; _, rev, err = e.runRounds(ctx, prd, \"\", nil); assert rev.Rounds[i].Clean == case.clean; assert the count of revision calls the script saw"
+          }
         },
         {
-          "id": "17-REQ-4.2",
+          "id": "REQ-4.2",
           "pattern": "event_driven",
           "condition": "two consecutive rounds of a PRD were clean",
-          "system": "round loop",
           "action": "stop the rounds and record that they converged",
-          "contract": "the stop reason is converged; no further round is started even when the round limit allows one; the rounds run count is the number of rounds started"
+          "contract": "the stop reason is converged; no further round is started even when the round limit allows one; the rounds run count is the number of rounds started",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a scripted reviewer whose findings per round the test chooses, and round limits of 1, 2, 3 and 5"
+            ],
+            "pseudocode": "table in specgen/rounds_test.go: for each case — script the reviewer's findings per round; _, rev, _ = e.runRounds(...); assert rev.StopReason == case.want and rev.RoundsRun == case.rounds"
+          }
         },
         {
-          "id": "17-REQ-4.3",
+          "id": "REQ-4.3",
           "pattern": "event_driven",
           "condition": "the allowed rounds have all run and no two consecutive rounds were clean",
-          "system": "round loop",
           "action": "stop the rounds and record that they were exhausted",
-          "contract": "the stop reason is rounds_exhausted; the rounds run count equals the round limit"
+          "contract": "the stop reason is rounds_exhausted; the rounds run count equals the round limit",
+          "check": {
+            "same_as": "REQ-4.2"
+          }
         },
         {
-          "id": "17-REQ-4.4",
+          "id": "REQ-4.4",
           "pattern": "event_driven",
           "condition": "a review or a revision does not finish, or the total budget is spent before one is started",
-          "system": "round loop",
           "action": "stop the rounds and record that they are incomplete, whatever else held",
-          "contract": "the stop reason is incomplete even where the rounds would otherwise have converged — a round whose review was clean after a clean round, whose revision then failed — and even where the limit had been reached; the package is generated from the last complete PRD; a high warning names the scope, the round, the phase that failed and why; the run's exit code is unchanged by it"
+          "contract": "the stop reason is incomplete even where the rounds would otherwise have converged — a round whose review was clean after a clean round, whose revision then failed — and even where the limit had been reached; the package is generated from the last complete PRD; a high warning names the scope, the round, the phase that failed and why; the run's exit code is unchanged by it",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round limit of 3 and a scripted reviewer and reviser that can be made to fail"
+            ],
+            "pseudocode": "table in specgen/rounds_test.go, extending TestRunRounds_AFailedPhaseStopsTheRoundsWithAWarning and TestRunRounds_AFailedRevisionLeavesItsFindingsUnanswered: for each case — make the scripted phase fail; assert rev.StopReason == \"incomplete\"; assert the dispositions; assert the warning's severity and text"
+          }
         },
         {
-          "id": "17-REQ-4.5",
+          "id": "REQ-4.5",
           "pattern": "event_driven",
           "condition": "a review raises at least one finding and none of them is critical or major",
-          "system": "round loop",
           "action": "run the revision of that round all the same, and go on to the next round unless the stopping rule says otherwise",
-          "contract": "the round has a revision, each of its minor findings carries an answer, and the round is recorded clean; the rounds stop at it only when the round before it was also clean or the limit is reached"
+          "contract": "the round has a revision, each of its minor findings carries an answer, and the round is recorded clean; the rounds stop at it only when the round before it was also clean or the limit is reached",
+          "check": {
+            "same_as": "REQ-4.1"
+          }
         },
         {
-          "id": "17-REQ-4.6",
+          "id": "REQ-4.6",
           "pattern": "event_driven",
           "condition": "a review raises no finding at all",
-          "system": "round loop",
           "action": "record the round clean, run no revision for it, and apply the stopping rule",
-          "contract": "the round carries an empty finding list and is clean; no revision phase is started for it, so none is billed; two such rounds in a row stop the rounds as converged"
+          "contract": "the round carries an empty finding list and is clean; no revision phase is started for it, so none is billed; two such rounds in a row stop the rounds as converged",
+          "check": {
+            "same_as": "REQ-4.1"
+          }
         },
         {
-          "id": "17-REQ-4.7",
+          "id": "REQ-4.7",
           "pattern": "event_driven",
           "condition": "the round limit is 1, the default when the rounds flag is not given",
-          "system": "round loop",
           "action": "run one review and at most one revision, and never record that the rounds converged",
-          "contract": "the stop reason is rounds_exhausted or incomplete and never converged; the phases run and the cost are the ones a single round costs today"
+          "contract": "the stop reason is rounds_exhausted or incomplete and never converged; the phases run and the cost are the ones a single round costs today",
+          "check": {
+            "same_as": "REQ-4.2"
+          }
         }
       ]
     },
     {
-      "id": "17-REQ-5",
+      "id": "REQ-5",
       "title": "The record of the review",
       "rationale": "A caller reads the record to learn what was found and what became of it, and a total that disagrees with the rounds makes it useless.",
       "criteria": [
         {
-          "id": "17-REQ-5.1",
+          "id": "REQ-5.1",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "for any review, record on each round whether it was clean",
-          "contract": "each round of the record carries a boolean saying so, true exactly when 17-REQ-4.1 holds for it"
+          "contract": "each round of the record carries a boolean saying so, true exactly when 17-REQ-4.1 holds for it",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "three rounds whose findings between them use all five dispositions, both rubrics and all three severities"
+            ],
+            "pseudocode": "in specgen/rounds_test.go, replacing TestBuildReview_TotalsAgreeWithTheRounds: rev = buildReview(rounds, limit, stop); assert rev.Rounds[i].Clean; assert each finding's fields by its disposition; assert rev.FindingsCount == sum of the five counts and == total findings"
+          }
         },
         {
-          "id": "17-REQ-5.2",
+          "id": "REQ-5.2",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "for any review, record each finding's rubric",
-          "contract": "every finding of a PRD review carries a rubric of prd or steering, and no other value is recorded"
+          "contract": "every finding of a PRD review carries a rubric of prd or steering, and no other value is recorded",
+          "check": {
+            "same_as": "REQ-5.1"
+          }
         },
         {
-          "id": "17-REQ-5.3",
+          "id": "REQ-5.3",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "for any finding, record the reviser's answer and only the fields that answer has",
-          "contract": "a fixed finding carries its disposition and none of the answer fields; a contested one carries a reason and counter-evidence; an escalated one carries a question, two or three options, a decision and a reason; a declined one carries a reason; an unanswered one carries none of them"
+          "contract": "a fixed finding carries its disposition and none of the answer fields; a contested one carries a reason and counter-evidence; an escalated one carries a question, two or three options, a decision and a reason; a declined one carries a reason; an unanswered one carries none of them",
+          "check": {
+            "same_as": "REQ-5.1"
+          }
         },
         {
-          "id": "17-REQ-5.4",
+          "id": "REQ-5.4",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "for any review, derive the six totals from the rounds rather than counting them as the rounds run",
-          "contract": "the record carries a findings count and one count each for fixed, contested, escalated, declined and unanswered; the findings count equals the number of findings over every round and equals the sum of the other five"
+          "contract": "the record carries a findings count and one count each for fixed, contested, escalated, declined and unanswered; the findings count equals the number of findings over every round and equals the sum of the other five",
+          "check": {
+            "same_as": "REQ-5.1"
+          }
         },
         {
-          "id": "17-REQ-5.5",
+          "id": "REQ-5.5",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "for any review, record exactly one of the three stop reasons converged, rounds_exhausted and incomplete",
-          "contract": "the stop reason is one of those three and never another value, for every path through the rounds, a run with no round started included"
+          "contract": "the stop reason is one of those three and never another value, for every path through the rounds, a run with no round started included",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a result carrying a review of two rounds with every disposition and every stop reason in turn"
+            ],
+            "pseudocode": "table in envelope/spec_result_test.go: b = json.Marshal(result); for each replaced token assert !bytes.Contains(b, token); assert the stop reason is in the set of three; then marshal the summary view and assert the counts survive and rounds is absent"
+          }
         },
         {
-          "id": "17-REQ-5.6",
+          "id": "REQ-5.6",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "for any result, carry none of the vocabulary this change replaces",
-          "contract": "no result of any run carries a disposition of accepted or rejected, an accepted or rejected count, or a stop reason of no_findings or no_serious_findings, and the JSON of a reviewed package holds none of those keys or values"
+          "contract": "no result of any run carries a disposition of accepted or rejected, an accepted or rejected count, or a stop reason of no_findings or no_serious_findings, and the JSON of a reviewed package holds none of those keys or values",
+          "check": {
+            "same_as": "REQ-5.5"
+          }
         },
         {
-          "id": "17-REQ-5.7",
+          "id": "REQ-5.7",
           "pattern": "event_driven",
           "condition": "a run reviewed at least one PRD",
           "system": "spec command",
           "action": "name in the summary sentence the rounds run, the findings raised with the steering ones counted apart, and the number fixed",
-          "contract": "the clause reads for example review: 2 rounds, 9 findings (1 steering), 7 fixed, counted over every package of a split; the parenthesis is left out when no finding carried the steering rubric, and the clause is absent when no PRD was reviewed"
+          "contract": "the clause reads for example review: 2 rounds, 9 findings (1 steering), 7 fixed, counted over every package of a split; the parenthesis is left out when no finding carried the steering rubric, and the clause is absent when no PRD was reviewed",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "results carrying a review of a single package and of a split, with and without a steering finding"
+            ],
+            "pseudocode": "table in specgen/pipeline_test.go, replacing the reviewClause cases around the existing summary table: assert tc.r.Summary() == tc.want for each case"
+          }
         }
       ]
     },
     {
-      "id": "17-REQ-6",
+      "id": "REQ-6",
       "title": "Steering alignment in the PRD review",
       "rationale": "The steering holds what the project has decided for every package, and a PRD that contradicts a directive is reported by nothing today.",
       "criteria": [
         {
-          "id": "17-REQ-6.1",
+          "id": "REQ-6.1",
           "pattern": "event_driven",
           "condition": "a PRD is reviewed and the spec root's steering body says something",
           "system": "review phase",
           "action": "check the PRD against every directive of it and raise a contradiction as a finding whose rubric is steering",
-          "contract": "the review's contract takes a rubric on every finding, the prompt carries the directives and the instruction to check against them, and such a finding is recorded with the rubric steering"
+          "contract": "the review's contract takes a rubric on every finding, the prompt carries the directives and the instruction to check against them, and such a finding is recorded with the rubric steering",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a steering body holding a known directive, and a review that raises three findings"
+            ],
+            "pseudocode": "in specgen/review_tool_test.go: tool = newReviewTool(sink, 1, nil, steeringBody); submit the three findings; assert the accepted ones' Rubric; submit the bad rubric and assert the error names \"prd\" and \"steering\""
+          }
         },
         {
-          "id": "17-REQ-6.2",
+          "id": "REQ-6.2",
           "pattern": "unwanted",
           "condition": "a finding whose rubric is steering has evidence that quotes no passage appearing in the steering body verbatim, whitespace aside",
           "system": "review phase",
           "action": "turn the review back, naming every such finding",
-          "contract": "one error naming each offending position and saying the evidence of a steering finding must quote the directive it contradicts; nothing is recorded"
+          "contract": "one error naming each offending position and saying the evidence of a steering finding must quote the directive it contradicts; nothing is recorded",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a steering body holding a known directive"
+            ],
+            "pseudocode": "table in specgen/review_tool_test.go: for each case — submit one steering finding built from case; assert res.IsError == case.refused and the message names case.says"
+          }
         },
         {
-          "id": "17-REQ-6.3",
+          "id": "REQ-6.3",
           "pattern": "unwanted",
           "condition": "a finding whose rubric is steering is submitted with the severity minor",
           "system": "review phase",
           "action": "turn the review back, naming every such finding",
-          "contract": "one error naming each offending position and saying a steering finding is critical or major; nothing is recorded"
+          "contract": "one error naming each offending position and saying a steering finding is critical or major; nothing is recorded",
+          "check": {
+            "same_as": "REQ-6.2"
+          }
         },
         {
-          "id": "17-REQ-6.4",
+          "id": "REQ-6.4",
           "pattern": "event_driven",
           "condition": "the spec root's steering body says nothing, or the run was not asked to review the PRD",
           "system": "specgen pipeline",
           "action": "check no alignment and raise no finding under that rubric",
-          "contract": "no finding of any round carries the rubric steering; without the review flag no round runs at all and the record is absent; the prompts are the ones built without a steering block"
+          "contract": "no finding of any round carries the rubric steering; without the review flag no round runs at all and the record is absent; the prompts are the ones built without a steering block",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a pipeline run over a scripted model, against a spec root whose steering in turn says something, is missing, and holds only the bare heading"
+            ],
+            "pseudocode": "table in specgen/pipeline_test.go: for each case — run the pipeline; assert got.Review == nil or that no finding has Rubric \"steering\"; assert the recorded prompts hold or do not hold the steering markers"
+          }
         },
         {
-          "id": "17-REQ-6.5",
+          "id": "REQ-6.5",
           "pattern": "ubiquitous",
           "system": "review phase",
           "action": "for any finding of a PRD review that is not a contradiction of a directive, set its rubric to prd",
-          "contract": "every finding carries a rubric of prd or steering, and a finding submitted with any other value turns the review back with one error naming the position and the two values"
+          "contract": "every finding carries a rubric of prd or steering, and a finding submitted with any other value turns the review back with one error naming the position and the two values",
+          "check": {
+            "same_as": "REQ-6.1"
+          }
         }
       ]
     }
   ],
   "execution_paths": [
     {
-      "id": "17-PATH-1",
+      "id": "PATH-1",
       "title": "Two consecutive clean rounds converge before the limit is reached",
       "steps": [
         {
@@ -353,10 +515,29 @@
           "actor": "spec command",
           "action": "reports the record with its six totals and the summary clause naming 3 rounds, 2 findings and 2 fixed"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "the spec command through Main",
+          "the specgen round loop with its review and revision phases",
+          "the scripted model provider",
+          "the afspec library's write and the verdict",
+          "a real repository and spec root on the file system"
+        ],
+        "setup": [
+          "a real repository and the scripted model, answering round 1 with one major finding, round 2 with one minor finding and round 3 with none"
+        ],
+        "end_state": [
+          "the run exits 0 and the written package validates",
+          "the record holds three rounds, the first not clean and the second and third clean, and the stop reason converged",
+          "no revision phase was billed for round 3",
+          "the summary sentence names 3 rounds, 2 findings and 2 fixed"
+        ],
+        "pseudocode": "end-to-end case in cmd/spec/main_test.go, beside TestAdversarial_GeneratesThePackageFromTheRevisedPRD: script the faux provider per round; code = Main(argv, &out, &err); env = decode(out); assert env.result.review.stop_reason == \"converged\" and the per-round clean flags; assert the usage holds no prd_revision phase for round 3"
+      }
     },
     {
-      "id": "17-PATH-2",
+      "id": "PATH-2",
       "title": "A finding is escalated, decided provisionally, and the question reaches the caller",
       "steps": [
         {
@@ -383,10 +564,29 @@
           "actor": "user",
           "action": "reads the question, the decision and the reason in the result's open questions, and the provisional entry in the written prd.md"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "the spec command through Main",
+          "the specgen round loop and the revision tool's checks",
+          "the scripted model provider",
+          "the afspec library's write",
+          "a real repository and spec root on the file system"
+        ],
+        "setup": [
+          "a real repository and the scripted model, whose review raises a major finding and whose revision escalates it with a question, three options, a decision and a reason, writing the decision into the body"
+        ],
+        "end_state": [
+          "the run exits 0 and the written package validates",
+          "the record holds the finding with the disposition escalated and its question, options, decision and reason",
+          "the result's open questions hold that question with its decision and reason",
+          "the written prd.md holds the decision under its Design Decisions section, opening with the word Provisional"
+        ],
+        "pseudocode": "end-to-end case in cmd/spec/main_test.go: script the provider; code = Main(argv, &out, &err); env = decode(out); assert the finding's disposition and fields; assert env.result.open_questions holds the question; read the written prd.md and assert the Provisional line"
+      }
     },
     {
-      "id": "17-PATH-3",
+      "id": "PATH-3",
       "title": "A steering contradiction is reported and cannot be declined",
       "steps": [
         {
@@ -413,7 +613,26 @@
           "actor": "spec command",
           "action": "reports the summary clause counting the steering finding apart, and the question in the result's open questions"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "the spec command through Main",
+          "the specgen round loop with its review and revision tools",
+          "the steering reader over a real steering.md",
+          "the scripted model provider",
+          "a real repository and spec root on the file system"
+        ],
+        "setup": [
+          "a real repository whose steering forbids what the input asks for, and a scripted model whose review raises a major steering finding quoting the directive and whose revision first declines it and then escalates it"
+        ],
+        "end_state": [
+          "the first revision submission is refused, the tool's error naming the finding and saying a steering finding cannot be declined",
+          "the second submission is accepted and the finding is recorded with the rubric steering and the disposition escalated",
+          "the run exits 0, the written package validates, and the summary sentence counts the steering finding apart",
+          "the result's open questions hold the escalated question"
+        ],
+        "pseudocode": "end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the temp spec root; script the provider to submit the decline first and the escalation second; assert the refusal reached the model as a tool error, then assert the recorded rubric, disposition and the summary clause"
+      }
     }
   ],
   "external_apis": [

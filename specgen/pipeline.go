@@ -304,7 +304,7 @@ func (r *Result) setSplit(report []ScopeReport) {
 			report[i].ErrorCount = p.Validation.ErrorCount
 			report[i].OpenQuestionsCount = len(p.OpenQuestions)
 			report[i].TraceGaps = len(p.Traceability.CriteriaUncovered) +
-				len(p.Traceability.PathsUncovered) + len(p.Traceability.TestsUnowned)
+				len(p.Traceability.PathsUncovered) + len(p.Traceability.CriteriaUnowned)
 			break
 		}
 	}
@@ -496,10 +496,11 @@ func GeneratePRD(ctx context.Context, o Options) (*Package, string, error) {
 // this one stops early.
 //
 // Within a package the order is the format's, not a preference:
-// requirements, then tests, then tasks, each phase seeing the complete
-// artifacts before it. A generator that cannot see a test id cannot own it,
-// which is how the previous format produced specs whose edge-case and
-// property tests belonged to no task.
+// requirements, with the check of every criterion and the smoke check of
+// every path, then tasks, the tasks phase seeing the complete requirements. A
+// generator that cannot see a criterion cannot own it, which is how an earlier
+// format produced specs whose edge-case and property tests belonged to no
+// task.
 func Run(ctx context.Context, o Options) (*Result, error) {
 	if _, f := Preflight(ctx, o); f != nil {
 		return nil, f
@@ -879,21 +880,24 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 
 	// ------------------------------------------------------- generation --
 	spec := afspec.CreateSpec(specID, prd.SpecName)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	spec.CreatedAt, spec.UpdatedAt = now, now
+	spec.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	spec.Title = prd.Title
 	spec.Source = pkg.Source
+	// The profile is the PRD phase's choice (format v3 §12.4); a full
+	// package names none.
+	spec.Profile = prd.Profile
 	// The version of the steering the package was written under; empty, and so
 	// left out, when the steering is unversioned, malformed or says nothing.
 	spec.SteeringVersion = e.steering.Version
 	spec.PRDBody = normalizeBody(prd.Body)
 
-	partial := afspec.PartialSpec{SpecID: specID, SpecName: prd.SpecName}
+	partial := afspec.PartialSpec{SpecID: specID, SpecName: prd.SpecName, Profile: prd.Profile}
 	for _, step := range afspec.GenerationSteps {
 		req := artifactRequest{
 			Step:            step,
 			SpecID:          specID,
 			SpecName:        prd.SpecName,
+			SpecProfile:     prd.Profile,
 			Root:            e.root,
 			PRD:             spec.PRDBody,
 			Profile:         e.profile,
@@ -933,7 +937,6 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		partial, pkg.PlanReview = reviewed, planReview
 	}
 	spec.Requirements = partial.Requirements
-	spec.TestSpec = partial.TestSpec
 	spec.Tasks = partial.Tasks
 
 	if o.Architecture {
@@ -948,7 +951,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		if err != nil {
 			// The architecture document is optional by the format's own
 			// definition, so failing to write it degrades the package rather
-			// than failing the run that produced the four required artifacts.
+			// than failing the run that produced the required artifacts.
 			o.Run.Warn(cli.WarnArchitectureNotWritten, "low", "architecture.md could not be written: %v", err)
 		} else {
 			spec.Architecture = doc
@@ -964,9 +967,10 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			return pkg, wrap(err)
 		}
 		written = true
-		// The save writes the render beside the artifacts, and a run lists
-		// the files it wrote; a dry run wrote none.
-		pkg.Artifacts = append(pkg.Artifacts, afspec.RenderedFileName)
+		// The save writes the progress and the render beside the
+		// artifacts, and a run lists the files it wrote; a dry run wrote
+		// none.
+		pkg.Artifacts = append(pkg.Artifacts, afspec.ProgressFileName, afspec.RenderedFileName)
 		o.Progress.Step("write", "%swrote %s", prefixed(label), specPath)
 		if onWritten != nil {
 			onWritten(specID, dirName)
@@ -1038,8 +1042,8 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			"the generated package has %d validation error(s); it is on disk at %s and each "+
 				"error names the rule it broke", report.ErrorCount, pkg.SpecDir))
 	}
-	o.Progress.Step("validate", "%svalid: %d requirements, %d tests, %d tasks", prefixed(label),
-		pkg.Requirements, pkg.Tests, pkg.Tasks)
+	o.Progress.Step("validate", "%svalid: %d requirements, %d criteria, %d tasks", prefixed(label),
+		pkg.Requirements, pkg.Criteria, pkg.Tasks)
 
 	// --------------------------------------------------------- activate --
 	if o.Activate && !o.DryRun {
@@ -1221,9 +1225,6 @@ func summarize(r *Package, s *afspec.Spec) {
 		}
 		r.ExecutionPaths = len(s.Requirements.ExecutionPaths)
 	}
-	if s.TestSpec != nil {
-		r.Tests = len(s.TestSpec.Tests)
-	}
 	if s.Tasks != nil {
 		r.Tasks = len(s.Tasks.Tasks)
 	}
@@ -1234,9 +1235,9 @@ func summarize(r *Package, s *afspec.Spec) {
 func prdComment(s *afspec.Spec, r *Package) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Specification: `%s`\n\n", filepath.Base(r.SpecDir))
-	fmt.Fprintf(&b, "Generated from this issue: %d requirements, %d criteria, %d tests, "+
+	fmt.Fprintf(&b, "Generated from this issue: %d requirements, %d criteria, "+
 		"%d tasks, %d execution paths. The package validates.\n\n",
-		r.Requirements, r.Criteria, r.Tests, r.Tasks, r.ExecutionPaths)
+		r.Requirements, r.Criteria, r.Tasks, r.ExecutionPaths)
 	if len(r.OpenQuestions) > 0 {
 		b.WriteString("### Decisions worth checking\n\n")
 		for _, q := range r.OpenQuestions {

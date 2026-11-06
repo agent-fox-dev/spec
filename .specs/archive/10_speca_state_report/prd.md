@@ -4,9 +4,8 @@ spec_name: "speca_state_report"
 title: "speca: report a spec package's state from the shell"
 status: "archived"
 created_at: "2026-10-22T07:23:01.807482Z"
-updated_at: "2026-11-06T15:39:56Z"
 intent_hash: "72a28f44629e25835193cef851f8a7f699d3f0bb567baa252077ecd8d1da5c51"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/02-change-the-state-of-a-package-with-its-own-command.md"
 ---
 ## Intent
@@ -212,3 +211,16 @@ Errors in this scope:
 18. **Archived packages are reached by path only.** This is the resolver's existing rule. It stops a name lookup from finding an archived package that shares its number with a live one.
 19. **The ADR is written in this scope and covers the whole command.** The decision to build `speca` belongs to the change that creates it. The later scopes add forms under that decision.
 20. **No smaller binary.** `speca` links `internal/cli` as `specr` does. ADR 05 left splitting the envelope out of the model stack for later, and nothing here needs it.
+
+## Glossary
+
+- **cross-spec rules**: The rules of afspec.ValidateCrossSpec (format v2 §10.4): unknown dependency, dependency cycle, actor, and glossary conflict.
+- **display rule**: A package path is shown relative to --dir when it lies inside it, and absolute otherwise.
+- **form**: One operation of speca: the report (speca <spec>), the verdict (--validate), or the list (--list).
+- **intent drift**: An active package with an intent_hash whose PRD body no longer hashes to that value, or no longer has a ## Intent section.
+- **next task**: The first in_progress task in plan order, otherwise the first ready task, as returned by (*TasksV2Json).NextTask.
+- **package reference**: The single positional input of specr and speca: a path to a package directory or a file in it, or a directory name, number or name under the spec root.
+- **program-driven path**: Any invocation other than -h/--help, --version and a bare invocation on a terminal; each writes exactly one JSON envelope to stdout.
+- **ready task**: A pending task whose dependencies are all done; dependencies come from depends_on when present, otherwise the previous task in plan order (format v2 §8.3).
+- **rule name**: The Check of a validation entry, or its Category when Check is empty.
+- **spec root**: The directory holding the NN_name spec packages, resolved by afspec.ResolveSpecsDir from --specs-dir and --dir (default .specs).

@@ -1,7 +1,7 @@
 // Package afspec is the reference Go library for the agent-fox specification
-// format, version 2. It loads, validates, mutates, saves and renders spec
+// format, version 3. It loads, validates, mutates, saves and renders spec
 // packages with byte-for-byte round-trip fidelity. The format is specified in
-// specification/spec-format-v2.md in this module's repository.
+// specification/spec-format-v3.md in this module's repository.
 //
 // Spec structs are treated as value types — mutation methods such as Transition
 // and Supersede return new Spec copies rather than modifying the receiver in

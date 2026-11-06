@@ -4,9 +4,8 @@ spec_name: "state_command_cross_links"
 title: "Make spec, specr and speca point at one another"
 status: "archived"
 created_at: "2026-10-22T07:45:48.451036Z"
-updated_at: "2026-11-06T15:39:57Z"
 intent_hash: "a476ea09d5610fc30f80a29f167924f82c4dc496597eb74bb57fe470c261c3c7"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/02-change-the-state-of-a-package-with-its-own-command.md"
 ---
 ## Intent
@@ -173,3 +172,17 @@ No test checks the content of any doc.
 | `10_speca_state_report` | Provides `cmd/speca` with its help, `description`, `--schema` golden file and `docs/speca.md`; `internal/specpkg`, where `IntentDrift` and `Writable` go; and `TaskInfo.ready`, which `specr`'s `next` reads. |
 | `11_speca_task_states` | Provides `speca <spec> --task N --state S`, the claim and done calls that `specr` suggests and the `af-impl` block uses; defines the writable-package rule and the report's claim suggestion that this spec makes `specr` match; and holds the private drift check this spec moves into `internal/specpkg`. |
 | `12_speca_lifecycle` | Edits `speca`'s help, `--schema` golden file and `docs/speca.md` before this spec does. This spec's changes to them are applied on top, and the golden file is regenerated after them. |
+
+## Glossary
+
+- **claim**: The call `speca <spec_dir> --task N --state in_progress`, which moves a pending task to in_progress as a compare-and-set.
+- **done call**: The call `speca <spec_dir> --task N --state done`, which records an in-progress task as finished.
+- **intent drift**: An active package whose recorded IntentHash is set and whose PRD body's intent hash cannot be computed or differs from it.
+- **ready task**: A pending task whose dependencies are all done, reported as TaskInfo.ready.
+- **render suggestion**: specr's existing `next` element `{tool: specr, input: <spec_dir>, flags: [--task, M]}` naming the next unfinished task.
+- **sibling sentence**: The value of the constant cli.SiblingCommands: "spec writes a package from an idea, specr renders one, speca reports and changes its state."
+- **speca entry**: A `next` element whose tool is "speca": a claim or a done call.
+- **task render**: A specr call with --task N.
+- **unfinished task**: A task whose state is neither done nor dropped.
+- **whole render**: A specr call without --task, with or without --section or --max-tokens.
+- **writable package**: A package with status draft, or with status active and no intent drift; the only packages speca's task and status writes accept.

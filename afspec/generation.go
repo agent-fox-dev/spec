@@ -7,17 +7,16 @@ import (
 )
 
 // GenerationStep names the artifact a generation pipeline has just produced.
-// Format v2 §12.1 fixes the order: requirements, then tests, then tasks.
+// Format v3 §12.1 fixes the order: requirements, then tasks.
 type GenerationStep string
 
 const (
 	StepRequirements GenerationStep = "requirements"
-	StepTestSpec     GenerationStep = "test_spec"
 	StepTasks        GenerationStep = "tasks"
 )
 
 // GenerationSteps is the mandatory generation order.
-var GenerationSteps = []GenerationStep{StepRequirements, StepTestSpec, StepTasks}
+var GenerationSteps = []GenerationStep{StepRequirements, StepTasks}
 
 // SchemaNameForStep returns the bundled schema that validates the artifact a
 // step produces.
@@ -25,8 +24,6 @@ func SchemaNameForStep(step GenerationStep) (string, bool) {
 	switch step {
 	case StepRequirements:
 		return RequirementsSchemaName, true
-	case StepTestSpec:
-		return TestSpecSchemaName, true
 	case StepTasks:
 		return TasksSchemaName, true
 	default:
@@ -38,24 +35,24 @@ func SchemaNameForStep(step GenerationStep) (string, bool) {
 func ArtifactFileName(step GenerationStep) string {
 	switch step {
 	case StepRequirements:
-		return "requirements.json"
-	case StepTestSpec:
-		return "test_spec.json"
+		return RequirementsFileName
 	case StepTasks:
-		return "tasks.json"
+		return TasksFileName
 	default:
 		return string(step)
 	}
 }
 
 // PartialSpec holds the artifacts a generation run has produced so far. Any of
-// them may be nil while generation is still in progress.
+// them may be nil while generation is still in progress. Profile is the
+// package's profile, ProfileLite or ProfileFull (or "", which is full), which
+// rule C7 holds the requirements to.
 type PartialSpec struct {
 	SpecID       string
 	SpecName     string
-	Requirements *RequirementsV2Json
-	TestSpec     *TestSpecV2Json
-	Tasks        *TasksV2Json
+	Profile      string
+	Requirements *RequirementsV3Json
+	Tasks        *TasksV3Json
 }
 
 // DecodeArtifact turns the tool input a model returned — a decoded JSON object
@@ -84,19 +81,13 @@ func DecodeArtifact(step GenerationStep, content map[string]any) (any, error) {
 	}
 	switch step {
 	case StepRequirements:
-		var out RequirementsV2Json
+		var out RequirementsV3Json
 		if err := json.Unmarshal(data, &out); err != nil {
 			return nil, fmt.Errorf("cannot decode the requirements artifact: %w", err)
 		}
 		return &out, refuse(&out)
-	case StepTestSpec:
-		var out TestSpecV2Json
-		if err := json.Unmarshal(data, &out); err != nil {
-			return nil, fmt.Errorf("cannot decode the test_spec artifact: %w", err)
-		}
-		return &out, refuse(&out)
 	case StepTasks:
-		var out TasksV2Json
+		var out TasksV3Json
 		if err := json.Unmarshal(data, &out); err != nil {
 			return nil, fmt.Errorf("cannot decode the tasks artifact: %w", err)
 		}
@@ -110,14 +101,13 @@ func DecodeArtifact(step GenerationStep, content map[string]any) (any, error) {
 // the artifact just produced plus every cross-file rule of §10.2 that is
 // decidable at that point (§12.2):
 //
-//	after requirements  C1, C2 over requirements, C10
-//	after test_spec     the above plus C2 over tests, C3, C4, C5, C11
-//	after tasks         the above plus C6, C7, C8, C9
+//	after requirements  C1, C2 over requirements, C3, C6, C7
+//	after tasks         the above plus C2 over tasks, C4, C5
 //
 // A pipeline sends the returned errors back to the model for repair and does
 // not write an artifact that still fails. Warnings are advisory.
 //
-// When the schema fails, only C10 and C11 run beside it: the reference rules
+// When the schema fails, only C6 and C7 run beside it: the reference rules
 // would mostly report consequences of the same defect.
 func ValidateGenerationStep(step GenerationStep, partial PartialSpec) ValidationResult {
 	return validateGenerationStep(step, partial, false)
@@ -136,8 +126,8 @@ func validateGenerationStep(step GenerationStep, partial PartialSpec, complete b
 	spec := &Spec{
 		SpecID:       partial.SpecID,
 		SpecName:     partial.SpecName,
+		Profile:      partial.Profile,
 		Requirements: partial.Requirements,
-		TestSpec:     partial.TestSpec,
 		Tasks:        partial.Tasks,
 	}
 
@@ -147,47 +137,40 @@ func validateGenerationStep(step GenerationStep, partial PartialSpec, complete b
 	switch step {
 	case StepRequirements:
 		if partial.Requirements != nil {
-			errors = append(errors, ValidateArtifactSchema(partial.Requirements, RequirementsSchemaName, "requirements.json")...)
-		}
-	case StepTestSpec:
-		if partial.TestSpec != nil {
-			errors = append(errors, ValidateArtifactSchema(partial.TestSpec, TestSpecSchemaName, "test_spec.json")...)
+			errors = append(errors, ValidateArtifactSchema(partial.Requirements, RequirementsSchemaName, RequirementsFileName)...)
 		}
 	case StepTasks:
 		if partial.Tasks != nil {
-			errors = append(errors, ValidateArtifactSchema(partial.Tasks, TasksSchemaName, "tasks.json")...)
+			errors = append(errors, ValidateArtifactSchema(partial.Tasks, TasksSchemaName, TasksFileName)...)
 		}
 	}
 
 	// A schema-invalid artifact makes the reference rules meaningless: they
 	// would report consequences of the same defect. Two rules are worth
-	// running anyway, because the schema expresses them as conditionals whose
-	// failure message ("'not' failed", "missing property") does not say which
-	// rule was broken, and a repair loop needs to be told.
+	// running anyway, because the schema's message does not say which rule
+	// was broken, and a repair loop needs to be told.
 	if len(errors) > 0 && !complete {
-		errors = append(errors, spec.checkC10()...)
-		errors = append(errors, spec.checkC11()...)
+		errors = append(errors, spec.checkC6()...)
+		errors = append(errors, spec.checkC7()...)
 		return ValidationResult{Valid: false, Errors: errors}
 	}
 
 	idx := spec.buildIndex()
 
 	errors = append(errors, spec.checkC1()...)
-	errors = append(errors, spec.checkC2(idx)...)
-	errors = append(errors, spec.checkC10()...)
+	errors = append(errors, spec.checkC2()...)
+	errors = append(errors, spec.checkC3(idx)...)
+	errors = append(errors, spec.checkC6()...)
+	errors = append(errors, spec.checkC7()...)
 
-	if step == StepTestSpec || step == StepTasks {
-		errors = append(errors, spec.checkC3C5(idx)...)
-		errors = append(errors, spec.checkC11()...)
-	}
 	if step == StepTasks {
-		errors = append(errors, spec.checkC6C9(idx)...)
+		errors = append(errors, spec.checkC4C5(idx)...)
 	}
 
 	return ValidationResult{
 		Valid:    len(errors) == 0,
 		Errors:   errors,
-		Warnings: spec.crossFileWarnings(idx),
+		Warnings: spec.crossFileWarnings(),
 	}
 }
 

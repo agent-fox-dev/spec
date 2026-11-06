@@ -1,7 +1,7 @@
 // Command create shows how to build a spec package with the afspec library:
-// start from a scaffold, add requirements, an execution path, tests and
-// tasks with the builders and the Add… functions, validate the result, save
-// it and activate it.
+// start from a scaffold, add requirements with their checks, an execution
+// path with its smoke check and tasks with the builders and the Add…
+// functions, validate the result, save it and activate it.
 //
 //	go run ./examples/create [-root DIR]
 //
@@ -78,7 +78,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	spec.Dir = dir
 
 	// Validate before writing anything: schema validation first, then the
-	// cross-file rules C1 to C11. Warnings never make a spec invalid.
+	// cross-file rules C1 to C8. Warnings never make a spec invalid.
 	result := spec.Validate()
 	for _, w := range result.Warnings {
 		fmt.Fprintf(stderr, "warning [%s] %s: %s\n", w.Check, w.Artifact, w.Message)
@@ -105,21 +105,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	fmt.Fprintf(stdout, "%s\n", dir)
-	fmt.Fprintf(stderr, "wrote %s_%s (%s): %d requirements, %d tests, %d tasks\n",
+	// The plan is the stored tasks plus the integration task the package
+	// derives from its paths (format v3 §8.4); Plan lists them all.
+	fmt.Fprintf(stderr, "wrote %s_%s (%s): %d requirements, %d paths, %d tasks\n",
 		active.SpecID, active.SpecName, active.Status,
-		len(active.Requirements.Requirements), len(active.TestSpec.Tests), len(active.Tasks.Tasks))
+		len(active.Requirements.Requirements), len(active.Requirements.ExecutionPaths), len(active.Plan()))
 	return nil
 }
 
 // build assembles the spec in memory. CreateSpec gives a draft scaffold whose
-// three artifacts already carry their $schema, spec_id, spec_name and
+// two artifacts already carry their $schema, spec_id, spec_name and
 // schema_version; everything else is added here.
 func build() (*afspec.Spec, error) {
 	spec := afspec.CreateSpec(specID, specName)
-	now := time.Now().UTC().Format(time.RFC3339)
 	spec.Title = "Greet command"
-	spec.CreatedAt = now
-	spec.UpdatedAt = now
+	spec.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	spec.PRDBody = prdBody
 
 	req, err := buildRequirements(*spec.Requirements)
@@ -127,12 +127,6 @@ func build() (*afspec.Spec, error) {
 		return nil, err
 	}
 	spec.Requirements = &req
-
-	ts, err := buildTests(*spec.TestSpec)
-	if err != nil {
-		return nil, err
-	}
-	spec.TestSpec = &ts
 
 	tasks, err := buildTasks(*spec.Tasks)
 	if err != nil {
@@ -145,28 +139,32 @@ func build() (*afspec.Spec, error) {
 
 // buildRequirements fills requirements.json. Every Add… function returns an
 // updated copy and leaves its input alone, and the Next…ID functions hand
-// out the next free ID of each format.
-func buildRequirements(req afspec.RequirementsV2Json) (afspec.RequirementsV2Json, error) {
-	req.Introduction = "The greet command prints a greeting for a name given on the command line."
-	req = afspec.SetGlossaryEntry(req, "greeting", "The line `Hello, <name>!` followed by a newline.")
-
+// out the next free ID of each format. Every criterion carries its check
+// (rule C3): its own, or the same as another criterion's or a path's.
+func buildRequirements(req afspec.RequirementsV3Json) (afspec.RequirementsV3Json, error) {
 	r := afspec.Requirement{Id: afspec.NextRequirementID(req), Title: "Greet a name"}
 	criteria := []func(id string) afspec.Criterion{
 		func(id string) afspec.Criterion {
 			return afspec.EventDrivenCriterion(id,
 				"greet is run with one name argument", "greet command",
 				"write the greeting for that name to stdout and exit 0").
-				WithContract("stdout is exactly `Hello, <name>!\\n`; exit code 0")
+				WithContract("stdout is exactly `Hello, <name>!\\n`; exit code 0").
+				WithCheck(afspec.CheckKindUnit, []string{"the greet command"},
+					"in cmd/greet/main_test.go: out, code = run(\"Ada\"); assert out == \"Hello, Ada!\\n\"; assert code == 0")
 		},
 		func(id string) afspec.Criterion {
 			return afspec.UnwantedCriterion(id,
 				"greet is run without a name argument", "greet command",
 				"write a usage message to stderr and exit",
-				"exit code 2; stdout is empty")
+				"exit code 2; stdout is empty").
+				WithCheck(afspec.CheckKindUnit, nil,
+					"in cmd/greet/main_test.go: out, errOut, code = run(); assert code == 2; assert out == \"\"; assert errOut contains \"usage\"")
 		},
 		func(id string) afspec.Criterion {
 			return afspec.UbiquitousCriterion(id, "greet command",
-				"for any non-empty name, write a greeting that contains the name unchanged")
+				"for any non-empty name, write a greeting that contains the name unchanged").
+				WithCheck(afspec.CheckKindProperty, nil,
+					"in cmd/greet/main_test.go: for any non-empty name: out, _ = run(name); assert out contains name")
 		},
 	}
 	for _, criterion := range criteria {
@@ -181,6 +179,9 @@ func buildRequirements(req afspec.RequirementsV2Json) (afspec.RequirementsV2Json
 		return req, err
 	}
 
+	// The path carries its smoke check: the run of the path with real
+	// components and the end state it asserts. The package's integration
+	// task, which the library derives, runs it.
 	return afspec.AddExecutionPath(req, afspec.ExecutionPath{
 		Id:    afspec.NextExecutionPathID(req),
 		Title: "A user greets Ada",
@@ -189,61 +190,19 @@ func buildRequirements(req afspec.RequirementsV2Json) (afspec.RequirementsV2Json
 			{Actor: "greet command", Action: "reads the name from its arguments"},
 			{Actor: "greet command", Action: "writes `Hello, Ada!` to stdout and exits 0"},
 		},
+		Smoke: afspec.Smoke{
+			RealComponents: []string{"greet binary"},
+			Setup:          []string{"the greet binary is built"},
+			EndState:       []string{"stdout is `Hello, Ada!\\n`", "the exit code is 0"},
+		},
 	})
 }
 
-// buildTests fills test_spec.json: every criterion is verified by a test
-// (rule C4) and the execution path by a smoke test (rule C5).
-func buildTests(ts afspec.TestSpecV2Json) (afspec.TestSpecV2Json, error) {
-	tests := []afspec.Test{
-		{
-			Kind:     afspec.TestKindUnit,
-			Verifies: []string{"01-REQ-1.1"},
-			Title:    "A name is greeted on stdout",
-			Given:    []string{"the greet command"},
-			When:     "it is run with the argument Ada",
-			Then:     []string{"stdout is `Hello, Ada!\\n`", "the exit code is 0"},
-		},
-		{
-			Kind:     afspec.TestKindUnit,
-			Verifies: []string{"01-REQ-1.2"},
-			Title:    "A missing name is a usage error",
-			Given:    []string{"the greet command"},
-			When:     "it is run without arguments",
-			Then:     []string{"the exit code is 2", "stdout is empty", "stderr holds a usage message"},
-		},
-		{
-			Kind:     afspec.TestKindProperty,
-			Verifies: []string{"01-REQ-1.3"},
-			Title:    "Any name appears unchanged in its greeting",
-			Given:    []string{"the greet command"},
-			When:     "for any non-empty name it is run with that name",
-			Then:     []string{"stdout contains the name unchanged"},
-		},
-		{
-			Kind:           afspec.TestKindSmoke,
-			Verifies:       []string{"01-PATH-1", "01-REQ-1.1"},
-			Title:          "The built binary greets Ada",
-			Given:          []string{"the greet binary is built"},
-			When:           "`greet Ada` is run",
-			Then:           []string{"stdout is `Hello, Ada!\\n`", "the exit code is 0"},
-			RealComponents: []string{"greet binary"},
-		},
-	}
-	for _, t := range tests {
-		t.Id = afspec.NextTestID(ts)
-		var err error
-		if ts, err = afspec.AddTest(ts, t); err != nil {
-			return ts, err
-		}
-	}
-	return ts, nil
-}
-
-// buildTasks fills tasks.json: every test is owned by a task (C7), every
-// criterion by an implement task (C8), and exactly one integration task
-// comes last and owns every smoke test (C9).
-func buildTasks(tasks afspec.TasksV2Json) (afspec.TasksV2Json, error) {
+// buildTasks fills tasks.json: every criterion is owned by a task (rule C5).
+// There is no integration task to write: a package with a path derives one
+// after the last stored task, and no state to write either, which lives in
+// progress.json.
+func buildTasks(tasks afspec.TasksV3Json) (afspec.TasksV3Json, error) {
 	tasks.TestCommands = afspec.TestCommands{
 		AllTests: "go test ./... -count=1",
 		Linter:   "go vet ./...",
@@ -251,25 +210,14 @@ func buildTasks(tasks afspec.TasksV2Json) (afspec.TasksV2Json, error) {
 
 	plan := []afspec.Task{
 		{
-			Kind:     afspec.TaskKindImplement,
 			Title:    "Implement the greet command",
-			Criteria: []string{"01-REQ-1"},
-			Tests:    []string{"TS-01-1", "TS-01-2", "TS-01-3"},
+			Criteria: []string{"REQ-1"},
 			Steps: []string{
-				"Write TS-01-1, TS-01-2 and TS-01-3 and confirm they fail",
+				"Add the greeting, the usage error and the any-name property to cmd/greet/main_test.go and confirm they fail",
 				"Read the name from the arguments and print the greeting",
 				"Exit 2 with a usage message when no name is given",
 			},
-			Touches: []string{"cmd/greet/main.go"},
-			State:   afspec.TaskStatePending,
-		},
-		{
-			Kind:      afspec.TaskKindIntegration,
-			Title:     "Verify the greet command end to end",
-			Tests:     []string{"TS-01-4"},
-			Steps:     []string{"Write TS-01-4 against the built binary and confirm it passes"},
-			DependsOn: []int{1},
-			State:     afspec.TaskStatePending,
+			Touches: []string{"cmd/greet/main.go", "cmd/greet/main_test.go"},
 		},
 	}
 	for _, task := range plan {

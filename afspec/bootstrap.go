@@ -21,18 +21,17 @@ type BootstrapSpec struct {
 	SpecName     string
 	Title        string
 	CreatedAt    string
-	UpdatedAt    string
-	Requirements *RequirementsV2Json
-	TestSpec     *TestSpecV2Json
-	Tasks        *TasksV2Json
+	Profile      string
+	Requirements *RequirementsV3Json
+	Tasks        *TasksV3Json
 	PRDBody      string
 	Architecture string
 }
 
 // NewBootstrapSpec creates a BootstrapSpec with the given specID and specName.
-// All artifact fields start as nil/zero values. Title, CreatedAt and UpdatedAt
-// default to values that satisfy the PRD frontmatter schema and should be
-// overwritten with the real ones before Finalize.
+// All artifact fields start as nil/zero values. Title and CreatedAt default
+// to values that satisfy the PRD frontmatter schema and should be overwritten
+// with the real ones before Finalize. Profile is "" (full) or ProfileLite.
 func NewBootstrapSpec(specID, specName string) *BootstrapSpec {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return &BootstrapSpec{
@@ -40,12 +39,11 @@ func NewBootstrapSpec(specID, specName string) *BootstrapSpec {
 		SpecName:  specName,
 		Title:     specName,
 		CreatedAt: now,
-		UpdatedAt: now,
 	}
 }
 
-// Finalize checks that all required artifacts (Requirements, TestSpec, Tasks,
-// PRDBody) are set, assembles a Spec from them, and runs full schema and
+// Finalize checks that all required artifacts (Requirements, Tasks, PRDBody)
+// are set, assembles a Spec from them, and runs full schema and
 // cross-file validation. Returns (*Spec, nil) on success.
 //
 // If any required artifacts are missing, returns (nil, []ValidationError)
@@ -63,9 +61,6 @@ func (b *BootstrapSpec) Finalize() (*Spec, []ValidationError) {
 	// Check for missing required artifacts.
 	if b.Requirements == nil {
 		errs = append(errs, ValidationError{Rule: "bootstrap", Message: "Missing artifact: requirements"})
-	}
-	if b.TestSpec == nil {
-		errs = append(errs, ValidationError{Rule: "bootstrap", Message: "Missing artifact: test_spec"})
 	}
 	if b.Tasks == nil {
 		errs = append(errs, ValidationError{Rule: "bootstrap", Message: "Missing artifact: tasks"})
@@ -85,11 +80,10 @@ func (b *BootstrapSpec) Finalize() (*Spec, []ValidationError) {
 		Title:         b.Title,
 		Status:        "draft",
 		CreatedAt:     b.CreatedAt,
-		UpdatedAt:     b.UpdatedAt,
 		SchemaVersion: SchemaVersion,
+		Profile:       b.Profile,
 		PRDBody:       b.PRDBody,
 		Requirements:  b.Requirements,
-		TestSpec:      b.TestSpec,
 		Tasks:         b.Tasks,
 		Architecture:  b.Architecture,
 	}
@@ -99,12 +93,6 @@ func (b *BootstrapSpec) Finalize() (*Spec, []ValidationError) {
 		errs = append(errs, ValidationError{
 			Rule:    "cross_file",
 			Message: fmt.Sprintf("requirements.spec_id %q does not match spec ID %q", b.Requirements.SpecId, b.SpecID),
-		})
-	}
-	if b.TestSpec.SpecId != b.SpecID {
-		errs = append(errs, ValidationError{
-			Rule:    "cross_file",
-			Message: fmt.Sprintf("test_spec.spec_id %q does not match spec ID %q", b.TestSpec.SpecId, b.SpecID),
 		})
 	}
 	if b.Tasks.SpecId != b.SpecID {
@@ -119,12 +107,6 @@ func (b *BootstrapSpec) Finalize() (*Spec, []ValidationError) {
 		errs = append(errs, ValidationError{
 			Rule:    "cross_file",
 			Message: fmt.Sprintf("requirements.spec_name %q does not match spec name %q", b.Requirements.SpecName, b.SpecName),
-		})
-	}
-	if b.TestSpec.SpecName != b.SpecName {
-		errs = append(errs, ValidationError{
-			Rule:    "cross_file",
-			Message: fmt.Sprintf("test_spec.spec_name %q does not match spec name %q", b.TestSpec.SpecName, b.SpecName),
 		})
 	}
 	if b.Tasks.SpecName != b.SpecName {

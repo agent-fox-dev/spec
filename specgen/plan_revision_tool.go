@@ -21,14 +21,13 @@ import (
 // ToolSubmitPlanRevision is the terminating tool of the plan revision phase.
 const ToolSubmitPlanRevision = "submit_plan_revision"
 
-// planArtifacts are the plan's three artifacts by the argument that carries
+// planArtifacts are the plan's two artifacts by the argument that carries
 // each, in the order they are generated.
 var planArtifacts = []struct {
 	arg  string
 	step afspec.GenerationStep
 }{
 	{"requirements", afspec.StepRequirements},
-	{"test_spec", afspec.StepTestSpec},
 	{"tasks", afspec.StepTasks},
 }
 
@@ -53,7 +52,7 @@ func (s *planRevisionSink) get() (afspec.PartialSpec, []Disposition, bool) {
 	return s.plan, s.dispositions, s.done
 }
 
-// planRevisionSchema is the plan revision's contract: the three artifacts,
+// planRevisionSchema is the plan revision's contract: the two artifacts,
 // whole, and an answer to every finding. It has no field for the PRD.
 func planRevisionSchema() *schema.Schema {
 	props := []schema.Field{}
@@ -71,11 +70,11 @@ func planRevisionSchema() *schema.Schema {
 
 // newPlanRevisionTool is the terminator of the revision of current, the plan
 // of the PRD prd, answering findings, the findings of this round. It takes
-// the three artifacts whole and turns back a revision that changes what a
-// plan revision may not — the PRD, the spec's identity, a task's state, the
-// actors of the execution paths, which the later scopes of a split were
-// handed — or whose plan breaks the format's own rules, so the phase asks
-// again until it passes. The answers are checked as a PRD revision's are.
+// the two artifacts whole and turns back a revision that changes what a plan
+// revision may not — the PRD, the spec's identity, the actors of the
+// execution paths, which the later scopes of a split were handed — or whose
+// plan breaks the format's own rules, so the phase asks again until it
+// passes. The answers are checked as a PRD revision's are.
 func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.PartialSpec, findings []Finding, ws *workspace.Workspace) core.Tool {
 	// identity holds the changes to a spec id or name that PrepareArguments
 	// took out of a submission so its schema check could pass; Execute turns
@@ -83,7 +82,7 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 	var identity []string
 	return core.Tool{
 		Name: ToolSubmitPlanRevision,
-		Description: "Submit the revised plan — requirements, test specification and tasks, each whole — and your " +
+		Description: "Submit the revised plan — requirements and tasks, each whole — and your " +
 			"answer to every finding, and end this phase. Call this once, after you have weighed every finding.",
 		InputSchema: planRevisionSchema(),
 		Terminating: true,
@@ -129,7 +128,7 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 					continue
 				}
 				problems = append(problems, fmt.Sprintf("the revision carries %q, and a plan revision changes the plan "+
-					"alone: the PRD and everything outside the three artifacts are not its to change", key))
+					"alone: the PRD and everything outside the two artifacts are not its to change", key))
 			}
 			sort.Strings(problems)
 
@@ -137,7 +136,7 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 			for _, a := range planArtifacts {
 				var content map[string]any
 				if err := json.Unmarshal(raw[a.arg], &content); err != nil || content == nil {
-					problems = append(problems, fmt.Sprintf("%s is missing or not an object: submit all three artifacts whole", a.arg))
+					problems = append(problems, fmt.Sprintf("%s is missing or not an object: submit both artifacts whole", a.arg))
 					continue
 				}
 				entriesAsDictionaries(content)
@@ -156,11 +155,9 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 					continue
 				}
 				switch v := decoded.(type) {
-				case *afspec.RequirementsV2Json:
+				case *afspec.RequirementsV3Json:
 					revised.Requirements = v
-				case *afspec.TestSpecV2Json:
-					revised.TestSpec = v
-				case *afspec.TasksV2Json:
+				case *afspec.TasksV3Json:
 					revised.Tasks = v
 				}
 			}
@@ -226,29 +223,14 @@ func identityChanges(content map[string]any, step afspec.GenerationStep, current
 // refusePlan turns a plan revision back with every problem it has.
 func refusePlan(problems []string) core.ToolResult {
 	return core.ErrResult("invalid_plan_revision", "the revision was not accepted: "+strings.Join(problems, "; ")+
-		". Fix every one of them and submit the three artifacts again.")
+		". Fix every one of them and submit both artifacts again.")
 }
 
-// frozenChanges names what a plan revision changed that it may not: a
-// task's state, and the actors of the execution paths, compared by name
-// ignoring case so that reordering the paths or a path's steps is no change.
+// frozenChanges names what a plan revision changed that it may not: the
+// actors of the execution paths, compared by name ignoring case so that
+// reordering the paths or a path's steps is no change.
 func frozenChanges(current, revised *afspec.PartialSpec) []string {
 	var out []string
-	if current.Tasks != nil && revised.Tasks != nil {
-		before := map[int]afspec.TaskState{}
-		for _, t := range current.Tasks.Tasks {
-			before[t.Id] = t.State
-		}
-		for _, t := range revised.Tasks.Tasks {
-			was, ok := before[t.Id]
-			if !ok {
-				was = afspec.TaskStatePending
-			}
-			if t.State != was {
-				out = append(out, fmt.Sprintf("it changes the state of task %d from %s to %s", t.Id, was, t.State))
-			}
-		}
-	}
 	added, removed := actorDiff(actorsOf(current.Requirements), actorsOf(revised.Requirements))
 	if len(added)+len(removed) > 0 {
 		out = append(out, fmt.Sprintf("it changes the actors of the execution paths (added: %s; removed: %s), which "+
@@ -286,6 +268,6 @@ func listOrNone(items []string) string {
 // planJSON is the plan as it would be written, to tell a changed plan from an
 // unchanged one.
 func planJSON(p *afspec.PartialSpec) string {
-	b, _ := json.Marshal([]any{p.Requirements, p.TestSpec, p.Tasks})
+	b, _ := json.Marshal([]any{p.Requirements, p.Tasks})
 	return string(b)
 }

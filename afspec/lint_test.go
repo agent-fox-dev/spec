@@ -20,9 +20,9 @@ func TestRunLintSpecs_PassesAValidSpec(t *testing.T) {
 
 func TestRunLintSpecs_FailsOnABrokenRule(t *testing.T) {
 	root := specRoot(t, map[string]string{"01_test_feature": fixtureValidSpec})
-	// Orphan a test so that C7 fires.
-	editTasks(t, filepath.Join(root, "01_test_feature", "tasks.json"), func(tasks *TasksV2Json) {
-		tasks.Tasks[0].Tests = []string{"TS-01-1"}
+	// Leave a criterion unowned so that C5 fires.
+	editTasks(t, filepath.Join(root, "01_test_feature", "tasks.json"), func(tasks *TasksV3Json) {
+		tasks.Tasks[1].Criteria = []string{"REQ-1.1"}
 	})
 
 	result, err := RunLintSpecs(root, true)
@@ -30,10 +30,10 @@ func TestRunLintSpecs_FailsOnABrokenRule(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.ExitCode == 0 {
-		t.Fatal("linting a spec with orphaned tests exited 0")
+		t.Fatal("linting a spec with an unowned criterion exited 0")
 	}
-	if !hasFinding(result.Findings, "C7") {
-		t.Errorf("no C7 finding: %v", result.Findings)
+	if !hasFinding(result.Findings, "C5") {
+		t.Errorf("no C5 finding: %v", result.Findings)
 	}
 }
 
@@ -58,16 +58,23 @@ func TestRunLintSpecs_ReportsAPackageThatDoesNotLoad(t *testing.T) {
 	}
 }
 
-// A fully implemented spec is one with every task done or dropped; it is
-// skipped unless every spec is asked for.
+// A fully implemented spec is one with every task done or dropped, the
+// integration task included, by its progress; it is skipped unless every
+// spec is asked for.
 func TestRunLintSpecs_SkipsAFullyImplementedSpecUnlessAll(t *testing.T) {
 	root := specRoot(t, map[string]string{"01_test_feature": fixtureValidSpec})
 	// Break the plan and mark every task done.
-	editTasks(t, filepath.Join(root, "01_test_feature", "tasks.json"), func(tasks *TasksV2Json) {
-		tasks.Tasks[0].Tests = []string{"TS-01-1"}
-		for i := range tasks.Tasks {
-			tasks.Tasks[i].State = TaskStateDone
-		}
+	editTasks(t, filepath.Join(root, "01_test_feature", "tasks.json"), func(tasks *TasksV3Json) {
+		tasks.Tasks[1].Criteria = []string{"REQ-1.1"}
+	})
+	editProgress(t, filepath.Join(root, "01_test_feature", "progress.json"), func(p *ProgressV3Json) {
+		p.Tasks = []TaskProgress{{Id: 1, State: TaskStateDone}, {Id: 2, State: TaskStateDone}}
+	})
+	if result, err := RunLintSpecs(root, false); err != nil || len(result.Findings) == 0 {
+		t.Errorf("a spec whose integration task is pending was skipped: %v, %v", result.Findings, err)
+	}
+	editProgress(t, filepath.Join(root, "01_test_feature", "progress.json"), func(p *ProgressV3Json) {
+		p.Tasks = append(p.Tasks, TaskProgress{Id: 3, State: TaskStateDropped})
 	})
 
 	result, err := RunLintSpecs(root, false)
@@ -132,7 +139,7 @@ func TestDiscoverLintSpecs(t *testing.T) {
 func TestSortFindings_OrdersBySpecFileAndSeverity(t *testing.T) {
 	findings := []LintFinding{
 		{SpecName: "02", Severity: "warning", Rule: "scope"},
-		{SpecName: "01", File: "tasks.json", Severity: "error", Rule: "C7"},
+		{SpecName: "01", File: "tasks.json", Severity: "error", Rule: "C5"},
 		{SpecName: "01", File: "requirements.json", Severity: "novel", Rule: "x"},
 		{SpecName: "01", File: "requirements.json", Severity: "hint", Rule: "y"},
 		{SpecName: "01", File: "requirements.json", Severity: "warning", Rule: "vague"},
@@ -143,7 +150,7 @@ func TestSortFindings_OrdersBySpecFileAndSeverity(t *testing.T) {
 		rules = append(rules, f.Rule)
 	}
 	// An unknown severity sorts as a hint; the sort is stable among equals.
-	want := []string{"vague", "x", "y", "C7", "scope"}
+	want := []string{"vague", "x", "y", "C5", "scope"}
 	for i := range want {
 		if rules[i] != want[i] {
 			t.Fatalf("order = %v; want %v", rules, want)

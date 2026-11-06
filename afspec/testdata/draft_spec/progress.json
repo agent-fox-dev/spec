@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/progress.v3.json",
+  "spec_id": "02",
+  "spec_name": "draft_feature",
+  "schema_version": 3,
+  "updated_at": "2026-01-01T00:00:00Z",
+  "tasks": [
+    {
+      "id": 1,
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "state": "pending"
+    }
+  ]
+}

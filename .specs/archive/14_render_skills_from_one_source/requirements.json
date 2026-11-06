@@ -1,375 +1,571 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
   "spec_id": "14",
   "spec_name": "render_skills_from_one_source",
-  "schema_version": 2,
-  "introduction": "The skill render turns one source tree under skills/ into the three af-* skills for each of four coding agents. It reads a skill as a SKILL.md with YAML frontmatter and a body, resolves the reference files the skill links, keeps only the frontmatter keys the agent reads, replaces the one {{invoke}} token with that agent's invocation syntax, and refuses a skill whose body would load more than 24,576 bytes at once. make skills writes the output under build/skills/, make install-skills copies it into an agent's skill directory, and make check runs the render's checks with no network and no credential.",
-  "glossary": {
-    "<source path>: <problem>": "The one line the skill render writes to stderr for each problem it finds: the path of the source file, a colon and a space, then the problem in words. Every refusal of the render takes this form, and a warning takes it too.",
-    "agent": "One of the four coding agents the render targets: claude, codex, cursor and copilot. Each reads its own frontmatter keys and its own invocation syntax.",
-    "body": "The part of a SKILL.md that follows the line closing its YAML frontmatter. It is loaded with the skill, which is why it carries the ceiling.",
-    "reference file": "A Markdown file under a skill's own references/ or under skills/_shared/references/, read by the agent at the step that links it rather than loaded with the skill.",
-    "skill": "A directory directly under skills/ whose name does not begin with an underscore, holding a SKILL.md and optionally its own references/ directory.",
-    "skill render": "The program make runs to render, install and uninstall the skills."
-  },
+  "schema_version": 3,
   "requirements": [
     {
-      "id": "14-REQ-1",
+      "id": "REQ-1",
       "title": "The skill source tree",
       "rationale": "One source tree serves four agents only if the render agrees with the author on what a skill is and on which files belong to it.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-1.1",
+          "id": "REQ-1.1",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "treat every directory directly under skills/ whose name does not begin with an underscore as a skill, and read its SKILL.md as YAML frontmatter delimited by two --- lines followed by the body"
+          "action": "treat every directory directly under skills/ whose name does not begin with an underscore as a skill, and read its SKILL.md as YAML frontmatter delimited by two --- lines followed by the body",
+          "contract": "the skills found are af-prd and af-spec, in that order; _shared is not among them; the loose file skills/notes.md is not a skill; each skill carries its frontmatter text and its body separately, split at the second --- line",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a source tree with skills/af-prd/SKILL.md, skills/af-spec/SKILL.md, skills/_shared/references/x.md and a loose file skills/notes.md"
+            ],
+            "pseudocode": "in internal/skillgen/source_test.go, over a fstest.MapFS: skills, problems = readSource(fsys); assert names(skills) == ['af-prd','af-spec']; assert problems is empty; assert skills[0].body starts after the closing ---"
+          }
         },
         {
-          "id": "14-REQ-1.2",
+          "id": "REQ-1.2",
           "pattern": "event_driven",
           "condition": "a SKILL.md or an included reference file links references/<file>.md",
-          "system": "skill render",
           "action": "resolve <file>.md in the linking skill's own skills/<name>/references/ first and in skills/_shared/references/ second",
-          "contract": "the resolved file is written into that skill's output as references/<file>.md"
+          "contract": "the resolved file is written into that skill's output as references/<file>.md",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "skills/af-spec/SKILL.md linking references/tasks.md and references/speca-specr.md",
+              "skills/af-spec/references/tasks.md, which itself links references/verdict.md",
+              "skills/af-spec/references/verdict.md",
+              "skills/_shared/references/speca-specr.md",
+              "skills/_shared/references/prd-shape.md, which no skill links"
+            ],
+            "pseudocode": "in internal/skillgen/source_test.go: included = resolveRefs(skills['af-spec']); assert keys(included) == {'tasks.md','speca-specr.md','verdict.md'}; assert included['speca-specr.md'].from == 'skills/_shared/references/speca-specr.md'"
+          }
         },
         {
-          "id": "14-REQ-1.3",
+          "id": "REQ-1.3",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "for any skill, include a reference file when that skill's SKILL.md links it or when a reference file already included in that skill links it, and include no other file"
+          "action": "for any skill, include a reference file when that skill's SKILL.md links it or when a reference file already included in that skill links it, and include no other file",
+          "check": {
+            "same_as": "REQ-1.2"
+          }
         },
         {
-          "id": "14-REQ-1.4",
+          "id": "REQ-1.4",
           "pattern": "unwanted",
           "condition": "a link to references/<file>.md resolves in neither the linking skill's own references/ nor skills/_shared/references/",
-          "system": "skill render",
           "action": "report the problem and render nothing",
-          "contract": "stderr carries one line reading `skills/af-spec/SKILL.md: links references/tasks.md, which is in neither skills/af-spec/references/ nor skills/_shared/references/`; the exit code is non-zero"
+          "contract": "stderr carries one line reading `skills/af-spec/SKILL.md: links references/tasks.md, which is in neither skills/af-spec/references/ nor skills/_shared/references/`; the exit code is non-zero",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "skills/af-spec/SKILL.md linking references/tasks.md, with no tasks.md in either references directory"
+            ],
+            "pseudocode": "in internal/skillgen/source_test.go: problems = check(fsys); assert problems == [that exact line]"
+          }
         },
         {
-          "id": "14-REQ-1.5",
+          "id": "REQ-1.5",
           "pattern": "unwanted",
           "condition": "a reference file name is present both in a skill's own references/ and in skills/_shared/references/",
-          "system": "skill render",
           "action": "report the problem naming the file and both directories, and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the file and both directories; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the file and both directories; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "skills/af-spec/references/speca-specr.md and skills/_shared/references/speca-specr.md, both present"
+            ],
+            "pseudocode": "in internal/skillgen/source_test.go: problems = check(fsys); assert one problem mentioning 'speca-specr.md', 'skills/af-spec/references/' and 'skills/_shared/references/'"
+          }
         },
         {
-          "id": "14-REQ-1.6",
+          "id": "REQ-1.6",
           "pattern": "unwanted",
           "condition": "a skill directory holds no SKILL.md, or its SKILL.md has no frontmatter, or its frontmatter is not YAML",
-          "system": "skill render",
           "action": "report which of the three it is and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>` naming which of the three it is; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line of the form `<source path>: <problem>` naming which of the three it is; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "three source trees: skills/af-x/ with only references/a.md; skills/af-x/SKILL.md starting with # af-x; skills/af-x/SKILL.md whose frontmatter body is `name: [unclosed`"
+            ],
+            "pseudocode": "in internal/skillgen/source_test.go, a table over the three trees: for each, problems = check(fsys); assert len(problems) == 1 and problems[0] matches the expected `<path>: <problem>`"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-2",
+      "id": "REQ-2",
       "title": "Rendering a skill for an agent",
       "rationale": "An installed skill has to work in its agent with no edit, and a render nobody can rerun with the same result is a render nobody can check.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-2.1",
+          "id": "REQ-2.1",
           "pattern": "event_driven",
           "condition": "make skills runs over a source tree that holds no problem",
-          "system": "skill render",
           "action": "write build/skills/<agent>/<name>/SKILL.md and its references/ directory for each of the agents claude, codex, cursor and copilot and each skill under skills/",
-          "contract": "exit code 0; build/skills/<agent>/<name>/SKILL.md exists for all four agents and every skill, each with a references/ holding exactly that skill's included files"
+          "contract": "exit code 0; build/skills/<agent>/<name>/SKILL.md exists for all four agents and every skill, each with a references/ holding exactly that skill's included files",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a clean source tree of three skills with their own and shared reference files",
+              "an empty output directory"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, against a real temporary directory: run(['--out', tmp]); snap1 = hashTree(tmp); run again; assert hashTree(tmp) == snap1; remove sources; run again; assert the removed paths are absent for all four agents"
+          }
         },
         {
-          "id": "14-REQ-2.2",
+          "id": "REQ-2.2",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "keep in a rendered frontmatter only the keys the agent reads — name, description, argument-hint and disable-model-invocation for claude; name and description for codex; name, description and disable-model-invocation for cursor; name and description for copilot — in the order the source gives them, each kept key carrying its source text and its continuation lines unchanged"
+          "action": "keep in a rendered frontmatter only the keys the agent reads — name, description, argument-hint and disable-model-invocation for claude; name and description for codex; name, description and disable-model-invocation for cursor; name and description for copilot — in the order the source gives them, each kept key carrying its source text and its continuation lines unchanged",
+          "contract": "claude keeps name, description, argument-hint and disable-model-invocation and drops metadata; codex keeps name and description only; cursor keeps name, description and disable-model-invocation and drops argument-hint; copilot keeps name and description only; every kept key appears in the source's order, with its source text and its continuation lines byte for byte",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a SKILL.md whose frontmatter is, in this order, name, description over two lines, argument-hint, disable-model-invocation and metadata with two nested keys"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table over the four agents: out = render(skill, agent); assert frontmatterKeys(out) == want; assert the description's second line is present unchanged"
+          }
         },
         {
-          "id": "14-REQ-2.3",
+          "id": "REQ-2.3",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "replace every {{invoke <name>}} in a body or a reference file with /<name> for claude, cursor and copilot and with $<name> for codex, and change no other byte of the body or of any reference file"
+          "action": "replace every {{invoke <name>}} in a body or a reference file with /<name> for claude, cursor and copilot and with $<name> for codex, and change no other byte of the body or of any reference file",
+          "contract": "claude, cursor and copilot carry /af-impl and /af-prd; codex carries $af-impl and $af-prd; both occurrences in the body are replaced; the rendered body and reference file are byte-identical to the source apart from the replaced tokens",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a body holding {{invoke af-impl}} twice and a reference file holding {{invoke af-prd}} once, both with surrounding prose, a code block and a table"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table over the four agents: out = render(skill, agent); assert out.body == strings.ReplaceAll(source.body, '{{invoke af-impl}}', want)"
+          }
         },
         {
-          "id": "14-REQ-2.4",
+          "id": "REQ-2.4",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "for any source tree that has not changed, write byte-identical output on every run"
+          "action": "for any source tree that has not changed, write byte-identical output on every run",
+          "check": {
+            "same_as": "REQ-2.1"
+          }
         },
         {
-          "id": "14-REQ-2.5",
+          "id": "REQ-2.5",
           "pattern": "event_driven",
           "condition": "make skills runs over a source tree from which a file has been removed since the previous run",
-          "system": "skill render",
           "action": "replace the previous output of make skills whole",
-          "contract": "build/skills/ holds no file that the current source does not render; exit code 0"
+          "contract": "build/skills/ holds no file that the current source does not render; exit code 0",
+          "check": {
+            "same_as": "REQ-2.1"
+          }
         },
         {
-          "id": "14-REQ-2.6",
+          "id": "REQ-2.6",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "render without making a model call, without making a network call, without reading a credential and without running the update-agentkit target"
+          "action": "render without making a model call, without making a network call, without reading a credential and without running the update-agentkit target",
+          "contract": "the exit code is 0; the output tree is complete for all four agents; no error about a credential or a connection is reported",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a clean source tree",
+              "an environment with ANTHROPIC_API_KEY and every other API key unset, and HTTP_PROXY and HTTPS_PROXY pointing at a closed local port"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go: t.Setenv('ANTHROPIC_API_KEY',''), t.Setenv('HTTPS_PROXY','http://127.0.0.1:1'); code = run(['--out', tmp]); assert code == 0"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-3",
+      "id": "REQ-3",
       "title": "A skill's name and description",
       "rationale": "Every one of the four agents loads a skill by its directory and offers it by its description, so a name or a description that breaks the Agent Skills rule breaks the skill in the agent, not in the render.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-3.1",
+          "id": "REQ-3.1",
           "pattern": "unwanted",
           "condition": "a frontmatter has no name, a name that differs from its directory's name, or a name that is not 1 to 64 characters of lowercase letters, digits and single hyphens with neither the first nor the last character a hyphen",
-          "system": "skill render",
           "action": "report the rule broken and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the rule broken; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the rule broken; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a valid skill directory skills/af-spec whose frontmatter name is varied"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table of name -> wantProblem: problems = check(treeWithName(name)); assert (len(problems) > 0) == wantProblem"
+          }
         },
         {
-          "id": "14-REQ-3.2",
+          "id": "REQ-3.2",
           "pattern": "unwanted",
           "condition": "a frontmatter has no description, an empty description, or a description longer than 1,024 characters",
-          "system": "skill render",
           "action": "report which of the three it is and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>`; a description of exactly 1,024 characters is accepted; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line of the form `<source path>: <problem>`; a description of exactly 1,024 characters is accepted; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a valid skill directory whose frontmatter description is varied"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table of description length -> wantProblem"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-4",
+      "id": "REQ-4",
       "title": "The body ceiling",
       "rationale": "The body is what loads with the skill at every step of a run, so it is the only part whose size the render has to hold down.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-4.1",
+          "id": "REQ-4.1",
           "pattern": "unwanted",
           "condition": "a rendered body is longer than 24,576 bytes for any agent",
-          "system": "skill render",
           "action": "report the skill, the agent, the size and the overage, and render nothing",
-          "contract": "stderr carries one line reading `skills/af-spec/SKILL.md: body is 31,204 bytes for codex, 6,628 over the 24,576-byte limit`; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line reading `skills/af-spec/SKILL.md: body is 31,204 bytes for codex, 6,628 over the 24,576-byte limit`; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a skill whose frontmatter is 300 bytes and whose body length is set per case, and a reference file of 60,000 bytes"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table of body -> per-agent want: problems = check(tree); assert the exact overage line for the failing agent"
+          }
         },
         {
-          "id": "14-REQ-4.2",
+          "id": "REQ-4.2",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "measure a rendered body as the bytes of UTF-8 that follow the line closing the frontmatter, after {{invoke <name>}} has been replaced for that agent, and accept a body of exactly 24,576 bytes"
+          "action": "measure a rendered body as the bytes of UTF-8 that follow the line closing the frontmatter, after {{invoke <name>}} has been replaced for that agent, and accept a body of exactly 24,576 bytes",
+          "check": {
+            "same_as": "REQ-4.1"
+          }
         },
         {
-          "id": "14-REQ-4.3",
+          "id": "REQ-4.3",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "render a reference file of any size without reporting a problem about its size"
+          "action": "render a reference file of any size without reporting a problem about its size",
+          "check": {
+            "same_as": "REQ-4.1"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-5",
+      "id": "REQ-5",
       "title": "Tokens and agent-specific text",
       "rationale": "The one text that differs by agent is the invocation of another skill; any other agent-specific text in the source is a skill that works in one agent and not the next.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-5.1",
+          "id": "REQ-5.1",
           "pattern": "unwanted",
           "condition": "a {{invoke <name>}} token names no directory under skills/",
-          "system": "skill render",
           "action": "report the source file and the unknown name, and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the unknown skill; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the unknown skill; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a source tree whose only skills are af-prd, af-spec and af-impl"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table of token -> expected problem text"
+          }
         },
         {
-          "id": "14-REQ-5.2",
+          "id": "REQ-5.2",
           "pattern": "unwanted",
           "condition": "a body or a reference file holds a {{...}} token that is not {{invoke <name>}}",
-          "system": "skill render",
           "action": "report the source file and the token, and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the token; the exit code is non-zero; no file is written for any agent"
+          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the token; the exit code is non-zero; no file is written for any agent",
+          "check": {
+            "same_as": "REQ-5.1"
+          }
         },
         {
-          "id": "14-REQ-5.3",
+          "id": "REQ-5.3",
           "pattern": "unwanted",
           "condition": "a body or a reference file holds $ARGUMENTS, or holds /<name> or $<name> for a skill under skills/ where the character before it is the start of a line, whitespace or one of a backtick, an opening parenthesis, an opening bracket or a double quote and the character after it is the end of a line, whitespace or punctuation",
-          "system": "skill render",
           "action": "report the source file and the text found, and render nothing",
-          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the text found and {{invoke <name>}} as its replacement; the exit code is non-zero; the path skills/af-impl written in prose is not reported"
+          "contract": "stderr carries one line of the form `<source path>: <problem>` naming the text found and {{invoke <name>}} as its replacement; the exit code is non-zero; the path skills/af-impl written in prose is not reported",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a source tree whose skills are af-prd, af-spec and af-impl"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, a table of body text -> wantProblem, covering the delimiters backtick, open paren, open bracket, double quote, line start and whitespace on the left and whitespace, line end and punctuation on the right"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-6",
+      "id": "REQ-6",
       "title": "Reporting problems and warnings",
       "rationale": "An author fixing the source wants every problem of one run, not the first of five; and a reference file nobody links is worth a word but not a stopped build.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-6.1",
+          "id": "REQ-6.1",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "report every problem the source tree holds in one run, one problem to a line on stderr in the form `<source path>: <problem>`"
+          "action": "report every problem the source tree holds in one run, one problem to a line on stderr in the form `<source path>: <problem>`",
+          "contract": "all four problems are on stderr, each on its own line in the form `<source path>: <problem>`; the exit code is non-zero; the output directory still holds exactly the file from the previous run and nothing new; no agent's directory was created",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a source tree with four problems at once: a broken link in af-prd, a name that differs from its directory in af-spec, an unknown invoke token in af-impl and a body over the ceiling in af-impl",
+              "an output directory already holding a file from a previous run"
+            ],
+            "pseudocode": "in internal/skillgen/check_test.go: code, stderr = run(['--out', tmp]); assert code != 0; assert 4 lines, each matching '^[^:]+: '; assert the listing of tmp is unchanged"
+          }
         },
         {
-          "id": "14-REQ-6.2",
+          "id": "REQ-6.2",
           "pattern": "event_driven",
           "condition": "the source tree holds at least one problem",
-          "system": "skill render",
           "action": "exit non-zero and write no file for any agent",
-          "contract": "the exit code is non-zero; build/skills/ is left exactly as it was before the run"
+          "contract": "the exit code is non-zero; build/skills/ is left exactly as it was before the run",
+          "check": {
+            "same_as": "REQ-6.1"
+          }
         },
         {
-          "id": "14-REQ-6.3",
+          "id": "REQ-6.3",
           "pattern": "event_driven",
           "condition": "a file in a skill's own references/ is linked by nothing",
-          "system": "skill render",
           "action": "write a warning to stderr naming the file and leave the exit code 0",
-          "contract": "stderr carries one line reading `skills/af-impl/references/old.md: linked by nothing; not rendered`; the exit code is 0; the file is in no agent's output"
+          "contract": "stderr carries one line reading `skills/af-impl/references/old.md: linked by nothing; not rendered`; the exit code is 0; the file is in no agent's output",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "skills/af-impl/references/old.md, which no file links",
+              "skills/_shared/references/unused.md, which no skill links",
+              "an otherwise clean source tree"
+            ],
+            "pseudocode": "in internal/skillgen/check_test.go: code, stderr = run(['--out', tmp]); assert code == 0; assert both warning lines; assert neither file under tmp"
+          }
         },
         {
-          "id": "14-REQ-6.4",
+          "id": "REQ-6.4",
           "pattern": "event_driven",
           "condition": "a file in skills/_shared/references/ is linked by no skill",
-          "system": "skill render",
           "action": "write a warning to stderr naming the file and leave the exit code 0",
-          "contract": "stderr carries one line naming the file as linked by nothing; the exit code is 0; the file is in no agent's output"
+          "contract": "stderr carries one line naming the file as linked by nothing; the exit code is 0; the file is in no agent's output",
+          "check": {
+            "same_as": "REQ-6.3"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-7",
+      "id": "REQ-7",
       "title": "Installing a rendered skill",
       "rationale": "A skill reaches an agent only from that agent's own directory, and a user installing again after a source file was removed should not be left with it.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-7.1",
+          "id": "REQ-7.1",
           "pattern": "event_driven",
           "condition": "make install-skills runs with no AGENT",
-          "system": "skill render",
           "action": "render the skills for claude and copy each one into the claude user skill directory",
-          "contract": "exit code 0; ~/.claude/skills/<name>/SKILL.md and ~/.claude/skills/<name>/references/ exist for each skill"
+          "contract": "exit code 0; ~/.claude/skills/<name>/SKILL.md and ~/.claude/skills/<name>/references/ exist for each skill",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a clean source tree of three skills",
+              "an install directory already holding af-spec/SKILL.md, af-spec/references/stale.md and an unrelated other-skill/SKILL.md"
+            ],
+            "pseudocode": "in internal/skillgen/install_test.go, against a real temporary HOME: code, stdout = run(['--install','--skills-dir',dir]); assert code == 0; assert the installed: lines; assert stale.md absent and other-skill intact"
+          }
         },
         {
-          "id": "14-REQ-7.2",
+          "id": "REQ-7.2",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "resolve the install directory as SKILLS_DIR when SKILLS_DIR is given; else, when PROJECT is given, as <PROJECT>/.claude/skills for claude, <PROJECT>/.agents/skills for codex, <PROJECT>/.cursor/skills for cursor and <PROJECT>/.github/skills for copilot; else as ~/.claude/skills for claude, $CODEX_HOME/skills for codex or ~/.codex/skills when CODEX_HOME is unset, ~/.cursor/skills for cursor and ~/.copilot/skills for copilot"
+          "action": "resolve the install directory as SKILLS_DIR when SKILLS_DIR is given; else, when PROJECT is given, as <PROJECT>/.claude/skills for claude, <PROJECT>/.agents/skills for codex, <PROJECT>/.cursor/skills for cursor and <PROJECT>/.github/skills for copilot; else as ~/.claude/skills for claude, $CODEX_HOME/skills for codex or ~/.codex/skills when CODEX_HOME is unset, ~/.cursor/skills for cursor and ~/.copilot/skills for copilot",
+          "contract": "with neither, the directories are ~/.claude/skills, $CODEX_HOME/skills, ~/.cursor/skills and ~/.copilot/skills, and ~/.codex/skills for codex when CODEX_HOME is unset; with PROJECT, they are <PROJECT>/.claude/skills, <PROJECT>/.agents/skills, <PROJECT>/.cursor/skills and <PROJECT>/.github/skills; with SKILLS_DIR, it is SKILLS_DIR for every agent; with both, SKILLS_DIR wins",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "HOME set to a temporary directory",
+              "CODEX_HOME set in one case and unset in another"
+            ],
+            "pseudocode": "in internal/skillgen/install_test.go, a table of (agent, project, skillsDir, codexHome) -> want: got, err = installDir(...); assert got == want"
+          }
         },
         {
-          "id": "14-REQ-7.3",
+          "id": "REQ-7.3",
           "pattern": "event_driven",
           "condition": "the skills are installed",
-          "system": "skill render",
           "action": "print one line reading `installed: <name> -> <dir>/<name>` for each skill and exit 0",
-          "contract": "stdout carries one such line per skill; the exit code is 0"
+          "contract": "stdout carries one such line per skill; the exit code is 0",
+          "check": {
+            "same_as": "REQ-7.1"
+          }
         },
         {
-          "id": "14-REQ-7.4",
+          "id": "REQ-7.4",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "replace <dir>/<name>/ whole for each skill installed, leaving behind no file of a previous install, and add, change or remove no other entry under <dir>"
+          "action": "replace <dir>/<name>/ whole for each skill installed, leaving behind no file of a previous install, and add, change or remove no other entry under <dir>",
+          "check": {
+            "same_as": "REQ-7.1"
+          }
         },
         {
-          "id": "14-REQ-7.5",
+          "id": "REQ-7.5",
           "pattern": "unwanted",
           "condition": "the source tree holds at least one problem when an install is asked for",
-          "system": "skill render",
           "action": "install nothing, report the problems as make skills does, and exit non-zero",
-          "contract": "the exit code is non-zero; stderr carries one line per problem; <dir> is left exactly as it was"
+          "contract": "the exit code is non-zero; stderr carries one line per problem; <dir> is left exactly as it was",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a source tree with a broken link and a body over the ceiling",
+              "an install directory holding one unrelated file"
+            ],
+            "pseudocode": "in internal/skillgen/install_test.go: code, out, errOut = run(['--install','--skills-dir',dir]); assert code != 0; assert listing(dir) unchanged"
+          }
         },
         {
-          "id": "14-REQ-7.6",
+          "id": "REQ-7.6",
           "pattern": "unwanted",
           "condition": "AGENT is a value other than claude, codex, cursor or copilot",
-          "system": "skill render",
           "action": "report the value with the four it accepts and write nothing",
-          "contract": "stderr carries `unknown agent \"<value>\"; one of: claude, codex, cursor, copilot`; the exit code is non-zero; <dir> is left exactly as it was"
+          "contract": "stderr carries `unknown agent \"<value>\"; one of: claude, codex, cursor, copilot`; the exit code is non-zero; <dir> is left exactly as it was",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a clean source tree",
+              "an install directory holding one unrelated file"
+            ],
+            "pseudocode": "in internal/skillgen/install_test.go, a table of flags -> exact stderr line and non-zero exit"
+          }
         },
         {
-          "id": "14-REQ-7.7",
+          "id": "REQ-7.7",
           "pattern": "unwanted",
           "condition": "PROJECT is given and is not an existing directory",
-          "system": "skill render",
           "action": "report the path and write nothing",
-          "contract": "stderr carries `PROJECT <path> is not a directory`; the exit code is non-zero; no file is written anywhere"
+          "contract": "stderr carries `PROJECT <path> is not a directory`; the exit code is non-zero; no file is written anywhere",
+          "check": {
+            "same_as": "REQ-7.6"
+          }
         },
         {
-          "id": "14-REQ-7.8",
+          "id": "REQ-7.8",
           "pattern": "event_driven",
           "condition": "the agent also loads another directory that already holds a skill of the name being installed",
-          "system": "skill render",
           "action": "print the warning naming that directory and install all the same",
-          "contract": "stderr carries `warning: <agent> also loads <path>/<name>; it will see <name> twice`; the exit code is 0; <dir>/<name> holds the installed skill"
+          "contract": "stderr carries `warning: <agent> also loads <path>/<name>; it will see <name> twice`; the exit code is 0; <dir>/<name> holds the installed skill",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "HOME holding ~/.claude/skills/af-spec/SKILL.md from an earlier claude install",
+              "a clean source tree"
+            ],
+            "pseudocode": "in internal/skillgen/install_test.go, against a real temporary HOME: code, errOut = run(['--install','--agent','copilot']); assert code == 0; assert the warning line; assert both directories hold af-spec"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-8",
+      "id": "REQ-8",
       "title": "Uninstalling the skills",
       "rationale": "An uninstall that resolved its directory differently from the install, or that removed more than it installed, would take someone else's skills with it.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-8.1",
+          "id": "REQ-8.1",
           "pattern": "event_driven",
           "condition": "make uninstall-skills runs",
-          "system": "skill render",
           "action": "resolve the directory by the same rule as the install and remove <dir>/<name> for each of af-prd, af-spec and af-impl, printing `removed: <name>` for each one it removed",
-          "contract": "exit code 0; stdout carries one line per removed skill; <dir>/<name> no longer exists for each of the three"
+          "contract": "exit code 0; stdout carries one line per removed skill; <dir>/<name> no longer exists for each of the three",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "an install directory holding af-prd/, af-spec/, an unrelated other-skill/ and a loose file notes.md",
+              "af-impl not installed"
+            ],
+            "pseudocode": "in internal/skillgen/install_test.go: code, stdout = run(['--uninstall','--skills-dir',dir]); assert code == 0; assert the two removed: lines and no third; assert listing(dir) == ['other-skill','notes.md']"
+          }
         },
         {
-          "id": "14-REQ-8.2",
+          "id": "REQ-8.2",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "skip a skill name that <dir> does not hold, writing no line for it and leaving the exit code 0"
+          "action": "skip a skill name that <dir> does not hold, writing no line for it and leaving the exit code 0",
+          "check": {
+            "same_as": "REQ-8.1"
+          }
         },
         {
-          "id": "14-REQ-8.3",
+          "id": "REQ-8.3",
           "pattern": "ubiquitous",
-          "system": "skill render",
-          "action": "remove no entry under <dir> other than the directories named af-prd, af-spec and af-impl"
+          "action": "remove no entry under <dir> other than the directories named af-prd, af-spec and af-impl",
+          "check": {
+            "same_as": "REQ-8.1"
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-9",
+      "id": "REQ-9",
       "title": "The committed source tree",
       "rationale": "The render's rules are worth nothing if the repository's own three skills break them; this is the one criterion the split has to satisfy.",
+      "system": "skill render",
       "criteria": [
         {
-          "id": "14-REQ-9.1",
+          "id": "REQ-9.1",
           "pattern": "ubiquitous",
-          "system": "skill render",
           "action": "render every skill of the repository's own skills/ tree for claude, codex, cursor and copilot without reporting a problem",
-          "contract": "exit code 0 and no line on stderr of the form `<source path>: <problem>`"
+          "contract": "exit code 0 and no line on stderr of the form `<source path>: <problem>`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository's committed skills/ directory as the source"
+            ],
+            "pseudocode": "in internal/skillgen/render_test.go, reading the real tree at ../../skills: code, errOut = run(['--source','../../skills','--out',tmp]); assert code == 0 and no problem lines. This is the one test that reads the repository's own skills; it asserts the render's verdict on them, not their wording."
+          }
         }
       ]
     },
     {
-      "id": "14-REQ-10",
+      "id": "REQ-10",
       "title": "The build's targets",
       "rationale": "The ceiling and the link rules hold only if the check someone runs before committing is the one that enforces them.",
+      "system": "build",
       "criteria": [
         {
-          "id": "14-REQ-10.1",
+          "id": "REQ-10.1",
           "pattern": "event_driven",
           "condition": "make check runs",
-          "system": "build",
           "action": "run the render's checks after test, making no network call and reading no API key",
-          "contract": "the exit code is 0 when the source tree holds no problem and non-zero when it holds one, with the problems on stderr; no request leaves the machine"
+          "contract": "the exit code is 0 when the source tree holds no problem and non-zero when it holds one, with the problems on stderr; no request leaves the machine",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository's Makefile"
+            ],
+            "pseudocode": "in internal/skillgen/make_test.go: out = exec('make','help'); assert the four targets; plan = exec('make','-n','check'); assert skills-check appears after the go test line; plan = exec('make','-n','clean'); assert it removes build. make check is read with -n and never run from a test, because running it would re-enter go test."
+          }
         },
         {
-          "id": "14-REQ-10.2",
+          "id": "REQ-10.2",
           "pattern": "ubiquitous",
-          "system": "build",
-          "action": "list skills, skills-check, install-skills and uninstall-skills in the output of make help"
+          "action": "list skills, skills-check, install-skills and uninstall-skills in the output of make help",
+          "check": {
+            "same_as": "REQ-10.1"
+          }
         },
         {
-          "id": "14-REQ-10.3",
+          "id": "REQ-10.3",
           "pattern": "event_driven",
           "condition": "make clean runs",
-          "system": "build",
           "action": "remove build/skills with the rest of build/",
-          "contract": "build/ does not exist; the exit code is 0"
+          "contract": "build/ does not exist; the exit code is 0",
+          "check": {
+            "same_as": "REQ-10.1"
+          }
         }
       ]
     }
   ],
   "execution_paths": [
     {
-      "id": "14-PATH-1",
+      "id": "PATH-1",
       "title": "A maintainer renders every skill for every agent",
       "steps": [
         {
@@ -392,10 +588,30 @@
           "actor": "maintainer",
           "action": "reads build/skills/codex/af-spec/SKILL.md and finds only name and description in its frontmatter and $af-impl where the source held {{invoke af-impl}}"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "make",
+          "skill render",
+          "the committed skills source tree",
+          "the file system"
+        ],
+        "setup": [
+          "a checkout whose skills/ tree is the committed one",
+          "no build/skills directory"
+        ],
+        "end_state": [
+          "make skills exits 0",
+          "build/skills/<agent>/<name>/SKILL.md exists for all four agents and every skill",
+          "the codex af-spec frontmatter holds name and description and no argument-hint",
+          "its body carries $af-impl where the source carries {{invoke af-impl}}",
+          "its references/ holds the files that skill links"
+        ],
+        "pseudocode": "in internal/skillgen/smoke_test.go, running the real make target in the checkout: exec('make','skills'); read build/skills/codex/af-spec/SKILL.md and assert its frontmatter and its invocation syntax"
+      }
     },
     {
-      "id": "14-PATH-2",
+      "id": "PATH-2",
       "title": "A maintainer installs the skills into a repository and removes them again",
       "steps": [
         {
@@ -418,10 +634,29 @@
           "actor": "skill render",
           "action": "removes the three skill directories, prints removed: <name> for each, and leaves every other entry under <path>/.agents/skills in place"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "make",
+          "skill render",
+          "the committed skills source tree",
+          "the file system"
+        ],
+        "setup": [
+          "a scratch directory standing in for a repository",
+          "the committed skills/ tree"
+        ],
+        "end_state": [
+          "the install exits 0 and prints installed: <name> -> <scratch>/.agents/skills/<name> for each skill",
+          "<scratch>/.agents/skills/<name>/SKILL.md and its references/ exist for each skill",
+          "the uninstall exits 0 and prints removed: <name> for each skill",
+          "<scratch>/.agents/skills holds none of the three skills afterwards"
+        ],
+        "pseudocode": "in internal/skillgen/smoke_test.go: exec('make','install-skills','AGENT=codex','PROJECT='+scratch); assert the tree and the lines; exec('make','uninstall-skills',...); assert the three directories are gone"
+      }
     },
     {
-      "id": "14-PATH-3",
+      "id": "PATH-3",
       "title": "A maintainer sees the render's checks refuse a skill that breaks a rule",
       "steps": [
         {
@@ -440,7 +675,26 @@
           "actor": "maintainer",
           "action": "reads the two problems named, finds build/skills/ unchanged, and sees make check fail on the same checks because it runs skills-check after test"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "make",
+          "skill render",
+          "a broken copy of the skills source tree",
+          "the file system"
+        ],
+        "setup": [
+          "a copy of the committed skills/ tree with a link to a reference file that does not exist added to one skill and another skill's body padded past the ceiling",
+          "no output tree"
+        ],
+        "end_state": [
+          "the exit code is non-zero",
+          "stderr carries one line for the broken link, naming the file and both references directories",
+          "stderr carries one line for the body over the ceiling, naming the agent, the size and the overage",
+          "no output tree was written"
+        ],
+        "pseudocode": "in internal/skillgen/smoke_test.go: copy skills/ to a scratch tree, break it twice, exec('make','skills-check','SKILLS_SRC='+scratch); assert the non-zero exit, both lines and that no output directory exists"
+      }
     }
   ],
   "external_apis": [

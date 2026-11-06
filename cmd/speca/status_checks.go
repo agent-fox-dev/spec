@@ -37,7 +37,7 @@ func (sc *statusCall) raise() {
 
 // unknownKeys names, as "artifact key", each key the package holds that the
 // schema does not allow, and that a write of it would drop. The library reports
-// those of the three JSON artifacts; the frontmatter of prd.md is looked at
+// those of the JSON artifacts; the frontmatter of prd.md is looked at
 // here, since a write renders it again from the fields it knows.
 func (sc *statusCall) unknownKeys() []string {
 	return append(unknownKeys(sc.spec.Validate().Errors), frontmatterUnknownKeys(sc.dir)...)
@@ -49,11 +49,11 @@ func (sc *statusCall) unknownKeys() []string {
 // needs a replacing package that can replace.
 func checkTarget(sc *statusCall) *cli.ErrorInfo {
 	switch sc.target {
-	case string(afspec.PrdFrontmatterV2JsonStatusActive):
+	case string(afspec.PrdFrontmatterV3JsonStatusActive):
 		return sc.checkActivation()
-	case string(afspec.PrdFrontmatterV2JsonStatusSealed):
+	case string(afspec.PrdFrontmatterV3JsonStatusSealed):
 		return sc.checkSealing()
-	case string(afspec.PrdFrontmatterV2JsonStatusSuperseded):
+	case string(afspec.PrdFrontmatterV3JsonStatusSuperseded):
 		return sc.checkReplacing()
 	}
 	return nil
@@ -101,7 +101,7 @@ func (sc *statusCall) checkSealing() *cli.ErrorInfo {
 		return lifecycleRefusal(fmt.Sprintf("%s cannot be sealed: its ## Intent has changed since it was activated (or is gone); "+
 			"restore the intent that was activated, or write a new package that supersedes this one", sc.name), nil)
 	}
-	open := openTasks(sc.spec.Tasks)
+	open := openTasks(sc.spec)
 	if len(open) == 0 {
 		return nil
 	}
@@ -113,14 +113,11 @@ func (sc *statusCall) checkSealing() *cli.ErrorInfo {
 	return nil
 }
 
-// openTasks lists the tasks that are pending or in progress, optional ones
-// included, as "task N (state)", in plan order.
-func openTasks(plan *afspec.TasksV2Json) []string {
-	if plan == nil {
-		return nil
-	}
+// openTasks lists the tasks that are pending or in progress, the derived
+// integration task included, as "task N (state)", in plan order.
+func openTasks(spec *afspec.Spec) []string {
 	var out []string
-	for _, t := range plan.Tasks {
+	for _, t := range spec.Plan() {
 		if t.State == afspec.TaskStatePending || t.State == afspec.TaskStateInProgress {
 			out = append(out, fmt.Sprintf("task %d (%s)", t.Id, t.State))
 		}
@@ -134,7 +131,7 @@ func openTasks(plan *afspec.TasksV2Json) []string {
 // same as part of its validation: sealing, archiving and superseding. A call
 // that only moves the directory writes no file.
 func checkUnknownKeys(sc *statusCall) *cli.ErrorInfo {
-	if sc.moveOnly || sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive) {
+	if sc.moveOnly || sc.target == string(afspec.PrdFrontmatterV3JsonStatusActive) {
 		return nil
 	}
 	keys := sc.unknownKeys()

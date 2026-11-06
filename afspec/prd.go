@@ -15,19 +15,23 @@ type prdFrontmatter struct {
 	Title         string   `yaml:"title"`
 	Status        string   `yaml:"status"`
 	CreatedAt     string   `yaml:"created_at"`
-	UpdatedAt     string   `yaml:"updated_at"`
-	Owner         string   `yaml:"owner"`
 	Source        string   `yaml:"source"`
 	Supersedes    []string `yaml:"supersedes"`
-	Tags          []string `yaml:"tags"`
 	IntentHash    *string  `yaml:"intent_hash"`
 	SchemaVersion int      `yaml:"schema_version"`
+	// Profile is full or lite, or "" when the frontmatter names none, which
+	// is full.
+	Profile string `yaml:"profile"`
 	// SteeringVersion is read as a plain string, so an empty value on disk is
-	// the field being absent, as an empty owner or source is.
+	// the field being absent, as an empty source is.
 	SteeringVersion string `yaml:"steering_version"`
 	// Extensions are the frontmatter's extension keys (extensions.go), read
 	// from a second decode into a map.
 	Extensions map[string]any `yaml:"-"`
+	// Raw is the whole frontmatter as a map, for a reader of another format
+	// version (migrate.go) that needs the fields this version has no field
+	// for.
+	Raw map[string]any `yaml:"-"`
 }
 
 // parsePRD splits a prd.md file into its YAML frontmatter and Markdown body.
@@ -90,6 +94,7 @@ func parsePRD(data []byte, filePath string) (*prdFrontmatter, string, error) {
 	var all map[string]any
 	if yaml.Unmarshal([]byte(frontmatterStr), &all) == nil {
 		fm.Extensions = frontmatterExtensions(all)
+		fm.Raw = all
 	}
 
 	// Validate required fields
@@ -115,12 +120,9 @@ func parsePRD(data []byte, filePath string) (*prdFrontmatter, string, error) {
 		}
 	}
 
-	// Ensure slices are non-nil, so an absent list marshals as [] rather than null
+	// Ensure the slice is non-nil, so an absent list marshals as [] rather than null
 	if fm.Supersedes == nil {
 		fm.Supersedes = []string{}
-	}
-	if fm.Tags == nil {
-		fm.Tags = []string{}
 	}
 
 	return &fm, body, nil
@@ -130,9 +132,9 @@ func parsePRD(data []byte, filePath string) (*prdFrontmatter, string, error) {
 // renderer with a fixed field order. It does not use yaml.Marshal, so the
 // output is byte-stable across runs and across library versions.
 //
-// Format v2 §4.1 makes owner, source, supersedes and tags optional; they are
-// omitted when empty so that a spec that never sets them round-trips without
-// accumulating empty keys.
+// Format v3 §4.1 makes profile, steering_version, source and supersedes
+// optional; they are omitted when empty so that a spec that never sets them
+// round-trips without accumulating empty keys.
 func renderPRD(s *Spec) []byte {
 	var b strings.Builder
 
@@ -158,10 +160,6 @@ func renderPRD(s *Spec) []byte {
 	b.WriteString(renderYAMLString(s.CreatedAt))
 	b.WriteByte('\n')
 
-	b.WriteString("updated_at: ")
-	b.WriteString(renderYAMLString(s.UpdatedAt))
-	b.WriteByte('\n')
-
 	b.WriteString("intent_hash: ")
 	b.WriteString(renderYAMLNullableString(s.IntentHash))
 	b.WriteByte('\n')
@@ -170,15 +168,15 @@ func renderPRD(s *Spec) []byte {
 	b.WriteString(fmt.Sprintf("%d", s.SchemaVersion))
 	b.WriteByte('\n')
 
-	if s.SteeringVersion != "" {
-		b.WriteString("steering_version: ")
-		b.WriteString(renderYAMLString(s.SteeringVersion))
+	if s.Profile != "" {
+		b.WriteString("profile: ")
+		b.WriteString(renderYAMLString(s.Profile))
 		b.WriteByte('\n')
 	}
 
-	if s.Owner != "" {
-		b.WriteString("owner: ")
-		b.WriteString(renderYAMLString(s.Owner))
+	if s.SteeringVersion != "" {
+		b.WriteString("steering_version: ")
+		b.WriteString(renderYAMLString(s.SteeringVersion))
 		b.WriteByte('\n')
 	}
 
@@ -191,12 +189,6 @@ func renderPRD(s *Spec) []byte {
 	if len(s.Supersedes) > 0 {
 		b.WriteString("supersedes: ")
 		b.WriteString(renderYAMLList(s.Supersedes))
-		b.WriteByte('\n')
-	}
-
-	if len(s.Tags) > 0 {
-		b.WriteString("tags: ")
-		b.WriteString(renderYAMLList(s.Tags))
 		b.WriteByte('\n')
 	}
 

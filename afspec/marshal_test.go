@@ -14,7 +14,7 @@ func TestMarshalJSON_OrdersFieldsBySchema(t *testing.T) {
 	out := string(data)
 	last := -1
 	for _, key := range []string{`"$schema"`, `"spec_id"`, `"spec_name"`, `"schema_version"`,
-		`"introduction"`, `"glossary"`, `"requirements"`, `"execution_paths"`} {
+		`"requirements"`, `"system"`, `"criteria"`, `"check"`, `"execution_paths"`, `"smoke"`} {
 		i := strings.Index(out, key)
 		if i < 0 {
 			t.Fatalf("key %s is missing", key)
@@ -24,25 +24,16 @@ func TestMarshalJSON_OrdersFieldsBySchema(t *testing.T) {
 		}
 		last = i
 	}
-}
-
-func TestMarshalJSON_SortsMapKeys(t *testing.T) {
-	req := RequirementsV2Json{Glossary: RequirementsV2JsonGlossary{"zebra": "z", "alpha": "a", "middle": "m"}}
-	data, err := MarshalJSON(&req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(data)
-	if strings.Index(out, "alpha") > strings.Index(out, "middle") ||
-		strings.Index(out, "middle") > strings.Index(out, "zebra") {
-		t.Errorf("glossary keys are not sorted:\n%s", out)
+	// Inside a criterion the check comes last, after the contract.
+	if strings.Index(out, `"contract": "a non-nil`) > strings.Index(out, `"check": {`) {
+		t.Error("the check is written before the contract")
 	}
 }
 
 // Spec text containing <, > or & must round-trip, and encoding/json escapes
 // them by default.
 func TestMarshalJSON_DoesNotEscapeHTML(t *testing.T) {
-	req := RequirementsV2Json{Introduction: `write {"error": <message>} when a && b`}
+	req := RequirementsV3Json{Requirements: []Requirement{{Title: `write {"error": <message>} when a && b`}}}
 	data, err := MarshalJSON(&req)
 	if err != nil {
 		t.Fatal(err)
@@ -58,16 +49,17 @@ func TestMarshalJSON_DoesNotEscapeHTML(t *testing.T) {
 
 // The output decodes with encoding/json and re-marshals to the same bytes. The
 // two marshallers do not agree field for field on purpose: an explicitly empty
-// array such as the integration task's "criteria": [] is preserved here and
-// dropped by encoding/json's omitempty, and dropping it would break round-trip
-// fidelity.
+// array such as "execution_paths": [] is preserved here and dropped by
+// encoding/json's omitempty, and dropping it would break round-trip fidelity.
 func TestMarshalJSON_IsStableUnderDecodeAndReencode(t *testing.T) {
-	first, err := MarshalJSON(loadFixture(t, fixtureValidSpec).Tasks)
+	spec := loadFixture(t, fixtureValidSpec)
+	spec.Requirements.ExecutionPaths = []ExecutionPath{}
+	first, err := MarshalJSON(spec.Requirements)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var decoded TasksV2Json
+	var decoded RequirementsV3Json
 	if err := json.Unmarshal(first, &decoded); err != nil {
 		t.Fatalf("our output does not decode: %v", err)
 	}
@@ -78,8 +70,19 @@ func TestMarshalJSON_IsStableUnderDecodeAndReencode(t *testing.T) {
 	if string(second) != string(first) {
 		t.Errorf("marshal → unmarshal → marshal is not stable:\n%s", firstDifference(string(first), string(second)))
 	}
-	if decoded.Tasks[2].Criteria == nil {
-		t.Error(`the integration task's explicit "criteria": [] decoded as absent`)
+	if decoded.ExecutionPaths == nil {
+		t.Error(`the explicit "execution_paths": [] decoded as absent`)
+	}
+}
+
+// A nil execution_paths is left out, which is how a lite package is written.
+func TestMarshalJSON_OmitsANilExecutionPaths(t *testing.T) {
+	data, err := MarshalJSON(&RequirementsV3Json{Requirements: []Requirement{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "execution_paths") {
+		t.Errorf("a nil execution_paths was written:\n%s", data)
 	}
 }
 

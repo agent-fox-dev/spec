@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-fox.dev/schemas/progress.v3.json",
+  "title": "Progress",
+  "description": "Schema for progress.json, the state of a package's tasks (format version 3). Written by the tools, never part of the contract.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "spec_id": { "type": "string", "minLength": 1 },
+    "spec_name": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "integer", "const": 3 },
+    "updated_at": { "type": "string", "description": "When a task last changed state, RFC 3339." },
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/task_progress" },
+      "description": "One entry per task of the plan and one for the integration task, in id order. A task with no entry is pending."
+    }
+  },
+  "required": ["$schema", "spec_id", "spec_name", "schema_version", "updated_at", "tasks"],
+  "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+  "additionalProperties": false,
+  "$defs": {
+    "task_progress": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "state": { "type": "string", "enum": ["pending", "in_progress", "done", "dropped"] }
+      },
+      "required": ["id", "state"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    }
+  }
+}

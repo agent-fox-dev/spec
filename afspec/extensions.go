@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Extension keys (format v2 §10.1): every object of the four schemas accepts a
+// Extension keys (format v3 §10.1): every object of the four schemas accepts a
 // key that begins with "x-", with any value, for a team's own metadata. The
 // artifact types are generated from the schemas and have no field for one, so
 // encoding/json drops it. LoadSpec records each such key with the address of
@@ -29,7 +29,7 @@ func IsExtensionKey(key string) bool { return strings.HasPrefix(key, ExtensionPr
 // An address is the object's path from the root of the file: "" for the root,
 // "/<key>" for the object under a field, and, for an element of an array,
 // "/id=<id>" when the element has an id (a requirement, a criterion, an
-// execution path, a test, a task) and "/<index>" otherwise. The library's
+// execution path, a task, a progress entry) and "/<index>" otherwise. The library's
 // mutations add and remove objects that have ids, so an id survives them where
 // a position would not.
 type extensionSet map[string]map[string]any

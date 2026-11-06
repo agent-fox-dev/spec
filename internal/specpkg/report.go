@@ -33,7 +33,7 @@ func itemOf(e afspec.ValidationEntry) envelope.ValidationItem {
 
 // TraceOf derives the coverage summary.
 //
-// It is computed rather than read, because format v2 makes coverage and
+// It is computed rather than read, because format v3 makes coverage and
 // traceability derived: there is no coverage object in the artifacts to
 // report, and the numbers here are the only place they exist. The matrix
 // carries one link per criterion AND one per execution path, distinguished by
@@ -54,29 +54,12 @@ func TraceOf(s *afspec.Spec) envelope.TraceReport {
 			} else {
 				out.CriteriaUncovered = append(out.CriteriaUncovered, link.ID)
 			}
-		}
-	}
-	out.TestsUnowned = unownedTests(s)
-	return out
-}
-
-// unownedTests are the tests no task lists. Rule C7 already reports them as
-// errors; repeating them here is what lets a caller act on the gap without
-// parsing validation messages.
-func unownedTests(s *afspec.Spec) []string {
-	if s.TestSpec == nil || s.Tasks == nil {
-		return nil
-	}
-	owned := map[string]bool{}
-	for _, t := range s.Tasks.Tasks {
-		for _, id := range t.Tests {
-			owned[id] = true
-		}
-	}
-	var out []string
-	for _, t := range s.TestSpec.Tests {
-		if !owned[t.Id] {
-			out = append(out, t.Id)
+			// Rule C5 already reports an unowned criterion as an error;
+			// repeating it here is what lets a caller act on the gap without
+			// parsing validation messages.
+			if !link.Owned {
+				out.CriteriaUnowned = append(out.CriteriaUnowned, link.ID)
+			}
 		}
 	}
 	return out

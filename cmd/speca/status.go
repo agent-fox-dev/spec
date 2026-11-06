@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -16,10 +15,10 @@ import (
 // statusTargets are the statuses --status moves a package to, in the order of
 // its life. draft is not one: no move leads back to it.
 var statusTargets = []string{
-	string(afspec.PrdFrontmatterV2JsonStatusActive),
-	string(afspec.PrdFrontmatterV2JsonStatusSealed),
-	string(afspec.PrdFrontmatterV2JsonStatusSuperseded),
-	string(afspec.PrdFrontmatterV2JsonStatusArchived),
+	string(afspec.PrdFrontmatterV3JsonStatusActive),
+	string(afspec.PrdFrontmatterV3JsonStatusSealed),
+	string(afspec.PrdFrontmatterV3JsonStatusSuperseded),
+	string(afspec.PrdFrontmatterV3JsonStatusArchived),
 }
 
 // givenFlag is a string flag that remembers it was given. --status "" must be
@@ -104,8 +103,8 @@ func executeStatus(c *call, dir string) (*Result, *cli.ErrorInfo) {
 // archive/ and starts with it elsewhere: an archive or a supersede of a package
 // that is not there yet, which a move-only call finishes.
 func (sc *statusCall) movesUnderArchive() bool {
-	return !sc.under && (sc.target == string(afspec.PrdFrontmatterV2JsonStatusArchived) ||
-		sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded))
+	return !sc.under && (sc.target == string(afspec.PrdFrontmatterV3JsonStatusArchived) ||
+		sc.target == string(afspec.PrdFrontmatterV3JsonStatusSuperseded))
 }
 
 // holdingDir is the directory that holds the package: where archive/ is made.
@@ -126,15 +125,14 @@ func checkDestination(sc *statusCall) *cli.ErrorInfo {
 }
 
 // apply writes what the call asks for, in order, and returns the package as it
-// is now. updated_at is set, since the library does not, on every package the
-// call writes.
+// is now. updated_at is not touched: it is progress.json's, and says when a
+// task last changed state, which a status change is not.
 func (sc *statusCall) apply() (*Result, *cli.ErrorInfo) {
 	var changes []envelope.Change
 	here := sc.dir
 	sc.written = sc.spec
-	superseding := sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded)
+	superseding := sc.target == string(afspec.PrdFrontmatterV3JsonStatusSuperseded)
 	if !sc.moveOnly {
-		sc.spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		var err error
 		if superseding {
 			sc.written, err = sc.supersede()
@@ -181,15 +179,14 @@ func (sc *statusCall) preview() *Result {
 	var changes []envelope.Change
 	if !sc.moveOnly {
 		after.Status = sc.target
-		after.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		if sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive) {
+		if sc.target == string(afspec.PrdFrontmatterV3JsonStatusActive) {
 			hash, _ := afspec.ComputeIntentHash(after.PRDBody) // the check found the intent
 			after.IntentHash = &hash
 		}
 		changes = append(changes, envelope.Change{Kind: "status", From: sc.spec.Status, To: sc.target})
 	}
 	sc.raise()
-	if sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded) {
+	if sc.target == string(afspec.PrdFrontmatterV3JsonStatusSuperseded) {
 		if change := sc.recordSupersedes(); change != nil {
 			changes = append(changes, *change)
 		}
@@ -222,7 +219,7 @@ func (sc *statusCall) finish(r *Result, changes []envelope.Change) *Result {
 	switch t := r.NextTask; {
 	case sc.opts.dryRun:
 		r.callNext = []cli.Next{sc.confirmCall()}
-	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive) && t != nil &&
+	case sc.target == string(afspec.PrdFrontmatterV3JsonStatusActive) && t != nil &&
 		t.State == string(afspec.TaskStatePending) && t.Ready:
 		r.callNext = []cli.Next{claimOf(r.SpecDir, *t)}
 	}
@@ -264,11 +261,11 @@ func (sc *statusCall) sentence(changes []envelope.Change) string {
 	switch {
 	case !wrote && moved != nil:
 		s = fmt.Sprintf("moved %s to %s", name, moved.To)
-	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusActive):
+	case sc.target == string(afspec.PrdFrontmatterV3JsonStatusActive):
 		s = "activated " + name
-	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusSealed):
+	case sc.target == string(afspec.PrdFrontmatterV3JsonStatusSealed):
 		s = "sealed " + name
-	case sc.target == string(afspec.PrdFrontmatterV2JsonStatusSuperseded):
+	case sc.target == string(afspec.PrdFrontmatterV3JsonStatusSuperseded):
 		s = fmt.Sprintf("superseded %s by %s%s", name, sc.by.SpecID, movedTo)
 	default:
 		s = "archived " + name + movedTo
@@ -344,15 +341,15 @@ func checkLoaded(sc *statusCall) *cli.ErrorInfo {
 	return nil
 }
 
-// legacyRefusal is the refusal of a package in a format version other than 2.
-// A write through the version 2 types, of its status or of its supersedes
-// list, would replace its tasks and tests with what the types read of them,
-// which is nothing.
+// legacyRefusal is the refusal of a package in a format version other than 3.
+// A write through the version 3 types, of its status or of its supersedes
+// list, would replace its artifacts with what the types read of them, which
+// for a v2 package is its tasks without their states and no tests.
 func legacyRefusal(who string, spec *afspec.Spec) *cli.ErrorInfo {
 	return &cli.ErrorInfo{Stage: "load", Category: envelope.CategoryInput,
-		Message: fmt.Sprintf("%s is format version %d, and speca changes the state of format version 2 packages only: "+
-			"a write would discard its tasks and tests, which the version 2 types do not read; convert it to version %d first "+
-			"(format v2 §13 maps each v1 construct to its v2 form)", who, spec.SchemaVersion, afspec.SchemaVersion)}
+		Message: fmt.Sprintf("%s is format version %d, and speca changes the state of format version 3 packages only: "+
+			"a write would discard what the version 3 types do not read; convert it to version %d first "+
+			"(speca <package> --migrate converts a version 2 package)", who, spec.SchemaVersion, afspec.SchemaVersion)}
 }
 
 // underArchive reports whether dir is a package under archive/: the directory
@@ -368,7 +365,7 @@ func checkMove(sc *statusCall) *cli.ErrorInfo {
 	status := sc.spec.Status
 	sc.under = underArchive(sc.dir)
 	sc.moveOnly = sc.target == status && !sc.under &&
-		(status == string(afspec.PrdFrontmatterV2JsonStatusArchived) || status == string(afspec.PrdFrontmatterV2JsonStatusSuperseded))
+		(status == string(afspec.PrdFrontmatterV3JsonStatusArchived) || status == string(afspec.PrdFrontmatterV3JsonStatusSuperseded))
 	if sc.moveOnly || afspec.ValidTransition(status, sc.target) {
 		return nil
 	}
@@ -381,10 +378,10 @@ func checkMove(sc *statusCall) *cli.ErrorInfo {
 
 // moveVerbs say a move to a status as an instruction.
 var moveVerbs = map[string]string{
-	string(afspec.PrdFrontmatterV2JsonStatusActive):     "activate",
-	string(afspec.PrdFrontmatterV2JsonStatusSealed):     "seal",
-	string(afspec.PrdFrontmatterV2JsonStatusSuperseded): "supersede",
-	string(afspec.PrdFrontmatterV2JsonStatusArchived):   "archive",
+	string(afspec.PrdFrontmatterV3JsonStatusActive):     "activate",
+	string(afspec.PrdFrontmatterV3JsonStatusSealed):     "seal",
+	string(afspec.PrdFrontmatterV3JsonStatusSuperseded): "supersede",
+	string(afspec.PrdFrontmatterV3JsonStatusArchived):   "archive",
 }
 
 // shortestMoves is a shortest chain of moves the lifecycle allows from one
@@ -431,7 +428,7 @@ func refusalMessage(name, current, target string) string {
 	steps := make([]string, len(chain))
 	for i, status := range chain {
 		switch {
-		case i == len(chain)-1 && status == string(afspec.PrdFrontmatterV2JsonStatusSuperseded):
+		case i == len(chain)-1 && status == string(afspec.PrdFrontmatterV3JsonStatusSuperseded):
 			steps[i] = fmt.Sprintf("then %s it, with --by naming the package that replaces it", moveVerbs[status])
 		case i == len(chain)-1:
 			steps[i] = fmt.Sprintf("then %s it", moveVerbs[status])

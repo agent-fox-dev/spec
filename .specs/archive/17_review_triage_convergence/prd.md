@@ -4,9 +4,8 @@ spec_name: "review_triage_convergence"
 title: "Triage every review finding four ways and converge on two clean rounds"
 status: "archived"
 created_at: "2026-11-06T12:57:04Z"
-updated_at: "2026-11-06T15:41:21Z"
 intent_hash: "d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"
 ---
 
@@ -383,3 +382,11 @@ and an ADR records it. The summary clause becomes, for example,
 - No new dependency. The counter-evidence quote is a string match over text
   the run already holds, through the same whitespace normalisation
   `sameEvidence` in `specgen/review_tool.go` applies.
+
+## Glossary
+
+- **clean round**: A round whose review raised no critical and no major finding. A round whose review raised only minor findings is clean, and so is one whose review raised none at all.
+- **counter-evidence**: What a contested answer must carry so that the run can check it rather than take the reviser's word: either a quote that appears in the PRD or the input verbatim, whitespace aside, or a repository path that exists, with what it shows.
+- **escalation**: A finding the reviser answers escalated: it holds, and remedying it takes a decision the input, the steering and the code do not make — a trade-off a person should own.
+- **provisional decision**: The option an escalation takes so that the package stays complete rather than carrying an open choice: written into the PRD under its Design Decisions section opening with the word Provisional, and handed to the caller as an open question.
+- **rubric**: The written standard a finding applies, named in a field of the finding. For the PRD review it is prd, the PRD's own flaws, or steering, a contradiction of a project directive. The reviewer sets it and the reviser cannot change it.

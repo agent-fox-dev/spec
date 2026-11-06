@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "15",
   "spec_name": "rendered_package_markdown",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -29,17 +29,9 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Compose the rendered bytes, expose them, and write spec.md with every save",
       "criteria": [
-        "15-REQ-1"
-      ],
-      "tests": [
-        "TS-15-1",
-        "TS-15-2",
-        "TS-15-3",
-        "TS-15-4",
-        "TS-15-5"
+        "REQ-1"
       ],
       "steps": [
         "Add the composition, determinism, exposure, failed-save and load behaviours to afspec/render_test.go and afspec/afspec_test.go, and confirm they fail",
@@ -63,22 +55,13 @@
         "docs/api.md",
         "docs/architecture.md",
         "docs/generated/"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Report a render that is missing, unreadable or stale in the verdict",
       "criteria": [
-        "15-REQ-2"
-      ],
-      "tests": [
-        "TS-15-6",
-        "TS-15-7",
-        "TS-15-8",
-        "TS-15-9",
-        "TS-15-10"
+        "REQ-2"
       ],
       "steps": [
         "Add the rendered-rule behaviours to afspec/validate_test.go and the refused activation to cmd/speca/status_test.go, and confirm they fail",
@@ -102,24 +85,14 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Add the --render form and render one package with it",
       "criteria": [
-        "15-REQ-3",
-        "15-REQ-5"
-      ],
-      "tests": [
-        "TS-15-11",
-        "TS-15-12",
-        "TS-15-13",
-        "TS-15-14",
-        "TS-15-19",
-        "TS-15-20"
+        "REQ-3",
+        "REQ-5"
       ],
       "steps": [
         "Add the one-package render behaviours to a new cmd/speca/render_test.go, the flag grammar to cmd/speca/main_test.go beside TestUsageErrors, and the self-description case to cmd/speca/schema_test.go, and confirm they fail",
@@ -148,21 +121,13 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Render every package under the spec root with one call",
       "criteria": [
-        "15-REQ-4"
-      ],
-      "tests": [
-        "TS-15-15",
-        "TS-15-16",
-        "TS-15-17",
-        "TS-15-18"
+        "REQ-4"
       ],
       "steps": [
         "Add the sweep behaviours to cmd/speca/render_test.go, and confirm they fail",
@@ -184,51 +149,7 @@
       ],
       "depends_on": [
         3
-      ],
-      "state": "done"
-    },
-    {
-      "id": 5,
-      "kind": "integration",
-      "title": "Verify the three paths end to end, and commit the renders of this repository's packages",
-      "tests": [
-        "TS-15-21",
-        "TS-15-22",
-        "TS-15-23"
-      ],
-      "steps": [
-        "Add the three end-to-end cases to cmd/speca/e2e_test.go, each against a real temporary spec root and the real library, and confirm they pass",
-        "Trace 15-PATH-1 from speca --status active through checkActivation and the library's Transition to the renamed spec.md on disk, and confirm each step calls the next with no stub left",
-        "Trace 15-PATH-2 from speca --validate through the rendered rule to the error, then through speca --render to the written file and back to a clean verdict, and confirm the message a person reads names the first differing line and the repairing call",
-        "Trace 15-PATH-3 from speca --render --all through the spec root and archive listing to a spec.md written for every package, and confirm the dry run reaches the same decisions and writes nothing",
-        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: saveToDisk consumes RenderedBytes, the verdict consumes the rule's findings, checkActivation consumes the verdict's rules, and the render form's result consumes each package's outcome",
-        "Grep afspec/, envelope/, internal/specpkg/ and cmd/speca/ for TODO and panic(\"not implemented\") and remove any that remain",
-        "Change skills/af-spec/SKILL.md so that §10 runs `speca <NN> --render` before `speca <NN> --validate`, and name the --render form and the rendered rule in skills/_shared/references/speca-specr.md and skills/af-spec/references/verdict.md; run make skills-check and confirm every body is still within the 24,576-byte ceiling",
-        "Write docs/adr/14-commit-the-rendered-package-beside-its-json.md recording the decision: the render is written by every save in the same atomic write, a stale render is an error only while the package can be saved, speca renders and specr does not, and spec.md is derived and never read as data",
-        "Add spec.md to the package file table in README.md, and say in docs/specr.md that spec.md is specr's unscoped render, committed with the package",
-        "Run `speca --render --all` over this repository's own .specs/, chmod the written files to the repository's usual mode, and commit every spec.md with the change",
-        "Run make doc and then make check, and confirm the only files the render added to the working tree are spec.md files"
-      ],
-      "touches": [
-        "cmd/speca/e2e_test.go",
-        "skills/af-spec/SKILL.md",
-        "skills/af-spec/references/verdict.md",
-        "skills/_shared/references/speca-specr.md",
-        "docs/adr/14-commit-the-rendered-package-beside-its-json.md",
-        "docs/specr.md",
-        "README.md",
-        ".specs/"
-      ],
-      "depends_on": [
-        2,
-        4
-      ],
-      "done_when": [
-        "`make check` passes, fmt, vet, lint, test and skills-check among it",
-        "every package under .specs/, archive/ included, holds a spec.md that `speca --render --all --dry-run` reports as unchanged",
-        "`git status --short` shows no file changed by the render other than a spec.md"
-      ],
-      "state": "done"
+      ]
     }
   ]
 }

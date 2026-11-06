@@ -100,10 +100,10 @@ SCHEMAS_DIR := $(CURDIR)/afspec/schemas
 .PHONY: json-gen
 json-gen: ## Regenerate the Go artifact types from the JSON Schemas
 	go install github.com/atombender/go-jsonschema@latest
-	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/requirements.v2.json  > $(CURDIR)/afspec/requirements.v2.go
-	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/test_spec.v2.json     > $(CURDIR)/afspec/test_spec.v2.go
-	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/tasks.v2.json         > $(CURDIR)/afspec/tasks.v2.go
-	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/prd-frontmatter.v2.json > $(CURDIR)/afspec/prd-frontmatter.v2.go
+	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/requirements.v3.json  > $(CURDIR)/afspec/requirements.v3.go
+	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/progress.v3.json      > $(CURDIR)/afspec/progress.v3.go
+	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/tasks.v3.json         > $(CURDIR)/afspec/tasks.v3.go
+	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/prd-frontmatter.v3.json > $(CURDIR)/afspec/prd-frontmatter.v3.go
 
 # render and install the skills
 

@@ -1,567 +1,1021 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
   "spec_id": "09",
   "spec_name": "adversarial_prd_review",
-  "schema_version": 2,
-  "introduction": "The `spec` command gains an opt-in adversarial review (`--adversarial`, `--adversarial-rounds`). A fresh reviewer agent looks for flaws in every PRD the run writes, and a fresh reviser agent answers each flaw before the requirements, test spec and tasks are generated. The result reports each review, and a failed review never fails the run.",
-  "glossary": {
-    "codebase_notes": "The notes the PRD phase hands to later phases after reading the code, bounded to 12000 bytes (ADR 04).",
-    "disposition": "What became of a finding: `accepted` (the PRD was changed to remedy it), `rejected` (with the reviser's reason) or `unanswered` (no revision finished for its round).",
-    "finding": "One flaw a reviewer reports, with severity (`critical`, `major` or `minor`), section, flaw, evidence, remedy and an optional `reopens` id. The run gives it the id `R<round>-F<n>`.",
-    "last complete PRD": "The PRD that the PRD phase wrote when no revision has finished, otherwise the PRD that the last finished revision left.",
-    "review phase": "The `prd_review` phase: a fresh agent conversation that reads the current PRD and submits a list of findings, possibly empty.",
-    "revision phase": "The `prd_revision` phase: a fresh agent conversation, separate from the PRD author and the reviewer, that answers every finding of a round and submits the revised PRD body.",
-    "round": "One review phase, followed by one revision phase when the review raised at least one finding.",
-    "round limit": "The highest number of rounds a PRD may get: the value of `--adversarial-rounds` (1 to 5), or 1 when the flag is not given.",
-    "stop_reason": "The single reason the rounds of a PRD stopped: `no_findings`, `no_serious_findings`, `rounds_exhausted` or `incomplete`.",
-    "whitespace normalisation": "Trimming leading and trailing whitespace and collapsing every internal run of whitespace into a single space, before two evidence strings are compared."
-  },
+  "schema_version": 3,
   "requirements": [
     {
-      "id": "09-REQ-1",
+      "id": "REQ-1",
       "title": "Adversarial flags and their validation",
       "rationale": "A review that is off by default leaves every existing run unchanged, and a malformed round count is refused before any money is spent.",
       "criteria": [
         {
-          "id": "09-REQ-1.1",
+          "id": "REQ-1.1",
           "pattern": "ubiquitous",
           "system": "spec command",
-          "action": "register a boolean flag `--adversarial` that is off by default and an integer flag `--adversarial-rounds`, and use a round limit of 1 when `--adversarial` is on and `--adversarial-rounds` is not given"
+          "action": "register a boolean flag `--adversarial` that is off by default and an integer flag `--adversarial-rounds`, and use a round limit of 1 when `--adversarial` is on and `--adversarial-rounds` is not given",
+          "contract": "adversarial is false when not given; adversarial is true and the resulting Options round limit is 1 with `--adversarial` alone; the round limit is 3 when `--adversarial-rounds 3` is given",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the spec command's flag set"
+            ],
+            "pseudocode": "o = specOptions(parse([])); assert !o.Adversarial; o = specOptions(parse(['--adversarial'])); assert o.Adversarial && o.AdversarialRounds == 1; o = specOptions(parse(['--adversarial','--adversarial-rounds','3'])); assert o.AdversarialRounds == 3"
+          }
         },
         {
-          "id": "09-REQ-1.2",
+          "id": "REQ-1.2",
           "pattern": "unwanted",
           "condition": "`--adversarial-rounds` is given with a value below 1 or above 5, including an explicit `0`, with or without `--preflight`",
           "system": "spec command",
           "action": "reject the invocation as a usage error before any input is fetched or any model is called",
-          "contract": "exit code 2, error category `usage`, no phase recorded in usage and no file written"
+          "contract": "exit code 2, error category `usage`, no phase recorded in usage and no file written",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a stub provider and a fetch hook that fail the test if called",
+              "an empty specs dir"
+            ],
+            "pseudocode": "for n in [0,6,-1]: for pf in [false,true]: r = runSpec(args(n, pf)); assert r.exit == 2; assert r.env.error.category == 'usage'; assert fetchCalls == 0 && modelCalls == 0; assert len(r.env.usage.phases) == 0; assert dirEmpty(specsDir)"
+          }
         },
         {
-          "id": "09-REQ-1.3",
+          "id": "REQ-1.3",
           "pattern": "unwanted",
           "condition": "`--adversarial-rounds` is given while `--adversarial` is off, with or without `--preflight`",
           "system": "spec command",
           "action": "reject the invocation as a usage error before any input is fetched or any model is called",
-          "contract": "exit code 2, error category `usage`, no phase recorded in usage and no file written"
+          "contract": "exit code 2, error category `usage`, no phase recorded in usage and no file written",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a stub provider and a fetch hook that fail the test if called"
+            ],
+            "pseudocode": "for pf in [false,true]: r = runSpec(['--adversarial-rounds','2'] + pf); assert r.exit == 2 && r.env.error.category == 'usage'; assert modelCalls == 0 && fetchCalls == 0"
+          }
         },
         {
-          "id": "09-REQ-1.4",
+          "id": "REQ-1.4",
           "pattern": "unwanted",
           "condition": "`--adversarial-rounds` is given a value that is not an integer",
           "system": "spec command",
           "action": "reject the invocation through the flag parser before any input is fetched or any model is called",
-          "contract": "exit code 2, error category `usage`"
+          "contract": "exit code 2, error category `usage`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a stub provider that fails the test if called"
+            ],
+            "pseudocode": "for v in ['abc','1.5']: r = runSpec(['--adversarial','--adversarial-rounds',v]); assert r.exit == 2; assert r.env.error.category == 'usage'; assert modelCalls == 0"
+          }
         },
         {
-          "id": "09-REQ-1.5",
+          "id": "REQ-1.5",
           "pattern": "state_driven",
           "condition": "`--adversarial` is off",
           "system": "specgen pipeline",
-          "action": "run the same phases with the same prompts, and produce the same result, summary sentence, files on disk and `usage.phases[]` entries as a run of the same input before this feature, with no `review` field in any package"
+          "action": "run the same phases with the same prompts, and produce the same result, summary sentence, files on disk and `usage.phases[]` entries as a run of the same input before this feature, with no `review` field in any package",
+          "contract": "the phases run are exactly prd, requirements, test_spec and tasks; no package carries a `review` field in the JSON result; the summary sentence has no `review:` clause; the package directory holds only the files the format defines; usage.phases[] names are exactly prd, requirements, test_spec, tasks",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the real specgen pipeline over the valid_spec fixture with a scripted author and a reviewer fake that fails the test if called",
+              "Adversarial is off"
+            ],
+            "pseudocode": "res = Run(ctx, opts{Adversarial:false}); assert phaseNames(res) == ['prd','requirements','test_spec','tasks']; assert reviewerCalls == 0; assert !contains(json(res), '\"review\"'); assert !contains(res.Summary(), 'review:')"
+          }
         },
         {
-          "id": "09-REQ-1.6",
+          "id": "REQ-1.6",
           "pattern": "optional",
           "condition": "`--dry-run` is given together with `--adversarial`",
           "system": "specgen pipeline",
-          "action": "run the review and revision phases as in a real run, write no file, and report each package's `review` with the same fields and values a real run would report"
+          "action": "run the review and revision phases as in a real run, write no file, and report each package's `review` with the same fields and values a real run would report",
+          "contract": "the dry run invoked prd_review and prd_revision; the dry run wrote no file; the dry run's package review equals the real run's package review field by field",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the real pipeline with scripted author, reviewer and reviser returning a major finding then no findings",
+              "two runs of the same input: one with --dry-run, one real"
+            ],
+            "pseudocode": "d = Run(opts{DryRun:true, Adversarial:true, Rounds:2}); r = Run(opts{Adversarial:true, Rounds:2}); assert noFiles(dryDir); assert d.Package.Review == r.Package.Review"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-2",
+      "id": "REQ-2",
       "title": "The review phase",
       "rationale": "A reviewer that did not write the PRD and sees everything the author saw can find flaws the author's blind spots hid.",
+      "system": "review phase",
       "criteria": [
         {
-          "id": "09-REQ-2.1",
+          "id": "REQ-2.1",
           "pattern": "event_driven",
           "condition": "a review phase starts",
-          "system": "review phase",
-          "action": "start a fresh conversation that is sent the current PRD (spec name, title, body, open questions and `relevant_files`), the original input, any `--context`, the current `codebase_notes` labelled as the author's claims to be checked against the code and not as facts, the language block, the steering, the repository map, the landscape of existing specs, and the read-only file tools plus `code_search` when the index exists"
+          "action": "start a fresh conversation that is sent the current PRD (spec name, title, body, open questions and `relevant_files`), the original input, any `--context`, the current `codebase_notes` labelled as the author's claims to be checked against the code and not as facts, the language block, the steering, the repository map, the landscape of existing specs, and the read-only file tools plus `code_search` when the index exists",
+          "contract": "the phase Kind is prd_review and its name is `prd_review`; the prompt contains the spec name, title, body, an open question and a relevant file of the PRD; the prompt contains the original input and the --context text; the notes appear labelled as the author's claims to be checked against the code, not as facts; the system prompt carries the language block, steering, repository map and landscape of existing specs; the built-in tools are the read-only file tools, plus code_search when the index exists; the prompt is not a continuation of the PRD phase's conversation",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a recording runner that captures the agentrun.Phase of every call",
+              "a PRD with open questions, relevant files and codebase_notes 'NOTE-X', input text and `--context` text"
+            ],
+            "pseudocode": "ph = recorder.last(); assert ph.Kind == 'prd_review'; assert contains(ph.User, prd.Body) && contains(ph.User, 'NOTE-X'); assert contains(ph.User, 'claims') && contains(ph.User, 'not facts'); assert ph.BuiltinTools == WithCodeSearch(ReadOnlyFileTools, cs); assert ph.History == nil"
+          }
         },
         {
-          "id": "09-REQ-2.2",
-          "pattern": "complex_event",
-          "condition": "a review phase starts",
-          "guard": "the PRD is one scope of a split",
-          "system": "review phase",
-          "action": "also send every scope's name and one-line scope, which scope this PRD covers, what the earlier scopes deliver as the PRD phase was shown it, and the statement that work belonging to another scope is not a dropped ask, without the PRD-writing instructions the PRD phase receives"
+          "id": "REQ-2.2",
+          "pattern": "event_driven",
+          "condition": "a review phase starts and the PRD is one scope of a split",
+          "action": "also send every scope's name and one-line scope, which scope this PRD covers, what the earlier scopes deliver as the PRD phase was shown it, and the statement that work belonging to another scope is not a dropped ask, without the PRD-writing instructions the PRD phase receives",
+          "contract": "the prompt lists every scope's name and one-line scope; the prompt says which scope this PRD covers; the prompt carries what scope 1 delivered as the PRD phase was shown it; the prompt states that work belonging to another scope is not a dropped ask; the prompt does not contain the PRD-writing instructions of the split block",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a three-scope split plan where scope 2 is under review and scope 1 has a draft PRD and notes"
+            ],
+            "pseudocode": "p = reviewPrompt(prd2, splitCtx(plan, 1, drafts, notes)); for s in plan: assert contains(p, s.Name) && contains(p, s.Scope); assert contains(p, 'not a dropped ask'); assert !contains(p, writeInstructionsText)"
+          }
         },
         {
-          "id": "09-REQ-2.3",
+          "id": "REQ-2.3",
           "pattern": "ubiquitous",
-          "system": "review phase",
           "action": "instruct the reviewer to find flaws rather than approve, and to look for behaviours without an error path, goals that cannot be verified, claims in the PRD or notes that the code contradicts, a proposed component that already exists under another name, scope the input did not ask for, asks of the input the PRD dropped, wording two readers would turn into different requirements, sections that contradict each other, Design Decisions whose reason does not hold, and internal design (package layout, types, signatures) that leaked into the PRD",
-          "contract": "the review phase's system prompt names each of the listed flaw kinds and tells the reviewer not to approve the PRD"
+          "contract": "the review phase's system prompt names each of the listed flaw kinds and tells the reviewer not to approve the PRD",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the review system prompt"
+            ],
+            "pseudocode": "s = prdReviewSystemPrompt(); for k in flawKindKeywords: assert contains(lower(s), k); assert contains(lower(s), 'not approve') or contains(lower(s), 'do not approve')"
+          }
         },
         {
-          "id": "09-REQ-2.4",
+          "id": "REQ-2.4",
           "pattern": "ubiquitous",
-          "system": "review phase",
-          "action": "end the review through a submit tool that takes a list of findings, possibly empty, in which each finding carries a severity from `critical`, `major` or `minor`, a section, a flaw, an evidence, a remedy and a `reopens` id that may be empty"
+          "action": "end the review through a submit tool that takes a list of findings, possibly empty, in which each finding carries a severity from `critical`, `major` or `minor`, a section, a flaw, an evidence, a remedy and a `reopens` id that may be empty",
+          "contract": "both are accepted and terminate the phase; the schema requires severity (enum critical, major, minor), section, flaw, evidence, remedy and reopens in each finding; the sink holds the submitted findings",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a review tool bound to a sink for round 1"
+            ],
+            "pseudocode": "r = tool.Execute(json({findings:[]})); assert r.Terminate && sink.get() == []; r = tool.Execute(json({findings:[f]})); assert r.Terminate; assert schema.item.required == ['severity','section','flaw','evidence','remedy','reopens']"
+          }
         },
         {
-          "id": "09-REQ-2.5",
+          "id": "REQ-2.5",
           "pattern": "event_driven",
           "condition": "the review tool accepts a submission in round r",
-          "system": "review phase",
           "action": "assign each submitted finding the id `R<r>-F<n>`, with n counting from 1 in the order the findings were submitted",
-          "contract": "ids such as `R2-F3` that are unique within the PRD's review and unchanged for the rest of the run"
+          "contract": "ids such as `R2-F3` that are unique within the PRD's review and unchanged for the rest of the run",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a review tool for round 2 with no earlier findings that are reopened"
+            ],
+            "pseudocode": "tool = newReviewTool(round=2, earlier=[]); tool.Execute(three); assert ids(sink.get()) == ['R2-F1','R2-F2','R2-F3']"
+          }
         },
         {
-          "id": "09-REQ-2.6",
+          "id": "REQ-2.6",
           "pattern": "unwanted",
           "condition": "the reviewer ends its conversation without an accepted submission",
-          "system": "review phase",
           "action": "report the phase as not finished, so that the round loop handles it as a review failure",
-          "contract": "a no-result error for phase `prd_review` naming the review tool"
+          "contract": "a no-result error for phase `prd_review` naming the review tool",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a runner fake that finishes the review conversation without calling the submit tool"
+            ],
+            "pseudocode": "_, _, err = reviewer.Review(ctx, req); assert err != nil; assert contains(err.Error(), 'prd_review') && contains(err.Error(), ToolSubmitPRDReview)"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-3",
+      "id": "REQ-3",
       "title": "Review submission checks",
       "rationale": "A finding without evidence or a verbatim repeat of a rejected finding costs a revision without giving it anything to check.",
+      "system": "review tool",
       "criteria": [
         {
-          "id": "09-REQ-3.1",
+          "id": "REQ-3.1",
           "pattern": "unwanted",
           "condition": "a review submission contains more than 30 findings",
-          "system": "review tool",
           "action": "turn the submission back to the reviewer, record no finding from it, and keep the phase running",
-          "contract": "a tool error that names the finding count and the limit of 30"
+          "contract": "a tool error that names the finding count and the limit of 30",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a review tool in round 1"
+            ],
+            "pseudocode": "r = tool.Execute(n(31)); assert r.IsError && contains(r.Msg,'31') && contains(r.Msg,'30'); assert !r.Terminate && sink.empty(); r = tool.Execute(n(30)); assert r.Terminate"
+          }
         },
         {
-          "id": "09-REQ-3.2",
+          "id": "REQ-3.2",
           "pattern": "unwanted",
           "condition": "a finding in a review submission has an empty severity, section, flaw, evidence or remedy",
-          "system": "review tool",
           "action": "turn the submission back to the reviewer, record no finding from it, and tell it to support or withdraw each such finding",
-          "contract": "a tool error that names each offending finding by its position and its empty fields"
+          "contract": "a tool error that names each offending finding by its position and its empty fields",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a review tool in round 1"
+            ],
+            "pseudocode": "r = tool.Execute([ok, noEvidence, noSevNoRemedy]); assert r.IsError; assert contains(r.Msg,'2') && contains(r.Msg,'evidence') && contains(r.Msg,'severity') && contains(r.Msg,'remedy'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-3.3",
+          "id": "REQ-3.3",
           "pattern": "unwanted",
           "condition": "a finding in a round-1 review submission has a non-empty `reopens`",
-          "system": "review tool",
           "action": "turn the submission back to the reviewer and record no finding from it",
-          "contract": "a tool error that names each offending finding"
+          "contract": "a tool error that names each offending finding",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a review tool in round 1"
+            ],
+            "pseudocode": "r = tool.Execute([f{reopens:'R1-F1'}]); assert r.IsError && contains(r.Msg,'1'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-3.4",
+          "id": "REQ-3.4",
           "pattern": "unwanted",
           "condition": "a finding in a later round's review submission has a `reopens` that names no earlier finding of this PRD",
-          "system": "review tool",
           "action": "turn the submission back to the reviewer and record no finding from it",
-          "contract": "a tool error that names each offending finding and the unknown id"
+          "contract": "a tool error that names each offending finding and the unknown id",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a review tool in round 2 with earlier findings R1-F1 and R1-F2"
+            ],
+            "pseudocode": "r = tool2.Execute([f{reopens:'R1-F9'}]); assert r.IsError && contains(r.Msg,'R1-F9'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-3.5",
+          "id": "REQ-3.5",
           "pattern": "unwanted",
           "condition": "a finding in a later round's review submission reopens an earlier `rejected` finding with evidence identical to that finding's evidence after whitespace normalisation",
-          "system": "review tool",
           "action": "turn the submission back to the reviewer and record no finding from it",
-          "contract": "a tool error that names each offending finding and the rejected finding it repeats"
+          "contract": "a tool error that names each offending finding and the rejected finding it repeats",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round-2 review tool whose earlier R1-F1 is rejected with evidence 'a  b\\nc'"
+            ],
+            "pseudocode": "r = tool2.Execute([f{reopens:'R1-F1', evidence:' a b c '}]); assert r.IsError && contains(r.Msg,'R1-F1'); r = tool2.Execute([f{reopens:'R1-F1', evidence:'new'}]); assert r.Terminate"
+          }
         },
         {
-          "id": "09-REQ-3.6",
+          "id": "REQ-3.6",
           "pattern": "unwanted",
           "condition": "a finding in a later round's review submission has an empty `reopens` and the same section text and flaw text as an earlier `rejected` finding",
-          "system": "review tool",
           "action": "turn the submission back to the reviewer and record no finding from it",
-          "contract": "a tool error that names each offending finding and the rejected finding it repeats"
+          "contract": "a tool error that names each offending finding and the rejected finding it repeats",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a round-2 review tool whose earlier R1-F1 is rejected with section 'Goals' and flaw 'X is untestable'"
+            ],
+            "pseudocode": "r = tool2.Execute([f{reopens:'',section:'Goals',flaw:'X is untestable'}]); assert r.IsError && contains(r.Msg,'R1-F1'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-3.7",
+          "id": "REQ-3.7",
           "pattern": "ubiquitous",
-          "system": "review tool",
-          "action": "for any two evidence strings that differ only in leading or trailing whitespace or in the length or kind of internal whitespace runs, treat them as identical, and for any two that differ in a non-whitespace character, treat them as different"
+          "action": "for any two evidence strings that differ only in leading or trailing whitespace or in the length or kind of internal whitespace runs, treat them as identical, and for any two that differ in a non-whitespace character, treat them as different",
+          "contract": "normalised equality holds for the whitespace-only variants; normalised equality does not hold when a non-whitespace character differs",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "the evidence normalisation function used for the repeat check"
+            ],
+            "pseudocode": "for a in gen_strings(): b = perturbWhitespace(a); assert sameEvidence(a,b); c = mutateNonSpaceChar(a); assert !sameEvidence(a,c)"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-4",
+      "id": "REQ-4",
       "title": "The revision phase",
       "rationale": "A third agent weighs each finding on its evidence instead of defending the author's choices, and cannot change what the split depends on.",
       "criteria": [
         {
-          "id": "09-REQ-4.1",
+          "id": "REQ-4.1",
           "pattern": "event_driven",
           "condition": "a review raised at least one finding and its revision phase starts",
           "system": "revision phase",
-          "action": "start a fresh conversation, separate from the PRD phase and the review, that is sent the current PRD, the round's findings with their ids, the original input, any `--context`, the current `codebase_notes`, and the same split context, run context and read-only tools as the review"
+          "action": "start a fresh conversation, separate from the PRD phase and the review, that is sent the current PRD, the round's findings with their ids, the original input, any `--context`, the current `codebase_notes`, and the same split context, run context and read-only tools as the review",
+          "contract": "the phase Kind is prd_revision with a fresh conversation; the prompt carries the PRD, R1-F1 and R1-F2 with their fields, the input, the --context and the notes; the split context, language block, steering, repository map, landscape and read-only tools equal those of the review phase",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a recording runner and a round-1 review that returned findings R1-F1 and R1-F2",
+              "a split scope PRD"
+            ],
+            "pseudocode": "rev = recorder.byKind('prd_revision'); rv = recorder.byKind('prd_review'); assert contains(rev.User,'R1-F1') && contains(rev.User,input); assert rev.BuiltinTools == rv.BuiltinTools; assert splitBlockOf(rev) == splitBlockOf(rv); assert rev.History == nil"
+          }
         },
         {
-          "id": "09-REQ-4.2",
+          "id": "REQ-4.2",
           "pattern": "ubiquitous",
           "system": "revision phase",
-          "action": "instruct the reviser to answer every finding as `accepted`, changing the PRD to remedy it, or as `rejected` with a reason that says why the finding does not hold, and to record in `## Design Decisions` what each accepted remedy settled"
+          "action": "instruct the reviser to answer every finding as `accepted`, changing the PRD to remedy it, or as `rejected` with a reason that says why the finding does not hold, and to record in `## Design Decisions` what each accepted remedy settled",
+          "contract": "it tells the reviser to answer every finding as accepted or rejected; it requires a rejected reason that says why the finding does not hold, not merely disagreement; it tells the reviser to record what each accepted remedy settled in `## Design Decisions`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the revision system prompt"
+            ],
+            "pseudocode": "s = prdRevisionSystemPrompt(); assert contains(s,'accepted') && contains(s,'rejected') && contains(s,'## Design Decisions') && contains(s,'does not hold')"
+          }
         },
         {
-          "id": "09-REQ-4.3",
+          "id": "REQ-4.3",
           "pattern": "ubiquitous",
           "system": "revision tool",
-          "action": "require the complete revised body and the dispositions, accept optional replacement `open_questions`, `relevant_files` and `codebase_notes`, and offer no field for the spec name, the title or the split"
+          "action": "require the complete revised body and the dispositions, accept optional replacement `open_questions`, `relevant_files` and `codebase_notes`, and offer no field for the spec name, the title or the split",
+          "contract": "body and dispositions are required; open_questions, relevant_files and codebase_notes are optional; there is no spec_name, title or recommended_split property",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the revision tool's input schema"
+            ],
+            "pseudocode": "s = revisionSchema(); assert required(s) == ['body','dispositions']; assert optional(s) == ['open_questions','relevant_files','codebase_notes']; assert !has(s,'spec_name') && !has(s,'title') && !has(s,'recommended_split')"
+          }
         },
         {
-          "id": "09-REQ-4.4",
+          "id": "REQ-4.4",
           "pattern": "event_driven",
           "condition": "the revision tool accepts a submission",
           "system": "revision phase",
           "action": "produce a revised PRD that carries the submitted body and the spec name, title and recommended split of the PRD it revises",
-          "contract": "the revised PRD's spec name, title and recommended split equal those of the PRD under revision"
+          "contract": "the revised PRD's spec name, title and recommended split equal those of the PRD under revision",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a PRD with spec name 'widget_cache', title 'Widget cache' and a recommended split of two scopes"
+            ],
+            "pseudocode": "out = sink.get(); assert out.Body == newBody; assert out.SpecName == prd.SpecName && out.Title == prd.Title && out.RecommendedSplit == prd.RecommendedSplit"
+          }
         },
         {
-          "id": "09-REQ-4.5",
+          "id": "REQ-4.5",
           "pattern": "event_driven",
           "condition": "the revision tool accepts a submission",
           "system": "revision phase",
-          "action": "keep the earlier value of each optional field that is omitted, replace it with each supplied value, clear `open_questions` or `relevant_files` when an empty list is supplied, and keep the earlier notes when an empty `codebase_notes` is supplied"
+          "action": "keep the earlier value of each optional field that is omitted, replace it with each supplied value, clear `open_questions` or `relevant_files` when an empty list is supplied, and keep the earlier notes when an empty `codebase_notes` is supplied",
+          "contract": "omitted fields keep the earlier values; supplied fields replace the earlier values; empty open_questions and relevant_files lists clear them; empty codebase_notes keeps 'OLD'",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a PRD with two open questions, two relevant files and notes 'OLD'"
+            ],
+            "pseudocode": "a = apply(omitAll); assert a.OpenQuestions == prd.OpenQuestions && a.CodebaseNotes == 'OLD'; b = apply({open_questions:[]}); assert len(b.OpenQuestions) == 0; c = apply({codebase_notes:''}); assert c.CodebaseNotes == 'OLD'"
+          }
         },
         {
-          "id": "09-REQ-4.6",
+          "id": "REQ-4.6",
           "pattern": "unwanted",
           "condition": "the replacement `codebase_notes` of an accepted revision exceed 12000 bytes",
           "system": "revision phase",
           "action": "bound the notes to 12000 bytes by the same rule the PRD phase applies to its notes",
-          "contract": "the revised PRD's notes are at most 12000 bytes long"
+          "contract": "the revised PRD's notes are at most 12000 bytes long",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a revision submission with codebase_notes of 20000 bytes"
+            ],
+            "pseudocode": "out = sink.get(); assert len(out.CodebaseNotes) <= 12000; assert out.CodebaseNotes == boundNotes(big)"
+          }
         },
         {
-          "id": "09-REQ-4.7",
+          "id": "REQ-4.7",
           "pattern": "unwanted",
           "condition": "the reviser ends its conversation without an accepted submission",
           "system": "revision phase",
           "action": "report the phase as not finished, so that the round loop handles it as a revision failure",
-          "contract": "a no-result error for phase `prd_revision` naming the revision tool"
+          "contract": "a no-result error for phase `prd_revision` naming the revision tool",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a runner fake that finishes without calling the revision submit tool"
+            ],
+            "pseudocode": "_, _, err = reviser.Revise(ctx, req); assert contains(err.Error(),'prd_revision') && contains(err.Error(), ToolSubmitPRDRevision)"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-5",
+      "id": "REQ-5",
       "title": "Revision submission checks",
       "rationale": "Every finding must get exactly one answer, an acceptance must change the PRD, and a revised PRD must pass the checks the PRD phase applies.",
+      "system": "revision tool",
       "criteria": [
         {
-          "id": "09-REQ-5.1",
+          "id": "REQ-5.1",
           "pattern": "unwanted",
           "condition": "a revision submission leaves a finding of this round without a disposition, gives a finding two dispositions, or has a disposition naming an id that is not one of this round's findings",
-          "system": "revision tool",
           "action": "turn the submission back to the reviser and record nothing from it",
-          "contract": "a tool error that names each missing, duplicated or unknown finding id"
+          "contract": "a tool error that names each missing, duplicated or unknown finding id",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a revision tool for findings R1-F1, R1-F2 and R1-F3"
+            ],
+            "pseudocode": "r = tool.Execute(dispositions([F1,F1,F2,F9])); assert r.IsError; assert contains(r.Msg,'R1-F1') && contains(r.Msg,'R1-F3') && contains(r.Msg,'R1-F9'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-5.2",
+          "id": "REQ-5.2",
           "pattern": "unwanted",
           "condition": "a `rejected` disposition in a revision submission has an empty reason",
-          "system": "revision tool",
           "action": "turn the submission back to the reviser and record nothing from it",
-          "contract": "a tool error that names each finding id whose rejection has no reason"
+          "contract": "a tool error that names each finding id whose rejection has no reason",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a revision tool for findings R1-F1 and R1-F2"
+            ],
+            "pseudocode": "r = tool.Execute([acc(F1), rej(F2,'  ')]); assert r.IsError && contains(r.Msg,'R1-F2'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-5.3",
+          "id": "REQ-5.3",
           "pattern": "unwanted",
           "condition": "a revision submission accepts at least one finding and its body, `open_questions`, `relevant_files` and notes, after the keep-or-replace rule, are all identical to those of the PRD under revision",
-          "system": "revision tool",
           "action": "turn the submission back to the reviser and record nothing from it",
-          "contract": "a tool error that says the accepted findings left the PRD unchanged"
+          "contract": "a tool error that says the accepted findings left the PRD unchanged",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a revision tool for one finding"
+            ],
+            "pseudocode": "r = tool.Execute(accept + sameBody); assert r.IsError && contains(r.Msg,'unchanged'); assert sink.empty(); r = tool.Execute(reject + sameBody); assert r.Terminate"
+          }
         },
         {
-          "id": "09-REQ-5.4",
+          "id": "REQ-5.4",
           "pattern": "unwanted",
           "condition": "the revised body has no `## Intent` section by afspec's rule, or starts with YAML frontmatter",
-          "system": "revision tool",
           "action": "turn the submission back to the reviser with the same rejection the PRD phase gives for the same body",
-          "contract": "a tool error with the PRD phase's code for the failed check"
+          "contract": "a tool error with the PRD phase's code for the failed check",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the PRD tool's rejection codes for the same bodies"
+            ],
+            "pseudocode": "for body in [noIntent, withFrontmatter]: assert revTool.Execute(body).Code == prdTool.Execute(prdWith(body)).Code"
+          }
         },
         {
-          "id": "09-REQ-5.5",
+          "id": "REQ-5.5",
           "pattern": "unwanted",
           "condition": "a path supplied in `relevant_files` is not a regular file in the workspace",
-          "system": "revision tool",
           "action": "turn the submission back to the reviser and record nothing from it",
-          "contract": "a tool error that names each offending path"
+          "contract": "a tool error that names each offending path",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a workspace containing file a.go and a directory d/"
+            ],
+            "pseudocode": "r = tool.Execute(files(['missing.go','d'])); assert r.IsError && contains(r.Msg,'missing.go') && contains(r.Msg,'d'); assert sink.empty()"
+          }
         },
         {
-          "id": "09-REQ-5.6",
+          "id": "REQ-5.6",
           "pattern": "event_driven",
           "condition": "a revision submission changes the text of `## Intent` and passes every other check",
-          "system": "revision tool",
           "action": "accept the submission",
-          "contract": "the revised PRD carries the changed `## Intent` text"
+          "contract": "the revised PRD carries the changed `## Intent` text",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a revision tool and a PRD whose Intent says 'old intent'"
+            ],
+            "pseudocode": "r = tool.Execute(acceptWithBody(replaceIntent(prd.Body,'new intent'))); assert r.Terminate; assert contains(sink.get().Body,'new intent')"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-6",
+      "id": "REQ-6",
       "title": "Rounds and stop reasons",
       "rationale": "Each round is two full phases, so the rounds stop as soon as nothing serious is found or the limit is reached.",
+      "system": "round loop",
       "criteria": [
         {
-          "id": "09-REQ-6.1",
+          "id": "REQ-6.1",
           "pattern": "event_driven",
           "condition": "a review raises no findings",
-          "system": "round loop",
           "action": "stop the rounds, record the round with an empty finding list and count it in `rounds_run`, and pass the PRD on unchanged",
-          "contract": "`stop_reason` is `no_findings`"
+          "contract": "`stop_reason` is `no_findings`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the real round loop with a scripted reviewer that submits no findings and a reviser that fails the test if called",
+              "round limit 3"
+            ],
+            "pseudocode": "out, rv = runRounds(prd, limit=3); assert reviserCalls == 0 && out == prd; assert rv.RoundsRun == 1 && len(rv.Rounds[0].Findings) == 0; assert rv.StopReason == 'no_findings'"
+          }
         },
         {
-          "id": "09-REQ-6.2",
+          "id": "REQ-6.2",
           "pattern": "event_driven",
           "condition": "a review raises one or more findings",
-          "system": "round loop",
-          "action": "run the revision phase of the same round on those findings"
+          "action": "run the revision phase of the same round on those findings",
+          "contract": "the revision of round 1 ran on round 1's findings; the round-2 review was sent the body the revision produced; rounds_run is 2",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a scripted reviewer returning a major finding in round 1 and no findings in round 2",
+              "a scripted reviser that changes the body",
+              "round limit 2"
+            ],
+            "pseudocode": "out, rv = runRounds(prd, limit=2); assert reviserCalls == 1; assert reviewerReqs[1].PRD.Body == revisedBody; assert rv.RoundsRun == 2"
+          }
         },
         {
-          "id": "09-REQ-6.3",
-          "pattern": "complex_event",
-          "condition": "a round's revision finishes",
-          "guard": "that round's review raised at least one `critical` or `major` finding and fewer rounds than the round limit have run",
-          "system": "round loop",
-          "action": "start another round whose review reads the PRD as that revision left it"
+          "id": "REQ-6.3",
+          "pattern": "event_driven",
+          "condition": "a round's revision finishes and that round's review raised at least one `critical` or `major` finding and fewer rounds than the round limit have run",
+          "action": "start another round whose review reads the PRD as that revision left it",
+          "check": {
+            "same_as": "REQ-6.2"
+          }
         },
         {
-          "id": "09-REQ-6.4",
-          "pattern": "complex_event",
-          "condition": "a round's revision finishes",
-          "guard": "that round's review raised only `minor` findings",
-          "system": "round loop",
+          "id": "REQ-6.4",
+          "pattern": "event_driven",
+          "condition": "a round's revision finishes and that round's review raised only `minor` findings",
           "action": "stop the rounds",
-          "contract": "`stop_reason` is `no_serious_findings`"
+          "contract": "`stop_reason` is `no_serious_findings`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a scripted reviewer returning only minor findings in round 1",
+              "round limit 5"
+            ],
+            "pseudocode": "out, rv = runRounds(prd, limit=5); assert reviserCalls == 1 && reviewerCalls == 1; assert rv.StopReason == 'no_serious_findings'"
+          }
         },
         {
-          "id": "09-REQ-6.5",
-          "pattern": "complex_event",
-          "condition": "a round's revision finishes",
-          "guard": "that round's review raised at least one `critical` or `major` finding and the number of rounds run equals the round limit",
-          "system": "round loop",
+          "id": "REQ-6.5",
+          "pattern": "event_driven",
+          "condition": "a round's revision finishes and that round's review raised at least one `critical` or `major` finding and the number of rounds run equals the round limit",
           "action": "stop the rounds",
-          "contract": "`stop_reason` is `rounds_exhausted`"
+          "contract": "`stop_reason` is `rounds_exhausted`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a scripted reviewer returning a critical finding every round",
+              "a reviser that finishes each time",
+              "round limit 2"
+            ],
+            "pseudocode": "out, rv = runRounds(prd, limit=2); assert reviewerCalls == 2 && reviserCalls == 2; assert rv.StopReason == 'rounds_exhausted'"
+          }
         },
         {
-          "id": "09-REQ-6.6",
+          "id": "REQ-6.6",
           "pattern": "event_driven",
           "condition": "a round after the first starts",
-          "system": "round loop",
-          "action": "send both its reviewer and its reviser every earlier round's findings with their ids, dispositions and reasons, and tell the reviewer that it may raise a rejected finding again only with evidence the rejection did not answer and only by naming it in `reopens`"
+          "action": "send both its reviewer and its reviser every earlier round's findings with their ids, dispositions and reasons, and tell the reviewer that it may raise a rejected finding again only with evidence the rejection did not answer and only by naming it in `reopens`",
+          "contract": "both prompts contain R1-F1, R1-F2, their dispositions and 'REASON-Q'; the reviewer prompt says a rejected finding may be raised again only with evidence the rejection did not answer and only by naming it in `reopens`; the round-1 prompts contain no earlier-findings section",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "round 1 findings R1-F1 (accepted) and R1-F2 (rejected with reason 'REASON-Q')",
+              "round limit 2 and a major finding in round 1"
+            ],
+            "pseudocode": "for p in [reviewerReqs[1], reviserReqs[1]]: assert contains(p,'R1-F2') && contains(p,'rejected') && contains(p,'REASON-Q'); assert contains(reviewerReqs[1],'reopens'); assert !contains(reviewerReqs[0],'R1-F')"
+          }
         },
         {
-          "id": "09-REQ-6.7",
+          "id": "REQ-6.7",
           "pattern": "ubiquitous",
-          "system": "round loop",
-          "action": "for any round limit from 1 to 5 and any sequence of review and revision outcomes, run at most the round limit of reviews, end with exactly one `stop_reason`, and report `incomplete` whenever a review or revision did not finish or the budget stopped the rounds, ahead of every other reason"
+          "action": "for any round limit from 1 to 5 and any sequence of review and revision outcomes, run at most the round limit of reviews, end with exactly one `stop_reason`, and report `incomplete` whenever a review or revision did not finish or the budget stopped the rounds, ahead of every other reason",
+          "contract": "the number of reviews is at most the round limit; stop_reason is exactly one of no_findings, no_serious_findings, rounds_exhausted, incomplete; stop_reason is incomplete whenever any phase failed or the budget stopped the rounds; otherwise stop_reason follows the last review and its revision",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "a round loop driven by scripted reviewer and reviser outcomes (findings of any severity mix, empty, failure, budget stop)"
+            ],
+            "pseudocode": "for limit in 1..5, seq in gen_outcomes(): out, rv = runRounds(prd, limit, seq); assert reviews <= limit; assert rv.StopReason in set; if anyFailure(seq, used) then assert rv.StopReason == 'incomplete'"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-7",
+      "id": "REQ-7",
       "title": "A round that cannot finish",
       "rationale": "The review only improves a PRD that is already complete, so losing the package because the critic failed would be worse than skipping the rest of the review.",
       "criteria": [
         {
-          "id": "09-REQ-7.1",
+          "id": "REQ-7.1",
           "pattern": "unwanted",
           "condition": "a review or revision phase ends without an accepted submission because of its budget, its turn limit, `--phase-timeout` while the run's context is still live, a refusal, or a model, API or internal error",
           "system": "round loop",
           "action": "stop the rounds, generate the package from the last complete PRD, and record a `high` warning `prd_review_incomplete` with stage `prd_review` that names the scope's spec name, the round, the failed phase (`prd_review` or `prd_revision`) and the reason it failed",
-          "contract": "`stop_reason` is `incomplete`; the run's status and exit code are those it would have without the failure"
+          "contract": "`stop_reason` is `incomplete`; the run's status and exit code are those it would have without the failure",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the real pipeline and rounds with a reviewer or reviser that fails by turn limit, timeout with a live context, refusal, API error and internal error in turn",
+              "the package otherwise generates"
+            ],
+            "pseudocode": "for fail in [turns,timeout,refusal,api,internal]: res = Run(opts, reviewerFails(fail)); w = warning(res,'prd_review_incomplete'); assert w.Severity=='high' && w.Stage=='prd_review'; assert contains(w.Message, specName) && contains(w.Message,'round 1') && contains(w.Message,'prd_review'); assert res.exit == 0"
+          }
         },
         {
-          "id": "09-REQ-7.2",
+          "id": "REQ-7.2",
           "pattern": "unwanted",
           "condition": "a round's review finished but its revision did not finish",
           "system": "round loop",
           "action": "report that round's findings with the disposition `unanswered` and generate the package from the PRD the review read",
-          "contract": "each such finding has `disposition` `unanswered` and no `reason`, and counts in `unanswered_count`"
+          "contract": "each such finding has `disposition` `unanswered` and no `reason`, and counts in `unanswered_count`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a reviewer that submits two findings and a reviser that fails"
+            ],
+            "pseudocode": "out, rv = runRounds(prd, limit=2, reviserFails); for f in rv.Rounds[0].Findings: assert f.Disposition=='unanswered' && f.Reason==''; assert rv.UnansweredCount == 2; assert out == prd"
+          }
         },
         {
-          "id": "09-REQ-7.3",
-          "pattern": "complex_event",
-          "condition": "a review or revision is about to start",
-          "guard": "`--total-budget` is set and the run's spend so far has reached the total budget",
+          "id": "REQ-7.3",
+          "pattern": "event_driven",
+          "condition": "a review or revision is about to start and `--total-budget` is set and the run's spend so far has reached the total budget",
           "system": "round loop",
           "action": "not start the phase, stop the rounds as for a failed phase, and name the total budget, the spend and the ceiling as the reason in the `prd_review_incomplete` warning",
-          "contract": "`stop_reason` is `incomplete`; `rounds_run` is 0 when the stop came before the first review; the exit code is unchanged"
+          "contract": "`stop_reason` is `incomplete`; `rounds_run` is 0 when the stop came before the first review; the exit code is unchanged",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "--total-budget set and the run's recorded spend already at or above it",
+              "a reviewer fake that fails the test if called"
+            ],
+            "pseudocode": "run.AddPhase(costly); out, rv = runRounds(prd, totalBudget=run.CostUSD()); assert reviewerCalls==0 && rv.RoundsRun==0 && rv.StopReason=='incomplete'; assert contains(warn.Message,'total budget') && contains(warn.Message, spendStr) && contains(warn.Message, ceilingStr)"
+          }
         },
         {
-          "id": "09-REQ-7.4",
+          "id": "REQ-7.4",
           "pattern": "unwanted",
           "condition": "the budget stops the rounds between a review and its revision",
           "system": "round loop",
           "action": "report that review's findings with the disposition `unanswered`",
-          "contract": "each such finding counts in `unanswered_count`"
+          "contract": "each such finding counts in `unanswered_count`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a review whose recorded cost pushes the spend to the total budget",
+              "a reviser fake that fails the test if called"
+            ],
+            "pseudocode": "out, rv = runRounds(prd, totalBudget=reviewCost); assert reviserCalls==0; assert all(f.Disposition=='unanswered' for f in rv.Rounds[0].Findings); assert rv.UnansweredCount == rv.FindingsCount"
+          }
         },
         {
-          "id": "09-REQ-7.5",
+          "id": "REQ-7.5",
           "pattern": "unwanted",
           "condition": "the run's context is cancelled by Ctrl-C or SIGTERM during a review or revision",
           "system": "specgen pipeline",
           "action": "stop the run as an interrupted run, record no `prd_review_incomplete` warning, and generate no package from the interrupted PRD",
-          "contract": "a failure with stage `prd_review` or `prd_revision`, category `aborted`, exit code 1"
+          "contract": "a failure with stage `prd_review` or `prd_revision`, category `aborted`, exit code 1",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a reviewer then a reviser fake that cancel the run's context while running"
+            ],
+            "pseudocode": "for ph in ['prd_review','prd_revision']: err = Run(ctx, opts with cancelDuring(ph)); f = asFailure(err); assert f.Stage==ph && f.Category=='aborted'; assert exitCode(err)==1; assert noWarning('prd_review_incomplete'); assert noPackage()"
+          }
         },
         {
-          "id": "09-REQ-7.6",
+          "id": "REQ-7.6",
           "pattern": "ubiquitous",
           "system": "specgen pipeline",
-          "action": "keep the existing total-budget check before each split scope's PRD phase after the first, failing the run with stage `budget` when the spend has reached the ceiling"
+          "action": "keep the existing total-budget check before each split scope's PRD phase after the first, failing the run with stage `budget` when the spend has reached the ceiling",
+          "contract": "the run fails with stage `budget` and category budget; scope 2's PRD phase did not run",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a split of three scopes with --total-budget already reached after scope 1"
+            ],
+            "pseudocode": "err = Run(opts{TotalBudgetUSD: x}); f = asFailure(err); assert f.Stage=='budget' && f.Category==CategoryBudget; assert prdCalls == 1"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-8",
+      "id": "REQ-8",
       "title": "Where the rounds run",
       "rationale": "Every PRD the run writes is reviewed before its package is reserved, and the next scope builds on the revised PRD rather than the original.",
       "criteria": [
         {
-          "id": "09-REQ-8.1",
+          "id": "REQ-8.1",
           "pattern": "event_driven",
           "condition": "the PRD of an undivided input has been written and any `--name` has been applied, while `--adversarial` is on",
           "system": "specgen pipeline",
-          "action": "run the PRD's rounds before its package number is reserved and before its package is generated"
+          "action": "run the PRD's rounds before its package number is reserved and before its package is generated",
+          "contract": "the review sees spec name 'custom_name'; the log order is prd, prd_review, prd_revision, reservePackage, requirements",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the real pipeline with an event log across author, reviewer, reviser, reservePackage and generation",
+              "--name 'custom_name' and --adversarial"
+            ],
+            "pseudocode": "assert order(log) == ['prd','prd_review','prd_revision','reserve','requirements']; assert reviewerReqs[0].PRD.SpecName == 'custom_name'"
+          }
         },
         {
-          "id": "09-REQ-8.2",
+          "id": "REQ-8.2",
           "pattern": "event_driven",
           "condition": "a split scope's PRD phase has finished and the planned name has replaced any name the model chose, while `--adversarial` is on",
           "system": "split coordinator",
-          "action": "run that PRD's rounds in the coordinator before the scope's package number is reserved and its package goroutine is started"
+          "action": "run that PRD's rounds in the coordinator before the scope's package number is reserved and its package goroutine is started",
+          "contract": "the review of scope 2 sees the planned name; scope 2's rounds finish before its reservePackage and before its package goroutine starts",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a two-scope split whose model-chosen name differs from the planned name"
+            ],
+            "pseudocode": "assert reviewerReqsFor(2).PRD.SpecName == plan[1].Name; assert idx(log,'rounds-done 2') < idx(log,'reserve 2') < idx(log,'build-start 2')"
+          }
         },
         {
-          "id": "09-REQ-8.3",
+          "id": "REQ-8.3",
           "pattern": "event_driven",
           "condition": "the first scope of a split is reviewed",
           "system": "split coordinator",
-          "action": "run its rounds after the split plan is recorded, inside the split loop, with a split context built for scope 1 like every other scope's"
+          "action": "run its rounds after the split plan is recorded, inside the split loop, with a split context built for scope 1 like every other scope's",
+          "contract": "the split plan file exists on disk before scope 1's review starts; scope 1's review request carries a splitContext with Index 0 and the full plan",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a split run where the PRD phase recommends a split"
+            ],
+            "pseudocode": "assert planSavedAt < firstReviewAt; assert reviewerReqs[0].Split != nil && reviewerReqs[0].Split.Index == 0 && len(reviewerReqs[0].Split.Plan.Scopes) == n"
+          }
         },
         {
-          "id": "09-REQ-8.4",
+          "id": "REQ-8.4",
           "pattern": "event_driven",
           "condition": "the PRD phase of a split scope after the first starts",
           "system": "split coordinator",
-          "action": "show it the earlier scopes' final PRDs and final `codebase_notes` as the rounds left them, not the PRD phase's originals"
+          "action": "show it the earlier scopes' final PRDs and final `codebase_notes` as the rounds left them, not the PRD phase's originals",
+          "contract": "its splitContext Drafts[0] has body 'REVISED-1'; its Notes[0] is 'NOTES-REV'; neither the original body nor the original notes appear",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "scope 1's revision changed the body to 'REVISED-1' and the notes to 'NOTES-REV'"
+            ],
+            "pseudocode": "req = authorReqs[1]; assert req.Split.Drafts[0].Body == 'REVISED-1' && req.Split.Notes[0] == 'NOTES-REV'"
+          }
         },
         {
-          "id": "09-REQ-8.5",
+          "id": "REQ-8.5",
           "pattern": "event_driven",
           "condition": "a split is resumed with `--adversarial`",
           "system": "split coordinator",
-          "action": "review only the PRDs of the scopes written in this run and leave the packages written in earlier runs unreviewed"
+          "action": "review only the PRDs of the scopes written in this run and leave the packages written in earlier runs unreviewed",
+          "contract": "the reviewer ran only for scopes 2 and 3; scope 1's package on disk is untouched and has no review round",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a split plan on disk with scope 1 already written and scopes 2 and 3 pending"
+            ],
+            "pseudocode": "Run(resumeOpts); assert reviewedScopes == ['scope2','scope3']; assert fileHash(scope1Dir) == before"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-9",
+      "id": "REQ-9",
       "title": "The review in the result",
       "rationale": "A caller must see how each PRD was reviewed and what changed, while the package on disk keeps exactly the files the format defines.",
       "criteria": [
         {
-          "id": "09-REQ-9.1",
+          "id": "REQ-9.1",
           "pattern": "optional",
           "condition": "`--adversarial` is on",
           "system": "specgen pipeline",
           "action": "attach a `review` to the first package and to every package in `follow_on_specs`, including a package reported unwritten, with the fields `rounds_run`, `rounds_allowed`, `stop_reason`, `findings_count`, `accepted_count`, `rejected_count`, `unanswered_count` and `rounds`",
-          "contract": "each `rounds` entry has its round number and its findings"
+          "contract": "each `rounds` entry has its round number and its findings",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a three-scope split with --adversarial where the third scope's generation fails"
+            ],
+            "pseudocode": "assert res.Review != nil; for p in res.FollowOnSpecs: assert p.Review != nil; assert res.FollowOnSpecs[1].Written == false && res.FollowOnSpecs[1].Review != nil; assert res.Review.Rounds[0].Round == 1"
+          }
         },
         {
-          "id": "09-REQ-9.2",
+          "id": "REQ-9.2",
           "pattern": "ubiquitous",
           "system": "specgen pipeline",
-          "action": "report each finding with `id`, `severity`, `section`, `flaw`, `evidence`, `remedy`, `disposition`, `reopens` only when it is non-empty, and `reason` only when the disposition is `rejected`"
+          "action": "report each finding with `id`, `severity`, `section`, `flaw`, `evidence`, `remedy`, `disposition`, `reopens` only when it is non-empty, and `reason` only when the disposition is `rejected`",
+          "contract": "every finding has id, severity, section, flaw, evidence, remedy and disposition; reopens is present only on the finding that has one; reason is present only on the rejected finding",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "findings: accepted without reopens, rejected with reason and reopens, unanswered"
+            ],
+            "pseudocode": "a = json(acc); assert !has(a,'reopens') && !has(a,'reason'); r = json(rej); assert r.reason == 'why' && r.reopens == 'R1-F1'; u = json(unans); assert !has(u,'reason')"
+          }
         },
         {
-          "id": "09-REQ-9.3",
+          "id": "REQ-9.3",
           "pattern": "ubiquitous",
           "system": "specgen pipeline",
-          "action": "for any package `review`, report `findings_count` equal to the number of findings over all rounds and equal to the sum of `accepted_count`, `rejected_count` and `unanswered_count`, and `rounds_run` equal to the number of `rounds` entries"
+          "action": "for any package `review`, report `findings_count` equal to the number of findings over all rounds and equal to the sum of `accepted_count`, `rejected_count` and `unanswered_count`, and `rounds_run` equal to the number of `rounds` entries",
+          "contract": "findings_count equals the number of findings over all rounds; findings_count equals accepted_count plus rejected_count plus unanswered_count; rounds_run equals the number of rounds entries",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "the review record built by the round loop"
+            ],
+            "pseudocode": "for rounds in gen_rounds(): rv = buildReview(rounds); assert rv.FindingsCount == sum(len(r.Findings)); assert rv.FindingsCount == rv.Accepted+rv.Rejected+rv.Unanswered; assert rv.RoundsRun == len(rv.Rounds)"
+          }
         },
         {
-          "id": "09-REQ-9.4",
+          "id": "REQ-9.4",
           "pattern": "ubiquitous",
           "system": "specgen pipeline",
-          "action": "use the final PRD for the written `prd.md`, the PRD posted by `--comment`, `result.open_questions` and `result.relevant_files`, and send its body, `relevant_files` and notes to the generation and architecture phases"
+          "action": "use the final PRD for the written `prd.md`, the PRD posted by `--comment`, `result.open_questions` and `result.relevant_files`, and send its body, `relevant_files` and notes to the generation and architecture phases",
+          "contract": "prd.md on disk has the revised body; the posted comment is built from the revised PRD; result.open_questions and result.relevant_files are the revised ones; requirements, test_spec, tasks and architecture phases are sent the revised body, relevant files and notes",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a revision that changed the body, open questions, relevant files and notes",
+              "--comment enabled with a recording comment client"
+            ],
+            "pseudocode": "assert read(prdmd).contains(revBody); assert comment.contains(revBody); assert res.OpenQuestions == rev.OQ && res.RelevantFiles == rev.RF; for ph in genPhases: assert contains(ph.User, revBody) && contains(ph.User, rev.Notes)"
+          }
         },
         {
-          "id": "09-REQ-9.5",
+          "id": "REQ-9.5",
           "pattern": "ubiquitous",
           "system": "specgen pipeline",
-          "action": "write no review data into any package directory or into the `--comment` text, so that the package holds only the files the format defines"
+          "action": "write no review data into any package directory or into the `--comment` text, so that the package holds only the files the format defines",
+          "contract": "the package directory holds only prd.md, requirements.json, test_spec.json, tasks.json (and architecture.md when asked); no file contains 'FINDING-MARK'; the posted comment does not contain it or a review section",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a run with findings whose text contains a unique marker 'FINDING-MARK'"
+            ],
+            "pseudocode": "assert sorted(ls(pkg)) == formatFiles; for f in ls(pkg): assert !contains(read(f),'FINDING-MARK'); assert !contains(comment,'FINDING-MARK')"
+          }
         },
         {
-          "id": "09-REQ-9.6",
+          "id": "REQ-9.6",
           "pattern": "event_driven",
           "condition": "any package of the run carries a `review`",
           "system": "result summary",
           "action": "add after the open-questions clause the clause `review: <R> round(s), <F> finding(s), <A> accepted`, totalled over every package of the run, using the singular noun when a count is 1 and leaving out `, <A> accepted` when F is 0, inside the existing 200-character cap and before the high-warning clause",
-          "contract": "for example `spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted`"
+          "contract": "for example `spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "results whose packages carry reviews: 2 rounds/9 findings/7 accepted; 1 round/1 finding/1 accepted; 1 round/0 findings; a long-named result near the 200-character cap; a result with a high warning"
+            ],
+            "pseudocode": "assert Summary(r1) == 'spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted'; assert contains(Summary(r2),'review: 1 round, 1 finding, 1 accepted'); assert endsWith(Summary(r3),'review: 1 round, 0 findings'); assert runeLen(envSummary(rLong)) <= 200"
+          }
         },
         {
-          "id": "09-REQ-9.7",
+          "id": "REQ-9.7",
           "pattern": "event_driven",
           "condition": "the result is emitted with `--detail summary`",
           "system": "result summary",
-          "action": "keep the first package's `review` with every field except `rounds`, so the result still decodes into `envelope.SpecResult`"
+          "action": "keep the first package's `review` with every field except `rounds`, so the result still decodes into `envelope.SpecResult`",
+          "contract": "the review keeps rounds_run, rounds_allowed, stop_reason and the four counts; the review has no rounds field; the JSON decodes into envelope.SpecResult without error and with the counts intact",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a Result whose first package has a review with two rounds"
+            ],
+            "pseudocode": "v = res.SummaryView(); b = json(v); assert has(b,'review.stop_reason') && !has(b,'review.rounds'); var sr envelope.SpecResult; assert json.Unmarshal(b,&sr)==nil; assert sr.Review.FindingsCount == n"
+          }
         }
       ]
     },
     {
-      "id": "09-REQ-10",
+      "id": "REQ-10",
       "title": "Progress, usage, preflight and models",
       "rationale": "Review phases are phases like any other: they are shown, bounded, priced and resolved to a model the same way.",
       "criteria": [
         {
-          "id": "09-REQ-10.1",
+          "id": "REQ-10.1",
           "pattern": "event_driven",
           "condition": "a review or revision phase runs",
           "system": "specgen pipeline",
           "action": "report it on stderr through the same begin and done lines and turns-and-tokens footer as every other phase, labelled `reviewing the PRD (round r of L)` or `revising the PRD (round r of L)` with the scope prefix in a split, then print a line with the number of findings by severity after a review, or the number accepted and rejected after a revision",
-          "contract": "for example `scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)`"
+          "contract": "for example `scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a split run of three scopes with --adversarial-rounds 2 and a progress writer capturing stderr",
+              "scope 2 review raises one critical and two minor findings, its revision accepts two and rejects one"
+            ],
+            "pseudocode": "out = stderr(); assert contains(out,'scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)'); assert contains(out,'revising the PRD (round 1 of 2)'); assert regex(out,'1 critical.*2 minor'); assert regex(out,'2 accepted.*1 rejected')"
+          }
         },
         {
-          "id": "09-REQ-10.2",
+          "id": "REQ-10.2",
           "pattern": "event_driven",
           "condition": "a review or revision phase ends",
           "system": "specgen pipeline",
-          "action": "record it in `usage.phases[]` under the name `prd_review` or `prd_revision` with its scope, model, effort, turns and cost, and count its cost in the run's spend"
+          "action": "record it in `usage.phases[]` under the name `prd_review` or `prd_revision` with its scope, model, effort, turns and cost, and count its cost in the run's spend",
+          "contract": "usage.phases contains entries named `prd_review` and `prd_revision` with scope, model, effort, turns and cost; Run.CostUSD includes their cost",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a run with scripted review and revision phases that each report a model, effort, turns and cost"
+            ],
+            "pseudocode": "p = usagePhases(env); assert has(p,'prd_review') && has(p,'prd_revision'); assert p['prd_review'].Model != '' && p['prd_review'].Turns > 0; assert run.CostUSD() == sum(cost of all phases)"
+          }
         },
         {
-          "id": "09-REQ-10.3",
+          "id": "REQ-10.3",
           "pattern": "optional",
           "condition": "`--preflight` is given with `--adversarial`",
           "system": "preflight",
-          "action": "set `estimate.phases` to (1 + 3, plus 1 with `--architecture`, + 2 × round limit) × packages, derive `max_total_usd` from it, and list `prd_review` and `prd_revision` with their model and effort after `prd` in the `phase_models` check detail"
+          "action": "set `estimate.phases` to (1 + 3, plus 1 with `--architecture`, + 2 × round limit) × packages, derive `max_total_usd` from it, and list `prd_review` and `prd_revision` with their model and effort after `prd` in the `phase_models` check detail",
+          "contract": "estimate.phases is 1 + 3 + 2×3 = 10 (11 with --architecture) times the package count; max_total_usd equals phases times the per-phase ceiling; the phase_models detail lists prd_review and prd_revision with model and effort immediately after prd",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a preflight run for a fresh input of one package with rounds 3, with and without --architecture"
+            ],
+            "pseudocode": "r = RunPreflight(opts{Adversarial:true, Rounds:3}); assert r.Estimate.Phases == 10*pkgs; assert r.Estimate.MaxTotalUSD == r.Estimate.Phases*MaxBudgetPerPhaseUSD; d = detail(r,'phase_models'); assert idx(d,'prd_review') == idx(d,'prd')+1 && idx(d,'prd_revision') == idx(d,'prd_review')+1"
+          }
         },
         {
-          "id": "09-REQ-10.4",
+          "id": "REQ-10.4",
           "pattern": "state_driven",
           "condition": "`--preflight` is given without `--adversarial`",
           "system": "preflight",
-          "action": "produce the same `estimate.phases`, `max_total_usd` and `phase_models` detail as before this feature"
+          "action": "produce the same `estimate.phases`, `max_total_usd` and `phase_models` detail as before this feature",
+          "contract": "estimate.phases is (1+3[+1])×packages; phase_models detail lists prd, requirements, test_spec, tasks (architecture only with the flag) and neither prd_review nor prd_revision",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a preflight run without --adversarial, with and without --architecture"
+            ],
+            "pseudocode": "r = RunPreflight(opts{}); assert r.Estimate.Phases == 4*pkgs; d = detail(r,'phase_models'); assert !contains(d,'prd_review') && !contains(d,'prd_revision')"
+          }
         },
         {
-          "id": "09-REQ-10.5",
+          "id": "REQ-10.5",
           "pattern": "ubiquitous",
           "system": "model resolver",
-          "action": "accept `prd_review` and `prd_revision` in `--phase-model` and resolve both, when no choice names them, to `claude-sonnet-5-5` `medium` on SIMPLE, `claude-sonnet-5-5` `high` on STANDARD and `claude-opus-5-5` `xhigh` on ADVANCED"
+          "action": "accept `prd_review` and `prd_revision` in `--phase-model` and resolve both, when no choice names them, to `claude-sonnet-5-5` `medium` on SIMPLE, `claude-sonnet-5-5` `high` on STANDARD and `claude-opus-5-5` `xhigh` on ADVANCED",
+          "contract": "both choices parse without error; SIMPLE resolves both to claude-sonnet-5-5 medium; STANDARD resolves both to claude-sonnet-5-5 high; ADVANCED resolves both to claude-opus-5-5 xhigh",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "tiers SIMPLE, STANDARD and ADVANCED with no phase choice naming the new phases"
+            ],
+            "pseudocode": "assert ParsePhaseChoice('prd_review=claude-opus-5-5') ok; for (tier,m,e) in table: p = ResolvePlan(tier); assert p.Phases['prd_review'] == (m,e) && p.Phases['prd_revision'] == (m,e)"
+          }
         },
         {
-          "id": "09-REQ-10.6",
+          "id": "REQ-10.6",
           "pattern": "ubiquitous",
           "system": "model resolver",
           "action": "apply a model id given to `--model` and `--effort` or `$AF_MODEL_EFFORT` to `prd_review` and `prd_revision`, leave them unmoved by `--phase-model prd=…`, and bound each review and revision by `--budget`, `--max-turns`, `--phase-timeout` and `--max-tokens` as a phase of its own",
-          "contract": "`model.phases` shows the `--model` id and effort for `prd_review` and `prd_revision`; a review that exceeds `--budget`, `--max-turns`, `--phase-timeout` or `--max-tokens` stops on its own bound"
+          "contract": "`model.phases` shows the `--model` id and effort for `prd_review` and `prd_revision`; a review that exceeds `--budget`, `--max-turns`, `--phase-timeout` or `--max-tokens` stops on its own bound",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan resolved with --model X, --effort high, and a separate plan with `--phase-model prd=claude-opus-5-5`",
+              "the real Runner with a fake model, bounds of a small --max-turns, --budget, --phase-timeout and --max-tokens in turn",
+              "a PRD phase that stayed within the bounds"
+            ],
+            "pseudocode": "p = ResolvePlan(model:'X', effort:'high'); assert p['prd_review'].Model=='X' && p['prd_revision'].Effort=='high'; q = ResolvePlan(choices:['prd=claude-opus-5-5']); assert q['prd'].Model=='claude-opus-5-5' && q['prd_review'] == tierBase\nfor bound in [turns,budget,timeout]: _, res, err = reviewer.Review(ctx, req); assert err != nil && res.StopReason == bound; assert recordedPhase.MaxTokens == maxTokens"
+          }
         },
         {
-          "id": "09-REQ-10.7",
+          "id": "REQ-10.7",
           "pattern": "ubiquitous",
           "system": "spec command",
-          "action": "list `prd_review` and `prd_revision` in `model.phases`, the `--phase-model` help and the `effort_clamped` warning whether or not `--adversarial` is on"
+          "action": "list `prd_review` and `prd_revision` in `model.phases`, the `--phase-model` help and the `effort_clamped` warning whether or not `--adversarial` is on",
+          "contract": "model.phases includes prd_review and prd_revision; the --phase-model usage string names both; the effort_clamped warning lists both phases when clamping applies",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "spec runs without --adversarial, one with an effort the model clamps"
+            ],
+            "pseudocode": "env = run(args); assert has(env.Model.Phases,'prd_review') && has(env.Model.Phases,'prd_revision'); assert contains(helpText,'prd_review') && contains(helpText,'prd_revision'); assert contains(clampWarning.Message,'prd_review')"
+          }
         }
       ]
     }
   ],
   "execution_paths": [
     {
-      "id": "09-PATH-1",
+      "id": "PATH-1",
       "title": "An undivided input is reviewed, revised and generated from the revised PRD",
       "steps": [
         {
@@ -596,10 +1050,34 @@
           "actor": "spec command",
           "action": "emits a result whose package carries `review` with `stop_reason` `no_findings`, and a summary with the review clause, exit 0"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "spec command",
+          "internal/cli App",
+          "specgen pipeline",
+          "round loop",
+          "review and revision tools",
+          "afspec validation",
+          "filesystem"
+        ],
+        "setup": [
+          "the spec command with a scripted provider: PRD phase, round-1 review with a major finding, round-1 revision that changes the body, round-2 review with no findings, then generation phases",
+          "the valid_spec fixture and an empty specs dir"
+        ],
+        "end_state": [
+          "exit code 0",
+          "phases ran in order prd, prd_review, prd_revision, prd_review, requirements, test_spec, tasks",
+          "finding ids start at R1-F1",
+          "the written prd.md has the revised body and the package validates",
+          "the package carries a review with rounds_run 2, rounds_allowed 2 and stop_reason `no_findings`",
+          "the summary contains `review: 2 rounds, 1 finding, 1 accepted`"
+        ],
+        "pseudocode": "r = runSpecCmd(['--adversarial','--adversarial-rounds','2', input]); assert r.exit==0; assert phases(r)==[...]; assert read(prdmd)==revisedBody; assert r.pkg.Review.StopReason=='no_findings'; assert contains(r.env.summary,'review: 2 rounds')"
+      }
     },
     {
-      "id": "09-PATH-2",
+      "id": "PATH-2",
       "title": "Each split scope is reviewed in the coordinator before its package starts",
       "steps": [
         {
@@ -626,10 +1104,35 @@
           "actor": "spec command",
           "action": "emits a result in which the first package and every `follow_on_specs` package carry `review`, and a summary clause totalled over all packages"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "spec command",
+          "internal/cli App",
+          "specgen pipeline",
+          "split coordinator",
+          "split plan persistence",
+          "round loop",
+          "afspec validation",
+          "filesystem"
+        ],
+        "setup": [
+          "a scripted provider whose PRD phase recommends a three-scope split, with reviews and revisions for each scope",
+          "a real specs dir"
+        ],
+        "end_state": [
+          "the split plan is recorded before scope 1's review",
+          "scope 2's PRD phase is shown scope 1's revised PRD and notes",
+          "every package is written from its final PRD",
+          "the first package and every follow_on_specs package carry a review",
+          "the summary clause totals rounds, findings and accepted over all packages",
+          "exit code 0"
+        ],
+        "pseudocode": "r = runSpecCmd(['--adversarial', input]); assert planSavedBeforeFirstReview; assert authorReq[1].Drafts[0].Body == revised1; for p in allPackages(r): assert p.Review != nil; assert summaryTotals(r) == sum(p.Review)"
+      }
     },
     {
-      "id": "09-PATH-3",
+      "id": "PATH-3",
       "title": "A review that cannot finish leaves a warning and the package from the last complete PRD",
       "steps": [
         {
@@ -656,10 +1159,32 @@
           "actor": "spec command",
           "action": "emits a result whose `review` has `stop_reason` `incomplete`, with the exit code of a run without the failure"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "spec command",
+          "internal/cli App",
+          "agentrun Runner",
+          "specgen pipeline",
+          "round loop",
+          "afspec validation",
+          "filesystem"
+        ],
+        "setup": [
+          "the spec command with a per-phase --budget the scripted review phase exceeds before submitting",
+          "scripted PRD and generation phases"
+        ],
+        "end_state": [
+          "exit code is 0, as for a run without the failure",
+          "a high prd_review_incomplete warning names the spec name, round 1, prd_review and the budget reason",
+          "the package on disk is generated from the PRD phase's PRD",
+          "the review has stop_reason `incomplete`"
+        ],
+        "pseudocode": "r = runSpecCmd(['--adversarial','--budget',small,input]); assert r.exit==0; w = warning(r,'prd_review_incomplete'); assert w.Severity=='high'; assert read(prdmd)==originalBody; assert r.pkg.Review.StopReason=='incomplete'"
+      }
     },
     {
-      "id": "09-PATH-4",
+      "id": "PATH-4",
       "title": "Preflight counts the review phases",
       "steps": [
         {
@@ -678,7 +1203,25 @@
           "actor": "spec command",
           "action": "emits the preflight result without calling any model"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "spec command",
+          "internal/cli App",
+          "preflight",
+          "agentrun model resolver"
+        ],
+        "setup": [
+          "the spec command with a provider that fails the test if a model is called"
+        ],
+        "end_state": [
+          "exit code 0 and no model was called",
+          "estimate.phases is (1 + 3 + 2×3) × packages",
+          "max_total_usd derives from that count",
+          "the phase_models check lists prd_review and prd_revision with model and effort after prd"
+        ],
+        "pseudocode": "r = runSpecCmd(['--preflight','--adversarial','--adversarial-rounds','3', input]); assert r.exit==0 && modelCalls==0; assert r.env.estimate.phases == 10*pkgs; assert order(detail,'prd','prd_review','prd_revision')"
+      }
     }
   ],
   "external_apis": [

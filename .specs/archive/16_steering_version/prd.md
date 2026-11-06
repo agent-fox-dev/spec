@@ -4,9 +4,8 @@ spec_name: "steering_version"
 title: "Version the steering and record which version a package was written under"
 status: "archived"
 created_at: "2026-11-06T12:39:19Z"
-updated_at: "2026-11-06T15:41:21Z"
 intent_hash: "ba0d73c0321f7fea64059d3368983dd14dfc7f389d101ca901e80d0c6accfe91"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"
 ---
 
@@ -357,3 +356,12 @@ package invalid.
   library. A date is checked with
   `time.Parse(time.DateOnly, s)` — `time.DateOnly` is `"2006-01-02"`, the
   `YYYY-MM-DD` form the record uses.
+
+## Glossary
+
+- **MAJOR bump**: An amendment that raised the first number of the version, which by the documented meaning marks a directive removed, or changed so that a package or code that followed it may now break it.
+- **amendment**: One entry of the steering's record: a version in the version form, a date in YYYY-MM-DD and a non-empty sentence saying what changed. The entries are newest first, their versions strictly decreasing and their dates not increasing, and the first entry's version is the file's version.
+- **steering_malformed**: The warning a command raises for a steering file whose frontmatter breaks one or more of the well-formedness rules. It is high, it names every rule broken, and it never changes a command's exit code.
+- **steering_version**: Both the optional PRD frontmatter field that records which steering version a package was generated against, and the name of the verdict rule that compares that field with the spec root's steering.
+- **the version form**: Three non-negative integers separated by full stops, with no leading zeros and nothing after the third: MAJOR.MINOR.PATCH. Two versions in this form are compared as three integers, never as text.
+- **versioned**: Said of a steering file that opens with well-formed frontmatter and whose body says something. Such a file has a version a package can record. A file with no frontmatter, one whose frontmatter breaks a rule, and one whose body says nothing are all unversioned.

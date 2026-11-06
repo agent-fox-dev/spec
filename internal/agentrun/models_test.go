@@ -64,19 +64,19 @@ func TestResolvePlan_ATierChoosesAModelPerPhase(t *testing.T) {
 	for tier, want := range map[string]map[string]string{
 		"SIMPLE": {
 			PhasePRD: "claude-sonnet-5-5/medium", PhasePRDReview: "claude-sonnet-5-5/medium", PhasePRDRevision: "claude-sonnet-5-5/medium",
-			PhaseRequirements: "claude-sonnet-5-5/medium", PhaseTestSpec: "claude-sonnet-5-5/low",
+			PhaseRequirements: "claude-sonnet-5-5/medium",
 			PhaseTasks: "claude-sonnet-5-5/low", PhaseArchitecture: "claude-sonnet-5-5/low",
 			PhasePlanReview: "claude-sonnet-5-5/medium", PhasePlanRevision: "claude-sonnet-5-5/medium",
 		},
 		"STANDARD": {
 			PhasePRD: "claude-sonnet-5-5/high", PhasePRDReview: "claude-sonnet-5-5/high", PhasePRDRevision: "claude-sonnet-5-5/high",
-			PhaseRequirements: "claude-sonnet-5-5/high", PhaseTestSpec: "claude-sonnet-5-5/medium",
+			PhaseRequirements: "claude-sonnet-5-5/high",
 			PhaseTasks: "claude-sonnet-5-5/medium", PhaseArchitecture: "claude-sonnet-5-5/medium",
 			PhasePlanReview: "claude-sonnet-5-5/high", PhasePlanRevision: "claude-sonnet-5-5/high",
 		},
 		"advanced": {
 			PhasePRD: "claude-opus-5-5/xhigh", PhasePRDReview: "claude-opus-5-5/xhigh", PhasePRDRevision: "claude-opus-5-5/xhigh",
-			PhaseRequirements: "claude-opus-5-5/high", PhaseTestSpec: "claude-sonnet-5-5/high",
+			PhaseRequirements: "claude-opus-5-5/high",
 			PhaseTasks: "claude-sonnet-5-5/high", PhaseArchitecture: "claude-sonnet-5-5/high",
 			PhasePlanReview: "claude-opus-5-5/high", PhasePlanRevision: "claude-opus-5-5/high",
 		},
@@ -139,7 +139,6 @@ func TestResolvePlan_AModelIdAndAnExplicitEffortApplyToEveryPhase(t *testing.T) 
 func TestResolvePlan_APhaseChoiceDecidesItsPhaseAlone(t *testing.T) {
 	choices := []PhaseChoice{
 		mustChoice(t, "tasks=claude-haiku-4-5:medium"),
-		mustChoice(t, "test_spec=ADVANCED"),
 		mustChoice(t, "architecture=claude-opus-5-5"),
 		mustChoice(t, "prd=claude-opus-5-5"),
 		mustChoice(t, "prd_review=claude-haiku-4-5:low"),
@@ -154,8 +153,7 @@ func TestResolvePlan_APhaseChoiceDecidesItsPhaseAlone(t *testing.T) {
 		PhasePRDRevision:  "claude-sonnet-5-5/high", // STANDARD's base entry, not the prd choice
 		PhaseRequirements: "claude-sonnet-5-5/high",
 		PhaseTasks:        "claude-haiku-4-5/medium",
-		PhaseTestSpec:     "claude-sonnet-5-5/high", // ADVANCED's test_spec entry
-		PhaseArchitecture: "claude-opus-5-5",        // an id with no effort sends none
+		PhaseArchitecture: "claude-opus-5-5", // an id with no effort sends none
 	} {
 		if got := plan.For(phase).String(); got != w {
 			t.Errorf("%s = %s, want %s", phase, got, w)
@@ -216,7 +214,7 @@ func TestParsePhaseChoice(t *testing.T) {
 	// A phase that is not one is refused naming the phases, in the order a
 	// package is built: the review right after the PRD it reviews.
 	_, err := ParsePhaseChoice("review=ADVANCED")
-	if err == nil || !strings.Contains(err.Error(), "prd, prd_review, prd_revision, requirements, test_spec, tasks, plan_review, plan_revision, architecture") {
+	if err == nil || !strings.Contains(err.Error(), "prd, prd_review, prd_revision, requirements, tasks, plan_review, plan_revision, architecture") {
 		t.Errorf("an unknown phase: err = %v", err)
 	}
 	for _, bad := range []string{"tasks", "=claude-opus-5-5", "tasks=", "tasks=:high"} {

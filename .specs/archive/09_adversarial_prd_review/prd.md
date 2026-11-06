@@ -4,9 +4,8 @@ spec_name: "adversarial_prd_review"
 title: "Review the PRD adversarially before generating the package"
 status: "archived"
 created_at: "2026-10-21T13:59:29.966011Z"
-updated_at: "2026-11-06T15:39:56Z"
 intent_hash: "5ed88d651afae618b44d3ffc0310d5b3a618e56b8d827c0e410bc1d66ba2a0a2"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/01-review-the-prd-adversarially.md"
 ---
 ## Intent
@@ -273,3 +272,16 @@ The work uses only agentkit-go symbols the repository already calls. The module 
 | `schema.String` | `func(description string) *schema.Schema` | `specgen/prd.go` |
 | `schema.Array` | `func(items *schema.Schema, description string) *schema.Schema`; field `MaxItems *int` | `specgen/prd.go` `relevantFilesArraySchema` |
 | `schema.Enum` | `func(description string, values ...string) *schema.Schema` | `specgen/patch.go` |
+
+## Glossary
+
+- **codebase_notes**: The notes the PRD phase hands to later phases after reading the code, bounded to 12000 bytes (ADR 04).
+- **disposition**: What became of a finding: `accepted` (the PRD was changed to remedy it), `rejected` (with the reviser's reason) or `unanswered` (no revision finished for its round).
+- **finding**: One flaw a reviewer reports, with severity (`critical`, `major` or `minor`), section, flaw, evidence, remedy and an optional `reopens` id. The run gives it the id `R<round>-F<n>`.
+- **last complete PRD**: The PRD that the PRD phase wrote when no revision has finished, otherwise the PRD that the last finished revision left.
+- **review phase**: The `prd_review` phase: a fresh agent conversation that reads the current PRD and submits a list of findings, possibly empty.
+- **revision phase**: The `prd_revision` phase: a fresh agent conversation, separate from the PRD author and the reviewer, that answers every finding of a round and submits the revised PRD body.
+- **round**: One review phase, followed by one revision phase when the review raised at least one finding.
+- **round limit**: The highest number of rounds a PRD may get: the value of `--adversarial-rounds` (1 to 5), or 1 when the flag is not given.
+- **stop_reason**: The single reason the rounds of a PRD stopped: `no_findings`, `no_serious_findings`, `rounds_exhausted` or `incomplete`.
+- **whitespace normalisation**: Trimming leading and trailing whitespace and collapsing every internal run of whitespace into a single space, before two evidence strings are compared.

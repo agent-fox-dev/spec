@@ -35,7 +35,7 @@ type artifactSchemaEntry struct {
 // schemaProperty is the artifact's own `$schema` field: the URI of the schema
 // the file is validated against.
 //
-// It is the one property of a v2 artifact the model is never asked for. A
+// It is the one property of a v3 artifact the model is never asked for. A
 // tool schema cannot even declare a property by that name — the vendors
 // restrict property names to `^[a-zA-Z0-9_.-]{1,64}$`, and Anthropic rejects
 // the whole request over it — and asking a model to reproduce a URL from
@@ -72,8 +72,10 @@ func dropProgramFields(s *schema.Schema) {
 // A strict tool schema cannot declare a dictionary: strict mode requires
 // every key of an object to be listed, and a dictionary's keys are the data.
 // So the tool asks for a list of entries instead, and the submit handler turns
-// the list back into the object the format stores.
-var dictionaryEntries = map[string][2]string{"glossary": {"term", "definition"}}
+// the list back into the object the format stores. Format v3 declares none
+// (the v2 glossary is a PRD section now); the mechanism stays for the next
+// one, and dictionariesAsEntries refuses a dictionary this map does not name.
+var dictionaryEntries = map[string][2]string{}
 
 // dictionariesAsEntries rewrites each top-level dictionary property of a
 // converted tool schema into a list of entries. A dictionary with no entry
@@ -320,7 +322,7 @@ func submitArtifactTool(step afspec.GenerationStep, s *schema.Schema,
 	return core.Tool{
 		Name: name,
 		Description: fmt.Sprintf("Submit the complete %s artifact and end this phase. "+
-			"It is validated against the format v2 schema and every cross-file rule "+
+			"It is validated against the format v3 schema and every cross-file rule "+
 			"decidable at this point; a violation comes back to you as an error to fix.", step),
 		InputSchema: s,
 		Terminating: true,
@@ -448,7 +450,7 @@ func reviewMessage(step afspec.GenerationStep, warnings []afspec.ValidationEntry
 }
 
 // validateArtifactContent decodes a model's arguments for one generation
-// step, runs the artifact's v2 schema and every cross-file rule decidable at
+// step, runs the artifact's v3 schema and every cross-file rule decidable at
 // that point, and records the typed artifact in partial on success.
 //
 // A step that fails leaves partial untouched, so the next attempt validates
@@ -477,11 +479,9 @@ func checkArtifact(content map[string]any, step afspec.GenerationStep, partial *
 		// Validate a COPY of the accumulated state, so a rejected artifact
 		// cannot be left behind for the next attempt to validate against.
 		switch artifact := decoded.(type) {
-		case *afspec.RequirementsV2Json:
+		case *afspec.RequirementsV3Json:
 			candidate.Requirements = artifact
-		case *afspec.TestSpecV2Json:
-			candidate.TestSpec = artifact
-		case *afspec.TasksV2Json:
+		case *afspec.TasksV3Json:
 			candidate.Tasks = artifact
 		}
 		result := afspec.ValidateGenerationStepComplete(step, candidate)

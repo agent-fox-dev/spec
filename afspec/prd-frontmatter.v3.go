@@ -2,16 +2,17 @@
 
 package afspec
 
-// Schema for the YAML frontmatter block in prd.md (format version 2)
-type PrdFrontmatterV2Json struct {
+// Schema for the YAML frontmatter block in prd.md (format version 3)
+type PrdFrontmatterV3Json struct {
 	// CreatedAt corresponds to the JSON schema field "created_at".
 	CreatedAt string `json:"created_at" yaml:"created_at" mapstructure:"created_at"`
 
 	// IntentHash corresponds to the JSON schema field "intent_hash".
-	IntentHash PrdFrontmatterV2JsonIntentHash `json:"intent_hash" yaml:"intent_hash" mapstructure:"intent_hash"`
+	IntentHash PrdFrontmatterV3JsonIntentHash `json:"intent_hash" yaml:"intent_hash" mapstructure:"intent_hash"`
 
-	// Owner corresponds to the JSON schema field "owner".
-	Owner *string `json:"owner,omitempty,omitzero" yaml:"owner,omitempty" mapstructure:"owner,omitempty"`
+	// The package's profile. A lite package has at most three requirements and no
+	// execution path, so no smoke check and no integration task. Absent means full.
+	Profile *PrdFrontmatterV3JsonProfile `json:"profile,omitempty,omitzero" yaml:"profile,omitempty" mapstructure:"profile,omitempty"`
 
 	// SchemaVersion corresponds to the JSON schema field "schema_version".
 	SchemaVersion int `json:"schema_version" yaml:"schema_version" mapstructure:"schema_version"`
@@ -26,7 +27,7 @@ type PrdFrontmatterV2Json struct {
 	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
 
 	// Status corresponds to the JSON schema field "status".
-	Status PrdFrontmatterV2JsonStatus `json:"status" yaml:"status" mapstructure:"status"`
+	Status PrdFrontmatterV3JsonStatus `json:"status" yaml:"status" mapstructure:"status"`
 
 	// SteeringVersion corresponds to the JSON schema field "steering_version".
 	SteeringVersion *string `json:"steering_version,omitempty,omitzero" yaml:"steering_version,omitempty" mapstructure:"steering_version,omitempty"`
@@ -34,22 +35,21 @@ type PrdFrontmatterV2Json struct {
 	// Supersedes corresponds to the JSON schema field "supersedes".
 	Supersedes []string `json:"supersedes,omitempty,omitzero" yaml:"supersedes,omitempty" mapstructure:"supersedes,omitempty"`
 
-	// Tags corresponds to the JSON schema field "tags".
-	Tags []string `json:"tags,omitempty,omitzero" yaml:"tags,omitempty" mapstructure:"tags,omitempty"`
-
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
-
-	// UpdatedAt corresponds to the JSON schema field "updated_at".
-	UpdatedAt string `json:"updated_at" yaml:"updated_at" mapstructure:"updated_at"`
 }
 
-type PrdFrontmatterV2JsonIntentHash *string
+type PrdFrontmatterV3JsonIntentHash *string
 
-type PrdFrontmatterV2JsonStatus string
+type PrdFrontmatterV3JsonProfile string
 
-const PrdFrontmatterV2JsonStatusActive PrdFrontmatterV2JsonStatus = "active"
-const PrdFrontmatterV2JsonStatusArchived PrdFrontmatterV2JsonStatus = "archived"
-const PrdFrontmatterV2JsonStatusDraft PrdFrontmatterV2JsonStatus = "draft"
-const PrdFrontmatterV2JsonStatusSealed PrdFrontmatterV2JsonStatus = "sealed"
-const PrdFrontmatterV2JsonStatusSuperseded PrdFrontmatterV2JsonStatus = "superseded"
+const PrdFrontmatterV3JsonProfileFull PrdFrontmatterV3JsonProfile = "full"
+const PrdFrontmatterV3JsonProfileLite PrdFrontmatterV3JsonProfile = "lite"
+
+type PrdFrontmatterV3JsonStatus string
+
+const PrdFrontmatterV3JsonStatusActive PrdFrontmatterV3JsonStatus = "active"
+const PrdFrontmatterV3JsonStatusArchived PrdFrontmatterV3JsonStatus = "archived"
+const PrdFrontmatterV3JsonStatusDraft PrdFrontmatterV3JsonStatus = "draft"
+const PrdFrontmatterV3JsonStatusSealed PrdFrontmatterV3JsonStatus = "sealed"
+const PrdFrontmatterV3JsonStatusSuperseded PrdFrontmatterV3JsonStatus = "superseded"

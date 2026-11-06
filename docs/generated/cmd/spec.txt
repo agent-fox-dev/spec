@@ -1,4 +1,4 @@
-Command spec turns a product idea into a complete, validated version 2
+Command spec turns a product idea into a complete, validated version 3
 specification package.
 
     spec [flags] <text | file | issue-url | ->

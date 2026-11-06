@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/agent-fox-dev/spec/afspec"
 )
@@ -37,9 +36,9 @@ func main() {
 // run reports on the package in dir and whether it is valid. An error means
 // the package could not be read at all.
 func run(dir string, w io.Writer) (bool, error) {
-	// LoadSpec reads prd.md, the three JSON artifacts and, when present,
-	// architecture.md. It fails only on what it cannot read or parse: a
-	// package that loads can still be invalid.
+	// LoadSpec reads prd.md, requirements.json, tasks.json and, when present,
+	// progress.json and architecture.md. It fails only on what it cannot
+	// read or parse: a package that loads can still be invalid.
 	spec, err := afspec.LoadSpec(dir)
 	if err != nil {
 		var loadErr *afspec.LoadError
@@ -50,12 +49,11 @@ func run(dir string, w io.Writer) (bool, error) {
 	}
 
 	fmt.Fprintf(w, "%s_%s — %s (%s)\n", spec.SpecID, spec.SpecName, spec.Title, spec.Status)
-	fmt.Fprintf(w, "  %d requirements, %d execution paths, %d tests, %d tasks\n",
-		len(spec.Requirements.Requirements), len(spec.Requirements.ExecutionPaths),
-		len(spec.TestSpec.Tests), len(spec.Tasks.Tasks))
+	fmt.Fprintf(w, "  %d requirements, %d execution paths, %d tasks\n",
+		len(spec.Requirements.Requirements), len(spec.Requirements.ExecutionPaths), len(spec.Plan()))
 
-	// Validate runs the four JSON Schemas, then the cross-file rules C1 to
-	// C11 (IDs resolve, every criterion is tested, every test is owned by a
+	// Validate runs the JSON Schemas, then the cross-file rules C1 to C8
+	// (IDs resolve, every check resolves, every criterion is owned by a
 	// task, …). ValidateSchema and ValidateCrossFile run either layer alone.
 	result := spec.Validate()
 	if result.Valid {
@@ -73,16 +71,16 @@ func run(dir string, w io.Writer) (bool, error) {
 
 	// Coverage and traceability are derived from the artifacts, never stored.
 	// On an invalid spec they show where the gaps are.
-	coverage := spec.TestSpec.ComputeCoverage(spec.Requirements)
-	fmt.Fprintf(w, "\ncoverage: %d of %d criteria and paths verified\n",
+	coverage := spec.Requirements.ComputeCoverage()
+	fmt.Fprintf(w, "\ncoverage: %d of %d criteria and paths checked\n",
 		len(coverage.Covered), len(coverage.Covered)+len(coverage.Uncovered))
 	for _, id := range coverage.Uncovered {
-		fmt.Fprintf(w, "  not verified: %s\n", id)
+		fmt.Fprintf(w, "  not checked: %s\n", id)
 	}
 
 	fmt.Fprintln(w, "\ntraceability:")
 	for _, link := range spec.ComputeTraceability().Links {
-		fmt.Fprintf(w, "  %-12s tests %-24s tasks %v\n", link.ID, strings.Join(link.Tests, ","), link.Tasks)
+		fmt.Fprintf(w, "  %-12s check %-24s tasks %v\n", link.ID, link.Check, link.Tasks)
 	}
 
 	return result.Valid, nil

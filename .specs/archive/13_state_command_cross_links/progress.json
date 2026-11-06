@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/progress.v3.json",
+  "spec_id": "13",
+  "spec_name": "state_command_cross_links",
+  "schema_version": 3,
+  "updated_at": "2026-11-06T15:39:57Z",
+  "tasks": [
+    {
+      "id": 1,
+      "state": "done"
+    },
+    {
+      "id": 2,
+      "state": "done"
+    },
+    {
+      "id": 3,
+      "state": "done"
+    },
+    {
+      "id": 4,
+      "state": "done"
+    },
+    {
+      "id": 5,
+      "state": "done"
+    },
+    {
+      "id": 6,
+      "state": "done"
+    }
+  ]
+}

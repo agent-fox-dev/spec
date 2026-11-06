@@ -19,9 +19,9 @@ import (
 	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
 
-// saveSpec writes the package. It is a variable so that a test can make the
-// write fail.
-var saveSpec = (*afspec.Spec).Save
+// saveProgress writes the package's progress file, the one file a task move
+// writes. It is a variable so that a test can make the write fail.
+var saveProgress = (*afspec.Spec).SaveProgress
 
 // executeTask is the task form: speca <spec> --task T --state S.
 //
@@ -35,13 +35,13 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	}
 	name := specpkg.Display(dir, c.root)
 
-	// A save re-encodes every artifact from the version 2 types, which read
-	// none of a version 1 plan: it would replace the plan with an empty one.
+	// The version 3 types read none of an older plan's states: a v2 task
+	// carries its state in tasks.json, which has no progress.json to write.
 	if specpkg.Legacy(spec) {
 		return nil, usageInfo(fmt.Errorf("%s is format version %d, and speca writes format version %d only: "+
-			"none of its tasks can be read, and a save would discard the v1 plan; convert it to version %d first "+
-			"(format v2 §13 maps each v1 construct to its v2 form)",
-			name, spec.SchemaVersion, afspec.SchemaVersion, afspec.SchemaVersion), nil)
+			"none of its task states can be read; convert it to version %d first "+
+			"(speca %s --migrate converts a version 2 package)",
+			name, spec.SchemaVersion, afspec.SchemaVersion, afspec.SchemaVersion, name), nil)
 	}
 
 	// A package Save would refuse is refused here, before any move is looked at,
@@ -52,11 +52,11 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 
 	// c.opts.tasks was checked with the flags, so it parses.
 	wanted, _ := parseTaskSpec(c.opts.tasks)
-	if refusal := checkNamedTasks(name, spec.Tasks, wanted); refusal != nil {
+	if refusal := checkNamedTasks(name, spec, wanted); refusal != nil {
 		return nil, refusal
 	}
 
-	moves, refusal := planMoves(name, spec.Tasks, wanted, afspec.TaskState(c.opts.state), c.opts.force)
+	moves, refusal := planMoves(name, spec, wanted, afspec.TaskState(c.opts.state), c.opts.force)
 	if refusal != nil {
 		return c.refused(dir, spec, refusal)
 	}
@@ -64,13 +64,13 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	warnings := moves.warnings
 	validity := spec.Validate()
 	if len(moves.moves) > 0 {
-		// A save re-encodes every artifact from the Go types, and the decode
-		// dropped the keys they lack: writing a package that holds any deletes them.
-		// That is data loss, and a refusal that --force overrides. The library
-		// reports the keys of the three JSON artifacts; the frontmatter of prd.md
-		// is looked at here.
+		// The write re-encodes progress.json from the Go types, and the decode
+		// dropped the keys they lack: writing a package whose progress holds
+		// any deletes them. That is data loss, and a refusal that --force
+		// overrides. The other artifacts are not written by a task move, so
+		// their keys are safe.
 		v := validity
-		switch unknown := append(unknownKeys(v.Errors), frontmatterUnknownKeys(spec.Dir)...); {
+		switch unknown := progressUnknownKeys(v.Errors); {
 		case len(unknown) > 0 && !c.opts.force:
 			return c.refused(dir, spec, &cli.ErrorInfo{Stage: "validate", Category: envelope.CategoryInvalidSpec,
 				Message: fmt.Sprintf("%s holds keys the schema does not allow, and a save would delete them: %s; "+
@@ -83,13 +83,14 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 				"the package does not validate (%d errors: %s); the change went ahead", len(v.Errors), strings.Join(specpkg.Rules(v.Errors), ", "))})
 		}
 
-		spec.Tasks = moves.after
+		spec.Progress = moves.after
 		spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		spec.Progress.UpdatedAt = spec.UpdatedAt
 		// The report is on the package as written, which holds none of the keys
 		// the write deletes.
 		validity = validateWritten(spec)
 		if !c.opts.dryRun {
-			if failure := writeSpec(spec, name); failure != nil {
+			if failure := writeProgress(spec, name); failure != nil {
 				return c.onDisk(dir, failure)
 			}
 		}
@@ -146,11 +147,11 @@ func (c *call) onDisk(dir string, failure *cli.ErrorInfo) (*Result, *cli.ErrorIn
 	return c.reportOf(dir, spec), failure
 }
 
-// writeSpec saves the package. What Save refuses on lifecycle or intent grounds
-// is the status refusal it is; a failure to write is a disk failure, and says
-// what the caller may find.
-func writeSpec(spec *afspec.Spec, name string) *cli.ErrorInfo {
-	err := saveSpec(spec, spec.Dir)
+// writeProgress writes the package's progress file. What the library refuses
+// on lifecycle or intent grounds is the status refusal it is; a failure to
+// write is a disk failure, and says what the caller may find.
+func writeProgress(spec *afspec.Spec, name string) *cli.ErrorInfo {
+	err := saveProgress(spec, spec.Dir)
 	if err == nil {
 		return nil
 	}
@@ -160,8 +161,8 @@ func writeSpec(spec *afspec.Spec, name string) *cli.ErrorInfo {
 		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle, Message: fmt.Sprintf("%s cannot be written: %v", name, err)}
 	}
 	return &cli.ErrorInfo{Stage: "write", Category: envelope.CategoryDisk,
-		Message: fmt.Sprintf("%s could not be written: %v. A failure while writing the temporary files leaves the package unchanged; "+
-			"a failure during the final renames may leave some files updated, so run `speca %s` to see the state", name, err, name)}
+		Message: fmt.Sprintf("%s could not be written: %v. A failure while writing the temporary file leaves the package unchanged; "+
+			"a failure during the final rename may have replaced progress.json, so run `speca %s` to see the state", name, err, name)}
 }
 
 // unwritable refuses a package that cannot take a write: one that is sealed,
@@ -180,9 +181,9 @@ func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
 				"the library refuses every write until the intent matches its hash again", name)}
 	}
 	switch spec.Status {
-	case string(afspec.PrdFrontmatterV2JsonStatusSealed),
-		string(afspec.PrdFrontmatterV2JsonStatusSuperseded),
-		string(afspec.PrdFrontmatterV2JsonStatusArchived):
+	case string(afspec.PrdFrontmatterV3JsonStatusSealed),
+		string(afspec.PrdFrontmatterV3JsonStatusSuperseded),
+		string(afspec.PrdFrontmatterV3JsonStatusArchived):
 		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
 			Message: fmt.Sprintf("%s is %s, so its tasks can no longer change: a change to it is a new package that supersedes it", name, spec.Status)}
 	}
@@ -192,12 +193,10 @@ func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
 
 // checkNamedTasks refuses a --task that names what the plan cannot supply: an
 // id it does not have, next when there is no next task, or all when there is
-// no task. It is a usage error: the call cannot hold for this package.
-func checkNamedTasks(name string, plan *afspec.TasksV2Json, wanted taskSpec) *cli.ErrorInfo {
-	var tasks []afspec.Task
-	if plan != nil {
-		tasks = plan.Tasks
-	}
+// no task. It is a usage error: the call cannot hold for this package. The
+// plan is the package's, the derived integration task included.
+func checkNamedTasks(name string, spec *afspec.Spec, wanted taskSpec) *cli.ErrorInfo {
+	tasks := spec.Plan()
 	ids := make([]string, len(tasks))
 	for i, t := range tasks {
 		ids[i] = strconv.Itoa(t.Id)
@@ -205,7 +204,7 @@ func checkNamedTasks(name string, plan *afspec.TasksV2Json, wanted taskSpec) *cl
 
 	switch wanted.keyword {
 	case "next":
-		if _, ok := plan.NextTask(); ok {
+		if _, ok := spec.NextTask(); ok {
 			return nil
 		}
 		if len(tasks) == 0 {
@@ -256,9 +255,21 @@ var unknownKey = regexp.MustCompile(`the key (.+?) is not allowed by the schema`
 // does not allow. The entries carry the key only in their message, so it is cut
 // out of it, and the whole message stands in if the library words it otherwise.
 func unknownKeys(entries []afspec.ValidationEntry) []string {
+	return unknownKeysOf(entries, "")
+}
+
+// progressUnknownKeys is unknownKeys for progress.json alone, the one file a
+// task move writes.
+func progressUnknownKeys(entries []afspec.ValidationEntry) []string {
+	return unknownKeysOf(entries, afspec.ProgressFileName)
+}
+
+// unknownKeysOf is unknownKeys for the artifact named, or for all of them when
+// artifact is "".
+func unknownKeysOf(entries []afspec.ValidationEntry, artifact string) []string {
 	var out []string
 	for _, e := range entries {
-		if e.Check != "unknown_field" {
+		if e.Check != "unknown_field" || (artifact != "" && e.Artifact != artifact) {
 			continue
 		}
 		if m := unknownKey.FindStringSubmatch(e.Message); m != nil {
@@ -297,7 +308,7 @@ func frontmatterUnknownKeys(dir string) []string {
 		return nil
 	}
 	var out []string
-	for _, key := range afspec.UnknownFields(raw, &afspec.PrdFrontmatterV2Json{}) {
+	for _, key := range afspec.UnknownFields(raw, &afspec.PrdFrontmatterV3Json{}) {
 		out = append(out, "prd.md "+key)
 	}
 	return out

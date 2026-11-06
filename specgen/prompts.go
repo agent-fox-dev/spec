@@ -141,24 +141,22 @@ func planVars(req planReviewRequest, forReviewer bool) map[string]string {
 }
 
 // renderPlan is the plan as the package's own render gives it: the
-// requirements, the test specification and the tasks, in that order, each
-// through its artifact's renderer, with no scope and no budget.
+// requirements, with every check and smoke check, and the tasks, the derived
+// integration task included, through the package's renderers, with no scope
+// and no budget.
 func renderPlan(p *afspec.PartialSpec) string {
 	if p == nil {
 		return ""
 	}
+	spec := &afspec.Spec{Profile: p.Profile, Requirements: p.Requirements, Tasks: p.Tasks}
 	var b strings.Builder
 	b.WriteString("# Requirements\n\n")
 	if p.Requirements != nil {
 		b.WriteString(p.Requirements.Render())
 	}
-	b.WriteString("\n# Test Specification\n\n")
-	if p.TestSpec != nil {
-		b.WriteString(p.TestSpec.Render())
-	}
 	b.WriteString("\n# Tasks\n\n")
 	if p.Tasks != nil {
-		b.WriteString(p.Tasks.Render())
+		b.WriteString(spec.RenderTasks())
 	}
 	return b.String()
 }
@@ -320,9 +318,9 @@ func callerContextBlock(context string) string {
 	return "\n" + context + "\n"
 }
 
-// generationSystemPrompt is shared by all three generation steps. It is one
-// string rather than three because the format's rules are the same for all of
-// them, and because a shared system prompt is a shared provider cache prefix.
+// generationSystemPrompt is shared by both generation steps. It is one string
+// rather than two because the format's rules are the same for both, and
+// because a shared system prompt is a shared provider cache prefix.
 func generationSystemPrompt() string { return template("generation_system.md") }
 
 // generationUserPrompt assembles one generation step's task. What is the
@@ -362,8 +360,6 @@ func stepInstructions(step afspec.GenerationStep) string {
 	switch step {
 	case afspec.StepRequirements:
 		return template("generation_user_requirements.md")
-	case afspec.StepTestSpec:
-		return template("generation_user_test_spec.md")
 	case afspec.StepTasks:
 		return template("generation_user_tasks.md")
 	default:
@@ -374,10 +370,10 @@ func stepInstructions(step afspec.GenerationStep) string {
 // priorArtifactsBlock renders the artifacts an earlier step produced.
 //
 // The order is the format's rule and the reason is concrete: a generator that
-// cannot see a test id cannot own it, which is how the previous format
+// cannot see a criterion cannot own it, which is how an earlier format
 // produced specs whose edge-case and property tests belonged to no task at
-// all. Each step therefore sees the complete artifacts before it, in full,
-// rather than a summary.
+// all. The tasks step therefore sees the complete requirements, with every
+// check, in full, rather than a summary.
 func priorArtifactsBlock(partial afspec.PartialSpec, step afspec.GenerationStep) string {
 	var b strings.Builder
 	render := func(title string, v any) {
@@ -397,10 +393,21 @@ func priorArtifactsBlock(partial afspec.PartialSpec, step afspec.GenerationStep)
 	if partial.Requirements != nil {
 		render("requirements.json", partial.Requirements)
 	}
-	if step == afspec.StepTasks && partial.TestSpec != nil {
-		render("test_spec.json", partial.TestSpec)
-	}
 	return b.String()
+}
+
+// profileBlock tells the requirements step the package's profile, which the
+// PRD phase chose and rule C7 holds the artifact to. It is empty for the
+// other steps and for a full package, whose prompt is then what it always
+// was.
+func profileBlock(step afspec.GenerationStep, profile string) string {
+	if step != afspec.StepRequirements || profile != afspec.ProfileLite {
+		return ""
+	}
+	return "\n## The profile\n\nThe PRD phase decided this package is **lite**: at most three requirements and " +
+		"no execution path, so no smoke check and no integration task. Write `execution_paths` as an empty list, " +
+		"or leave it out, and at most three requirements; a lite package with a path, or with a fourth requirement, " +
+		"is rejected.\n"
 }
 
 // compactJSON is v as afspec writes it, without the indentation. A later

@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "11",
   "spec_name": "speca_task_states",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -17,17 +17,11 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Add the envelope types, lifecycle category and task warning codes",
       "criteria": [
-        "11-REQ-10.1",
-        "11-REQ-10.2",
-        "11-REQ-10.3"
-      ],
-      "tests": [
-        "TS-11-49",
-        "TS-11-50",
-        "TS-11-51"
+        "REQ-10.1",
+        "REQ-10.2",
+        "REQ-10.3"
       ],
       "steps": [
         "Write TS-11-49 (envelope/error_test.go), TS-11-50 (internal/cli/warn_test.go) and TS-11-51 (envelope/admin_result_test.go) and confirm they fail",
@@ -46,29 +40,19 @@
         "envelope/error_test.go",
         "internal/cli/warn.go",
         "internal/cli/warn_test.go"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Parse the task form flags and refuse bad combinations before loading",
       "criteria": [
-        "11-REQ-1.1",
-        "11-REQ-1.2",
-        "11-REQ-1.3",
-        "11-REQ-1.4",
-        "11-REQ-1.5",
-        "11-REQ-1.6",
-        "11-REQ-1.7"
-      ],
-      "tests": [
-        "TS-11-2",
-        "TS-11-3",
-        "TS-11-4",
-        "TS-11-5",
-        "TS-11-6",
-        "TS-11-7"
+        "REQ-1.1",
+        "REQ-1.2",
+        "REQ-1.3",
+        "REQ-1.4",
+        "REQ-1.5",
+        "REQ-1.6",
+        "REQ-1.7"
       ],
       "steps": [
         "Write TS-11-2..TS-11-7 in cmd/speca/task_flags_test.go using the existing Main/run helpers and confirm they fail",
@@ -87,27 +71,17 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Load the package and refuse post-load usage errors",
       "criteria": [
-        "11-REQ-1.8",
-        "11-REQ-2.1",
-        "11-REQ-2.2",
-        "11-REQ-2.3",
-        "11-REQ-2.4"
-      ],
-      "tests": [
-        "TS-11-8",
-        "TS-11-9",
-        "TS-11-10",
-        "TS-11-11",
-        "TS-11-12",
-        "TS-11-13"
+        "REQ-1.8",
+        "REQ-2.1",
+        "REQ-2.2",
+        "REQ-2.3",
+        "REQ-2.4"
       ],
       "steps": [
         "Write TS-11-8..TS-11-13 in cmd/speca/task_load_test.go (fixtures built with the newRepo-style helper; for empty plans, schema_version 1 and EAdd-only variants edit copies of the fixture JSON) and confirm they fail",
@@ -124,36 +98,26 @@
       ],
       "depends_on": [
         2
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Refuse unwritable packages and plan all-or-nothing moves through the state machine",
       "criteria": [
-        "11-REQ-2.5",
-        "11-REQ-2.6",
-        "11-REQ-2.7",
-        "11-REQ-2.8",
-        "11-REQ-3.1",
-        "11-REQ-3.2",
-        "11-REQ-3.3",
-        "11-REQ-3.4",
-        "11-REQ-3.5",
-        "11-REQ-3.6",
-        "11-REQ-4.1",
-        "11-REQ-4.2",
-        "11-REQ-4.3",
-        "11-REQ-4.5"
-      ],
-      "tests": [
-        "TS-11-17",
-        "TS-11-19",
-        "TS-11-20",
-        "TS-11-22",
-        "TS-11-23",
-        "TS-11-24"
+        "REQ-2.5",
+        "REQ-2.6",
+        "REQ-2.7",
+        "REQ-2.8",
+        "REQ-3.1",
+        "REQ-3.2",
+        "REQ-3.3",
+        "REQ-3.4",
+        "REQ-3.5",
+        "REQ-3.6",
+        "REQ-4.1",
+        "REQ-4.2",
+        "REQ-4.3",
+        "REQ-4.5"
       ],
       "steps": [
         "Write TS-11-17, 19, 20, 22, 23, 24 in cmd/speca/task_plan_test.go (sealed/superseded/archived and drifted active fixtures are made by editing frontmatter or using Spec.Transition on a copy) and confirm they fail",
@@ -171,34 +135,20 @@
       ],
       "depends_on": [
         3
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 5,
-      "kind": "implement",
       "title": "Write the change with Save and report it",
       "criteria": [
-        "11-REQ-4.4",
-        "11-REQ-7.1",
-        "11-REQ-7.2",
-        "11-REQ-7.3",
-        "11-REQ-7.4",
-        "11-REQ-7.5",
-        "11-REQ-7.6",
-        "11-REQ-9.4"
-      ],
-      "tests": [
-        "TS-11-14",
-        "TS-11-15",
-        "TS-11-16",
-        "TS-11-18",
-        "TS-11-25",
-        "TS-11-37",
-        "TS-11-38",
-        "TS-11-39",
-        "TS-11-40",
-        "TS-11-41"
+        "REQ-4.4",
+        "REQ-7.1",
+        "REQ-7.2",
+        "REQ-7.3",
+        "REQ-7.4",
+        "REQ-7.5",
+        "REQ-7.6",
+        "REQ-9.4"
       ],
       "steps": [
         "Write TS-11-14, 15, 16, 18, 25, 37, 38, 39, 40, 41 in cmd/speca/task_write_test.go and confirm they fail; TS-11-25 uses an injectable save function variable (default (*afspec.Spec).Save) replaced by a stub",
@@ -217,36 +167,22 @@
       ],
       "depends_on": [
         4
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 6,
-      "kind": "implement",
       "title": "Add --force bypasses, readiness warnings and the unknown-key guard",
       "criteria": [
-        "11-REQ-5.1",
-        "11-REQ-5.2",
-        "11-REQ-5.3",
-        "11-REQ-5.4",
-        "11-REQ-5.5",
-        "11-REQ-6.1",
-        "11-REQ-6.2",
-        "11-REQ-6.3",
-        "11-REQ-6.4",
-        "11-REQ-6.5"
-      ],
-      "tests": [
-        "TS-11-27",
-        "TS-11-28",
-        "TS-11-29",
-        "TS-11-30",
-        "TS-11-31",
-        "TS-11-32",
-        "TS-11-33",
-        "TS-11-34",
-        "TS-11-35",
-        "TS-11-36"
+        "REQ-5.1",
+        "REQ-5.2",
+        "REQ-5.3",
+        "REQ-5.4",
+        "REQ-5.5",
+        "REQ-6.1",
+        "REQ-6.2",
+        "REQ-6.3",
+        "REQ-6.4",
+        "REQ-6.5"
       ],
       "steps": [
         "Write TS-11-27..TS-11-36 in cmd/speca/task_force_test.go (TS-11-36 as a property test over generated packages with arbitrary validation failures and optional unknown keys, using testing/quick or math/rand) and confirm they fail",
@@ -265,36 +201,22 @@
       ],
       "depends_on": [
         5
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 7,
-      "kind": "implement",
       "title": "Add --dry-run and the claim suggestions in next",
       "criteria": [
-        "11-REQ-1.1",
-        "11-REQ-8.1",
-        "11-REQ-8.2",
-        "11-REQ-8.3",
-        "11-REQ-8.4",
-        "11-REQ-9.1",
-        "11-REQ-9.2",
-        "11-REQ-9.3",
-        "11-REQ-3.6",
-        "11-REQ-4.5"
-      ],
-      "tests": [
-        "TS-11-1",
-        "TS-11-21",
-        "TS-11-26",
-        "TS-11-42",
-        "TS-11-43",
-        "TS-11-44",
-        "TS-11-45",
-        "TS-11-46",
-        "TS-11-47",
-        "TS-11-48"
+        "REQ-1.1",
+        "REQ-8.1",
+        "REQ-8.2",
+        "REQ-8.3",
+        "REQ-8.4",
+        "REQ-9.1",
+        "REQ-9.2",
+        "REQ-9.3",
+        "REQ-3.6",
+        "REQ-4.5"
       ],
       "steps": [
         "Write TS-11-1, 21, 26, 42..48 in cmd/speca/task_dryrun_test.go and cmd/speca/result_test.go; TS-11-21 is a property test over generated plans (1-8 tasks, random states and dependencies), ids and targets with and without --force, asserting tasks.json is byte-identical on refusal; confirm they fail",
@@ -315,20 +237,14 @@
       ],
       "depends_on": [
         6
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 8,
-      "kind": "implement",
       "title": "Describe the task form in help and --schema and update the documentation",
       "criteria": [
-        "11-REQ-10.4",
-        "11-REQ-10.5"
-      ],
-      "tests": [
-        "TS-11-52",
-        "TS-11-53"
+        "REQ-10.4",
+        "REQ-10.5"
       ],
       "steps": [
         "Write TS-11-52 (help text mentions the task form, --task, --state, --force, --dry-run) and TS-11-53 (--schema equals cmd/speca/testdata/schema.golden.json) and confirm they fail",
@@ -350,35 +266,7 @@
       ],
       "depends_on": [
         7
-      ],
-      "state": "done"
-    },
-    {
-      "id": 9,
-      "kind": "integration",
-      "title": "Verify the claim, refusal and forced-recovery paths end to end",
-      "tests": [
-        "TS-11-54",
-        "TS-11-55",
-        "TS-11-56"
-      ],
-      "steps": [
-        "Write TS-11-54, 55 and 56 as smoke tests in cmd/speca/smoke_test.go against the real speca and specr Main entry points and real fixture copies on disk, and confirm they pass",
-        "Trace 11-PATH-1, 11-PATH-2 and 11-PATH-3 through the real code: Main, cli.SplitArgs, specpkg.Locate, afspec.LoadSpec, status guard, NextTask, ValidTaskTransition, TransitionTask, CompleteTaskStates/ResetTaskStates, Validate, Spec.Save, report builder, Run.Envelope and Emit; confirm each step calls the next and no placeholder remains in executeTask",
-        "Confirm every contract is consumed in production code: Change entries and DryRun by the speca result and envelope, CategoryLifecycle by the status and task refusals, WarnTaskNotReady and WarnTaskStateForced by run.Warn calls in cmd/speca, the status/write error mapping by executeTask",
-        "Search every file in the tasks' touches (cmd/speca, envelope, internal/cli) for panic(\"not implemented\"), TODO, \"not yet implemented\" and bare `return nil` on non-trivial paths, and remove any that remain",
-        "Run make test and make lint, and run make doc so docs/generated is current"
-      ],
-      "touches": [
-        "cmd/speca/smoke_test.go"
-      ],
-      "depends_on": [
-        8
-      ],
-      "done_when": [
-        "`make test` and `make lint` pass"
-      ],
-      "state": "done"
+      ]
     }
   ]
 }

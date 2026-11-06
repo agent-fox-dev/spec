@@ -10,7 +10,7 @@ import (
 // Sections hands out its own slice, so one caller cannot reorder another's.
 func TestSections_IsAFreshSliceInRenderOrder(t *testing.T) {
 	a := envelope.Sections()
-	if strings.Join(a, ",") != "prd,architecture,requirements,test_spec,tasks" {
+	if strings.Join(a, ",") != "prd,architecture,requirements,tasks" {
 		t.Fatalf("sections = %v", a)
 	}
 	a[0] = "changed"

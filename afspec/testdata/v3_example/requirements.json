@@ -1,0 +1,135 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "09",
+  "spec_name": "agent_mode",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "JSON-only stdout in agent mode",
+      "rationale": "Agents parse stdout; a single stray byte breaks them.",
+      "system": "spec binary",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "state_driven",
+          "condition": "AF_AGENT=1 is set in the environment",
+          "action": "suppress the banner and spinner and write only the command's JSON result to stdout",
+          "contract": "stdout parses as exactly one JSON object",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "AF_AGENT=1 is set",
+              "a spec root with two specs exists"
+            ],
+            "pseudocode": "r = run(env={AF_AGENT:'1'}, 'spec list'); assert parse_json(r.stdout).ok == true; assert not contains(r.stdout, BANNER_TEXT)"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "a command finishes and AF_AGENT=1 is set and --quiet was also passed",
+          "action": "behave exactly as with AF_AGENT=1 alone",
+          "contract": "identical stdout, stderr and exit code",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "AF_AGENT=1 is set",
+              "a spec root with two specs exists"
+            ],
+            "pseudocode": "a = run(env, 'spec list'); b = run(env, 'spec --quiet list'); assert a == b"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "ubiquitous",
+          "action": "for any command and any arguments, in agent mode, write progress and diagnostics to stderr only",
+          "contract": "stdout parses as JSON; every diagnostic line appears on stderr only",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "AF_AGENT=1 is set",
+              "a temporary spec root"
+            ],
+            "pseudocode": "for cmd in COMMANDS: r = run(env, cmd); assert is_json(r.stdout)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Error envelope in agent mode",
+      "system": "spec binary",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "unwanted",
+          "condition": "a command returns an error while AF_AGENT=1 is set",
+          "action": "write {\"ok\": false, \"error\": <message>} to stdout and exit",
+          "contract": "exit code 1; stdout is {\"ok\": false, \"error\": string}",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "AF_AGENT=1 is set",
+              "the spec 99_missing does not exist"
+            ],
+            "pseudocode": "r = run(env, 'spec status 99_missing'); assert r.code == 1; j = parse_json(r.stdout); assert j.ok == false and len(j.error) > 0"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "stdout is a closed pipe while the JSON result is written",
+          "action": "discard the write error and keep the command's own exit code",
+          "contract": "no panic; exit code is the command's, not a write error",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "AF_AGENT=1 is set",
+              "stdout is connected to a reader that closes before the payload is written"
+            ],
+            "pseudocode": "r = run_with_closed_stdout(env, 'spec list'); assert r.code == 0; assert not contains(r.stderr, 'panic')"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "Agent lists specs and parses the result",
+      "steps": [
+        {
+          "actor": "agent",
+          "action": "runs `spec list` with AF_AGENT=1"
+        },
+        {
+          "actor": "spec binary",
+          "action": "detects agent mode before the banner would print"
+        },
+        {
+          "actor": "spec binary",
+          "action": "scans the spec root and builds the list payload"
+        },
+        {
+          "actor": "spec binary",
+          "action": "writes the payload as one JSON object to stdout and exits 0"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "spec binary",
+          "spec root on disk"
+        ],
+        "setup": [
+          "the spec binary is built",
+          "a spec root with one spec exists"
+        ],
+        "end_state": [
+          "exit code is 0",
+          "stdout is one JSON object whose specs array has one entry"
+        ]
+      }
+    }
+  ]
+}

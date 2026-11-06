@@ -36,7 +36,6 @@ const (
 	PhasePRDReview    = "prd_review"
 	PhasePRDRevision  = "prd_revision"
 	PhaseRequirements = "requirements"
-	PhaseTestSpec     = "test_spec"
 	PhaseTasks        = "tasks"
 	PhaseArchitecture = "architecture"
 	PhasePlanReview   = "plan_review"
@@ -45,7 +44,7 @@ const (
 
 // Phases are the phases a model can be chosen for, in the order a package is
 // built.
-var Phases = []string{PhasePRD, PhasePRDReview, PhasePRDRevision, PhaseRequirements, PhaseTestSpec, PhaseTasks,
+var Phases = []string{PhasePRD, PhasePRDReview, PhasePRDRevision, PhaseRequirements, PhaseTasks,
 	PhasePlanReview, PhasePlanRevision, PhaseArchitecture}
 
 // tierEntry pairs a catalog model id with the effort the tier prescribes.
@@ -75,8 +74,8 @@ func (t tier) entry(phase string) tierEntry {
 // context window, output cap, prices and which efforts the model takes.
 //
 // The PRD and the requirements are where a spec's judgment is made: what the
-// work is, how it splits, what each criterion demands. The test spec, the
-// tasks and the architecture turn those into structure the validator checks,
+// work is, how it splits, what each criterion demands and how it is checked.
+// The tasks and the architecture turn those into structure the validator checks,
 // so a tier runs them at a lower effort, or, for ADVANCED, on the faster model:
 // every turn of a phase pays for its effort, the turns that only read a file
 // included.
@@ -86,7 +85,6 @@ var tierTable = map[ModelTier]tier{
 		phases: map[string]tierEntry{
 			PhasePlanReview:   {"claude-sonnet-5-5", core.EffortMedium},
 			PhasePlanRevision: {"claude-sonnet-5-5", core.EffortMedium},
-			PhaseTestSpec:     {"claude-sonnet-5-5", core.EffortLow},
 			PhaseTasks:        {"claude-sonnet-5-5", core.EffortLow},
 			PhaseArchitecture: {"claude-sonnet-5-5", core.EffortLow},
 		},
@@ -96,7 +94,6 @@ var tierTable = map[ModelTier]tier{
 		phases: map[string]tierEntry{
 			PhasePlanReview:   {"claude-sonnet-5-5", core.EffortHigh},
 			PhasePlanRevision: {"claude-sonnet-5-5", core.EffortHigh},
-			PhaseTestSpec:     {"claude-sonnet-5-5", core.EffortMedium},
 			PhaseTasks:        {"claude-sonnet-5-5", core.EffortMedium},
 			PhaseArchitecture: {"claude-sonnet-5-5", core.EffortMedium},
 		},
@@ -107,7 +104,6 @@ var tierTable = map[ModelTier]tier{
 			PhaseRequirements: {"claude-opus-5-5", core.EffortHigh},
 			PhasePlanReview:   {"claude-opus-5-5", core.EffortHigh},
 			PhasePlanRevision: {"claude-opus-5-5", core.EffortHigh},
-			PhaseTestSpec:     {"claude-sonnet-5-5", core.EffortHigh},
 			PhaseTasks:        {"claude-sonnet-5-5", core.EffortHigh},
 			PhaseArchitecture: {"claude-sonnet-5-5", core.EffortHigh},
 		},

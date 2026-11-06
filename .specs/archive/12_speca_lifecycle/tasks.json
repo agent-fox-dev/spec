@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "12",
   "spec_name": "speca_lifecycle",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -21,20 +21,9 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Add ArchiveDestination and MoveUnderArchive to afspec and rebuild MoveToArchive on them",
       "criteria": [
-        "12-REQ-1"
-      ],
-      "tests": [
-        "TS-12-1",
-        "TS-12-2",
-        "TS-12-3",
-        "TS-12-4",
-        "TS-12-5",
-        "TS-12-6",
-        "TS-12-7",
-        "TS-12-8"
+        "REQ-1"
       ],
       "steps": [
         "Write TS-12-1..TS-12-8 in afspec/lifecycle_test.go (use copyFixture and Transition on copies to make active/sealed/archived/superseded packages at <root>/NN_name; skip the read-only cases when os.Geteuid()==0) and confirm they fail",
@@ -49,21 +38,13 @@
       ],
       "done_when": [
         "TestMoveToArchive passes unchanged"
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Extend envelope Change, warning codes and ErrorInfo stage docs",
       "criteria": [
-        "12-REQ-10"
-      ],
-      "tests": [
-        "TS-12-55",
-        "TS-12-56",
-        "TS-12-57"
+        "REQ-10"
       ],
       "steps": [
         "Write TS-12-55 (envelope), TS-12-56 (internal/cli, through Run.Warn and Run.Warnings) and TS-12-57 (go/parser import check over non-test envelope/*.go) and confirm they fail",
@@ -83,27 +64,17 @@
       ],
       "done_when": [
         "envelope imports only the standard library"
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Add the --status and --by flags, usage errors and schema",
       "criteria": [
-        "12-REQ-2.2",
-        "12-REQ-2.3",
-        "12-REQ-2.4",
-        "12-REQ-2.5",
-        "12-REQ-2.6"
-      ],
-      "tests": [
-        "TS-12-10",
-        "TS-12-11",
-        "TS-12-12",
-        "TS-12-13",
-        "TS-12-14"
+        "REQ-2.2",
+        "REQ-2.3",
+        "REQ-2.4",
+        "REQ-2.5",
+        "REQ-2.6"
       ],
       "steps": [
         "Write TS-12-10..TS-12-14 in cmd/speca tests (using Main against a temp spec root) and confirm they fail",
@@ -126,25 +97,17 @@
       ],
       "done_when": [
         "--schema output equals the regenerated golden file"
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Status form core: load checks, move classification and lifecycle refusals",
       "criteria": [
-        "12-REQ-2.1",
-        "12-REQ-3.2",
-        "12-REQ-3.3",
-        "12-REQ-3.4",
-        "12-REQ-3.5"
-      ],
-      "tests": [
-        "TS-12-16",
-        "TS-12-18",
-        "TS-12-19"
+        "REQ-2.1",
+        "REQ-3.2",
+        "REQ-3.3",
+        "REQ-3.4",
+        "REQ-3.5"
       ],
       "steps": [
         "Write TS-12-16, TS-12-18 and TS-12-19 (property: a pure refusalMessage(current,target) function checked over all ordered status pairs against an independent BFS) and confirm they fail",
@@ -161,34 +124,19 @@
       ],
       "depends_on": [
         3
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 5,
-      "kind": "implement",
       "title": "Activation and sealing with the unknown-key guard and the status write",
       "criteria": [
-        "12-REQ-3.6",
-        "12-REQ-3.7",
-        "12-REQ-4.1",
-        "12-REQ-4.2",
-        "12-REQ-4.3",
-        "12-REQ-4.4",
-        "12-REQ-5"
-      ],
-      "tests": [
-        "TS-12-20",
-        "TS-12-21",
-        "TS-12-23",
-        "TS-12-24",
-        "TS-12-25",
-        "TS-12-26",
-        "TS-12-28",
-        "TS-12-29",
-        "TS-12-30",
-        "TS-12-31"
+        "REQ-3.6",
+        "REQ-3.7",
+        "REQ-4.1",
+        "REQ-4.2",
+        "REQ-4.3",
+        "REQ-4.4",
+        "REQ-5"
       ],
       "steps": [
         "Write the ten tests (build active/sealed packages with Transition on fixture copies; add unknown keys to prd.md frontmatter or tasks.json) and confirm they fail",
@@ -206,28 +154,16 @@
       "depends_on": [
         1,
         4
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 6,
-      "kind": "implement",
       "title": "Archiving, move-only calls and the archive destination check",
       "criteria": [
-        "12-REQ-3.1",
-        "12-REQ-3.8",
-        "12-REQ-6",
-        "12-REQ-9.1"
-      ],
-      "tests": [
-        "TS-12-15",
-        "TS-12-17",
-        "TS-12-22",
-        "TS-12-32",
-        "TS-12-33",
-        "TS-12-34",
-        "TS-12-47"
+        "REQ-3.1",
+        "REQ-3.8",
+        "REQ-6",
+        "REQ-9.1"
       ],
       "steps": [
         "Write the seven tests and confirm they fail",
@@ -243,23 +179,13 @@
       ],
       "depends_on": [
         5
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 7,
-      "kind": "implement",
       "title": "Superseding with --by and the supersedes record",
       "criteria": [
-        "12-REQ-7"
-      ],
-      "tests": [
-        "TS-12-35",
-        "TS-12-36",
-        "TS-12-37",
-        "TS-12-38",
-        "TS-12-39"
+        "REQ-7"
       ],
       "steps": [
         "Write TS-12-35..TS-12-39 (TS-12-39 as a property over 1-5 repeated calls, including resumed moves) and confirm they fail",
@@ -276,31 +202,19 @@
       ],
       "depends_on": [
         6
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 8,
-      "kind": "implement",
       "title": "Write failures, updated_at and the resumable archive failure",
       "criteria": [
-        "12-REQ-8.1",
-        "12-REQ-8.2",
-        "12-REQ-8.3",
-        "12-REQ-8.4",
-        "12-REQ-8.5",
-        "12-REQ-8.6",
-        "12-REQ-8.7"
-      ],
-      "tests": [
-        "TS-12-40",
-        "TS-12-41",
-        "TS-12-42",
-        "TS-12-43",
-        "TS-12-44",
-        "TS-12-45",
-        "TS-12-46"
+        "REQ-8.1",
+        "REQ-8.2",
+        "REQ-8.3",
+        "REQ-8.4",
+        "REQ-8.5",
+        "REQ-8.6",
+        "REQ-8.7"
       ],
       "steps": [
         "Write the seven tests, using the seams from task 5 to stub the library call and the read-back (skip permission-based cases when uid is 0) and confirm they fail",
@@ -318,29 +232,18 @@
       ],
       "depends_on": [
         7
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 9,
-      "kind": "implement",
       "title": "Dry run, summary sentences and next after a status call",
       "criteria": [
-        "12-REQ-2.1",
-        "12-REQ-4.5",
-        "12-REQ-9.2",
-        "12-REQ-9.3",
-        "12-REQ-9.4",
-        "12-REQ-9.5"
-      ],
-      "tests": [
-        "TS-12-9",
-        "TS-12-27",
-        "TS-12-48",
-        "TS-12-49",
-        "TS-12-50",
-        "TS-12-51"
+        "REQ-2.1",
+        "REQ-4.5",
+        "REQ-9.2",
+        "REQ-9.3",
+        "REQ-9.4",
+        "REQ-9.5"
       ],
       "steps": [
         "Write the six tests and confirm they fail",
@@ -356,23 +259,15 @@
       ],
       "depends_on": [
         8
-      ],
-      "state": "done",
-      "optional": false
+      ]
     },
     {
       "id": 10,
-      "kind": "implement",
       "title": "Report-form lifecycle suggestions and documentation",
       "criteria": [
-        "12-REQ-9.6",
-        "12-REQ-9.7",
-        "12-REQ-9.8"
-      ],
-      "tests": [
-        "TS-12-52",
-        "TS-12-53",
-        "TS-12-54"
+        "REQ-9.6",
+        "REQ-9.7",
+        "REQ-9.8"
       ],
       "steps": [
         "Write TS-12-52, TS-12-53 and TS-12-54 (property over generated packages: run the suggested --status call and require exit 0) and confirm they fail",
@@ -393,40 +288,7 @@
       ],
       "depends_on": [
         9
-      ],
-      "state": "done",
-      "optional": false
-    },
-    {
-      "id": 11,
-      "kind": "integration",
-      "title": "Verify the lifecycle paths end to end",
-      "tests": [
-        "TS-12-58",
-        "TS-12-59",
-        "TS-12-60",
-        "TS-12-61",
-        "TS-12-62"
-      ],
-      "steps": [
-        "Write the five smoke tests against the real Main, internal/specpkg, afspec, internal/cli and envelope (skip TS-12-62 as uid 0)",
-        "Trace 12-PATH-1..12-PATH-5 through the real code (resolver → load → checks → afspec call → read-back → envelope); confirm each step calls the next and no stub remains",
-        "Confirm each contract result is consumed in production code: MoveUnderArchive and ArchiveDestination by cmd/speca, Change.Spec/Added by the status form, WarnTasksOpen and WarnSupersedesNotRecorded by Run.Warn, Result.Resumable by Run.Envelope",
-        "Confirm the entry points owned by specs 10 and 11 (Main dispatch, resolver, --force/--dry-run flags, task claim form) are called from production code",
-        "Search every file in the touches of all tasks for panic(\"not implemented\"), TODO, and bare return nil on non-trivial paths and remove any that remain",
-        "Run make test and make lint"
-      ],
-      "touches": [
-        "cmd/speca/smoke_test.go"
-      ],
-      "depends_on": [
-        10
-      ],
-      "done_when": [
-        "`make test` and `make lint` pass"
-      ],
-      "state": "done",
-      "optional": false
+      ]
     }
   ]
 }

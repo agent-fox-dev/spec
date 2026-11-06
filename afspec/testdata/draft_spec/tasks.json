@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "02",
   "spec_name": "draft_feature",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "go test ./... -count=1",
     "linter": "go vet ./..."
@@ -16,14 +16,9 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Draft editing and lifecycle guards",
       "criteria": [
-        "02-REQ-1"
-      ],
-      "tests": [
-        "TS-02-1",
-        "TS-02-2"
+        "REQ-1"
       ],
       "steps": [
         "Write TS-02-1 and TS-02-2 and confirm they fail",
@@ -32,25 +27,7 @@
       ],
       "touches": [
         "afspec/lifecycle.go"
-      ],
-      "state": "pending"
-    },
-    {
-      "id": 2,
-      "kind": "integration",
-      "title": "Verify draft editing end to end",
-      "criteria": [],
-      "tests": [
-        "TS-02-3"
-      ],
-      "steps": [
-        "Write TS-02-3 against a real directory and confirm it passes",
-        "Trace 02-PATH-1 from the edit through Save to the reload"
-      ],
-      "depends_on": [
-        1
-      ],
-      "state": "pending"
+      ]
     }
   ]
 }

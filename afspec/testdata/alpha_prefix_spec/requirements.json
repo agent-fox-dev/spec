@@ -1,62 +1,84 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
   "spec_id": "abc",
   "spec_name": "alpha_prefix_feature",
-  "schema_version": 2,
-  "introduction": "The test feature validates the spec library.",
-  "glossary": {
-    "spec": "A four-artifact package representing one feature.",
-    "system": "The afspec library."
-  },
+  "schema_version": 3,
   "requirements": [
     {
-      "id": "abc-REQ-1",
+      "id": "REQ-1",
       "title": "Data model",
       "rationale": "Callers need typed models so that a malformed artifact fails at load time, not at use time.",
+      "system": "afspec library",
       "criteria": [
         {
-          "id": "abc-REQ-1.1",
+          "id": "REQ-1.1",
           "pattern": "event_driven",
           "condition": "a spec directory is loaded from disk",
-          "system": "afspec library",
           "action": "return a Spec whose four artifacts are populated from the files on disk",
-          "contract": "a non-nil *Spec and a nil error"
+          "contract": "a non-nil *Spec and a nil error",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a directory holding prd.md and the three JSON artifacts"
+            ],
+            "pseudocode": "s, err = LoadSpec(dir); assert err == nil; assert s.Requirements != nil"
+          }
         },
         {
-          "id": "abc-REQ-1.2",
+          "id": "REQ-1.2",
           "pattern": "unwanted",
           "condition": "a required artifact file is missing from the spec directory",
-          "system": "afspec library",
           "action": "return a LoadError naming the missing file",
-          "contract": "a nil *Spec and a LoadError whose File field is the missing path"
+          "contract": "a nil *Spec and a LoadError whose File field is the missing path",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a directory with no requirements.json"
+            ],
+            "pseudocode": "s, err = LoadSpec(dir); assert s == nil; assert errors.As(err, &LoadError{})"
+          }
         },
         {
-          "id": "abc-REQ-1.3",
+          "id": "REQ-1.3",
           "pattern": "ubiquitous",
-          "system": "afspec library",
-          "action": "for any spec loaded from disk, produce byte-identical files when it is saved again without modification"
+          "action": "for any spec loaded from disk, produce byte-identical files when it is saved again without modification",
+          "contract": "each written file is byte-identical to the file it was read from",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "a corpus of well-formed spec directories"
+            ],
+            "pseudocode": "for d in corpus: s = LoadSpec(d); s.Save(tmp); assert files_equal(d, tmp)"
+          }
         }
       ]
     },
     {
-      "id": "abc-REQ-2",
+      "id": "REQ-2",
       "title": "Cross-file validation",
       "rationale": "A spec whose references do not resolve is a plan with holes in it.",
+      "system": "afspec library",
       "criteria": [
         {
-          "id": "abc-REQ-2.1",
+          "id": "REQ-2.1",
           "pattern": "state_driven",
           "condition": "a loaded spec is validated",
-          "system": "afspec library",
           "action": "report every criterion that no test verifies and every test that no task owns",
-          "contract": "a ValidationResult whose Errors name the uncovered and unowned entities"
+          "contract": "a ValidationResult whose Errors name the uncovered and unowned entities",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a spec whose second criterion is verified by no test"
+            ],
+            "pseudocode": "r = spec.Validate(); assert not r.Valid; assert any(e.Check == 'C4' for e in r.Errors)"
+          }
         }
       ]
     }
   ],
   "execution_paths": [
     {
-      "id": "abc-PATH-1",
+      "id": "PATH-1",
       "title": "A consumer loads and validates a spec",
       "steps": [
         {
@@ -75,7 +97,20 @@
           "actor": "consumer",
           "action": "calls Validate() and inspects the result"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "afspec library",
+          "spec directory on disk"
+        ],
+        "setup": [
+          "a spec directory on disk"
+        ],
+        "end_state": [
+          "LoadSpec returns no error",
+          "Validate reports the spec as valid"
+        ]
+      }
     }
   ]
 }

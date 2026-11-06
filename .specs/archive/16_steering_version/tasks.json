@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "16",
   "spec_name": "steering_version",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -21,17 +21,11 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Carry an optional steering_version in the PRD frontmatter",
       "criteria": [
-        "16-REQ-4.1",
-        "16-REQ-4.4",
-        "16-REQ-4.5"
-      ],
-      "tests": [
-        "TS-16-8",
-        "TS-16-9",
-        "TS-16-10"
+        "REQ-4.1",
+        "REQ-4.4",
+        "REQ-4.5"
       ],
       "steps": [
         "Add the round-trip, the schema refusal and the change-on-an-active-package behaviours to afspec/prd_test.go, afspec/validate_test.go and afspec/afspec_test.go, and confirm they fail",
@@ -56,24 +50,15 @@
         "specification/spec-format-v2.md",
         "docs/api.md",
         "docs/generated/"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Read the steering's version, its amendment record and the rules it must meet",
       "criteria": [
-        "16-REQ-1",
-        "16-REQ-2.1",
-        "16-REQ-2.2"
-      ],
-      "tests": [
-        "TS-16-1",
-        "TS-16-2",
-        "TS-16-3",
-        "TS-16-4",
-        "TS-16-5"
+        "REQ-1",
+        "REQ-2.1",
+        "REQ-2.2"
       ],
       "steps": [
         "Add the reader behaviours to internal/project/steering_test.go, beside TestSteering_IgnoresAFileWithNothingToSay, and confirm they fail",
@@ -88,19 +73,13 @@
       "touches": [
         "internal/project/steering.go",
         "internal/project/steering_test.go"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Give every phase the body and name the version in its steering block",
       "criteria": [
-        "16-REQ-3"
-      ],
-      "tests": [
-        "TS-16-6",
-        "TS-16-7"
+        "REQ-3"
       ],
       "steps": [
         "Add the block behaviours to specgen/prompts_test.go, beside TestRunContextBlock, and the no-record-in-any-prompt behaviour to specgen/phases_test.go, and confirm they fail",
@@ -119,23 +98,16 @@
       ],
       "depends_on": [
         2
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Record the version in the package a run writes, and warn about a malformed record",
       "criteria": [
-        "16-REQ-2.3",
-        "16-REQ-2.4",
-        "16-REQ-4.2",
-        "16-REQ-4.3"
-      ],
-      "tests": [
-        "TS-16-11",
-        "TS-16-12",
-        "TS-16-13"
+        "REQ-2.3",
+        "REQ-2.4",
+        "REQ-4.2",
+        "REQ-4.3"
       ],
       "steps": [
         "Add the written-field, the preflight-warning and the speca-warning behaviours to specgen/pipeline_test.go and cmd/speca/verdict_test.go, and confirm they fail",
@@ -160,20 +132,13 @@
         1,
         2,
         3
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 5,
-      "kind": "implement",
       "title": "Report in the verdict the amendments a package was not written under",
       "criteria": [
-        "16-REQ-5"
-      ],
-      "tests": [
-        "TS-16-14",
-        "TS-16-15",
-        "TS-16-16"
+        "REQ-5"
       ],
       "steps": [
         "Add the rule's behaviours to a new internal/specpkg/steering_test.go, and confirm they fail",
@@ -195,48 +160,7 @@
       "depends_on": [
         1,
         2
-      ],
-      "state": "done"
-    },
-    {
-      "id": 6,
-      "kind": "integration",
-      "title": "Verify the three paths end to end, and version this repository's own steering",
-      "tests": [
-        "TS-16-17",
-        "TS-16-18",
-        "TS-16-19"
-      ],
-      "steps": [
-        "Add the end-to-end case of 16-PATH-1 to cmd/speca/e2e_test.go and those of 16-PATH-2 and 16-PATH-3 to cmd/spec/main_test.go, each against a real temporary repository and the scripted model, and confirm they pass",
-        "Trace 16-PATH-1 from the amended steering through the reader and the verdict's rule to the warning, then through the changed field back to a verdict with no finding, and confirm each step calls the next with no stub left",
-        "Trace 16-PATH-2 from the versioned steering through the run environment's single read, the version line in each phase's prompt and the write, to the field in prd.md and the clean verdict",
-        "Trace 16-PATH-3 from the malformed record through the one preflight warning to a run that used the directives and wrote no version",
-        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: the pipeline consumes the reader's version and its problems, each phase's prompt consumes the version, the write consumes spec.SteeringVersion, and the verdict consumes the rule's warnings",
-        "Grep internal/project/, internal/specpkg/, specgen/, afspec/ and cmd/ for TODO and panic(\"not implemented\") and remove any that remain",
-        "Write the ADR as docs/adr/NN-version-the-steering.md, NN being the next free number by the rule in CLAUDE.md (the highest numeric prefix in docs/adr/ plus one), recording: the version and the record live in frontmatter parsed as YAML; the record is never sent to a model; a stale version is a warning a person clears by changing the field; the rule reads the spec root so it belongs in the verdict, not in the library's own validation; and nothing is refused because of the steering",
-        "Add frontmatter to .specs/steering.md with version \"2.0.1\" and four amendments, newest first, leaving the body exactly as it is: 2.0.1 on 2026-11-06, the file carries a version and this record; 2.0.0 on 2026-10-25, tests are organised by behaviour, with no per-spec, smoke, property, phase or group test files; 1.1.0 on 2026-10-15, Generated Docs was added; 1.0.0 on 2026-10-15, the file was standardised across the agent-fox repositories",
-        "Add no steering_version to any package under .specs/: none of them recorded which steering it was written under, and the field must not claim one",
-        "Run speca --list and speca <package> --validate over this repository and confirm no steering_malformed warning is raised and no steering_version finding is reported for any package",
-        "Run make doc and then make check"
-      ],
-      "touches": [
-        "cmd/speca/e2e_test.go",
-        "cmd/spec/main_test.go",
-        ".specs/steering.md",
-        "docs/adr/"
-      ],
-      "depends_on": [
-        4,
-        5
-      ],
-      "done_when": [
-        "`make check` passes, fmt, vet, lint, test and skills-check among it",
-        "`speca --list` over this repository raises no steering_malformed warning",
-        "`speca <package> --validate` reports no steering_version finding for any package under .specs/",
-        "the body of .specs/steering.md is byte-identical to what it was before the change, the frontmatter being the only addition"
-      ],
-      "state": "done"
+      ]
     }
   ]
 }

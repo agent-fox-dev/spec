@@ -6,20 +6,19 @@ const (
 	SectionPRD          = "prd"
 	SectionArchitecture = "architecture"
 	SectionRequirements = "requirements"
-	SectionTestSpec     = "test_spec"
 	SectionTasks        = "tasks"
 )
 
 // Sections is every section name, in the order the format renders them.
 func Sections() []string {
-	return []string{SectionPRD, SectionArchitecture, SectionRequirements, SectionTestSpec, SectionTasks}
+	return []string{SectionPRD, SectionArchitecture, SectionRequirements, SectionTasks}
 }
 
 // What --max-tokens can drop, in the order it drops it. They are the values
 // of RenderResult.Reduced.
 const (
 	ReducedArchitecture = "architecture"
-	ReducedTestDetail   = "test_detail"
+	ReducedCheckDetail  = "check_detail"
 )
 
 // The scopes of a render, the values of RenderResult.Scope.
@@ -39,23 +38,23 @@ type RenderResult struct {
 	Valid     bool       `json:"valid" description:"whether the package passes the format's validation; an invalid package still renders in full, and a spec_invalid warning names the failing rules"`
 	Scope     string     `json:"scope" description:"what was rendered: spec (the whole package) or task (the package scoped to one task)"`
 	Task      *TaskInfo  `json:"task,omitempty" description:"the task the render is scoped to; present exactly when scope is task"`
-	Sections  []string   `json:"sections" description:"the sections the Markdown holds, in order; a subset of prd, architecture, requirements, test_spec, tasks"`
+	Sections  []string   `json:"sections" description:"the sections the Markdown holds, in order; a subset of prd, architecture, requirements, tasks"`
 	MaxTokens int        `json:"max_tokens,omitempty" description:"the --max-tokens budget the render was held to; absent when there was none"`
-	Reduced   []string   `json:"reduced,omitempty" description:"the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), test_detail (each test's given, when, real components and pseudocode); absent when nothing was dropped"`
+	Reduced   []string   `json:"reduced,omitempty" description:"the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), check_detail (the setup and pseudocode of every check and smoke check); absent when nothing was dropped"`
 	Tokens    int        `json:"tokens" description:"the estimated token count of markdown (bytes / 4)"`
-	Tasks     []TaskInfo `json:"tasks" description:"every task of the plan, in order: the ids --task takes"`
+	Tasks     []TaskInfo `json:"tasks" description:"every task of the plan, in order, the derived integration task last: the ids --task takes, with their states from progress.json"`
 	// MarkdownFile is where --markdown-file wrote the Markdown.
 	MarkdownFile string `json:"markdown_file,omitempty" description:"the absolute path --markdown-file wrote the Markdown to"`
 	Markdown     string `json:"markdown" description:"the rendered Markdown"`
 }
 
-// TaskInfo is one task of the plan, by id, without its body.
+// TaskInfo is one task of the plan, by id, without its body: a task of
+// tasks.json, or the derived integration task.
 type TaskInfo struct {
 	ID        int    `json:"id" description:"the task id, as --task takes it"`
 	Title     string `json:"title" description:"the task title"`
-	Kind      string `json:"kind" description:"implement, or integration for the plan's last task"`
-	State     string `json:"state" description:"pending, in_progress, done or dropped"`
-	Optional  bool   `json:"optional,omitempty" description:"true when the task may be skipped"`
+	Kind      string `json:"kind" description:"implement for a task of tasks.json, or integration for the derived last task of a full package"`
+	State     string `json:"state" description:"pending, in_progress, done or dropped, from progress.json"`
 	DependsOn []int  `json:"depends_on,omitempty" description:"the tasks that must be done first"`
 	Ready     bool   `json:"ready,omitempty" description:"true for a pending task whose dependencies are all done; absent otherwise"`
 }

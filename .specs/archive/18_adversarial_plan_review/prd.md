@@ -4,9 +4,8 @@ spec_name: "adversarial_plan_review"
 title: "Review the plan adversarially before the package is written"
 status: "archived"
 created_at: "2026-11-06T13:31:22Z"
-updated_at: "2026-11-06T15:41:21Z"
 intent_hash: "b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"
 ---
 
@@ -456,3 +455,12 @@ the PRD review's, applied to the plan unchanged.
   resolved against the repository root before `os.Stat` decides whether it
   exists, the same pair `validateRelevantFiles` in `specgen/prd.go` uses.
 - No new dependency.
+
+## Glossary
+
+- **grounding facts**: The list the run computes before the first round, naming for every path in every task's touches whether that path exists in the repository as a file or as a directory. It is a file system call over paths resolved against the repository root, never a model's judgment.
+- **plan review phase**: The plan_review phase: a fresh agent conversation that reads the PRD, the rendered plan and the grounding facts and submits a list of findings, possibly empty.
+- **plan revision phase**: The plan_revision phase: a fresh agent conversation, separate from the phases that generated the plan and from the reviewer, that answers every finding of a round and submits the revised three plan artifacts.
+- **the Zero-Decision Rule**: The rubric that a coder who holds the package and the code should have no design choice left to make. A choice the plan does not make, and that a test or another task depends on, is a finding against it.
+- **the last complete plan**: The plan the generating phases produced when no revision has finished, otherwise the plan the last finished revision submitted. It is what the package is written from when the rounds stop early.
+- **the plan**: The three generated artifacts of a package taken together: requirements.json, test_spec.json and tasks.json. The PRD is not part of it, and neither is architecture.md.

@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "14",
   "spec_name": "render_skills_from_one_source",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -12,17 +12,9 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Read the skill source tree and resolve the files each skill links",
       "criteria": [
-        "14-REQ-1"
-      ],
-      "tests": [
-        "TS-14-1",
-        "TS-14-2",
-        "TS-14-3",
-        "TS-14-4",
-        "TS-14-5"
+        "REQ-1"
       ],
       "steps": [
         "Create internal/skillgen as package main, with source_test.go holding the behaviours of this task over testing/fstest.MapFS trees, and confirm they fail",
@@ -36,19 +28,13 @@
       "touches": [
         "internal/skillgen/source.go",
         "internal/skillgen/source_test.go"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Check a skill's name and description against the Agent Skills rule",
       "criteria": [
-        "14-REQ-3"
-      ],
-      "tests": [
-        "TS-14-6",
-        "TS-14-7"
+        "REQ-3"
       ],
       "steps": [
         "Add the name and description tables to internal/skillgen/render_test.go and confirm they fail",
@@ -62,25 +48,16 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Render one skill for one agent: the frontmatter, the token and nothing else",
       "criteria": [
-        "14-REQ-2.2",
-        "14-REQ-2.3",
-        "14-REQ-2.6",
-        "14-REQ-5"
-      ],
-      "tests": [
-        "TS-14-8",
-        "TS-14-9",
-        "TS-14-10",
-        "TS-14-11",
-        "TS-14-16"
+        "REQ-2.2",
+        "REQ-2.3",
+        "REQ-2.6",
+        "REQ-5"
       ],
       "steps": [
         "Add the per-agent frontmatter, token and forbidden-text behaviours to internal/skillgen/render_test.go and confirm they fail",
@@ -98,18 +75,13 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Enforce the 24,576-byte ceiling on a rendered body",
       "criteria": [
-        "14-REQ-4"
-      ],
-      "tests": [
-        "TS-14-12"
+        "REQ-4"
       ],
       "steps": [
         "Add the ceiling table to internal/skillgen/render_test.go, with the boundary, a multi-byte body and a body that grows past the limit only after the codex substitution, and confirm it fails",
@@ -123,19 +95,13 @@
       ],
       "depends_on": [
         3
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 5,
-      "kind": "implement",
       "title": "Report every problem of a run, and warn about a reference file nothing links",
       "criteria": [
-        "14-REQ-6"
-      ],
-      "tests": [
-        "TS-14-13",
-        "TS-14-14"
+        "REQ-6"
       ],
       "steps": [
         "Add the reporting behaviours to internal/skillgen/check_test.go, over a tree with four problems at once and over a tree with two unlinked reference files, and confirm they fail",
@@ -150,20 +116,15 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 6,
-      "kind": "implement",
       "title": "Write the output tree for every agent, the same bytes every run",
       "criteria": [
-        "14-REQ-2.1",
-        "14-REQ-2.4",
-        "14-REQ-2.5"
-      ],
-      "tests": [
-        "TS-14-15"
+        "REQ-2.1",
+        "REQ-2.4",
+        "REQ-2.5"
       ],
       "steps": [
         "Add the output-tree, rerun and stale-file behaviours to internal/skillgen/render_test.go against a real temporary directory, and confirm they fail",
@@ -183,21 +144,15 @@
         3,
         4,
         5
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 7,
-      "kind": "implement",
       "title": "Resolve an agent's install directory, and refuse an unknown agent or a bad PROJECT",
       "criteria": [
-        "14-REQ-7.2",
-        "14-REQ-7.6",
-        "14-REQ-7.7"
-      ],
-      "tests": [
-        "TS-14-17",
-        "TS-14-20"
+        "REQ-7.2",
+        "REQ-7.6",
+        "REQ-7.7"
       ],
       "steps": [
         "Add the directory-resolution table and the two refusals to internal/skillgen/install_test.go, over a temporary HOME and with CODEX_HOME both set and unset, and confirm they fail",
@@ -213,26 +168,18 @@
       ],
       "depends_on": [
         6
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 8,
-      "kind": "implement",
       "title": "Install and uninstall the skills in the resolved directory",
       "criteria": [
-        "14-REQ-7.1",
-        "14-REQ-7.3",
-        "14-REQ-7.4",
-        "14-REQ-7.5",
-        "14-REQ-7.8",
-        "14-REQ-8"
-      ],
-      "tests": [
-        "TS-14-18",
-        "TS-14-19",
-        "TS-14-21",
-        "TS-14-22"
+        "REQ-7.1",
+        "REQ-7.3",
+        "REQ-7.4",
+        "REQ-7.5",
+        "REQ-7.8",
+        "REQ-8"
       ],
       "steps": [
         "Add the install and uninstall behaviours to internal/skillgen/install_test.go, over a directory that already holds a stale reference file, an unrelated skill and a loose file, and confirm they fail",
@@ -249,18 +196,13 @@
       ],
       "depends_on": [
         7
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 9,
-      "kind": "implement",
       "title": "Move the three skills into the source layout and split their bodies under the ceiling",
       "criteria": [
-        "14-REQ-9"
-      ],
-      "tests": [
-        "TS-14-23"
+        "REQ-9"
       ],
       "steps": [
         "Add TS-14-23 to internal/skillgen/render_test.go, reading the repository's own skills/ tree, and confirm it fails because the tree is still three extensionless files",
@@ -291,18 +233,13 @@
         "go run ./internal/skillgen --check reports no problem and no warning over the committed skills/ tree",
         "every rendered body is at most 24,576 bytes for claude, codex, cursor and copilot",
         "every instruction of the three pre-change skills is in a body, in a reference file, or in the list of deliberate cuts written for the pull request description"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 10,
-      "kind": "implement",
       "title": "Wire the render into make and document the source layout, the render and the install",
       "criteria": [
-        "14-REQ-10"
-      ],
-      "tests": [
-        "TS-14-24"
+        "REQ-10"
       ],
       "steps": [
         "Add TS-14-24 to internal/skillgen/make_test.go, reading make help and the plans of make -n check and make -n clean, and confirm it fails",
@@ -327,42 +264,7 @@
       "depends_on": [
         8,
         9
-      ],
-      "state": "done"
-    },
-    {
-      "id": 11,
-      "kind": "integration",
-      "title": "Verify the three paths end to end and that the skills still behave the same",
-      "tests": [
-        "TS-14-25",
-        "TS-14-26",
-        "TS-14-27"
-      ],
-      "steps": [
-        "Add the three smoke tests to internal/skillgen/smoke_test.go, each running the real make target in the checkout, and confirm they pass",
-        "Trace 14-PATH-1 from make skills through the source reader, the per-agent render and the writer to build/skills, and confirm each step calls the next with no stub left",
-        "Trace 14-PATH-2 from make install-skills AGENT=codex PROJECT=<path> through the directory resolution and the whole-directory replacement to the installed tree, and back out again through make uninstall-skills",
-        "Trace 14-PATH-3 from make skills-check over a broken source to the lines on stderr and the absent output tree, and confirm make check fails the same way",
-        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: the problems the checks return reach main.go's stderr and exit code, and the resolved directory reaches the install writer",
-        "Grep internal/skillgen for TODO and panic(\"not implemented\") and remove any that remain",
-        "Run each of the three skills once in Claude Code and once in Codex, in a scratch repository, before the change and after it, on the same input: af-prd on an idea of two sentences, af-spec on a PRD of one or two requirement areas, af-impl on a package of two tasks",
-        "For each run after the change, confirm it reads each linked reference file at the step that links it, takes the same gates, and ends at the same stop or the same end, and that the af-spec run ends with a package speca --validate reports valid",
-        "Write what each pair of runs showed, any difference, and the list of deliberate cuts from task 9 into the pull request description"
-      ],
-      "touches": [
-        "internal/skillgen/smoke_test.go"
-      ],
-      "depends_on": [
-        10
-      ],
-      "done_when": [
-        "make test passes and make lint reports nothing",
-        "make skills-check reports no problem and no warning over the committed skills/ tree",
-        "the six before-and-after runs are recorded in the pull request description, with any difference named",
-        "the pull request description carries the list of deliberate cuts, each with its reason"
-      ],
-      "state": "done"
+      ]
     }
   ]
 }

@@ -16,23 +16,28 @@ import (
 const frontmatterExtensionLines = "x-jira: \"ABC-1\"\nx-labels: [\"a\", \"b\"]\nx-meta: {\"k\": 1}\n"
 
 // withExtensions writes extension keys on objects of every kind in the
-// package at dir: the root of an artifact, a requirement, a criterion, a path
-// step, a test, a task, the test commands and the PRD frontmatter.
+// package at dir: the root of an artifact, a requirement, a criterion, a
+// check, a path step, a smoke check, a task, the test commands, a progress
+// entry and the PRD frontmatter.
 func withExtensions(t *testing.T, dir string) {
 	t.Helper()
 	editJSON(t, filepath.Join(dir, "requirements.json"), func(m map[string]any) {
 		m["x-team"] = "core"
 		req := m["requirements"].([]any)[0].(map[string]any)
 		req["x-jira"] = "ABC-1"
-		req["criteria"].([]any)[1].(map[string]any)["x-risk"] = map[string]any{"level": "high", "score": 3.0}
-		m["execution_paths"].([]any)[0].(map[string]any)["steps"].([]any)[0].(map[string]any)["x-note"] = true
-	})
-	editJSON(t, filepath.Join(dir, "test_spec.json"), func(m map[string]any) {
-		m["tests"].([]any)[0].(map[string]any)["x-flaky"] = false
+		criterion := req["criteria"].([]any)[1].(map[string]any)
+		criterion["x-risk"] = map[string]any{"level": "high", "score": 3.0}
+		criterion["check"].(map[string]any)["x-flaky"] = false
+		path := m["execution_paths"].([]any)[0].(map[string]any)
+		path["steps"].([]any)[0].(map[string]any)["x-note"] = true
+		path["smoke"].(map[string]any)["x-env"] = "ci"
 	})
 	editJSON(t, filepath.Join(dir, "tasks.json"), func(m map[string]any) {
 		m["tasks"].([]any)[1].(map[string]any)["x-estimate"] = 2.5
 		m["test_commands"].(map[string]any)["x-ci"] = "make ci"
+	})
+	editJSON(t, filepath.Join(dir, "progress.json"), func(m map[string]any) {
+		m["tasks"].([]any)[0].(map[string]any)["x-by"] = "agent-7"
 	})
 	prdPath := filepath.Join(dir, "prd.md")
 	prd, err := os.ReadFile(prdPath)
@@ -109,19 +114,23 @@ func TestSave_KeepsExtensionKeysOnTheirObjects(t *testing.T) {
 
 	req := readJSON(t, filepath.Join(dir, "requirements.json"))
 	first := req["requirements"].([]any)[0].(map[string]any)
-	risk, _ := first["criteria"].([]any)[1].(map[string]any)["x-risk"].(map[string]any)
-	step := req["execution_paths"].([]any)[0].(map[string]any)["steps"].([]any)[0].(map[string]any)
-	ts := readJSON(t, filepath.Join(dir, "test_spec.json"))
+	criterion := first["criteria"].([]any)[1].(map[string]any)
+	risk, _ := criterion["x-risk"].(map[string]any)
+	path := req["execution_paths"].([]any)[0].(map[string]any)
+	step := path["steps"].([]any)[0].(map[string]any)
 	tasks := readJSON(t, filepath.Join(dir, "tasks.json"))
+	progress := readJSON(t, filepath.Join(dir, "progress.json"))
 	fm := readFrontmatter(t, dir)
 	for name, ok := range map[string]bool{
 		"requirements root":   req["x-team"] == "core",
 		"requirement":         first["x-jira"] == "ABC-1",
 		"criterion":           risk["level"] == "high" && risk["score"] == 3.0,
+		"check":               criterion["check"].(map[string]any)["x-flaky"] == false,
 		"path step":           step["x-note"] == true,
-		"test":                ts["tests"].([]any)[0].(map[string]any)["x-flaky"] == false,
+		"smoke check":         path["smoke"].(map[string]any)["x-env"] == "ci",
 		"task":                tasks["tasks"].([]any)[1].(map[string]any)["x-estimate"] == 2.5,
 		"test commands":       tasks["test_commands"].(map[string]any)["x-ci"] == "make ci",
+		"progress entry":      progress["tasks"].([]any)[0].(map[string]any)["x-by"] == "agent-7",
 		"frontmatter string":  fm["x-jira"] == "ABC-1",
 		"frontmatter list":    len(fm["x-labels"].([]any)) == 2,
 		"frontmatter map":     fm["x-meta"] != nil,
@@ -136,7 +145,7 @@ func TestSave_KeepsExtensionKeysOnTheirObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`"state": "pending",?\s*"x-estimate": 2\.5\s*}`).Match(raw) {
+	if !regexp.MustCompile(`"depends_on": \[\s*1\s*\],?\s*"x-estimate": 2\.5\s*}`).Match(raw) {
 		t.Errorf("the extension key does not follow the task's own fields:\n%s", raw)
 	}
 
@@ -150,11 +159,11 @@ func TestSave_KeepsExtensionKeysOnTheirObjects(t *testing.T) {
 	}
 }
 
-// snapshot is the content of a package's four files, in one string.
+// snapshot is the content of a package's files, in one string.
 func snapshot(t *testing.T, dir string) string {
 	t.Helper()
 	var b strings.Builder
-	for _, f := range []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"} {
+	for _, f := range []string{"prd.md", "requirements.json", "tasks.json", "progress.json"} {
 		data, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {
 			t.Fatal(err)
@@ -173,12 +182,13 @@ func TestSave_ExtensionKeysFollowTheirObjectThroughAMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	moved, err := s.Tasks.TransitionTask(1, string(TaskStateInProgress))
+	moved, err := s.TransitionTask(1, string(TaskStateInProgress))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Tasks = moved
-	s.Requirements.Requirements = s.Requirements.Requirements[1:] // drops 01-REQ-1 and its keys
+	s.Progress = moved
+	s.Requirements.Requirements = s.Requirements.Requirements[1:] // drops REQ-1 and its keys
+	s.Tasks.Tasks[0].Criteria = []string{"REQ-2"}
 	if err := s.Save(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +197,15 @@ func TestSave_ExtensionKeysFollowTheirObjectThroughAMutation(t *testing.T) {
 	if got := tasks["tasks"].([]any)[1].(map[string]any)["x-estimate"]; got != 2.5 {
 		t.Errorf("task 2's extension key after a move of task 1 = %v", got)
 	}
+	progress := readJSON(t, filepath.Join(dir, "progress.json"))
+	if got := progress["tasks"].([]any)[0].(map[string]any)["x-by"]; got != "agent-7" {
+		t.Errorf("the moved task's progress entry lost its key: %v", got)
+	}
 	raw, err := os.ReadFile(filepath.Join(dir, "requirements.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, gone := range []string{"x-jira", "x-risk"} {
+	for _, gone := range []string{"x-jira", "x-risk", "x-flaky"} {
 		if strings.Contains(string(raw), gone) {
 			t.Errorf("%s outlived the requirement it was on", gone)
 		}
@@ -229,7 +243,7 @@ func TestValidateSchema_AllowsExtensionKeysAndReportsOtherKeys(t *testing.T) {
 
 	for file, schema := range map[string]string{
 		"requirements.json": RequirementsSchemaName,
-		"test_spec.json":    TestSpecSchemaName,
+		"progress.json":     ProgressSchemaName,
 	} {
 		if errs := ValidateArtifactSchema(readJSON(t, filepath.Join(dir, file)), schema, file); len(errs) > 0 {
 			t.Errorf("%s with extension keys does not validate against its schema: %v", file, errs)
@@ -251,7 +265,7 @@ func TestValidateSchema_AllowsExtensionKeysAndReportsOtherKeys(t *testing.T) {
 
 func TestUnknownFields_DoesNotListExtensionKeys(t *testing.T) {
 	raw := map[string]any{"x-team": "core", "tasks": []any{map[string]any{"id": 1.0, "x-estimate": 2.0, "done-when": "x"}}}
-	got := UnknownFields(raw, &TasksV2Json{})
+	got := UnknownFields(raw, &TasksV3Json{})
 	if len(got) != 1 || got[0] != "/tasks/0/done-when" {
 		t.Errorf("UnknownFields = %q, want only /tasks/0/done-when", got)
 	}
@@ -263,7 +277,7 @@ func TestDecodeArtifact_RefusesExtensionKeys(t *testing.T) {
 	content := readJSON(t, filepath.Join(fixtureValidSpec, "requirements.json"))
 	content["requirements"].([]any)[0].(map[string]any)["x-jira"] = "ABC-1"
 	_, err := DecodeArtifact(StepRequirements, content)
-	if err == nil || !strings.Contains(err.Error(), "/requirements/id=01-REQ-1/x-jira") ||
+	if err == nil || !strings.Contains(err.Error(), "/requirements/id=REQ-1/x-jira") ||
 		!strings.Contains(err.Error(), "extension key") {
 		t.Errorf("DecodeArtifact = %v, want a refusal naming the extension key", err)
 	}

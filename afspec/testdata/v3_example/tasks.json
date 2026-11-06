@@ -1,0 +1,57 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "09",
+  "spec_name": "agent_mode",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "go test ./... -count=1",
+    "linter": "go vet ./...",
+    "spec_tests": "go test ./cmd/spec/... -run 'TestAgentMode' -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "08",
+      "reason": "extends the cobra root command and emit helpers of the Go CLI"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Detect agent mode and keep stdout JSON-only",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Write TS-09-1, TS-09-2 and TS-09-3 in cmd/spec/agent_test.go and confirm they fail",
+        "Add isAgentMode() reading AF_AGENT and call it in the root PersistentPreRun before the banner",
+        "Force quiet when in agent mode so the spinner and banner write nothing",
+        "Make emit() the only writer to stdout; route every other message to stderr"
+      ],
+      "touches": [
+        "cmd/spec/root.go",
+        "cmd/spec/banner.go",
+        "cmd/spec/spinner.go"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Error envelope and closed-pipe handling",
+      "criteria": [
+        "REQ-2.1",
+        "REQ-2.2"
+      ],
+      "steps": [
+        "Write TS-09-4 and TS-09-5 and confirm they fail",
+        "In Execute(), when agent mode is on and RunE returns an error, print {ok:false,error} via emit() and exit 1",
+        "In emit(), treat EPIPE and io.ErrClosedPipe as success so the command's exit code is preserved"
+      ],
+      "touches": [
+        "cmd/spec/root.go",
+        "cmd/spec/emit.go"
+      ],
+      "depends_on": [
+        1
+      ]
+    }
+  ]
+}

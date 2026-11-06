@@ -1,13 +1,13 @@
 package specgen // import "github.com/agent-fox-dev/spec/specgen"
 
-Package specgen turns a product idea into a complete, validated version 2
+Package specgen turns a product idea into a complete, validated version 3
 specification package.
 
 It is the `afspec` skill rebuilt as a program. The skill is ~750 lines of
 markdown describing a seven-step workflow across fifteen CLI subcommands,
 with a refinement loop that stops to ask a person questions. This package keeps
-the two things that genuinely need a model — write the PRD, and generate the
-three artifacts — and turns everything else into a mechanism:
+the two things that genuinely need a model — write the PRD, and generate the two
+artifacts — and turns everything else into a mechanism:
 
   - The workflow is the pipeline, not a numbered list the model may skip.
   - The refinement loop is gone. Nobody is waiting to answer questions,
@@ -33,9 +33,9 @@ three artifacts — and turns everything else into a mechanism:
     the last package — by this run, or by the next run on the same input if this
     one stops early.
 
-The three generation phases are separate agents rather than one conversation,
-because sharing a transcript would carry the requirements phase's reasoning into
-the tests that are supposed to check the requirements.
+The generation phases are separate agents rather than one conversation, because
+sharing a transcript would carry the requirements phase's reasoning into the
+plan that is supposed to deliver the requirements.
 
 CONSTANTS
 
@@ -297,6 +297,9 @@ type PRD struct {
 	// CodebaseNotes is what the phase learned reading the code, for the
 	// phases after it. It is bounded by maxCodebaseNotes.
 	CodebaseNotes string `json:"codebase_notes,omitempty"`
+	// Profile is the package's profile: afspec.ProfileLite when the phase
+	// judged the work small enough (format v3 §12.4), "" for a full package.
+	Profile string `json:"profile,omitempty"`
 }
     PRD is the first phase's result.
 
@@ -361,10 +364,10 @@ func Run(ctx context.Context, o Options) (*Result, error)
     one stops early.
 
     Within a package the order is the format's, not a preference: requirements,
-    then tests, then tasks, each phase seeing the complete artifacts before it.
-    A generator that cannot see a test id cannot own it, which is how the
-    previous format produced specs whose edge-case and property tests belonged
-    to no task.
+    with the check of every criterion and the smoke check of every path,
+    then tasks, the tasks phase seeing the complete requirements. A generator
+    that cannot see a criterion cannot own it, which is how an earlier format
+    produced specs whose edge-case and property tests belonged to no task.
 
 func RunPreflight(ctx context.Context, o Options) (*Result, error)
     RunPreflight is spec --preflight: every check Run performs before its

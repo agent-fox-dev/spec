@@ -8,4 +8,4 @@ Revise the plan below, generated against the code in {{root}} from the PRD that 
 {{findings_block}}{{facts_block}}{{notes_block}}{{earlier_block}}
 Your file tools take paths relative to {{root}}; a path outside it is refused, and retrying will not change that.
 
-Answer every finding, and call submit_plan_revision with the three revised artifacts and your dispositions.
+Answer every finding, and call submit_plan_revision with the two revised artifacts and your dispositions.

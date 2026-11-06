@@ -19,7 +19,7 @@ type summaryTrace struct {
 	PathsCovered      int      `json:"paths_covered"`
 	CriteriaUncovered []string `json:"criteria_uncovered,omitempty"`
 	PathsUncovered    []string `json:"paths_uncovered,omitempty"`
-	TestsUnowned      []string `json:"tests_unowned,omitempty"`
+	CriteriaUnowned   []string `json:"criteria_unowned,omitempty"`
 }
 
 // summaryResult is the trimmed view of Result kept under --detail summary.
@@ -72,7 +72,7 @@ func (r *Result) SummaryView() any {
 			PathsCovered:      r.Traceability.PathsCovered,
 			CriteriaUncovered: r.Traceability.CriteriaUncovered,
 			PathsUncovered:    r.Traceability.PathsUncovered,
-			TestsUnowned:      r.Traceability.TestsUnowned,
+			CriteriaUnowned:   r.Traceability.CriteriaUnowned,
 		},
 		OpenQuestions: r.OpenQuestions,
 		Review:        reviewCounts(r.Review),

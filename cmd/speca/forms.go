@@ -22,8 +22,8 @@ type call struct {
 }
 
 // execute resolves where the call works, then runs the form the flags name:
-// the list, the render form, the status form, the task form, the verdict on one
-// package, or the report on it. A form returns a result or a failure, never both, except where
+// the list, the render form, the migrate form, the status form, the task form,
+// the verdict on one package, or the report on it. A form returns a result or a failure, never both, except where
 // a form says otherwise.
 func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	root, err := filepath.Abs(o.dir)
@@ -41,12 +41,18 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if o.render && ref == "" {
 		return renderAll(c)
 	}
+	if o.migrate && ref == "" {
+		return migrateAll(c)
+	}
 	dir, err := specpkg.Locate(tool, ref, root, c.specsDir)
 	if err != nil {
 		return nil, usageInfo(err, nil)
 	}
 	if o.render {
 		return renderOne(c, dir)
+	}
+	if o.migrate {
+		return migrateOne(c, dir)
 	}
 	if o.statusForm() {
 		return executeStatus(c, dir)
@@ -72,8 +78,9 @@ func load(dir string) (*afspec.Spec, *cli.ErrorInfo) {
 }
 
 // loadPackage loads the package in dir for the report and the verdict. One in
-// another format version loads, but its tests and tasks are not read, so the
-// form reports what did load and raises a high spec_invalid warning to say so.
+// another format version loads, but its progress and its tasks are not read,
+// so the form reports what did load and raises a high spec_invalid warning to
+// say so.
 func (c *call) loadPackage(dir string) (*afspec.Spec, *cli.ErrorInfo) {
 	spec, failure := load(dir)
 	if failure != nil {
@@ -81,8 +88,8 @@ func (c *call) loadPackage(dir string) (*afspec.Spec, *cli.ErrorInfo) {
 	}
 	if specpkg.Legacy(spec) {
 		c.run.Warn(cli.WarnSpecInvalid, "high", "the package is format version %d, and speca reads version %d only: "+
-			"its tests and tasks are not read, and what is reported holds only what the two versions share — "+
-			"format v2 §13 maps each v1 construct to its v2 form", spec.SchemaVersion, afspec.SchemaVersion)
+			"its progress and its tasks are not read, and what is reported holds only what the two versions share — "+
+			"speca <package> --migrate converts a version 2 package", spec.SchemaVersion, afspec.SchemaVersion)
 	}
 	return spec, nil
 }
@@ -92,7 +99,7 @@ func (c *call) loadPackage(dir string) (*afspec.Spec, *cli.ErrorInfo) {
 func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
 	r := envelope.AdminResult{
 		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Title: spec.Title,
-		Status: spec.Status, CreatedAt: spec.CreatedAt, UpdatedAt: spec.UpdatedAt,
+		Status: spec.Status, CreatedAt: spec.CreatedAt, UpdatedAt: spec.UpdatedAt, Profile: spec.Profile,
 		IntentDrift: specpkg.IntentDrift(spec),
 	}
 	if spec.IntentHash != nil && *spec.IntentHash != "" {
@@ -100,9 +107,6 @@ func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
 	}
 	if len(spec.Supersedes) > 0 {
 		r.Supersedes = slices.Clone(spec.Supersedes)
-	}
-	if len(spec.Tags) > 0 {
-		r.Tags = slices.Clone(spec.Tags)
 	}
 	return r
 }

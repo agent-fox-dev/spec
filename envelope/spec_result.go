@@ -53,12 +53,13 @@ type Package struct {
 	Requirements   int `json:"requirements"`
 	Criteria       int `json:"criteria"`
 	ExecutionPaths int `json:"execution_paths"`
-	Tests          int `json:"tests"`
-	Tasks          int `json:"tasks"`
+	// Tasks counts the tasks of tasks.json; the integration task, which is
+	// derived, is not among them.
+	Tasks int `json:"tasks"`
 
 	// Validation is the format's own verdict on the package.
 	Validation ValidationReport `json:"validation"`
-	// Traceability is derived from test.verifies and task.tests, never
+	// Traceability is derived from the checks and task.criteria, never
 	// stored — the format makes both computed, so reporting them here is the
 	// only place they exist.
 	Traceability TraceReport `json:"traceability"`
@@ -139,13 +140,15 @@ type ValidationItem struct {
 	Message  string `json:"message"`
 }
 
-// TraceReport is the derived coverage summary.
+// TraceReport is the derived coverage summary: the criteria whose check
+// resolves and the paths that carry a smoke check, those that do not, and the
+// criteria no task owns.
 type TraceReport struct {
 	CriteriaCovered   int      `json:"criteria_covered"`
 	CriteriaUncovered []string `json:"criteria_uncovered,omitempty"`
 	PathsCovered      int      `json:"paths_covered"`
 	PathsUncovered    []string `json:"paths_uncovered,omitempty"`
-	TestsUnowned      []string `json:"tests_unowned,omitempty"`
+	CriteriaUnowned   []string `json:"criteria_unowned,omitempty"`
 }
 
 // OpenQuestion is one decision made under uncertainty.

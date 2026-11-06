@@ -8,7 +8,7 @@ import (
 
 // verdict is the form of speca <spec> --validate: the format's full verdict on
 // the package in dir. That is the package's own validation (the schemas and
-// the cross-file rules C1 to C11) and the cross-spec rules that concern it,
+// the cross-file rules C1 to C8) and the cross-spec rules that concern it,
 // which only a run over the whole spec root can apply, and which spec applies
 // to every package it writes (specpkg.Verdict). A package that does not
 // validate is a successful call: the answer is in valid.

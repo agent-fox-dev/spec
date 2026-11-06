@@ -9,24 +9,49 @@ import (
 	"testing"
 )
 
-func TestRequirementsRender_ShowsEveryCriterionAndContract(t *testing.T) {
+func TestRequirementsRender_ShowsEveryCriterionContractAndCheck(t *testing.T) {
 	out := loadFixture(t, fixtureValidSpec).Requirements.Render()
 
 	for _, want := range []string{
-		"## Introduction",
-		"## Glossary",
-		"### 01-REQ-1: Data model",
+		"### REQ-1: Data model",
 		"**Rationale:**",
 		"#### Criteria",
-		"[01-REQ-1.1] WHEN a spec directory is loaded from disk, THE afspec library SHALL",
+		"[REQ-1.1] WHEN a spec directory is loaded from disk, THE afspec library SHALL",
 		"→ a non-nil *Spec and a nil error",
-		"[01-REQ-1.2] IF a required artifact file is missing",
+		"   Check: unit\n   - setup: a directory holding prd.md and the three JSON artifacts\n   ```\n   s, err = LoadSpec(dir); assert err == nil; assert s.Requirements != nil\n   ```\n",
+		"[REQ-1.2] IF a required artifact file is missing",
+		"   Check: property\n",
 		"## Execution Paths",
-		"### 01-PATH-1:",
+		"### PATH-1:",
 		"1. **consumer** calls LoadSpec(dir)",
+		"**Smoke check — real components (must not be mocked):** afspec library, spec directory on disk",
+		"**Setup:**\n\n- a spec directory on disk",
+		"**End state:**\n\n- LoadSpec returns no error\n- Validate reports the spec as valid",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("the requirements render is missing %q", want)
+			t.Errorf("the requirements render is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "## Introduction") || strings.Contains(out, "## Glossary") {
+		t.Error("the render has a section version 3 has no data for")
+	}
+}
+
+// The requirement's system is the criterion's when the criterion names none;
+// a shared check names the id it is the same as.
+func TestRequirementsRender_ResolvesTheSystemAndNamesASharedCheck(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	spec.Requirements.Requirements[0].Criteria[1].System = strPtr("the loader")
+	spec.Requirements.Requirements[0].Criteria[2].Check = SameAs("REQ-1.1")
+	out := spec.Requirements.Render()
+	for _, want := range []string{
+		"THE afspec library SHALL return a Spec",
+		"THEN THE the loader SHALL return a LoadError",
+		"[REQ-1.3] THE afspec library SHALL for any spec",
+		"   Check: same as REQ-1.1\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the render lacks %q:\n%s", want, out)
 		}
 	}
 }
@@ -42,38 +67,56 @@ func TestRequirementsRender_FlagsAnUnverifiedPackage(t *testing.T) {
 	}
 }
 
-func TestTasksRender_ShowsThePlan(t *testing.T) {
-	out := loadFixture(t, fixtureValidSpec).Tasks.Render()
+// The plan renders every task of tasks.json and then the derived integration
+// task, with no state.
+func TestRenderTasks_ShowsThePlanAndTheIntegrationTask(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	spec.Progress = &ProgressV3Json{Tasks: []TaskProgress{{Id: 1, State: TaskStateDone}}}
+	out := spec.RenderTasks()
 
 	for _, want := range []string{
-		"### [ ] 1. Load and save spec artifacts (implement, pending)",
-		"**Criteria:** 01-REQ-1",
-		"**Tests:** TS-01-1, TS-01-2, TS-01-3",
+		"### 1. Load and save spec artifacts (implement)",
+		"**Criteria:** REQ-1",
 		"**Steps:**",
 		"**Touches:**",
 		"`afspec/afspec.go`",
-		"**Depends on:** 1, 2",
+		"**Depends on:** 1\n",
 		"**Done when:**",
-		"- the tests listed above exist, are executable and pass",
+		"- the checks of the criteria listed above exist as tests, are executable and pass",
 		"- `go test ./... -count=1` passes",
 		"- `go vet ./...` passes",
-		"`go test ./afspec/... -count=1` passes",
+		"### 3. " + IntegrationTaskTitle + " (integration)",
+		"**Depends on:** 1, 2\n",
+		"- 3.1 Run the smoke check of PATH-1 (A consumer loads and validates a spec) with afspec library, spec directory on disk unmocked and confirm its end state: LoadSpec returns no error; Validate reports the spec as valid",
+		"- 3.2 Trace PATH-1 through the real code",
+		"For every criterion with a contract (REQ-1.1, REQ-1.2, REQ-1.3, REQ-2.1), confirm",
+		"Search every path in touches for stub markers",
+		"- `afspec/validate.go`",
+		"- every smoke check above runs with its real components and reaches its end state",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("the tasks render is missing %q", want)
+			t.Errorf("the tasks render is missing %q:\n%s", want, out)
 		}
+	}
+	for _, gone := range []string{"[x]", "[ ]", "pending", "done)", "**Tests:**"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the tasks render holds %q, which is state or version 2:\n%s", gone, out)
+		}
+	}
+	if strings.Contains(spec.Tasks.Render(), IntegrationTaskTitle) {
+		t.Error("the tasks artifact's own render carries the derived integration task")
 	}
 }
 
 // Each step is numbered task.step, so a step can be named across tasks.
-func TestTasksRender_NumbersEachStepByItsTask(t *testing.T) {
-	out := loadFixture(t, fixtureValidSpec).Tasks.Render()
+func TestRenderTasks_NumbersEachStepByItsTask(t *testing.T) {
+	out := loadFixture(t, fixtureValidSpec).RenderTasks()
 
 	for _, want := range []string{
 		"- 1.1 Write TS-01-1, TS-01-2 and TS-01-3 and confirm they fail\n",
 		"- 1.4 Write the artifacts back through the deterministic marshaller\n",
 		"- 2.1 Write TS-01-4 and confirm it fails\n",
-		"- 3.3 Confirm Validate is called from production code, not only from tests\n",
+		"- 3.1 Run the smoke check of PATH-1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the tasks render is missing %q", want)
@@ -84,11 +127,9 @@ func TestTasksRender_NumbersEachStepByItsTask(t *testing.T) {
 	}
 }
 
-// Nothing in the package is dropped by an unbudgeted render: every value of
-// every artifact, and every frontmatter field, appears in it. This is what
-// guarantees every test renders all its fields whatever its kind, and every
-// contract is shown (§11.2).
-func TestRender_DropsNothingFromThePackage(t *testing.T) {
+// Nothing in the contract is dropped by an unbudgeted render: every value of
+// every artifact, and every frontmatter field, appears in it (§11.2).
+func TestRender_DropsNothingFromTheContract(t *testing.T) {
 	s := fullySetSpec(t)
 	// $schema and the artifacts' copies of the identity are format
 	// constants and duplicates of the metadata; the pattern is the EARS
@@ -97,19 +138,19 @@ func TestRender_DropsNothingFromThePackage(t *testing.T) {
 
 	renders := map[string]string{"combined": s.RenderCombined()}
 	ind := s.RenderIndividual()
-	renders["individual"] = ind["prd"] + ind["requirements"] + ind["test_spec"] + ind["tasks"]
+	renders["individual"] = ind["prd"] + ind["requirements"] + ind["tasks"]
 	for name, render := range renders {
 		render = unescape(render)
-		for _, artifact := range []any{s.Requirements, s.TestSpec, s.Tasks} {
+		for _, artifact := range []any{s.Requirements, s.Tasks} {
 			for path, value := range leaves(t, artifact, skip) {
 				if !strings.Contains(render, value) {
 					t.Errorf("%s: %s = %q is not in the render", name, path, value)
 				}
 			}
 		}
-		for _, want := range []string{"01_test_feature", s.Title, s.Status, s.CreatedAt, s.UpdatedAt, s.Owner,
-			s.Source, "00_old_loader", "core", "io", "sha256:abc123", "Schema version:** 2", "Steering version:** 3.1.4",
-			"verified", "_(optional)_"} {
+		for _, want := range []string{"01_test_feature", s.Title, s.Status, s.CreatedAt,
+			s.Source, "00_old_loader", "sha256:abc123", "Schema version:** 3", "Steering version:** 3.1.4",
+			"verified", "same as REQ-1.1"} {
 			if !strings.Contains(render, want) {
 				t.Errorf("%s: the metadata lacks %q", name, want)
 			}
@@ -117,13 +158,29 @@ func TestRender_DropsNothingFromThePackage(t *testing.T) {
 	}
 }
 
+// The progress is not the contract: a task move changes no byte of the
+// render, and the render holds no state and no updated_at.
+func TestRender_IgnoresTheProgress(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	spec.UpdatedAt = "2026-02-02T02:02:02Z"
+	before := spec.RenderedBytes()
+	spec.Progress = spec.CompleteTaskStates([]int{1, 2, 3})
+	spec.UpdatedAt = "2027-03-03T03:03:03Z"
+	if after := spec.RenderedBytes(); string(after) != string(before) {
+		t.Errorf("the render changed with the progress:\n%s", firstDifference(string(before), string(after)))
+	}
+	if r := string(before); strings.Contains(r, "2026-02-02") || strings.Contains(r, "Updated") {
+		t.Error("the render holds updated_at")
+	}
+}
+
 // A table cell keeps its row: a pipe or a newline in a value is escaped.
 func TestRender_EscapesTableCells(t *testing.T) {
-	out := fullySetSpec(t).Requirements.Render()
-	for _, want := range []string{`| pipe \| term | a definition<br>over two lines |`, "returns a \\| b |"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the render lacks %q:\n%s", want, out)
-		}
+	s := fullySetSpec(t)
+	s.Requirements.ExternalApis[0].Symbols[0].Notes = strPtr("returns a | b\nover two lines")
+	out := s.Requirements.Render()
+	if want := `| returns a \| b<br>over two lines |`; !strings.Contains(out, want) {
+		t.Errorf("the render lacks %q:\n%s", want, out)
 	}
 	if got := code("a`b"); got != "``a`b``" {
 		t.Errorf("code(a`b) = %q", got)
@@ -144,7 +201,7 @@ func TestRenderCombined_OrdersTheSections(t *testing.T) {
 	out := loadFixture(t, fixtureWithArch).RenderCombined()
 
 	last := -1
-	for _, section := range []string{"# PRD", "# Architecture", "# Requirements", "# Test Specification", "# Tasks"} {
+	for _, section := range []string{"# PRD", "# Architecture", "# Requirements", "# Tasks"} {
 		i := strings.Index(out, section)
 		if i < 0 {
 			t.Fatalf("section %q is missing", section)
@@ -154,24 +211,29 @@ func TestRenderCombined_OrdersTheSections(t *testing.T) {
 		}
 		last = i
 	}
+	if strings.Contains(out, "# Test Specification") {
+		t.Error("the render has a test specification section")
+	}
 }
 
 func TestRenderIndividual_HasAnArchitectureKeyOnlyWhenPresent(t *testing.T) {
 	out := loadFixture(t, fixtureValidSpec).RenderIndividual()
-	for _, key := range []string{"prd", "requirements", "test_spec", "tasks"} {
+	for _, key := range []string{"prd", "requirements", "tasks"} {
 		if out[key] == "" {
 			t.Errorf("key %q is empty", key)
 		}
 	}
-	if _, present := out["architecture"]; present {
-		t.Error("the architecture key is present for a spec with no architecture.md")
+	for _, key := range []string{"architecture", "test_spec"} {
+		if _, present := out[key]; present {
+			t.Errorf("the %s key is present", key)
+		}
 	}
 	if loadFixture(t, fixtureWithArch).RenderIndividual()["architecture"] == "" {
 		t.Error("the architecture key is missing for a spec that has one")
 	}
 }
 
-// §11.1: scoping reads task.criteria and task.tests directly.
+// §11.1: scoping reads task.criteria directly.
 func TestRenderIndividualScoped_RendersTheTaskInFullAndTheRestByID(t *testing.T) {
 	out := loadFixture(t, fixtureValidSpec).RenderIndividualScoped(2)
 
@@ -179,52 +241,71 @@ func TestRenderIndividualScoped_RendersTheTaskInFullAndTheRestByID(t *testing.T)
 	if !strings.Contains(reqs, "## Spec Overview") {
 		t.Error("the scoped requirements render has no overview")
 	}
-	if !strings.Contains(reqs, "**01-REQ-1:** Data model (other task)") {
+	if !strings.Contains(reqs, "**REQ-1:** Data model (other task)") {
 		t.Error("the out-of-scope requirement is not summarised as one line")
 	}
-	if !strings.Contains(reqs, "**01-REQ-2:** Cross-file validation (included below)") {
+	if !strings.Contains(reqs, "**REQ-2:** Cross-file validation (included below)") {
 		t.Error("the in-scope requirement is not marked as included")
 	}
-	if !strings.Contains(reqs, "### 01-REQ-2: Cross-file validation") {
-		t.Error("the in-scope requirement is not rendered in full")
+	if !strings.Contains(reqs, "### REQ-2: Cross-file validation") || !strings.Contains(reqs, "Check: integration") {
+		t.Error("the in-scope requirement is not rendered in full with its check")
 	}
-	if strings.Contains(reqs, "### 01-REQ-1: Data model") {
+	if strings.Contains(reqs, "### REQ-1: Data model") {
 		t.Error("an out-of-scope requirement was rendered in full")
 	}
-
-	tests := out["test_spec"]
-	if !strings.Contains(tests, "TS-01-4") {
-		t.Error("the task's own test is missing")
-	}
-	if strings.Contains(tests, "### TS-01-1 ") {
-		t.Error("a test belonging to another task was rendered in full")
-	}
-	if !strings.Contains(tests, "## Other tests") || !strings.Contains(tests, "- **TS-01-1** (") {
-		t.Error("a test belonging to another task is not listed by id")
+	if !strings.Contains(reqs, "**PATH-1:** A consumer loads and validates a spec (verified by the integration task)") ||
+		strings.Contains(reqs, "## Execution Paths") {
+		t.Error("the path is not listed by id alone")
 	}
 
 	tasks := out["tasks"]
-	if !strings.Contains(tasks, "### [ ] 2. Cross-file validation") {
+	if !strings.Contains(tasks, "### 2. Cross-file validation (implement)") {
 		t.Error("the target task is not rendered in full")
 	}
-	if !strings.Contains(tasks, "- [ ] 1. Load and save spec artifacts") {
+	if !strings.Contains(tasks, "- 1. Load and save spec artifacts (implement)") || !strings.Contains(tasks, "- 3. "+IntegrationTaskTitle+" (integration)") {
 		t.Error("another task is not summarised as one line")
 	}
-	if strings.Contains(tasks, "### [ ] 1. Load and save spec artifacts") {
+	if strings.Contains(tasks, "### 1. Load and save spec artifacts") {
 		t.Error("another task was rendered in full")
 	}
 }
 
-func TestRenderIndividualScoped_IncludesThePathsTheTasksTestsVerify(t *testing.T) {
+// A path is in a task's scope when a check of the task's criteria is the
+// same as the path's smoke check.
+func TestRenderIndividualScoped_IncludesThePathsASharedCheckNames(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
+	spec.Requirements.Requirements[1].Criteria[0].Check = SameAs("PATH-1")
 
-	// Task 3 owns the smoke test, which verifies 01-PATH-1.
-	if !strings.Contains(spec.RenderIndividualScoped(3)["requirements"], "### 01-PATH-1:") {
-		t.Error("the path verified by the task's smoke test is missing from the scoped render")
+	if out := spec.RenderIndividualScoped(2)["requirements"]; !strings.Contains(out, "### PATH-1:") || !strings.Contains(out, "**Smoke check") {
+		t.Error("the path a shared check names is missing from the scoped render")
 	}
-	// Task 2 owns no smoke test, so no path is in scope.
-	if strings.Contains(spec.RenderIndividualScoped(2)["requirements"], "## Execution Paths") {
-		t.Error("a path was rendered for a task whose tests verify none")
+	if strings.Contains(spec.RenderIndividualScoped(1)["requirements"], "## Execution Paths") {
+		t.Error("a path was rendered for a task whose checks name none")
+	}
+}
+
+// The integration task's render holds every path with its smoke check, every
+// requirement one line each, the contracts, and the task in full.
+func TestRenderIndividualScoped_RendersTheIntegrationTask(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	out := spec.RenderIndividualScoped(3)
+	reqs := out["requirements"]
+	for _, want := range []string{
+		"**REQ-1:** Data model (other task)", "**REQ-2:** Cross-file validation (other task)",
+		"**PATH-1:** A consumer loads and validates a spec (included below)",
+		"## Contracts", "- **REQ-1.2:** a nil *Spec and a LoadError whose File field is the missing path",
+		"### PATH-1:", "**Smoke check", "**End state:**",
+	} {
+		if !strings.Contains(reqs, want) {
+			t.Errorf("the integration render lacks %q:\n%s", want, reqs)
+		}
+	}
+	if strings.Contains(reqs, "### REQ-1: Data model") {
+		t.Error("a requirement was rendered in full for the integration task")
+	}
+	tasks := out["tasks"]
+	if !strings.Contains(tasks, "### 3. "+IntegrationTaskTitle+" (integration)") || !strings.Contains(tasks, "- 1. Load and save spec artifacts (implement)") {
+		t.Errorf("the integration task is not the one in full:\n%s", tasks)
 	}
 }
 
@@ -233,10 +314,9 @@ func TestRenderIndividualScoped_IncludesThePathsTheTasksTestsVerify(t *testing.T
 // it altogether.
 func TestRenderIndividualScoped_MissesNothingFromThePackage(t *testing.T) {
 	s := fullySetSpec(t)
-	for _, task := range s.Tasks.Tasks {
-		out := s.RenderIndividualScoped(task.Id)
-		render := unescape(out["prd"] + out["requirements"] + out["test_spec"] + out["tasks"])
-		specWide := []any{s.Requirements.ExternalApis, s.Requirements.Glossary, s.Tasks.Dependencies, s.Tasks.TestCommands}
+	for _, task := range s.Plan() {
+		render := unescape(scopedRender(s.RenderIndividualScoped(task.Id)))
+		specWide := []any{s.Requirements.ExternalApis, s.Tasks.Dependencies, s.Tasks.TestCommands}
 		for _, part := range specWide {
 			for path, value := range leaves(t, part, nil) {
 				if !strings.Contains(render, value) {
@@ -251,13 +331,10 @@ func TestRenderIndividualScoped_MissesNothingFromThePackage(t *testing.T) {
 		for _, p := range s.Requirements.ExecutionPaths {
 			ids = append(ids, p.Id)
 		}
-		for _, tt := range s.TestSpec.Tests {
-			ids = append(ids, tt.Id)
-		}
-		for _, other := range s.Tasks.Tasks {
+		for _, other := range s.Plan() {
 			ids = append(ids, fmt.Sprintf("%d. %s", other.Id, other.Title))
 		}
-		for _, id := range append(ids, "01_test_feature", s.Requirements.Introduction) {
+		for _, id := range append(ids, "01_test_feature") {
 			if !strings.Contains(render, id) {
 				t.Errorf("task %d: the scoped render does not name %q", task.Id, id)
 			}
@@ -347,7 +424,7 @@ func TestRenderIndividualScoped_FallsBackForAnUnknownTask(t *testing.T) {
 // unbudgeted render, and a file written from the exported bytes is the one a
 // save writes.
 func TestRenderedBytes_AreTheHeaderAndTheWholeRender(t *testing.T) {
-	const header = "<!-- Generated by afspec from prd.md, requirements.json, test_spec.json, tasks.json and architecture.md. Do not edit: change those files, or run speca <package> --render. -->"
+	const header = "<!-- Generated by afspec from prd.md, requirements.json, tasks.json and architecture.md. Do not edit: change those files, or run speca <package> --render. -->"
 	if RenderedFileName != "spec.md" {
 		t.Errorf("RenderedFileName = %q; want spec.md", RenderedFileName)
 	}
@@ -385,7 +462,7 @@ func TestRenderedBytes_AreTheHeaderAndTheWholeRender(t *testing.T) {
 }
 
 // The same package always renders to the same bytes, and they hold no time
-// but the two the frontmatter carries.
+// but the one the frontmatter carries.
 func TestRenderedBytes_AreTheSameEveryTime(t *testing.T) {
 	scaffold := CreateSpec("07", "new_feature")
 	scaffold.Title = "New Feature"
@@ -416,8 +493,8 @@ func TestRenderedBytes_AreTheSameEveryTime(t *testing.T) {
 				t.Errorf("the reloaded package composes differently:\n%s", firstDifference(string(first), string(reloaded)))
 			}
 			for _, at := range instant.FindAllString(string(first), -1) {
-				if at != tc.spec.CreatedAt && at != tc.spec.UpdatedAt {
-					t.Errorf("the render holds the instant %s, which is neither created_at nor updated_at", at)
+				if at != tc.spec.CreatedAt {
+					t.Errorf("the render holds the instant %s, which is not created_at", at)
 				}
 			}
 		})

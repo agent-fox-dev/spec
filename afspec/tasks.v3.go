@@ -11,8 +11,9 @@ type Dependency struct {
 }
 
 type Task struct {
-	// Criteria corresponds to the JSON schema field "criteria".
-	Criteria []string `json:"criteria,omitempty,omitzero" yaml:"criteria,omitempty" mapstructure:"criteria,omitempty"`
+	// The requirement and criterion ids the task satisfies. A requirement id means
+	// all of its criteria.
+	Criteria []string `json:"criteria" yaml:"criteria" mapstructure:"criteria"`
 
 	// DependsOn corresponds to the JSON schema field "depends_on".
 	DependsOn []int `json:"depends_on,omitempty,omitzero" yaml:"depends_on,omitempty" mapstructure:"depends_on,omitempty"`
@@ -23,20 +24,8 @@ type Task struct {
 	// Id corresponds to the JSON schema field "id".
 	Id int `json:"id" yaml:"id" mapstructure:"id"`
 
-	// Kind corresponds to the JSON schema field "kind".
-	Kind TaskKind `json:"kind" yaml:"kind" mapstructure:"kind"`
-
-	// Optional corresponds to the JSON schema field "optional".
-	Optional *bool `json:"optional,omitempty,omitzero" yaml:"optional,omitempty" mapstructure:"optional,omitempty"`
-
-	// State corresponds to the JSON schema field "state".
-	State TaskState `json:"state" yaml:"state" mapstructure:"state"`
-
 	// Steps corresponds to the JSON schema field "steps".
 	Steps []string `json:"steps" yaml:"steps" mapstructure:"steps"`
-
-	// Tests corresponds to the JSON schema field "tests".
-	Tests []string `json:"tests" yaml:"tests" mapstructure:"tests"`
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
@@ -45,20 +34,8 @@ type Task struct {
 	Touches []string `json:"touches,omitempty,omitzero" yaml:"touches,omitempty" mapstructure:"touches,omitempty"`
 }
 
-type TaskKind string
-
-const TaskKindImplement TaskKind = "implement"
-const TaskKindIntegration TaskKind = "integration"
-
-type TaskState string
-
-const TaskStateDone TaskState = "done"
-const TaskStateDropped TaskState = "dropped"
-const TaskStateInProgress TaskState = "in_progress"
-const TaskStatePending TaskState = "pending"
-
-// Schema for tasks.json spec artifact (format version 2)
-type TasksV2Json struct {
+// Schema for tasks.json spec artifact (format version 3)
+type TasksV3Json struct {
 	// Schema corresponds to the JSON schema field "$schema".
 	Schema string `json:"$schema" yaml:"$schema" mapstructure:"$schema"`
 
@@ -74,7 +51,8 @@ type TasksV2Json struct {
 	// SpecName corresponds to the JSON schema field "spec_name".
 	SpecName string `json:"spec_name" yaml:"spec_name" mapstructure:"spec_name"`
 
-	// Tasks corresponds to the JSON schema field "tasks".
+	// The implement tasks, in order. The integration task is derived from the package
+	// and is not stored.
 	Tasks []Task `json:"tasks" yaml:"tasks" mapstructure:"tasks"`
 
 	// TestCommands corresponds to the JSON schema field "test_commands".

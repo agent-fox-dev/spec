@@ -1,520 +1,867 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
   "spec_id": "11",
   "spec_name": "speca_task_states",
-  "schema_version": 2,
-  "introduction": "This spec gives the `speca` command its first writing form, the task form (`speca <spec> --task T --state S`), which moves one or more tasks of a spec package through afspec's task state machine all-or-nothing, writes through `Spec.Save`, and reports every change in the result envelope; it adds `--force`, `--dry-run`, claim suggestions in `next`, and the `envelope` types (`Change`, `CategoryLifecycle`, two warning codes) the form needs.",
-  "glossary": {
-    "bypass": "Setting a state with afspec's CompleteTaskStates (done) or ResetTaskStates (pending) instead of TransitionTask; reachable only through --force.",
-    "change entry": "One element of the result's `changes`: {kind: \"task\", id, from, to, forced?} for a task whose state changed.",
-    "claim": "A move of a task to in_progress. A claim of a task already in_progress is not a move, which makes the state machine the compare-and-set between agents.",
-    "legacy package": "A package whose schema_version is neither 0 nor 2, by specr's rule.",
-    "move": "A change of one task from its current state to the --state target; allowed exactly when afspec.ValidTaskTransition(current, target) is true (format v2 §8.3.1).",
-    "task form": "The speca invocation `speca <spec> --task T --state S`, which changes task states; the first speca form that writes.",
-    "unknown key": "A JSON key the v2 schema does not allow; LoadSpec drops it, ValidateSchema reports it as an unknown_field error, and a Save deletes it from disk.",
-    "writable package": "A package Save would write: status draft, or status active without intent drift."
-  },
+  "schema_version": 3,
   "requirements": [
     {
-      "id": "11-REQ-1",
+      "id": "REQ-1",
       "title": "Task form flags and pre-load usage errors",
       "rationale": "A call that cannot hold must be refused before the package is touched, with the flag and values that fix it.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-1.1",
+          "id": "REQ-1.1",
           "pattern": "event_driven",
           "condition": "speca is invoked with exactly one positional input, one or more --task flags and one --state flag whose values are valid",
-          "system": "speca",
-          "action": "resolve the positional input as the report form resolves it, read each --task value as a comma-separated list of positive integer ids, `next` or `all`, and collapse duplicate ids into one"
+          "action": "resolve the positional input as the report form resolves it, read each --task value as a comma-separated list of positive integer ids, `next` or `all`, and collapse duplicate ids into one",
+          "contract": "exit code is 0; the change set and resolved ids contain 1 and 2 once each; the package was resolved as the report form resolves it",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft v2 package 09_agent_mode having tasks 1, 2, 3"
+            ],
+            "pseudocode": "parse(['09','--task','1,2','--task','2','--state','in_progress']); assert ids == [1,2]"
+          }
         },
         {
-          "id": "11-REQ-1.2",
+          "id": "REQ-1.2",
           "pattern": "unwanted",
           "condition": "--task is given without --state, or --state without --task",
-          "system": "speca",
           "action": "refuse the call and write nothing",
-          "contract": "exit 2; error stage `usage`, category `usage`; no result"
+          "contract": "exit 2; error stage `usage`, category `usage`; no result",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft package"
+            ],
+            "pseudocode": "for argv in [['09','--task','1'],['09','--state','done']]: env=run(argv); assert env.exit==2 and env.error.stage=='usage' and env.result==nil"
+          }
         },
         {
-          "id": "11-REQ-1.3",
+          "id": "REQ-1.3",
           "pattern": "unwanted",
           "condition": "the --state value is not one of pending, in_progress, done, dropped",
-          "system": "speca",
           "action": "refuse the call and write nothing",
-          "contract": "exit 2; stage `usage`, category `usage`; fix_hint {flag: \"--state\", valid: [\"pending\",\"in_progress\",\"done\",\"dropped\"]}"
+          "contract": "exit 2; stage `usage`, category `usage`; fix_hint {flag: \"--state\", valid: [\"pending\",\"in_progress\",\"done\",\"dropped\"]}",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft package"
+            ],
+            "pseudocode": "env=run(['09','--task','1','--state','finished']); assert env.error.fix_hint == {flag:'--state', valid:[four]}"
+          }
         },
         {
-          "id": "11-REQ-1.4",
+          "id": "REQ-1.4",
           "pattern": "unwanted",
           "condition": "a --task value is not a positive integer, `next` or `all` (including 0, a negative number and an empty item), or `next` or `all` appears together with any other --task value",
-          "system": "speca",
           "action": "refuse the call and write nothing",
-          "contract": "exit 2; stage `usage`, category `usage`"
+          "contract": "exit 2; stage `usage`, category `usage`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft package"
+            ],
+            "pseudocode": "for v in ['0','-1','abc','1,,2','next,1','all,2','next,all']: assert run(['09','--task',v,'--state','done']).exit==2"
+          }
         },
         {
-          "id": "11-REQ-1.5",
+          "id": "REQ-1.5",
           "pattern": "unwanted",
           "condition": "the task form is combined with --validate or --list",
-          "system": "speca",
           "action": "refuse the call as naming two operations and write nothing",
-          "contract": "exit 2; stage `usage`, category `usage`"
+          "contract": "exit 2; stage `usage`, category `usage`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft package"
+            ],
+            "pseudocode": "assert run(['09','--task','1','--state','done','--validate']).exit==2"
+          }
         },
         {
-          "id": "11-REQ-1.6",
+          "id": "REQ-1.6",
           "pattern": "unwanted",
           "condition": "the task form has no positional input, more than one, or a positional input that is `-`, a URL or spans more than one line",
-          "system": "speca",
           "action": "refuse the call and write nothing",
-          "contract": "exit 2; stage `usage`, category `usage`"
+          "contract": "exit 2; stage `usage`, category `usage`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft package"
+            ],
+            "pseudocode": "for inp in [[],['a','b'],['-'],['https://example.com/x/issues/1'],['a\\nb']]: assert run(inp+['--task','1','--state','done']).exit==2"
+          }
         },
         {
-          "id": "11-REQ-1.7",
+          "id": "REQ-1.7",
           "pattern": "unwanted",
           "condition": "--force or --dry-run is given without --task",
-          "system": "speca",
           "action": "refuse the call because the flag has no effect without a writing form",
-          "contract": "exit 2; stage `usage`, category `usage`"
+          "contract": "exit 2; stage `usage`, category `usage`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with a draft package"
+            ],
+            "pseudocode": "assert run(['09','--force']).exit==2; assert run(['09','--dry-run']).exit==2"
+          }
         },
         {
-          "id": "11-REQ-1.8",
+          "id": "REQ-1.8",
           "pattern": "unwanted",
           "condition": "the resolved package fails to load",
-          "system": "speca",
           "action": "stop as the report form does",
-          "contract": "exit 1; stage `load`, category `input`; no result"
+          "contract": "exit 1; stage `load`, category `input`; no result",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo whose package 09 has malformed tasks.json"
+            ],
+            "pseudocode": "env=run(...); assert env.exit==1 and env.error.stage=='load' and env.error.category=='input' and env.result==nil"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-2",
+      "id": "REQ-2",
       "title": "Post-load usage errors and expansion of next and all",
       "rationale": "Ids, `next` and `all` can only be checked against the loaded plan, and must resolve to the same tasks the report names.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-2.1",
+          "id": "REQ-2.1",
           "pattern": "unwanted",
           "condition": "one or more named ids are not in the plan",
-          "system": "speca",
           "action": "refuse the call with a message naming the package and every unknown id; when the plan has no tasks the message says so",
-          "contract": "exit 2; stage `usage`, category `usage`; fix_hint {flag: \"--task\", valid: [every task id]}, absent when the plan has no tasks; nothing written"
+          "contract": "exit 2; stage `usage`, category `usage`; fix_hint {flag: \"--task\", valid: [every task id]}, absent when the plan has no tasks; nothing written",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a package with tasks 1, 2, 3",
+              "a package whose tasks array is empty"
+            ],
+            "pseudocode": "env=run(...); assert '7' in msg and '9' in msg; assert fix_hint.valid==['1','2','3']\nenv=run(...); assert env.exit==2 and env.error.fix_hint==nil"
+          }
         },
         {
-          "id": "11-REQ-2.2",
+          "id": "REQ-2.2",
           "pattern": "unwanted",
           "condition": "--task next is given and the plan has no next task",
-          "system": "speca",
           "action": "refuse the call with a message saying either that every task is done or dropped, or that no pending task has its dependencies done",
-          "contract": "exit 2; stage `usage`, category `usage`; in the second case fix_hint {flag: \"--task\", valid: [the pending ids]}, otherwise none"
+          "contract": "exit 2; stage `usage`, category `usage`; in the second case fix_hint {flag: \"--task\", valid: [the pending ids]}, otherwise none",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "plan A where every task is done or dropped",
+              "plan B where pending task 2 depends on task 1 that is dropped, and no task is in progress"
+            ],
+            "pseudocode": "assert A.fix_hint==nil; assert B.fix_hint.valid==['2']"
+          }
         },
         {
-          "id": "11-REQ-2.3",
+          "id": "REQ-2.3",
           "pattern": "unwanted",
           "condition": "--task all is given on a plan with no tasks",
-          "system": "speca",
           "action": "refuse the call naming the package",
-          "contract": "exit 2; stage `usage`, category `usage`"
+          "contract": "exit 2; stage `usage`, category `usage`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a package whose tasks array is empty"
+            ],
+            "pseudocode": "env=run(['<spec>','--task','all','--state','done']); assert env.exit==2"
+          }
         },
         {
-          "id": "11-REQ-2.4",
+          "id": "REQ-2.4",
           "pattern": "unwanted",
           "condition": "the package's schema_version is neither 0 nor 2",
-          "system": "speca",
           "action": "refuse the call, with or without --force, with a message saying speca writes format version 2 only and a save would discard the v1 plan",
-          "contract": "exit 2; stage `usage`, category `usage`; nothing written"
+          "contract": "exit 2; stage `usage`, category `usage`; nothing written",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a package whose schema_version is 1"
+            ],
+            "pseudocode": "for extra in [[],['--force']]: assert run(base+extra).exit==2; assert bytes_unchanged()"
+          }
         },
         {
-          "id": "11-REQ-2.5",
+          "id": "REQ-2.5",
           "pattern": "event_driven",
           "condition": "--task next is given and the plan has a next task",
-          "system": "speca",
-          "action": "resolve `next` to the id that (*TasksV2Json).NextTask returns, the same task as the report's next_task"
+          "action": "resolve `next` to the id that (*TasksV2Json).NextTask returns, the same task as the report's next_task",
+          "contract": "exit 0; changes holds task 1 only; the report's next_task before the call was task 1",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package with task 1 pending and task 2 pending depending on 1"
+            ],
+            "pseudocode": "assert report.next_task==1; env=run(next form); assert env.result.changes[0].id==1"
+          }
         },
         {
-          "id": "11-REQ-2.6",
+          "id": "REQ-2.6",
           "pattern": "event_driven",
           "condition": "--task all is given",
-          "system": "speca",
-          "action": "resolve `all` to every task in plan order except tasks already in the target state and tasks in state dropped"
+          "action": "resolve `all` to every task in plan order except tasks already in the target state and tasks in state dropped",
+          "contract": "exit 0; changes are task 2 and task 4 in_progress → done, in plan order; tasks 1 (already done) and 3 (dropped) are not in changes",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks 1 done, 2 in_progress, 3 dropped, 4 in_progress",
+              "target state is done"
+            ],
+            "pseudocode": "run('all','done'); assert [c.id for c in changes]==[2,4]"
+          }
         },
         {
-          "id": "11-REQ-2.7",
+          "id": "REQ-2.7",
           "pattern": "unwanted",
           "condition": "`all` resolves to no task",
-          "system": "speca",
           "action": "succeed without changing or writing anything",
-          "contract": "exit 0; changes empty; summary `speca: <dir name> no task changed`; files and updated_at unchanged"
+          "contract": "exit 0; changes empty; summary `speca: <dir name> no task changed`; files and updated_at unchanged",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "every task is done or dropped",
+              "package files recorded byte-for-byte"
+            ],
+            "pseudocode": "before=snapshot(dir); env=run(...); assert env.exit==0 and env.result.changes==[] and snapshot(dir)==before"
+          }
         },
         {
-          "id": "11-REQ-2.8",
+          "id": "REQ-2.8",
           "pattern": "ubiquitous",
-          "system": "speca",
-          "action": "move an explicitly named id as named even when the task is already in the target state, so that the state machine judges that move"
+          "action": "move an explicitly named id as named even when the task is already in the target state, so that the state machine judges that move",
+          "contract": "exit 1, stage task, category lifecycle; tasks.json is unchanged",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 1 is in_progress"
+            ],
+            "pseudocode": "env=run(...); assert env.exit==1 and env.error.stage=='task' and env.error.category=='lifecycle'"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-3",
+      "id": "REQ-3",
       "title": "All-or-nothing moves through the task state machine",
       "rationale": "A partial multi-task move leaves a plan no caller asked for, and the machine must be the only judge of a move.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-3.1",
+          "id": "REQ-3.1",
           "pattern": "event_driven",
           "condition": "every named move passes ValidTaskTransition",
-          "system": "speca",
-          "action": "check every named move before applying any, then apply them in plan order with TransitionTask, each on the copy the previous call returned"
+          "action": "check every named move before applying any, then apply them in plan order with TransitionTask, each on the copy the previous call returned",
+          "contract": "exit 0; changes list task 1 then task 3 (plan order); tasks.json holds both in_progress",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks 1 and 3 pending, 2 in_progress"
+            ],
+            "pseudocode": "assert [c.id for c in changes]==[1,3]; assert disk states[1],[3]=='in_progress'"
+          }
         },
         {
-          "id": "11-REQ-3.2",
+          "id": "REQ-3.2",
           "pattern": "unwanted",
           "condition": "any named move fails ValidTaskTransition and is not covered by --force",
-          "system": "speca",
           "action": "refuse the whole call without changing any task, with a message that names every refused task with its current state and the target, cites format v2 §8.3.1, and lists the states each refused task may move to",
-          "contract": "exit 1; stage `task`, category `lifecycle`; tasks.json unchanged on disk"
+          "contract": "exit 1; stage `task`, category `lifecycle`; tasks.json unchanged on disk",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 1 pending, task 2 in_progress, task 3 done"
+            ],
+            "pseudocode": "assert fix_hint.valid==['in_progress','dropped']; assert disk_state(2)=='in_progress'"
+          }
         },
         {
-          "id": "11-REQ-3.3",
+          "id": "REQ-3.3",
           "pattern": "unwanted",
           "condition": "a move is refused and the first refused task in plan order has at least one allowed target",
-          "system": "speca",
           "action": "carry that task's allowed targets, found by testing each of the four states with ValidTaskTransition, in fix_hint",
-          "contract": "fix_hint {flag: \"--state\", valid: [states the first refused task may move to]}"
+          "contract": "fix_hint {flag: \"--state\", valid: [states the first refused task may move to]}",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
         },
         {
-          "id": "11-REQ-3.4",
+          "id": "REQ-3.4",
           "pattern": "unwanted",
           "condition": "a move is refused and the first refused task in plan order is dropped",
-          "system": "speca",
           "action": "omit fix_hint and say in the message that --force with done or pending is the only way out",
-          "contract": "exit 1; stage `task`, category `lifecycle`; no fix_hint"
+          "contract": "exit 1; stage `task`, category `lifecycle`; no fix_hint",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 3 is dropped"
+            ],
+            "pseudocode": "assert env.error.fix_hint==nil and '--force' in env.error.message"
+          }
         },
         {
-          "id": "11-REQ-3.5",
+          "id": "REQ-3.5",
           "pattern": "unwanted",
           "condition": "a call names a task with target in_progress while that task is already in_progress",
-          "system": "speca",
           "action": "refuse the claim as a disallowed move, so a second agent learns the task is taken",
-          "contract": "exit 1; stage `task`, category `lifecycle`; no task changes"
+          "contract": "exit 1; stage `task`, category `lifecycle`; no task changes",
+          "check": {
+            "same_as": "REQ-2.8"
+          }
         },
         {
-          "id": "11-REQ-3.6",
+          "id": "REQ-3.6",
           "pattern": "ubiquitous",
-          "system": "speca",
-          "action": "for any plan, set of named ids and target state, either apply every named move or none of them, never a subset"
+          "action": "for any plan, set of named ids and target state, either apply every named move or none of them, never a subset",
+          "contract": "either every named task not already skipped has changed to its target, or tasks.json is byte-identical to before; a refused call changes no task",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "a temp package per generated plan"
+            ],
+            "pseudocode": "for plan,ids,target,force in gen(): before=snap(); env=run(); assert env.exit==0 or snap()==before; if env.exit==0: assert all(disk[i] in (target, before_state[i]) for i in ids) and all(disk[i]==target for i in changed)"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-4",
+      "id": "REQ-4",
       "title": "Refusing writes the package status does not allow",
       "rationale": "A dry run must report the refusal the real call would hit, and Save would refuse these packages anyway.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-4.1",
+          "id": "REQ-4.1",
           "pattern": "unwanted",
           "condition": "the package status is sealed, superseded or archived",
-          "system": "speca",
           "action": "refuse the call before any move is checked, with a message that its tasks can no longer change and a change is a new package that supersedes it",
-          "contract": "exit 1; stage `status`, category `lifecycle`; no fix_hint; nothing written"
+          "contract": "exit 1; stage `status`, category `lifecycle`; no fix_hint; nothing written",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "three packages with status sealed, superseded, archived and a pending task each"
+            ],
+            "pseudocode": "for st in [sealed,superseded,archived]: env=run(); assert env.error.stage=='status' and env.error.fix_hint==nil"
+          }
         },
         {
-          "id": "11-REQ-4.2",
+          "id": "REQ-4.2",
           "pattern": "unwanted",
           "condition": "the package is active with intent drift, including a body without `## Intent` while intent_hash is set",
-          "system": "speca",
           "action": "refuse the call before any move is checked, with a message that the library refuses every write until the intent matches its hash again",
-          "contract": "exit 1; stage `status`, category `lifecycle`; no fix_hint; nothing written"
+          "contract": "exit 1; stage `status`, category `lifecycle`; no fix_hint; nothing written",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "an active package whose PRD intent was edited after activation",
+              "an active package whose body lost its ## Intent while intent_hash is set",
+              "the call also names an unknown id"
+            ],
+            "pseudocode": "assert env.exit==1 and env.error.stage=='status'"
+          }
         },
         {
-          "id": "11-REQ-4.3",
+          "id": "REQ-4.3",
           "pattern": "ubiquitous",
-          "system": "speca",
-          "action": "apply the status refusals of 11-REQ-4.1 and 11-REQ-4.2 identically with --dry-run and with --force"
+          "action": "apply the status refusals of 11-REQ-4.1 and 11-REQ-4.2 identically with --dry-run and with --force",
+          "contract": "exit code, stage, category and message are the same in all three variants; files are unchanged",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a sealed package and an active package with intent drift"
+            ],
+            "pseudocode": "base=run(a); for extra in ['--dry-run','--force']: assert same(base, run(a+[extra]))"
+          }
         },
         {
-          "id": "11-REQ-4.4",
+          "id": "REQ-4.4",
           "pattern": "unwanted",
           "condition": "Spec.Save returns a *LifecycleError or an *IntentError",
-          "system": "speca",
           "action": "report the failure at the status stage",
-          "contract": "exit 1; stage `status`, category `lifecycle`"
+          "contract": "exit 1; stage `status`, category `lifecycle`",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the save step is stubbed to return a *LifecycleError, an *IntentError, then a *SaveError"
+            ],
+            "pseudocode": "stub.save=err; env=run(); assert (env.error.stage,env.error.category)==expected; assert env.retryable==false for SaveError"
+          }
         },
         {
-          "id": "11-REQ-4.5",
+          "id": "REQ-4.5",
           "pattern": "state_driven",
           "condition": "the package is a draft, or active without intent drift",
-          "system": "speca",
-          "action": "accept task changes"
+          "action": "accept task changes",
+          "contract": "both exit 0; tasks.json holds task 1 in_progress in each",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package",
+              "an active package whose intent matches its hash"
+            ],
+            "pseudocode": "for p in [draft, active]: assert run(p).exit==0 and disk_state(p,1)=='in_progress'"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-5",
+      "id": "REQ-5",
       "title": "--force through the library's bypasses",
       "rationale": "Recovery from a wrong state must be possible without writing a state by hand.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-5.1",
+          "id": "REQ-5.1",
           "pattern": "optional",
           "condition": "--force is given and the target is done or pending",
-          "system": "speca",
-          "action": "make each named move the machine refuses with CompleteTaskStates (done) or ResetTaskStates (pending), and every allowed move with TransitionTask"
+          "action": "make each named move the machine refuses with CompleteTaskStates (done) or ResetTaskStates (pending), and every allowed move with TransitionTask",
+          "contract": "task 2 dropped → pending is made; task 4 in_progress → done is made as an ordinary move without forced flag; task 3 pending → done is made through the bypass; tasks.json holds the new states",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 1 pending, task 2 dropped, target pending, then task 3 pending and task 4 in_progress with target done"
+            ],
+            "pseudocode": "assert states after == expected; assert change(4).forced is absent"
+          }
         },
         {
-          "id": "11-REQ-5.2",
+          "id": "REQ-5.2",
           "pattern": "event_driven",
           "condition": "a task is set through a bypass",
-          "system": "speca",
           "action": "name the task with its from and to states in one high-severity task_state_forced warning at stage task, and mark its change entry forced",
-          "contract": "warning {code: \"task_state_forced\", severity: \"high\", stage: \"task\"} per bypassed task; change entry carries `forced: true`"
+          "contract": "warning {code: \"task_state_forced\", severity: \"high\", stage: \"task\"} per bypassed task; change entry carries `forced: true`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks 2 and 3 are dropped, task 1 pending"
+            ],
+            "pseudocode": "assert count(w.code=='task_state_forced')==2 and all(w.severity=='high' and w.stage=='task')"
+          }
         },
         {
-          "id": "11-REQ-5.3",
+          "id": "REQ-5.3",
           "pattern": "event_driven",
           "condition": "--force is given and a named task is already in the target state",
-          "system": "speca",
-          "action": "produce neither a change entry nor a warning for that task"
+          "action": "produce neither a change entry nor a warning for that task",
+          "contract": "exit 0; changes is empty; no task_state_forced warning",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 1 is done"
+            ],
+            "pseudocode": "assert env.result.changes==[] and no warning with that code"
+          }
         },
         {
-          "id": "11-REQ-5.4",
+          "id": "REQ-5.4",
           "pattern": "unwanted",
           "condition": "--force is given with target in_progress or dropped and a named move is refused by the machine",
-          "system": "speca",
           "action": "refuse the call as in 11-REQ-3.2, saying in the message that --force cannot set in_progress or dropped",
-          "contract": "exit 1; stage `task`, category `lifecycle`; no task changes"
+          "contract": "exit 1; stage `task`, category `lifecycle`; no task changes",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 1 is done and task 2 is dropped"
+            ],
+            "pseudocode": "assert 'cannot set in_progress or dropped' in msg"
+          }
         },
         {
-          "id": "11-REQ-5.5",
+          "id": "REQ-5.5",
           "pattern": "ubiquitous",
-          "system": "speca",
           "action": "let --force skip only the machine refusals of 11-REQ-5.1 and the unknown-key refusal of 11-REQ-6.3, never a usage error, the status refusal or the legacy-version refusal",
-          "contract": "a usage error with --force still exits 2 at stage `usage`; a status or legacy-version refusal with --force exits as it does without --force"
+          "contract": "a usage error with --force still exits 2 at stage `usage`; a status or legacy-version refusal with --force exits as it does without --force",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package, a sealed package and a v1 package"
+            ],
+            "pseudocode": "assert exits == [2,1,2] and stages == ['usage','status','usage']"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-6",
+      "id": "REQ-6",
       "title": "Readiness and validity warnings and the unknown-key guard",
       "rationale": "Recording work should not wait on a dangling id, but a save that silently deletes keys is data loss.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-6.1",
+          "id": "REQ-6.1",
           "pattern": "event_driven",
           "condition": "a task is moved to in_progress while IsReady reports it not ready on the plan as it was before the call",
-          "system": "speca",
           "action": "go ahead with the move and raise a low-severity task_not_ready warning naming the task and the ids in its depends_on that are not done",
-          "contract": "warning {code: \"task_not_ready\", severity: \"low\", stage: \"task\"}"
+          "contract": "warning {code: \"task_not_ready\", severity: \"low\", stage: \"task\"}",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 2 pending depends on task 1 which is pending"
+            ],
+            "pseudocode": "w=find(warnings,'task_not_ready'); assert w.severity=='low' and '1' in w.message"
+          }
         },
         {
-          "id": "11-REQ-6.2",
+          "id": "REQ-6.2",
           "pattern": "event_driven",
           "condition": "the package does not validate and validation reports no unknown_field error",
-          "system": "speca",
           "action": "go ahead with the task change and raise one low-severity spec_invalid warning naming the failing rules (distinct Check, else Category)",
-          "contract": "warning {code: \"spec_invalid\", severity: \"low\", stage: \"validate\"}"
+          "contract": "warning {code: \"spec_invalid\", severity: \"low\", stage: \"validate\"}",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package with a dangling depends_on id and no unknown keys"
+            ],
+            "pseudocode": "assert count(spec_invalid)==1 and severity=='low' and stage=='validate'"
+          }
         },
         {
-          "id": "11-REQ-6.3",
+          "id": "REQ-6.3",
           "pattern": "unwanted",
           "condition": "validation reports unknown_field errors and --force is not given",
-          "system": "speca",
           "action": "refuse the call before anything is written, with a message listing each artifact and key that the write would delete",
-          "contract": "exit 1; stage `validate`, category `invalid_spec`; no fix_hint; files unchanged"
+          "contract": "exit 1; stage `validate`, category `invalid_spec`; no fix_hint; files unchanged",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks.json has an extra key `traceability` not allowed by the schema"
+            ],
+            "pseudocode": "assert env.error.stage=='validate' and 'tasks.json' in msg and 'traceability' in msg and snap==before"
+          }
         },
         {
-          "id": "11-REQ-6.4",
+          "id": "REQ-6.4",
           "pattern": "optional",
           "condition": "--force is given and validation reports unknown_field errors",
-          "system": "speca",
           "action": "go ahead with the write and raise one high-severity spec_invalid warning naming the keys the write removed",
-          "contract": "warning {code: \"spec_invalid\", severity: \"high\", stage: \"validate\"}"
+          "contract": "warning {code: \"spec_invalid\", severity: \"high\", stage: \"validate\"}",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks.json has an extra unknown key"
+            ],
+            "pseudocode": "assert warning.severity=='high' and key in warning.message and key not in read(tasks.json)"
+          }
         },
         {
-          "id": "11-REQ-6.5",
+          "id": "REQ-6.5",
           "pattern": "ubiquitous",
-          "system": "speca",
-          "action": "raise at most one spec_invalid warning per call"
+          "action": "raise at most one spec_invalid warning per call",
+          "contract": "the warnings contain at most one with code spec_invalid",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "packages generated with arbitrary validation failures, with or without unknown keys"
+            ],
+            "pseudocode": "for pkg,force in gen(): env=run(); assert count(w.code=='spec_invalid')<=1"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-7",
+      "id": "REQ-7",
       "title": "Writing the change and reporting it",
       "rationale": "A caller must learn what the call did from the result alone, and an idempotent call must leave the files untouched.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-7.1",
+          "id": "REQ-7.1",
           "pattern": "event_driven",
           "condition": "at least one task changes and --dry-run is not given",
-          "system": "speca",
           "action": "set updated_at to the current time in UTC formatted as RFC 3339, then write the package with Spec.Save(spec.Dir)",
-          "contract": "tasks.json holds the new states; prd.md frontmatter holds the new updated_at"
+          "contract": "tasks.json holds the new states; prd.md frontmatter holds the new updated_at",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package with an old updated_at"
+            ],
+            "pseudocode": "t0=now(); run(); ts=parse(frontmatter.updated_at); assert t0<=ts<=now() and ts.utc"
+          }
         },
         {
-          "id": "11-REQ-7.2",
+          "id": "REQ-7.2",
           "pattern": "unwanted",
           "condition": "Spec.Save returns a *SaveError",
-          "system": "speca",
           "action": "report a write failure with a message saying a failure while writing temporary files leaves the package unchanged, a failure during the final renames may leave some files updated, and the caller should run `speca <spec>` to see the state",
-          "contract": "exit 1; stage `write`, category `disk`, retryable false"
+          "contract": "exit 1; stage `write`, category `disk`, retryable false",
+          "check": {
+            "same_as": "REQ-4.4"
+          }
         },
         {
-          "id": "11-REQ-7.3",
+          "id": "REQ-7.3",
           "pattern": "event_driven",
           "condition": "no task changes",
-          "system": "speca",
           "action": "write nothing and leave updated_at unchanged",
-          "contract": "exit 0 unless refused; package files byte-identical"
+          "contract": "exit 0 unless refused; package files byte-identical",
+          "check": {
+            "same_as": "REQ-2.7"
+          }
         },
         {
-          "id": "11-REQ-7.4",
+          "id": "REQ-7.4",
           "pattern": "event_driven",
           "condition": "the call succeeds",
-          "system": "speca",
           "action": "return the report of the package computed on the state written, with every field the report form produces, plus `changes`: one entry per changed task in plan order",
-          "contract": "exit 0; result.changes = [{kind: \"task\", id: N, from: S0, to: S1, forced?: true}]"
+          "contract": "exit 0; result.changes = [{kind: \"task\", id: N, from: S0, to: S1, forced?: true}]",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks 1 and 3 pending with no dependencies"
+            ],
+            "pseudocode": "assert result.tasks.in_progress==2 and changes==[c1,c3]"
+          }
         },
         {
-          "id": "11-REQ-7.5",
+          "id": "REQ-7.5",
           "pattern": "ubiquitous",
-          "system": "speca",
           "action": "write the summary as `speca: <dir name> task N <from> → <to>` for one change, `speca: <dir name> tasks N, M → <to>` for several, and `speca: <dir name> no task changed` for none, appending ` (dry run, nothing written)` under --dry-run",
-          "contract": "envelope summary string"
+          "contract": "envelope summary string",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a result with one change 2 pending → in_progress, one with changes 2 and 3 → done, and one with no changes",
+              "generated change lists"
+            ],
+            "pseudocode": "assert summary(...)==expected\nfor ids,to,dry in gen(): s=summary(); assert s.startswith('speca: d ') and s.endswith(SUFFIX)==dry and ('no task changed' in s)==(ids==[])"
+          }
         },
         {
-          "id": "11-REQ-7.6",
+          "id": "REQ-7.6",
           "pattern": "unwanted",
           "condition": "the call is refused at stage status, task or validate, or fails at stage write",
-          "system": "speca",
           "action": "return the report of the package as it is on disk, without changes and without next",
-          "contract": "exit 1; result present with current task states; `changes` and `next` absent"
+          "contract": "exit 1; result present with current task states; `changes` and `next` absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a refused claim of an in_progress task",
+              "a sealed package",
+              "a package with unknown keys without --force"
+            ],
+            "pseudocode": "for env in refusals: assert env.result.tasks!=nil and env.result.changes==nil and env.next==nil"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-8",
+      "id": "REQ-8",
       "title": "--dry-run",
       "rationale": "An agent must be able to see the exact effect of a call before making it.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-8.1",
+          "id": "REQ-8.1",
           "pattern": "optional",
           "condition": "--dry-run is given with the task form",
-          "system": "speca",
           "action": "run every check, expansion, warning and refusal of the task form and skip the write",
-          "contract": "package files byte-identical after the call"
+          "contract": "package files byte-identical after the call",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package with pending tasks"
+            ],
+            "pseudocode": "before=snap(); run(+'--dry-run'); assert snap()==before"
+          }
         },
         {
-          "id": "11-REQ-8.2",
+          "id": "REQ-8.2",
           "pattern": "optional",
           "condition": "--dry-run is given and the call would succeed",
-          "system": "speca",
           "action": "return the result the call would have produced, including the would-be updated_at and the changes it would have made, with dry_run set",
-          "contract": "exit 0; result.dry_run = true; result.changes as the real call would report"
+          "contract": "exit 0; result.dry_run = true; result.changes as the real call would report",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package with task 1 pending"
+            ],
+            "pseudocode": "assert r.dry_run and r.changes[0].to=='in_progress' and r.updated_at != disk.updated_at"
+          }
         },
         {
-          "id": "11-REQ-8.3",
+          "id": "REQ-8.3",
           "pattern": "unwanted",
           "condition": "--dry-run is given and the real call would be refused",
-          "system": "speca",
           "action": "return the same refusal",
-          "contract": "same exit code, stage, category and fix_hint as the call without --dry-run"
+          "contract": "same exit code, stage, category and fix_hint as the call without --dry-run",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a refused claim (task in_progress), a sealed package, and an unknown-key package"
+            ],
+            "pseudocode": "for c in cases: assert same(run(c), run(c+['--dry-run']))"
+          }
         },
         {
-          "id": "11-REQ-8.4",
+          "id": "REQ-8.4",
           "pattern": "optional",
           "condition": "--dry-run is given and the call would change at least one task",
-          "system": "speca",
           "action": "set next to one entry: the same call without --dry-run, naming the resolved ids comma-joined instead of `next` or `all`, and keeping --force when it was given; with no changes next is empty",
-          "contract": "next = [{tool: \"speca\", input: <spec_dir>, flags: [\"--task\", \"N,M\", \"--state\", S, (\"--force\")]}]"
+          "contract": "next = [{tool: \"speca\", input: <spec_dir>, flags: [\"--task\", \"N,M\", \"--state\", S, (\"--force\")]}]",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "tasks 1 and 2 pending, no dependencies"
+            ],
+            "pseudocode": "assert next==[{tool:'speca',flags:['--task','1,2','--state','in_progress','--force']}]"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-9",
+      "id": "REQ-9",
       "title": "Claim suggestions in next",
       "rationale": "An agent should be led from the report to the claim and from each move to the call after it.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "11-REQ-9.1",
-          "pattern": "complex_event",
-          "condition": "the report form runs on a writable package",
-          "guard": "no task is in_progress and next_task is a ready pending task",
-          "system": "speca",
+          "id": "REQ-9.1",
+          "pattern": "event_driven",
+          "condition": "the report form runs on a writable package and no task is in_progress and next_task is a ready pending task",
           "action": "add to next the claim `speca <spec_dir> --task N --state in_progress` for next_task",
-          "contract": "next contains {tool: \"speca\", input: <spec_dir>, flags: [\"--task\", \"N\", \"--state\", \"in_progress\"]}"
+          "contract": "next contains {tool: \"speca\", input: <spec_dir>, flags: [\"--task\", \"N\", \"--state\", \"in_progress\"]}",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a draft package with task 1 pending and ready",
+              "an otherwise identical package with a task in_progress",
+              "a sealed package with a ready task"
+            ],
+            "pseudocode": "assert claim in next(a); assert claim not in next(b) and not in next(c)"
+          }
         },
         {
-          "id": "11-REQ-9.2",
+          "id": "REQ-9.2",
           "pattern": "event_driven",
           "condition": "the list form runs",
-          "system": "speca",
-          "action": "add to next the claim of the ready pending task of the first active package in number order that has no task in progress, has a ready pending task and has no intent drift"
+          "action": "add to next the claim of the ready pending task of the first active package in number order that has no task in progress, has a ready pending task and has no intent drift",
+          "contract": "next contains the claim of package 08's ready task and none for 09",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "active package 05 with a task in_progress",
+              "active package 07 with intent drift",
+              "active package 08 with a ready pending task and no drift",
+              "active package 09 also claimable"
+            ],
+            "pseudocode": "assert next==[claim('08', task)]"
+          }
         },
         {
-          "id": "11-REQ-9.3",
+          "id": "REQ-9.3",
           "pattern": "event_driven",
           "condition": "a move succeeds without --dry-run",
-          "system": "speca",
-          "action": "set next to the report's next computed on the package after the call, so a claim is followed by `specr <spec_dir> --task N` and a done by the next ready task's claim, or nothing when no task is left"
+          "action": "set next to the report's next computed on the package after the call, so a claim is followed by `specr <spec_dir> --task N` and a done by the next ready task's claim, or nothing when no task is left",
+          "contract": "after the claim next is `specr <spec_dir> --task 1`; after the done next is the claim of task 2; after the last task is done next is empty",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "task 1 pending then done-able, task 2 pending depends on 1"
+            ],
+            "pseudocode": "assert next1[0].tool=='specr'; assert next2==claim(2); assert next3==[]"
+          }
         },
         {
-          "id": "11-REQ-9.4",
+          "id": "REQ-9.4",
           "pattern": "unwanted",
           "condition": "the task form fails or is refused",
-          "system": "speca",
           "action": "leave next absent from the envelope",
-          "contract": "envelope next absent"
+          "contract": "envelope next absent",
+          "check": {
+            "same_as": "REQ-7.6"
+          }
         }
       ]
     },
     {
-      "id": "11-REQ-10",
+      "id": "REQ-10",
       "title": "Envelope additions and self-description",
       "rationale": "Programs consume the result through envelope and --schema, so the new fields must be typed and described.",
       "criteria": [
         {
-          "id": "11-REQ-10.1",
+          "id": "REQ-10.1",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "define CategoryLifecycle = \"lifecycle\", for which RetryableFor returns false, without changing the meaning of any existing constant or type",
-          "contract": "RetryableFor(CategoryLifecycle) == false"
+          "contract": "RetryableFor(CategoryLifecycle) == false",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the envelope package"
+            ],
+            "pseudocode": "assert CategoryLifecycle=='lifecycle' and !RetryableFor(CategoryLifecycle) and RetryableFor(CategoryAPI)"
+          }
         },
         {
-          "id": "11-REQ-10.2",
+          "id": "REQ-10.2",
           "pattern": "ubiquitous",
           "system": "envelope and internal/cli",
           "action": "define WarnTaskNotReady = \"task_not_ready\" and WarnTaskStateForced = \"task_state_forced\" in envelope, with aliases in internal/cli and warnStages entries at stage task",
-          "contract": "WarnStage of each code == \"task\""
+          "contract": "WarnStage of each code == \"task\"",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "internal/cli and envelope packages"
+            ],
+            "pseudocode": "assert cli.WarnStage(cli.WarnTaskNotReady)=='task' and cli.WarnTaskStateForced==envelope.WarnTaskStateForced"
+          }
         },
         {
-          "id": "11-REQ-10.3",
+          "id": "REQ-10.3",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "define the Change type with kind, id, from, to and forced, where kind is an open string set and id, from, to and forced are omitempty, and add changes and dry_run, both omitempty, to AdminResult",
-          "contract": "DecodeSpeca round-trips changes and dry_run; a result without them encodes neither key"
+          "contract": "DecodeSpeca round-trips changes and dry_run; a result without them encodes neither key",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "an AdminResult with two changes (one forced) and dry_run true, and one without either"
+            ],
+            "pseudocode": "b=json(env); assert decode(b).changes==changes; assert 'changes' not in json(env2)"
+          }
         },
         {
-          "id": "11-REQ-10.4",
+          "id": "REQ-10.4",
           "pattern": "event_driven",
           "condition": "speca is invoked with -h or --help",
           "system": "speca",
-          "action": "describe the task form, --task, --state, --force and --dry-run in the help text"
+          "action": "describe the task form, --task, --state, --force and --dry-run in the help text",
+          "contract": "the help text mentions the task form, --task, --state, --force and --dry-run",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the speca command"
+            ],
+            "pseudocode": "out=run(['--help']); for k in ['--task','--state','--force','--dry-run']: assert k in out"
+          }
         },
         {
-          "id": "11-REQ-10.5",
+          "id": "REQ-10.5",
           "pattern": "event_driven",
           "condition": "speca is invoked with --schema",
           "system": "speca",
           "action": "describe --task, --state as an enum of the four states, --force, --dry-run, the changes and dry_run result fields, and exit codes 1 and 2 covering refusals",
-          "contract": "output equals the regenerated golden file cmd/speca/testdata/schema.golden.json"
+          "contract": "output equals the regenerated golden file cmd/speca/testdata/schema.golden.json",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "cmd/speca/testdata/schema.golden.json regenerated"
+            ],
+            "pseudocode": "assert Main(['--schema','--dir','/nonexistent','anything']) == read(golden)"
+          }
         }
       ]
     }
   ],
   "execution_paths": [
     {
-      "id": "11-PATH-1",
+      "id": "PATH-1",
       "title": "An agent claims the next ready task, then finishes it",
       "steps": [
         {
@@ -545,10 +892,29 @@
           "actor": "agent",
           "action": "runs `speca <spec> --task N --state done` and tasks.json on disk holds task N done"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "afspec",
+          "cmd/speca",
+          "internal/specpkg",
+          "envelope",
+          "filesystem"
+        ],
+        "setup": [
+          "a copy of a draft v2 package with task 1 pending and ready, on disk under .specs/"
+        ],
+        "end_state": [
+          "the report's next holds the claim for task 1",
+          "the claim exits 0 with changes [{task 1 pending → in_progress}] and next `specr <spec_dir> --task 1`",
+          "tasks.json holds task 1 in_progress, then done",
+          "updated_at is set after each write",
+          "the done call's next is the next ready task's claim or empty"
+        ]
+      }
     },
     {
-      "id": "11-PATH-2",
+      "id": "PATH-2",
       "title": "A second agent's claim of a taken task is refused",
       "steps": [
         {
@@ -563,10 +929,28 @@
           "actor": "speca",
           "action": "writes nothing and emits exit 1, stage task, category lifecycle, fix_hint {flag: --state, valid: [pending, done]}, and the on-disk report without changes or next"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "afspec",
+          "cmd/speca",
+          "internal/specpkg",
+          "envelope",
+          "filesystem"
+        ],
+        "setup": [
+          "a package with task 1 in_progress on disk"
+        ],
+        "end_state": [
+          "exit 1, stage task, category lifecycle",
+          "fix_hint is {flag: --state, valid: [pending, done]}",
+          "result carries the on-disk report without changes or next",
+          "tasks.json and prd.md are byte-identical"
+        ]
+      }
     },
     {
-      "id": "11-PATH-3",
+      "id": "PATH-3",
       "title": "A dry run of a forced recovery, then the real call",
       "steps": [
         {
@@ -585,7 +969,24 @@
           "actor": "agent",
           "action": "runs the suggested call, and speca writes the package with Spec.Save so tasks.json holds task 3 pending"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "afspec",
+          "cmd/speca",
+          "internal/specpkg",
+          "envelope",
+          "filesystem"
+        ],
+        "setup": [
+          "a package with task 3 dropped on disk"
+        ],
+        "end_state": [
+          "the dry run exits 0 with dry_run true, changes [{task 3 dropped → pending, forced true}], a high task_state_forced warning and files unchanged",
+          "next is `speca <spec_dir> --task 3 --state pending --force`",
+          "the real call writes the package so tasks.json holds task 3 pending"
+        ]
+      }
     }
   ]
 }

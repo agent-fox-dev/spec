@@ -52,32 +52,32 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// TaskInfos lists the plan's tasks without their bodies, in plan order. A
-// package without a plan gives an empty list, not nil.
+// TaskInfos lists the plan's tasks without their bodies, in plan order, the
+// integration task included, each with its state from the progress. A package
+// without a plan gives an empty list, not nil.
 func TaskInfos(spec *afspec.Spec) []envelope.TaskInfo {
 	out := []envelope.TaskInfo{}
-	if spec.Tasks == nil {
-		return out
-	}
-	for _, t := range spec.Tasks.Tasks {
-		out = append(out, TaskInfo(spec.Tasks, t))
+	for _, t := range spec.Plan() {
+		out = append(out, TaskInfo(spec, t))
 	}
 	return out
 }
 
-// TaskInfo describes one task of plan, with ready from the plan's own rule
-// (afspec's IsReady), so that every command means the same by it.
-func TaskInfo(plan *afspec.TasksV2Json, t afspec.Task) envelope.TaskInfo {
+// TaskInfo describes one task of spec's plan, with ready from the plan's own
+// rule (afspec's IsReady), so that every command means the same by it.
+func TaskInfo(spec *afspec.Spec, t afspec.PlannedTask) envelope.TaskInfo {
 	return envelope.TaskInfo{
 		ID: t.Id, Title: t.Title, Kind: string(t.Kind), State: string(t.State),
-		Optional: t.IsOptional(), DependsOn: append([]int(nil), t.DependsOn...),
-		Ready: plan.IsReady(t.Id),
+		DependsOn: append([]int(nil), t.DependsOn...),
+		Ready:     spec.IsReady(t.Id),
 	}
 }
 
 // Legacy reports whether the package is in a format version other than the
-// one this library reads. Such a package loads, but the v2 types read none of
-// its tests or tasks: a v1 plan is task_groups, not tasks.
+// one this library reads. Such a package loads, but the v3 types read none of
+// its progress and little of its plan: a v2 task carries its state and its
+// tests, a v1 plan is task_groups, not tasks. speca <package> --migrate
+// converts a version 2 package.
 func Legacy(spec *afspec.Spec) bool {
 	return spec.SchemaVersion != 0 && spec.SchemaVersion != afspec.SchemaVersion
 }

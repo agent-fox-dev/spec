@@ -145,7 +145,7 @@ func TestSpecEnvelope_RoundTrip(t *testing.T) {
 		Result: &envelope.SpecResult{
 			Package: envelope.Package{
 				SpecDir: ".specs/01_a", SpecID: "01", SpecName: "a", Title: "A", Status: "active", Source: "text",
-				Artifacts: []string{"prd.md", "requirements.json"}, Requirements: 2, Criteria: 5, Tests: 7, Tasks: 3,
+				Artifacts: []string{"prd.md", "requirements.json"}, Requirements: 2, Criteria: 5, Tasks: 3,
 				Validation:    envelope.ValidationReport{Valid: true},
 				Traceability:  envelope.TraceReport{CriteriaCovered: 5, PathsUncovered: []string{"EP-1"}},
 				OpenQuestions: []envelope.OpenQuestion{{Question: "q", Decision: "d", Why: "w"}},

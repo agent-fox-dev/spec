@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 
@@ -31,7 +30,7 @@ type ValidationEntry struct {
 	Artifact string // the artifact file the issue was found in
 	Path     string // JSON path (InstanceLocation) for schema errors
 	Keyword  string // KeywordLocation for schema errors
-	Check    string // rule name: "json_schema", "completeness", "C1".."C11", "scope_limit", "missing_contract", …
+	Check    string // rule name: "json_schema", "completeness", "C1".."C8", "scope_limit", "missing_contract", …
 	EntityID string // the entity the entry is about
 	Value    string // optional value context
 }
@@ -201,16 +200,16 @@ func ValidateArtifactSchema(artifact any, schemaName, artifactName string) []Val
 	return flattenValidationError(ve, artifactName)
 }
 
-// Schema file names for the four v2 artifacts.
+// Schema file names for the four v3 artifacts.
 const (
-	PRDFrontmatterSchemaName = "prd-frontmatter.v2.json"
-	RequirementsSchemaName   = "requirements.v2.json"
-	TestSpecSchemaName       = "test_spec.v2.json"
-	TasksSchemaName          = "tasks.v2.json"
+	PRDFrontmatterSchemaName = "prd-frontmatter.v3.json"
+	RequirementsSchemaName   = "requirements.v3.json"
+	TasksSchemaName          = "tasks.v3.json"
+	ProgressSchemaName       = "progress.v3.json"
 )
 
 // prdFrontmatterForSchema carries exactly the fields of
-// prd-frontmatter.v2.json, so that non-schema fields of Spec cannot produce
+// prd-frontmatter.v3.json, so that non-schema fields of Spec cannot produce
 // spurious additionalProperties errors. The optional four are omitted when
 // empty, matching what renderPRD writes.
 type prdFrontmatterForSchema struct {
@@ -219,27 +218,30 @@ type prdFrontmatterForSchema struct {
 	Title           string   `json:"title"`
 	Status          string   `json:"status"`
 	CreatedAt       string   `json:"created_at"`
-	UpdatedAt       string   `json:"updated_at"`
 	IntentHash      *string  `json:"intent_hash"`
 	SchemaVersion   int      `json:"schema_version"`
+	Profile         string   `json:"profile,omitempty"`
 	SteeringVersion string   `json:"steering_version,omitempty"`
-	Owner           string   `json:"owner,omitempty"`
 	Source          string   `json:"source,omitempty"`
 	Supersedes      []string `json:"supersedes,omitempty"`
-	Tags            []string `json:"tags,omitempty"`
 }
 
 // legacyVersionEntry describes a spec still written in an older format
-// version. Validating it against the v2 schemas produces a schema error per
+// version. Validating it against the v3 schemas produces a schema error per
 // artifact plus every shape difference underneath; one sentence naming the
-// version and where the conversion is described is more use than that list.
+// version and the way to convert it is more use than that list.
 func legacyVersionEntry(version int) ValidationEntry {
+	msg := fmt.Sprintf("spec declares schema_version %d; this library reads version %d only", version, SchemaVersion)
+	if version == 2 {
+		msg += " — speca <package> --migrate converts a version 2 package in place (format v3 §13 maps each v2 construct to its v3 form)"
+	} else {
+		msg += fmt.Sprintf(" — format v3 §13 maps each v2 construct to its v3 form; a version %d package has no conversion", version)
+	}
 	return ValidationEntry{
 		Category: "integrity",
 		Check:    "schema_version",
 		Artifact: "prd.md",
-		Message: fmt.Sprintf("spec declares schema_version %d; this library reads version %d only — format v2 §13 maps each v1 construct to its v2 form",
-			version, SchemaVersion),
+		Message:  msg,
 	}
 }
 
@@ -250,14 +252,15 @@ func scaffoldEntry() ValidationEntry {
 	return ValidationEntry{
 		Category: "integrity",
 		Check:    "completeness",
-		Message:  "spec is an empty scaffold: generate its requirements, tests and tasks",
+		Message:  "spec is an empty scaffold: generate its requirements and tasks",
 	}
 }
 
-// ValidateSchema validates the PRD frontmatter and the three JSON artifacts
-// against the bundled v2 schemas. The EARS field constraints of §6.2.1 are
-// expressed as conditionals inside requirements.v2.json, so there is no
-// separate EARS check.
+// ValidateSchema validates the PRD frontmatter, the two contract artifacts
+// and, when the package has one, the progress file against the bundled v3
+// schemas. The EARS field constraints of §6.2.1 and the two forms of a check
+// (§6.2.2) are expressed as conditionals inside requirements.v3.json, so
+// there is no separate EARS check.
 func (s *Spec) ValidateSchema() ValidationResult {
 	if s.SchemaVersion != 0 && s.SchemaVersion != SchemaVersion {
 		return ValidationResult{Valid: false, Errors: []ValidationEntry{legacyVersionEntry(s.SchemaVersion)}}
@@ -274,29 +277,27 @@ func (s *Spec) ValidateSchema() ValidationResult {
 		Title:           s.Title,
 		Status:          s.Status,
 		CreatedAt:       s.CreatedAt,
-		UpdatedAt:       s.UpdatedAt,
 		IntentHash:      s.IntentHash,
 		SchemaVersion:   s.SchemaVersion,
+		Profile:         s.Profile,
 		SteeringVersion: s.SteeringVersion,
-		Owner:           s.Owner,
 		Source:          s.Source,
 		Supersedes:      s.Supersedes,
-		Tags:            s.Tags,
 	}
 	errors = append(errors, ValidateArtifactSchema(fm, PRDFrontmatterSchemaName, "prd.md")...)
 
 	if s.Requirements != nil {
-		errors = append(errors, ValidateArtifactSchema(s.Requirements, RequirementsSchemaName, "requirements.json")...)
-	}
-	if s.TestSpec != nil {
-		errors = append(errors, ValidateArtifactSchema(s.TestSpec, TestSpecSchemaName, "test_spec.json")...)
+		errors = append(errors, ValidateArtifactSchema(s.Requirements, RequirementsSchemaName, RequirementsFileName)...)
 	}
 	if s.Tasks != nil {
-		errors = append(errors, ValidateArtifactSchema(s.Tasks, TasksSchemaName, "tasks.json")...)
+		errors = append(errors, ValidateArtifactSchema(s.Tasks, TasksSchemaName, TasksFileName)...)
+	}
+	if s.Progress != nil {
+		errors = append(errors, ValidateArtifactSchema(s.Progress, ProgressSchemaName, ProgressFileName)...)
 	}
 	// Keys on disk that no schema allows: the decode dropped them, so the
 	// schema run above never saw them.
-	for _, artifact := range []string{"requirements.json", "test_spec.json", "tasks.json"} {
+	for _, artifact := range []string{RequirementsFileName, TasksFileName, ProgressFileName} {
 		for _, key := range s.unknown[artifact] {
 			errors = append(errors, ValidationEntry{
 				Category: "schema", Check: "unknown_field", Artifact: artifact,
@@ -314,56 +315,31 @@ func (s *Spec) ValidateSchema() ValidationResult {
 // ---------------------------------------------------------------------------
 
 var (
-	requirementIDPattern = regexp.MustCompile(`^[A-Za-z0-9_]+-REQ-\d+$`)
-	criterionIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_]+-REQ-\d+\.\d+$`)
-	pathIDPattern        = regexp.MustCompile(`^[A-Za-z0-9_]+-PATH-\d+$`)
-	testIDPattern        = regexp.MustCompile(`^TS-[A-Za-z0-9_]+-\d+$`)
+	requirementIDPattern = regexp.MustCompile(`^REQ-\d+$`)
+	criterionIDPattern   = regexp.MustCompile(`^REQ-\d+\.\d+$`)
+	pathIDPattern        = regexp.MustCompile(`^PATH-\d+$`)
 
-	// entityPrefixRe captures the spec_id prefix of a REQ or PATH id.
-	entityPrefixRe = regexp.MustCompile(`^([A-Za-z0-9_]+)-(?:REQ|PATH)-`)
-	// testPrefixRe captures the spec_id prefix of a test id.
-	testPrefixRe = regexp.MustCompile(`^TS-([A-Za-z0-9_]+)-\d+$`)
 	// criterionParentRe captures the requirement id a criterion belongs to.
 	criterionParentRe = regexp.MustCompile(`^(.+)\.\d+$`)
 
 	// errorKeywordRe spots an action that describes an error outcome; §10.2
 	// warns when such a criterion carries no contract.
 	errorKeywordRe = regexp.MustCompile(`(?i)\b(error|fail|reject|denied|deny|invalid|unauthorized|unauthorised|forbidden|timeout|not found)\b`)
-
-	// backtickTermRe extracts `term` spans for the glossary hint of §10.3.
-	backtickTermRe = regexp.MustCompile("`([^`]+)`")
-	// backtickNumericRe and backtickQuotedRe exclude literals from that hint.
-	backtickNumericRe = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
-	backtickQuotedRe  = regexp.MustCompile(`^["'].*["']$`)
 )
 
-// Scope limits of §6.5.3, §7.3.4 and §8.6.4-5. Exceeding one is a warning.
+// Scope limits of §6.5.4 and §7.3.3. Exceeding one is a warning. A lite
+// package holds at most maxRequirementsLite requirements, which is an error
+// (rule C7).
 const (
 	maxRequirementsPerSpec = 10
 	maxCriteriaPerReq      = 8
-	maxCriteriaPerTest     = 4
-	maxTestsPerTask        = 10
 	maxStepsPerTask        = 12
 	maxTasksPerSpec        = 12
-	glossaryHintThreshold  = 3
+	maxRequirementsLite    = 3
 )
 
-func entityPrefix(id string) string {
-	if m := entityPrefixRe.FindStringSubmatch(id); m != nil {
-		return m[1]
-	}
-	return ""
-}
-
-func testPrefix(id string) string {
-	if m := testPrefixRe.FindStringSubmatch(id); m != nil {
-		return m[1]
-	}
-	return ""
-}
-
 // ---------------------------------------------------------------------------
-// Spec.ValidateCrossFile — rules C1 to C11 of §10.2
+// Spec.ValidateCrossFile — rules C1 to C8 of §10.2
 // ---------------------------------------------------------------------------
 
 // The rule functions below run over whatever artifacts the Spec carries, so
@@ -384,20 +360,6 @@ func executionPathsOf(s *Spec) []ExecutionPath {
 	return s.Requirements.ExecutionPaths
 }
 
-func glossaryOf(s *Spec) RequirementsV2JsonGlossary {
-	if s.Requirements == nil {
-		return nil
-	}
-	return s.Requirements.Glossary
-}
-
-func testsOf(s *Spec) []Test {
-	if s.TestSpec == nil {
-		return nil
-	}
-	return s.TestSpec.Tests
-}
-
 func tasksOf(s *Spec) []Task {
 	if s.Tasks == nil {
 		return nil
@@ -412,10 +374,10 @@ type specIndex struct {
 	criterionIDs   map[string]bool
 	criteriaOfReq  map[string][]string
 	criterionOrder []string
-	pathIDs        map[string]bool
-	pathOrder      []string
-	testByID       map[string]Test
-	testOrder      []string
+	// ownCheck is true for a criterion whose check is its own, not shared.
+	ownCheck  map[string]bool
+	pathIDs   map[string]bool
+	pathOrder []string
 }
 
 func (s *Spec) buildIndex() specIndex {
@@ -423,8 +385,8 @@ func (s *Spec) buildIndex() specIndex {
 		requirementIDs: map[string]bool{},
 		criterionIDs:   map[string]bool{},
 		criteriaOfReq:  map[string][]string{},
+		ownCheck:       map[string]bool{},
 		pathIDs:        map[string]bool{},
-		testByID:       map[string]Test{},
 	}
 	if s.Requirements != nil {
 		for _, r := range s.Requirements.Requirements {
@@ -433,6 +395,7 @@ func (s *Spec) buildIndex() specIndex {
 				idx.criterionIDs[c.Id] = true
 				idx.criterionOrder = append(idx.criterionOrder, c.Id)
 				idx.criteriaOfReq[r.Id] = append(idx.criteriaOfReq[r.Id], c.Id)
+				idx.ownCheck[c.Id] = c.Check.SameAs == nil
 			}
 		}
 		for _, p := range s.Requirements.ExecutionPaths {
@@ -440,18 +403,11 @@ func (s *Spec) buildIndex() specIndex {
 			idx.pathOrder = append(idx.pathOrder, p.Id)
 		}
 	}
-	if s.TestSpec != nil {
-		for _, t := range s.TestSpec.Tests {
-			idx.testByID[t.Id] = t
-			idx.testOrder = append(idx.testOrder, t.Id)
-		}
-	}
 	return idx
 }
 
-// ValidateCrossFile runs the cross-file integrity rules C1 to C11 of §10.2
-// plus the warnings listed there. All rules are errors unless stated
-// otherwise.
+// ValidateCrossFile runs the cross-file integrity rules C1 to C8 of §10.2
+// plus the warnings listed there. All rules are errors.
 func (s *Spec) ValidateCrossFile() ValidationResult {
 	if s.SchemaVersion != 0 && s.SchemaVersion != SchemaVersion {
 		return ValidationResult{Valid: false, Errors: []ValidationEntry{legacyVersionEntry(s.SchemaVersion)}}
@@ -462,13 +418,10 @@ func (s *Spec) ValidateCrossFile() ValidationResult {
 
 	var incomplete []string
 	if s.Requirements == nil {
-		incomplete = append(incomplete, "requirements.json")
-	}
-	if s.TestSpec == nil {
-		incomplete = append(incomplete, "test_spec.json")
+		incomplete = append(incomplete, RequirementsFileName)
 	}
 	if s.Tasks == nil {
-		incomplete = append(incomplete, "tasks.json")
+		incomplete = append(incomplete, TasksFileName)
 	}
 	if len(incomplete) > 0 {
 		return ValidationResult{
@@ -485,21 +438,22 @@ func (s *Spec) ValidateCrossFile() ValidationResult {
 
 	var errors []ValidationEntry
 	errors = append(errors, s.checkC1()...)
-	errors = append(errors, s.checkC2(idx)...)
-	errors = append(errors, s.checkC3C5(idx)...)
-	errors = append(errors, s.checkC6C9(idx)...)
-	errors = append(errors, s.checkC10()...)
-	errors = append(errors, s.checkC11()...)
+	errors = append(errors, s.checkC2()...)
+	errors = append(errors, s.checkC3(idx)...)
+	errors = append(errors, s.checkC4C5(idx)...)
+	errors = append(errors, s.checkC6()...)
+	errors = append(errors, s.checkC7()...)
+	errors = append(errors, s.checkC8()...)
 
 	return ValidationResult{
 		Valid:    len(errors) == 0,
 		Errors:   errors,
-		Warnings: s.crossFileWarnings(idx),
+		Warnings: s.crossFileWarnings(),
 	}
 }
 
-// checkC1: spec_id and spec_name agree across prd.md, the three JSON files
-// and the folder name.
+// checkC1: spec_id and spec_name agree across prd.md, the JSON files and the
+// folder name.
 func (s *Spec) checkC1() []ValidationEntry {
 	var errors []ValidationEntry
 
@@ -510,13 +464,13 @@ func (s *Spec) checkC1() []ValidationEntry {
 	}
 	var artifacts []artifactID
 	if s.Requirements != nil {
-		artifacts = append(artifacts, artifactID{"requirements.json", s.Requirements.SpecId, s.Requirements.SpecName})
-	}
-	if s.TestSpec != nil {
-		artifacts = append(artifacts, artifactID{"test_spec.json", s.TestSpec.SpecId, s.TestSpec.SpecName})
+		artifacts = append(artifacts, artifactID{RequirementsFileName, s.Requirements.SpecId, s.Requirements.SpecName})
 	}
 	if s.Tasks != nil {
-		artifacts = append(artifacts, artifactID{"tasks.json", s.Tasks.SpecId, s.Tasks.SpecName})
+		artifacts = append(artifacts, artifactID{TasksFileName, s.Tasks.SpecId, s.Tasks.SpecName})
+	}
+	if s.Progress != nil {
+		artifacts = append(artifacts, artifactID{ProgressFileName, s.Progress.SpecId, s.Progress.SpecName})
 	}
 	for _, a := range artifacts {
 		if a.specID != s.SpecID {
@@ -559,11 +513,10 @@ func (s *Spec) checkC1() []ValidationEntry {
 	return errors
 }
 
-// checkC2: every ID matches its format, carries this spec's prefix, and is
-// unique within its family.
-func (s *Spec) checkC2(idx specIndex) []ValidationEntry {
+// checkC2: every id matches its format, a criterion id is under its
+// requirement, and every id is unique within its family.
+func (s *Spec) checkC2() []ValidationEntry {
 	var errors []ValidationEntry
-	specID := s.SpecID
 
 	bad := func(artifact, id, msg string) ValidationEntry {
 		return ValidationEntry{
@@ -576,34 +529,27 @@ func (s *Spec) checkC2(idx specIndex) []ValidationEntry {
 	seenCriterion := map[string]bool{}
 	for _, r := range requirementsOf(s) {
 		if !requirementIDPattern.MatchString(r.Id) {
-			errors = append(errors, bad("requirements.json", r.Id,
-				fmt.Sprintf("requirement ID %q does not match {spec_id}-REQ-{N}", r.Id)))
-		} else if p := entityPrefix(r.Id); p != specID {
-			errors = append(errors, bad("requirements.json", r.Id,
-				fmt.Sprintf("requirement ID %q carries spec_id prefix %q but this spec is %q", r.Id, p, specID)))
+			errors = append(errors, bad(RequirementsFileName, r.Id,
+				fmt.Sprintf("requirement ID %q does not match REQ-{N}", r.Id)))
 		}
 		if seenReq[r.Id] {
-			errors = append(errors, bad("requirements.json", r.Id,
+			errors = append(errors, bad(RequirementsFileName, r.Id,
 				fmt.Sprintf("duplicate requirement ID %q", r.Id)))
 		}
 		seenReq[r.Id] = true
 
 		for _, c := range r.Criteria {
 			if !criterionIDPattern.MatchString(c.Id) {
-				errors = append(errors, bad("requirements.json", c.Id,
-					fmt.Sprintf("criterion ID %q does not match {spec_id}-REQ-{N}.{C}", c.Id)))
+				errors = append(errors, bad(RequirementsFileName, c.Id,
+					fmt.Sprintf("criterion ID %q does not match REQ-{N}.{C}", c.Id)))
 				continue
 			}
-			if p := entityPrefix(c.Id); p != specID {
-				errors = append(errors, bad("requirements.json", c.Id,
-					fmt.Sprintf("criterion ID %q carries spec_id prefix %q but this spec is %q", c.Id, p, specID)))
-			}
 			if m := criterionParentRe.FindStringSubmatch(c.Id); m != nil && m[1] != r.Id {
-				errors = append(errors, bad("requirements.json", c.Id,
+				errors = append(errors, bad(RequirementsFileName, c.Id,
 					fmt.Sprintf("criterion ID %q is listed under requirement %q", c.Id, r.Id)))
 			}
 			if seenCriterion[c.Id] {
-				errors = append(errors, bad("requirements.json", c.Id,
+				errors = append(errors, bad(RequirementsFileName, c.Id,
 					fmt.Sprintf("duplicate criterion ID %q", c.Id)))
 			}
 			seenCriterion[c.Id] = true
@@ -613,127 +559,70 @@ func (s *Spec) checkC2(idx specIndex) []ValidationEntry {
 	seenPath := map[string]bool{}
 	for _, p := range executionPathsOf(s) {
 		if !pathIDPattern.MatchString(p.Id) {
-			errors = append(errors, bad("requirements.json", p.Id,
-				fmt.Sprintf("execution path ID %q does not match {spec_id}-PATH-{N}", p.Id)))
-		} else if pre := entityPrefix(p.Id); pre != specID {
-			errors = append(errors, bad("requirements.json", p.Id,
-				fmt.Sprintf("execution path ID %q carries spec_id prefix %q but this spec is %q", p.Id, pre, specID)))
+			errors = append(errors, bad(RequirementsFileName, p.Id,
+				fmt.Sprintf("execution path ID %q does not match PATH-{N}", p.Id)))
 		}
 		if seenPath[p.Id] {
-			errors = append(errors, bad("requirements.json", p.Id,
+			errors = append(errors, bad(RequirementsFileName, p.Id,
 				fmt.Sprintf("duplicate execution path ID %q", p.Id)))
 		}
 		seenPath[p.Id] = true
 	}
 
-	seenTest := map[string]bool{}
-	for _, t := range testsOf(s) {
-		if !testIDPattern.MatchString(t.Id) {
-			errors = append(errors, bad("test_spec.json", t.Id,
-				fmt.Sprintf("test ID %q does not match TS-{spec_id}-{N}", t.Id)))
-		} else if p := testPrefix(t.Id); p != specID {
-			errors = append(errors, bad("test_spec.json", t.Id,
-				fmt.Sprintf("test ID %q carries spec_id prefix %q but this spec is %q", t.Id, p, specID)))
-		}
-		if seenTest[t.Id] {
-			errors = append(errors, bad("test_spec.json", t.Id,
-				fmt.Sprintf("duplicate test ID %q", t.Id)))
-		}
-		seenTest[t.Id] = true
-	}
-
 	seenTask := map[int]bool{}
 	for _, task := range tasksOf(s) {
 		if task.Id < 1 {
-			errors = append(errors, bad("tasks.json", fmt.Sprint(task.Id),
+			errors = append(errors, bad(TasksFileName, fmt.Sprint(task.Id),
 				fmt.Sprintf("task ID %d is not a positive integer", task.Id)))
 		}
 		if seenTask[task.Id] {
-			errors = append(errors, bad("tasks.json", fmt.Sprint(task.Id),
+			errors = append(errors, bad(TasksFileName, fmt.Sprint(task.Id),
 				fmt.Sprintf("duplicate task ID %d", task.Id)))
 		}
 		seenTask[task.Id] = true
 	}
 
-	_ = idx
 	return errors
 }
 
-// checkC3C5 covers the test-side coverage rules:
-//
-//	C3 every test.verifies entry resolves to a criterion or a path
-//	C4 every criterion is verified by at least one test
-//	C5 every path is verified by at least one smoke test, and every smoke
-//	   test verifies at least one path
-func (s *Spec) checkC3C5(idx specIndex) []ValidationEntry {
+// checkC3: every check.same_as names a criterion of this spec whose check is
+// its own and is not the criterion itself, or a path of this spec.
+func (s *Spec) checkC3(idx specIndex) []ValidationEntry {
 	var errors []ValidationEntry
-
-	verifiedCriteria := map[string]bool{}
-	verifiedPathsBySmoke := map[string]bool{}
-
-	for _, t := range testsOf(s) {
-		smokeVerifiesAPath := false
-		for _, ref := range t.Verifies {
-			switch {
-			case idx.criterionIDs[ref]:
-				verifiedCriteria[ref] = true
-			case idx.pathIDs[ref]:
-				smokeVerifiesAPath = true
-				if t.Kind == TestKindSmoke {
-					verifiedPathsBySmoke[ref] = true
-				}
-			default:
-				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C3", Artifact: "test_spec.json",
-					EntityID: t.Id,
-					Message: fmt.Sprintf("test %s verifies %q, which is neither a criterion nor an execution path of this spec",
-						t.Id, ref),
-				})
+	for _, r := range requirementsOf(s) {
+		for _, c := range r.Criteria {
+			if c.Check.SameAs == nil {
+				continue
 			}
-		}
-		if t.Kind == TestKindSmoke && !smokeVerifiesAPath {
+			ref := *c.Check.SameAs
+			var msg string
+			switch {
+			case ref == c.Id:
+				msg = fmt.Sprintf("criterion %s says its check is the same as its own", c.Id)
+			case idx.criterionIDs[ref] && !idx.ownCheck[ref]:
+				msg = fmt.Sprintf("criterion %s says its check is the same as %s's, whose check is itself shared; "+
+					"name the criterion that carries the check", c.Id, ref)
+			case idx.criterionIDs[ref], idx.pathIDs[ref]:
+				continue
+			default:
+				msg = fmt.Sprintf("criterion %s says its check is the same as %q, which is neither a criterion nor an execution path of this spec", c.Id, ref)
+			}
 			errors = append(errors, ValidationEntry{
-				Category: "integrity", Check: "C5", Artifact: "test_spec.json",
-				EntityID: t.Id,
-				Message:  fmt.Sprintf("smoke test %s verifies no execution path", t.Id),
+				Category: "integrity", Check: "C3", Artifact: RequirementsFileName, EntityID: c.Id, Message: msg,
 			})
 		}
 	}
-
-	for _, id := range idx.criterionOrder {
-		if !verifiedCriteria[id] {
-			errors = append(errors, ValidationEntry{
-				Category: "integrity", Check: "C4", Artifact: "requirements.json",
-				EntityID: id,
-				Message:  fmt.Sprintf("criterion %s is not verified by any test", id),
-			})
-		}
-	}
-
-	for _, id := range idx.pathOrder {
-		if !verifiedPathsBySmoke[id] {
-			errors = append(errors, ValidationEntry{
-				Category: "integrity", Check: "C5", Artifact: "requirements.json",
-				EntityID: id,
-				Message:  fmt.Sprintf("execution path %s is not verified by any smoke test", id),
-			})
-		}
-	}
-
 	return errors
 }
 
-// checkC6C9 covers the plan-side rules:
+// checkC4C5 covers the plan-side rules:
 //
-//	C6 every task.criteria, task.tests and depends_on entry resolves;
-//	   depends_on forms a DAG over lower task IDs
-//	C7 every test is owned by at least one task
-//	C8 every criterion is owned by at least one implement task
-//	C9 exactly one integration task, last, owning every smoke test
-func (s *Spec) checkC6C9(idx specIndex) []ValidationEntry {
+//	C4 every task.criteria entry resolves to a requirement or a criterion;
+//	   every depends_on entry resolves to a lower task id
+//	C5 every criterion is owned by at least one task
+func (s *Spec) checkC4C5(idx specIndex) []ValidationEntry {
 	var errors []ValidationEntry
 
-	ownedTests := map[string]bool{}
 	ownedCriteria := map[string]bool{}
 	taskIDs := map[int]bool{}
 	for _, task := range tasksOf(s) {
@@ -744,19 +633,15 @@ func (s *Spec) checkC6C9(idx specIndex) []ValidationEntry {
 		for _, ref := range task.Criteria {
 			switch {
 			case idx.criterionIDs[ref]:
-				if task.Kind == TaskKindImplement {
-					ownedCriteria[ref] = true
-				}
+				ownedCriteria[ref] = true
 			case idx.requirementIDs[ref]:
-				// A requirement ID means all of its criteria (§8.3).
-				if task.Kind == TaskKindImplement {
-					for _, cid := range idx.criteriaOfReq[ref] {
-						ownedCriteria[cid] = true
-					}
+				// A requirement ID means all of its criteria (§7.2).
+				for _, cid := range idx.criteriaOfReq[ref] {
+					ownedCriteria[cid] = true
 				}
 			default:
 				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C6", Artifact: "tasks.json",
+					Category: "integrity", Check: "C4", Artifact: TasksFileName,
 					EntityID: fmt.Sprint(task.Id),
 					Message: fmt.Sprintf("task %d claims criteria %q, which is neither a requirement nor a criterion of this spec",
 						task.Id, ref),
@@ -764,22 +649,10 @@ func (s *Spec) checkC6C9(idx specIndex) []ValidationEntry {
 			}
 		}
 
-		for _, ref := range task.Tests {
-			if _, ok := idx.testByID[ref]; !ok {
-				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C6", Artifact: "tasks.json",
-					EntityID: fmt.Sprint(task.Id),
-					Message:  fmt.Sprintf("task %d owns test %q, which does not exist in test_spec.json", task.Id, ref),
-				})
-				continue
-			}
-			ownedTests[ref] = true
-		}
-
 		for _, dep := range task.DependsOn {
 			if !taskIDs[dep] {
 				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C6", Artifact: "tasks.json",
+					Category: "integrity", Check: "C4", Artifact: TasksFileName,
 					EntityID: fmt.Sprint(task.Id),
 					Message:  fmt.Sprintf("task %d depends on task %d, which does not exist", task.Id, dep),
 				})
@@ -789,7 +662,7 @@ func (s *Spec) checkC6C9(idx specIndex) []ValidationEntry {
 			// construction, so no separate cycle search is needed.
 			if dep >= task.Id {
 				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C6", Artifact: "tasks.json",
+					Category: "integrity", Check: "C4", Artifact: TasksFileName,
 					EntityID: fmt.Sprint(task.Id),
 					Message:  fmt.Sprintf("task %d depends on task %d; depends_on must reference lower task IDs", task.Id, dep),
 				})
@@ -797,86 +670,13 @@ func (s *Spec) checkC6C9(idx specIndex) []ValidationEntry {
 		}
 	}
 
-	for _, id := range idx.testOrder {
-		if !ownedTests[id] {
-			errors = append(errors, ValidationEntry{
-				Category: "integrity", Check: "C7", Artifact: "test_spec.json",
-				EntityID: id,
-				Message: fmt.Sprintf("test %s is not owned by any task; add %s to the tests of an existing "+
-					"task (the task that builds what it checks)", id, id),
-			})
-		}
-	}
-
 	for _, id := range idx.criterionOrder {
 		if !ownedCriteria[id] {
 			errors = append(errors, ValidationEntry{
-				Category: "integrity", Check: "C8", Artifact: "requirements.json",
+				Category: "integrity", Check: "C5", Artifact: RequirementsFileName,
 				EntityID: id,
-				Message: fmt.Sprintf("criterion %s is not owned by any implement task; add %s to the criteria "+
-					"of the implement task that builds it (not the integration task, which owns smoke tests)", id, id),
-			})
-		}
-	}
-
-	errors = append(errors, s.checkC9(idx)...)
-	return errors
-}
-
-// checkC9: exactly one task has kind integration, it is the last task, and its
-// tests include every smoke test.
-func (s *Spec) checkC9(idx specIndex) []ValidationEntry {
-	var errors []ValidationEntry
-
-	tasks := tasksOf(s)
-	var integrationIdx []int
-	for i, task := range tasks {
-		if task.Kind == TaskKindIntegration {
-			integrationIdx = append(integrationIdx, i)
-		}
-	}
-
-	switch len(integrationIdx) {
-	case 0:
-		errors = append(errors, ValidationEntry{
-			Category: "integrity", Check: "C9", Artifact: "tasks.json",
-			Message: "no task has kind \"integration\"; the final task must be the integration task",
-		})
-		return errors
-	case 1:
-		// The expected shape.
-	default:
-		ids := make([]string, 0, len(integrationIdx))
-		for _, i := range integrationIdx {
-			ids = append(ids, fmt.Sprint(tasks[i].Id))
-		}
-		errors = append(errors, ValidationEntry{
-			Category: "integrity", Check: "C9", Artifact: "tasks.json",
-			Message: fmt.Sprintf("expected exactly one integration task, found %d (tasks %s)",
-				len(integrationIdx), strings.Join(ids, ", ")),
-		})
-	}
-
-	last := integrationIdx[len(integrationIdx)-1]
-	integration := tasks[last]
-	if last != len(tasks)-1 {
-		errors = append(errors, ValidationEntry{
-			Category: "integrity", Check: "C9", Artifact: "tasks.json",
-			EntityID: fmt.Sprint(integration.Id),
-			Message:  fmt.Sprintf("integration task %d is not the last task", integration.Id),
-		})
-	}
-
-	owned := make(map[string]bool, len(integration.Tests))
-	for _, id := range integration.Tests {
-		owned[id] = true
-	}
-	for _, id := range idx.testOrder {
-		if idx.testByID[id].Kind == TestKindSmoke && !owned[id] {
-			errors = append(errors, ValidationEntry{
-				Category: "integrity", Check: "C9", Artifact: "tasks.json",
-				EntityID: id,
-				Message:  fmt.Sprintf("smoke test %s is not owned by the integration task", id),
+				Message: fmt.Sprintf("criterion %s is not owned by any task; add %s, or its requirement, to the criteria "+
+					"of the task that builds it", id, id),
 			})
 		}
 	}
@@ -884,14 +684,14 @@ func (s *Spec) checkC9(idx specIndex) []ValidationEntry {
 	return errors
 }
 
-// checkC10: every unwanted criterion has a non-empty contract.
-func (s *Spec) checkC10() []ValidationEntry {
+// checkC6: every unwanted criterion has a non-empty contract.
+func (s *Spec) checkC6() []ValidationEntry {
 	var errors []ValidationEntry
 	for _, r := range requirementsOf(s) {
 		for _, c := range r.Criteria {
 			if c.Pattern == CriterionPatternUnwanted && c.ContractText() == "" {
 				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C10", Artifact: "requirements.json",
+					Category: "integrity", Check: "C6", Artifact: RequirementsFileName,
 					EntityID: c.Id,
 					Message:  fmt.Sprintf("unwanted criterion %s has no contract", c.Id),
 				})
@@ -901,37 +701,71 @@ func (s *Spec) checkC10() []ValidationEntry {
 	return errors
 }
 
-// checkC11: real_components is present and non-empty exactly when kind is
-// smoke.
-func (s *Spec) checkC11() []ValidationEntry {
+// checkC7: a full package has at least one execution path; a lite package
+// has no execution path and at most three requirements.
+func (s *Spec) checkC7() []ValidationEntry {
+	if s.Requirements == nil {
+		return nil
+	}
 	var errors []ValidationEntry
-	for _, t := range testsOf(s) {
-		switch t.Kind {
-		case TestKindSmoke:
-			if len(t.RealComponents) == 0 {
-				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C11", Artifact: "test_spec.json",
-					EntityID: t.Id,
-					Message:  fmt.Sprintf("smoke test %s lists no real_components", t.Id),
-				})
-			}
-		default:
-			if len(t.RealComponents) > 0 {
-				errors = append(errors, ValidationEntry{
-					Category: "integrity", Check: "C11", Artifact: "test_spec.json",
-					EntityID: t.Id,
-					Message:  fmt.Sprintf("test %s has kind %q but lists real_components, which only smoke tests may do", t.Id, t.Kind),
-				})
-			}
+	bad := func(artifact, msg string) {
+		errors = append(errors, ValidationEntry{Category: "integrity", Check: "C7", Artifact: artifact, EntityID: s.SpecID, Message: msg})
+	}
+	paths := len(s.Requirements.ExecutionPaths)
+	if !s.IsLite() {
+		if paths == 0 {
+			bad(RequirementsFileName, "the package has no execution path; a full package has at least one, and a package of at most three "+
+				"requirements with no end-to-end path may declare profile: lite in its PRD frontmatter")
 		}
+		return errors
+	}
+	if paths > 0 {
+		bad(RequirementsFileName, fmt.Sprintf("the package is lite and has %d execution path(s); a lite package has none: "+
+			"remove them, or remove profile from the PRD frontmatter to make the package full", paths))
+	}
+	if n := len(s.Requirements.Requirements); n > maxRequirementsLite {
+		bad("prd.md", fmt.Sprintf("the package is lite and has %d requirements; a lite package has at most %d: "+
+			"remove profile from the PRD frontmatter to make the package full", n, maxRequirementsLite))
+	}
+	return errors
+}
+
+// checkC8: every entry of progress.json names a task of the plan or the
+// integration task, each at most once.
+func (s *Spec) checkC8() []ValidationEntry {
+	if s.Progress == nil {
+		return nil
+	}
+	var errors []ValidationEntry
+	known := map[int]bool{}
+	for _, t := range tasksOf(s) {
+		known[t.Id] = true
+	}
+	if id, ok := s.IntegrationTaskID(); ok {
+		known[id] = true
+	}
+	seen := map[int]bool{}
+	for _, e := range s.Progress.Tasks {
+		switch {
+		case !known[e.Id]:
+			errors = append(errors, ValidationEntry{
+				Category: "integrity", Check: "C8", Artifact: ProgressFileName, EntityID: fmt.Sprint(e.Id),
+				Message: fmt.Sprintf("%s records a state for task %d, which is neither a task of the plan nor the integration task", ProgressFileName, e.Id),
+			})
+		case seen[e.Id]:
+			errors = append(errors, ValidationEntry{
+				Category: "integrity", Check: "C8", Artifact: ProgressFileName, EntityID: fmt.Sprint(e.Id),
+				Message: fmt.Sprintf("%s records a state for task %d twice", ProgressFileName, e.Id),
+			})
+		}
+		seen[e.Id] = true
 	}
 	return errors
 }
 
 // crossFileWarnings collects the never-blocking warnings of §10.2: scope
-// limits, glossary hints, and criteria that describe an error outcome without
-// a contract.
-func (s *Spec) crossFileWarnings(idx specIndex) []ValidationEntry {
+// limits, and criteria that describe an error outcome without a contract.
+func (s *Spec) crossFileWarnings() []ValidationEntry {
 	var warnings []ValidationEntry
 	warn := func(check, artifact, entity, msg string) {
 		warnings = append(warnings, ValidationEntry{
@@ -939,106 +773,42 @@ func (s *Spec) crossFileWarnings(idx specIndex) []ValidationEntry {
 		})
 	}
 
-	// §6.5.3 — spec and requirement scope.
+	// §6.5.4 — spec and requirement scope.
 	if n := len(requirementsOf(s)); n > maxRequirementsPerSpec {
-		warn("scope_limit", "requirements.json", s.SpecID,
+		warn("scope_limit", RequirementsFileName, s.SpecID,
 			fmt.Sprintf("spec has %d requirements (limit %d); consider splitting it", n, maxRequirementsPerSpec))
 	}
 	for _, r := range requirementsOf(s) {
 		if n := len(r.Criteria); n > maxCriteriaPerReq {
-			warn("scope_limit", "requirements.json", r.Id,
+			warn("scope_limit", RequirementsFileName, r.Id,
 				fmt.Sprintf("requirement %s has %d criteria (limit %d); consider splitting it", r.Id, n, maxCriteriaPerReq))
 		}
 	}
 
 	// The contract hint of §10.2. Vague wording is not the validator's: no
 	// rule matches words (§0, rule 3); the generator and the review rubrics
-	// look for it (§6.5.4).
+	// look for it (§6.5.5).
 	for _, r := range requirementsOf(s) {
 		for _, c := range r.Criteria {
 			if c.Pattern != CriterionPatternUnwanted && c.ContractText() == "" && errorKeywordRe.MatchString(c.Action) {
-				warn("missing_contract", "requirements.json", c.Id,
+				warn("missing_contract", RequirementsFileName, c.Id,
 					fmt.Sprintf("criterion %s describes an error outcome but has no contract", c.Id))
 			}
 		}
 	}
 
-	// §7.3.4 — a test that verifies more than four criteria is usually two.
-	for _, t := range testsOf(s) {
-		criteriaCount := 0
-		for _, ref := range t.Verifies {
-			if idx.criterionIDs[ref] {
-				criteriaCount++
-			}
-		}
-		if criteriaCount > maxCriteriaPerTest {
-			warn("scope_limit", "test_spec.json", t.Id,
-				fmt.Sprintf("test %s verifies %d criteria (limit %d); it is probably two tests", t.Id, criteriaCount, maxCriteriaPerTest))
-		}
-	}
-
-	// §8.6.4-5 — task size and count.
+	// §7.3.3 — task size and count.
 	if n := len(tasksOf(s)); n > maxTasksPerSpec {
-		warn("scope_limit", "tasks.json", s.SpecID,
+		warn("scope_limit", TasksFileName, s.SpecID,
 			fmt.Sprintf("spec has %d tasks (limit %d); consider splitting it", n, maxTasksPerSpec))
 	}
 	for _, task := range tasksOf(s) {
-		if n := len(task.Tests); n > maxTestsPerTask {
-			warn("scope_limit", "tasks.json", fmt.Sprint(task.Id),
-				fmt.Sprintf("task %d owns %d tests (limit %d); consider splitting it", task.Id, n, maxTestsPerTask))
-		}
 		if n := len(task.Steps); n > maxStepsPerTask {
-			warn("scope_limit", "tasks.json", fmt.Sprint(task.Id),
+			warn("scope_limit", TasksFileName, fmt.Sprint(task.Id),
 				fmt.Sprintf("task %d has %d steps (limit %d); consider splitting it", task.Id, n, maxStepsPerTask))
 		}
 	}
 
-	warnings = append(warnings, s.glossaryHints()...)
-	return warnings
-}
-
-// glossaryHints implements §10.3: at most a warning per backtick-wrapped term
-// that appears in three or more criteria and has no glossary entry. The v1
-// rule made this an error and produced most of the repair churn.
-func (s *Spec) glossaryHints() []ValidationEntry {
-	counts := map[string]int{}
-	for _, r := range requirementsOf(s) {
-		for _, c := range r.Criteria {
-			seenInCriterion := map[string]bool{}
-			for _, text := range []string{c.Action, c.ConditionText(), c.GuardText(), c.ContractText()} {
-				for _, m := range backtickTermRe.FindAllStringSubmatch(text, -1) {
-					term := strings.TrimSpace(m[1])
-					if term == "" || backtickNumericRe.MatchString(term) || backtickQuotedRe.MatchString(term) {
-						continue
-					}
-					seenInCriterion[term] = true
-				}
-			}
-			for term := range seenInCriterion {
-				counts[term]++
-			}
-		}
-	}
-
-	terms := make([]string, 0, len(counts))
-	for term, n := range counts {
-		if n < glossaryHintThreshold {
-			continue
-		}
-		if _, defined := glossaryOf(s)[term]; defined {
-			continue
-		}
-		terms = append(terms, term)
-	}
-	sort.Strings(terms)
-
-	warnings := make([]ValidationEntry, 0, len(terms))
-	for _, term := range terms {
-		warnings = append(warnings, ValidationEntry{
-			Category: "warning", Check: "glossary_hint", Artifact: "requirements.json", EntityID: term,
-			Message: fmt.Sprintf("term %q appears in %d criteria but has no glossary entry", term, counts[term]),
-		})
-	}
 	return warnings
 }
 
@@ -1119,16 +889,16 @@ func firstDifferingLine(want, got []byte) (int, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// ValidateCrossSpec — §10.4
+// ValidateCrossSpec — §10.3
 // ---------------------------------------------------------------------------
 
 // ValidateCrossSpec checks the rules that span specs: every declared
-// dependency exists, the dependency graph is acyclic, glossary terms shared
-// between specs agree (warning), and each dependency edge is reflected by a
-// shared actor in the two specs' execution paths (error).
+// dependency exists, the dependency graph is acyclic, and each dependency edge
+// between two packages that have execution paths is reflected by a shared
+// actor in their paths (error).
 //
-// The v1 external-API signature and return-contract comparisons are gone: they
-// compared free text and never fired usefully.
+// The v2 glossary comparison is gone with the glossary; the v1 external-API
+// signature and return-contract comparisons were gone before it.
 func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 	var errors, warnings []ValidationEntry
 
@@ -1146,7 +916,7 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 			if _, ok := specByID[dep.Spec]; !ok {
 				errors = append(errors, ValidationEntry{
 					Category: "integrity", Check: "cross_spec_unknown_dependency",
-					Artifact: "tasks.json", EntityID: s.SpecID,
+					Artifact: TasksFileName, EntityID: s.SpecID,
 					Message: fmt.Sprintf("spec %s declares a dependency on spec %q, which does not exist in the spec root", s.SpecID, dep.Spec),
 				})
 			}
@@ -1167,32 +937,10 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 		}
 	}
 
-	// Glossary terms shared between specs should agree (warning only).
-	for i := 0; i < len(specs); i++ {
-		for j := i + 1; j < len(specs); j++ {
-			a, b := specs[i], specs[j]
-			if a.Requirements == nil || b.Requirements == nil {
-				continue
-			}
-			terms := make([]string, 0, len(a.Requirements.Glossary))
-			for term := range a.Requirements.Glossary {
-				terms = append(terms, term)
-			}
-			sort.Strings(terms)
-			for _, term := range terms {
-				defB, ok := b.Requirements.Glossary[term]
-				if ok && a.Requirements.Glossary[term] != defB {
-					warnings = append(warnings, ValidationEntry{
-						Category: "warning", EntityID: term,
-						Message: fmt.Sprintf("glossary term %q is defined differently in spec %s and spec %s", term, a.SpecID, b.SpecID),
-					})
-				}
-			}
-		}
-	}
-
-	// Along each dependency edge, the downstream spec must have at least one
-	// execution path step whose actor also appears in an upstream path.
+	// Along each dependency edge between two packages that have paths, the
+	// downstream spec must have at least one execution path step whose actor
+	// also appears in an upstream path. A lite package has no path and is
+	// held to nothing here, on either side.
 	if graph != nil {
 		seen := map[[2]string]bool{}
 		for _, edge := range graph.Edges {
@@ -1205,7 +953,8 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 			// FromSpec depends on ToSpec, so ToSpec is upstream.
 			downstream, upstream := specByID[edge.FromSpec], specByID[edge.ToSpec]
 			if downstream == nil || upstream == nil ||
-				downstream.Requirements == nil || upstream.Requirements == nil {
+				downstream.Requirements == nil || upstream.Requirements == nil ||
+				len(downstream.Requirements.ExecutionPaths) == 0 {
 				continue
 			}
 
