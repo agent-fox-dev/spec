@@ -3,7 +3,7 @@
 **Status:** accepted
 **Date:** 2026-10-15
 **Related:** [ADR 04](04-hand-on-what-a-phase-learned.md),
-[ADR 06](06-build-against-the-latest-agentkit-go.md)
+[ADR 06](06-build-against-the-latest-agentkit-go.md), superseded by [ADR 13](13-pin-a-released-agentkit-go.md)
 
 ## Context
 
@@ -49,5 +49,5 @@ bad one costs one cheap tool error.
 - A phase's own tools can still outgrow the budget, alone or together. The
   same probe is how to find out: it builds each phase's request and posts it
   with `max_tokens` 1.
-- `spec` depends on an agentkit-go with the option; ADR 06 keeps it on the
+- `spec` depends on an agentkit-go with the option; ADR 06 kept it on the
   latest.

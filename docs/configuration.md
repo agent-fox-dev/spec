@@ -72,9 +72,16 @@ every phase as the project's directives.
 
 ## The build
 
-| Make variable | Default | Effect |
-|---|---|---|
-| `AGENTKIT_UPDATE` | `1` | the targets that compile (`build`, `test`, `test-fast`, `coverage`, `vet`, `lint`, `doc`) first run `make update-agentkit`, which moves the agentkit-go pin in `go.mod` to the latest `main` ([ADR 06](adr/06-build-against-the-latest-agentkit-go.md)); `0` builds the committed pin, e.g. offline |
+The build reads no configuration. `go.mod` pins a released agentkit-go and
+carries no `replace`, so every target builds the committed pin and no target
+needs the network ([ADR 13](adr/13-pin-a-released-agentkit-go.md)).
+
+`make update-agentkit` moves the pin to agentkit-go's latest release. It is
+explicit: nothing runs it for you, and the move is committed as its own
+change. `github.com/agent-fox-dev/agentkit-go/codesearch` has no tags, so it
+stays on the pseudo-version in `go.mod` and is moved by hand.
+
+`AGENTKIT_UPDATE` is gone, with the per-target dependency it controlled.
 
 ## The skills
 

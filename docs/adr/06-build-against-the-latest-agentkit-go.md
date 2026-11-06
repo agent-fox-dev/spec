@@ -1,8 +1,13 @@
 # 06. Build against the latest agentkit-go
 
-**Status:** accepted
+**Status:** superseded by [ADR 13](13-pin-a-released-agentkit-go.md)
 **Date:** 2026-10-15
 **Related:** [ADR 01](01-run-the-spec-command-on-the-agentkit-driver.md)
+
+> Superseded on 2026-11-06: agentkit-go was released as `v0.9.0`, so `go.mod`
+> pins that release and carries no `replace`, and no make target moves the pin
+> or needs the network. [ADR 13](13-pin-a-released-agentkit-go.md) records
+> what replaced the decision below, and what it costs.
 
 ## Context
 
