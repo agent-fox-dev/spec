@@ -1,0 +1,271 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "17",
+  "spec_name": "review_triage_convergence",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./envelope/... ./specgen/... ./cmd/spec/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "09",
+      "reason": "this package replaces the dispositions, the stopping rule and the envelope.Review that package built, and keeps its severities, its 30-finding cap, its evidence rules, its R<round>-F<n> ids and its failure handling"
+    },
+    {
+      "spec": "16",
+      "reason": "the steering rubric quotes the steering body, which that package defines as the text after the frontmatter, and it changes the signature of steeringBlock and the steering plumbing of the same review and revision requests these prompts are built from"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Answer every finding one of four ways, carry a rubric, and record the answer",
+      "criteria": [
+        "17-REQ-1.1",
+        "17-REQ-1.2",
+        "17-REQ-1.3",
+        "17-REQ-1.4",
+        "17-REQ-1.5",
+        "17-REQ-1.6",
+        "17-REQ-5.2",
+        "17-REQ-5.3",
+        "17-REQ-5.4",
+        "17-REQ-5.5",
+        "17-REQ-5.6",
+        "17-REQ-6.5"
+      ],
+      "tests": [
+        "TS-17-1",
+        "TS-17-2",
+        "TS-17-3",
+        "TS-17-4",
+        "TS-17-5",
+        "TS-17-15",
+        "TS-17-16"
+      ],
+      "steps": [
+        "Add the disposition, counter-evidence, decline and record behaviours to specgen/revision_tool_test.go, specgen/rounds_test.go and envelope/spec_result_test.go, and confirm they fail",
+        "In envelope/spec_result.go replace DispositionAccepted and DispositionRejected with DispositionFixed, DispositionContested, DispositionEscalated and DispositionDeclined, keep DispositionUnanswered, add RubricPRD and RubricSteering, and replace ReviewStopNoFindings and ReviewStopNoSeriousFindings with ReviewStopConverged",
+        "In envelope/spec_result.go add Rubric, CounterEvidence, Question, Options and Decision to ReviewFinding, each omitempty except Rubric, and replace AcceptedCount and RejectedCount on Review with FixedCount, ContestedCount, EscalatedCount and DeclinedCount",
+        "In revisionSchema in specgen/revision_tool.go make disposition the enum of the four, add counter_evidence, question, options and decision as properties whose descriptions say which disposition needs each, and add the matching fields to the Disposition struct",
+        "In checkDispositions refuse a disposition outside the four and keep the existing refusals of a finding answered twice, not at all, or by an id that is not of this round, naming every offending id in one error",
+        "In checkDispositions refuse a contest with no counter_evidence, and one whose counter_evidence is neither a quote found in the PRD body or the input under sameEvidence's normalisation nor a path that workspace.Resolve resolves and os.Stat finds — a directory counts, as validateRelevantFiles in specgen/prd.go resolves a path but without its IsRegular test — naming each offending id and which of the two it failed",
+        "In checkDispositions refuse a decline with no reason, and refuse a decline of a finding whose severity is critical or whose rubric is steering, naming each offending id with its severity or rubric and saying such a finding is fixed, contested or escalated",
+        "Change the unchanged-PRD guard in newRevisionTool to fire on a fixed answer rather than an accepted one, so a revision that answers no finding fixed may leave the PRD as it was",
+        "Strip severity and rubric from whatever the reviser submits, the way checkFinding already strips the fields the reviewer must not set, so a recorded finding keeps the review phase's values",
+        "In reviewSchema in specgen/review_tool.go add rubric as the enum of prd and steering with a description of each, and in checkFinding refuse any other value or an empty one, naming the position and the two values",
+        "In buildReview in specgen/rounds.go derive the six counts from the rounds so that findings_count stays their sum, and in answer() write only the fields the finding's disposition carries, clearing the others",
+        "Replace the two dispositions in specgen/templates/prd_revision_system.md with the four and what each requires, update the result.review fields in docs/cli.md and the envelope.Review types in docs/api.md, and run make doc"
+      ],
+      "touches": [
+        "envelope/spec_result.go",
+        "envelope/spec_result_test.go",
+        "specgen/revision_tool.go",
+        "specgen/revision_tool_test.go",
+        "specgen/review_tool.go",
+        "specgen/rounds.go",
+        "specgen/rounds_test.go",
+        "specgen/templates/prd_revision_system.md",
+        "docs/cli.md",
+        "docs/api.md",
+        "docs/generated/"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Escalate with a provisional decision and hand the question to the caller",
+      "criteria": [
+        "17-REQ-2.1",
+        "17-REQ-2.2",
+        "17-REQ-2.3"
+      ],
+      "tests": [
+        "TS-17-6",
+        "TS-17-7",
+        "TS-17-17"
+      ],
+      "steps": [
+        "Add the escalation behaviours to specgen/revision_tool_test.go and the open-question behaviours to specgen/pipeline_test.go, and confirm they fail",
+        "In checkDispositions refuse an escalated answer with no question, with fewer than two or more than three options, with no decision or with no reason, naming every offending id and the fields it is missing",
+        "In checkDispositions refuse an escalated answer whose decision does not appear in the revised body under sameEvidence's whitespace normalisation, saying the decision belongs under the PRD's Design Decisions section opening with the word Provisional",
+        "In specgen/templates/prd_revision_system.md tell the reviser what an escalation is for — a trade-off the input, the steering and the code do not settle — and that its decision goes under ## Design Decisions opening with \"Provisional:\", numbered like the decisions already there",
+        "In buildPackage in specgen/pipeline.go collect every escalation from the *Review the caller already hands it — runRounds needs no new return value, the record holding every round's findings with their answers — in round order and then in the order the reviser answered them, as question, decision and why_unsure",
+        "In buildPackage append those escalations to the PRD's open questions before pkg.OpenQuestions is set from them, skipping one whose question already appears there under the same whitespace normalisation, so that a later round's revision replacing the open questions cannot drop an earlier round's escalation",
+        "Confirm the run's open-question count and the summary's counting across the scopes of a split include them, the counts being derived in specgen/pipeline.go from the same lists"
+      ],
+      "touches": [
+        "specgen/revision_tool.go",
+        "specgen/revision_tool_test.go",
+        "specgen/rounds.go",
+        "specgen/pipeline.go",
+        "specgen/pipeline_test.go",
+        "specgen/templates/prd_revision_system.md"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Hold a later round to what the earlier rounds settled",
+      "criteria": [
+        "17-REQ-3.1",
+        "17-REQ-3.2",
+        "17-REQ-3.3",
+        "17-REQ-3.4"
+      ],
+      "tests": [
+        "TS-17-8",
+        "TS-17-11"
+      ],
+      "steps": [
+        "Add the repeat and reopen behaviours to specgen/review_tool_test.go and the earlier-rounds block behaviours to specgen/prompts_test.go, and confirm they fail",
+        "In checkFinding in specgen/review_tool.go accept a finding whose section and flaw repeat a contested one only through a reopens id naming it and with evidence the contest did not answer, keeping the sameEvidence comparison the rejected rule uses today",
+        "In checkFinding refuse a finding whose section and flaw repeat a declined or an escalated one, whether or not reopens names it, with one error naming the earlier id and its disposition",
+        "In checkFinding accept a reopens id only when it names a contested finding of an earlier round of this review, and refuse one in round 1, one naming no earlier finding of this PRD, and one naming a fixed, declined, escalated or unanswered finding, naming the id and what is wrong",
+        "In writeFinding in specgen/prompts.go render each finding's rubric beside its severity, and the fields its disposition carries: the reason and counter-evidence of a contest, the question, every option, the decision and the reason of an escalation, the reason of a decline, and none of them for an unanswered finding",
+        "In earlierRoundsBlock replace the sentences about accepted and rejected findings: tell the reviewer that a contested finding may be raised again only through reopens with evidence the contest did not answer, that a declined or escalated one may not be raised again, and that a flaw an earlier round fixed and which the PRD still has is raised as a new finding; tell the reviser not to undo what an earlier round settled unless a finding of this round shows it was wrong",
+        "In specgen/templates/prd_review_system.md replace the rule about rejected findings with these three rules"
+      ],
+      "touches": [
+        "specgen/review_tool.go",
+        "specgen/review_tool_test.go",
+        "specgen/prompts.go",
+        "specgen/prompts_test.go",
+        "specgen/templates/prd_review_system.md"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Converge on two consecutive clean rounds",
+      "criteria": [
+        "17-REQ-1.7",
+        "17-REQ-4.1",
+        "17-REQ-4.2",
+        "17-REQ-4.3",
+        "17-REQ-4.4",
+        "17-REQ-4.5",
+        "17-REQ-4.6",
+        "17-REQ-4.7",
+        "17-REQ-5.1"
+      ],
+      "tests": [
+        "TS-17-12",
+        "TS-17-13",
+        "TS-17-14"
+      ],
+      "steps": [
+        "Add the clean-round, convergence and incomplete behaviours to specgen/rounds_test.go, and confirm they fail",
+        "Add Clean to ReviewRound in envelope/spec_result.go, and in runRounds set it from whether the round's review raised any critical or major finding, reusing the serious() helper",
+        "Replace the stopping switch at the end of runRounds' loop: stop as converged when this round and the round before it were both clean, as rounds_exhausted when the limit is reached without two consecutive clean rounds, and keep incomplete winning over both when a phase did not finish or the budget was spent",
+        "Run the revision of a round whose review raised only minor findings, and run none for a round whose review raised nothing at all, recording both rounds clean — so two reviews with no findings converge rather than stopping at the first",
+        "Keep answer(findings, nil) marking every finding of a round unanswered when its revision did not finish, and keep warnIncomplete's high warning naming the scope, the round, the phase that failed and why, and the run's exit code unchanged",
+        "Confirm a limit of 1 runs one review and at most one revision, stops as rounds_exhausted or incomplete and never as converged, and bills the phases a single round bills today",
+        "Update the progress step that reports a round's outcome in runRounds to say whether the round was clean, beside the findings it counts by severity"
+      ],
+      "touches": [
+        "envelope/spec_result.go",
+        "specgen/rounds.go",
+        "specgen/rounds_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Check the PRD against the steering directives, and report the review in the summary",
+      "criteria": [
+        "17-REQ-5.7",
+        "17-REQ-6.1",
+        "17-REQ-6.2",
+        "17-REQ-6.3",
+        "17-REQ-6.4"
+      ],
+      "tests": [
+        "TS-17-9",
+        "TS-17-10",
+        "TS-17-18",
+        "TS-17-19"
+      ],
+      "steps": [
+        "Add the steering-rubric behaviours to specgen/review_tool_test.go and the alignment and summary cases to specgen/pipeline_test.go, and confirm they fail",
+        "Give newReviewTool the steering body as a parameter, from the same run environment value the review request already carries, so that checkFinding can check a quote against it",
+        "In checkFinding refuse a finding whose rubric is steering and whose evidence quotes no passage appearing in the steering body under sameEvidence's normalisation, naming each offending position and saying the evidence must quote the directive it contradicts",
+        "In checkFinding refuse a finding whose rubric is steering and whose severity is minor, naming each offending position and saying such a finding is critical or major",
+        "In specgen/templates/prd_review_system.md add the steering rubric: check the PRD against every directive of the steering block, quote the directive as the evidence, a contradiction is critical or major, and set the rubric on every finding to prd or steering",
+        "Raise no steering finding where the steering body says nothing: the prompt then carries no steering block, and the tool accepts the prd rubric alone, so a run without the review flag and a run against an empty steering both report no finding under that rubric",
+        "In reviewClause in specgen/pipeline.go count the findings whose rubric is steering apart and the fixed ones in place of the accepted ones, and build the clause with the parenthesis only when at least one steering finding was raised, counting over every package of a split",
+        "Update docs/cli.md for the steering rubric, what turns a steering finding back, and the changed summary clause"
+      ],
+      "touches": [
+        "specgen/review_tool.go",
+        "specgen/review_tool_test.go",
+        "specgen/rounds.go",
+        "specgen/pipeline.go",
+        "specgen/pipeline_test.go",
+        "specgen/templates/prd_review_system.md",
+        "docs/cli.md"
+      ],
+      "depends_on": [
+        1,
+        4
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "integration",
+      "title": "Verify the three paths end to end and record the break in an ADR",
+      "tests": [
+        "TS-17-20",
+        "TS-17-21",
+        "TS-17-22"
+      ],
+      "steps": [
+        "Add the three end-to-end cases to cmd/spec/main_test.go, beside TestAdversarial_GeneratesThePackageFromTheRevisedPRD, each against a real temporary repository and the scripted model, and confirm they pass",
+        "Trace 17-PATH-1 from the scripted reviews through the round loop's clean flags to the converged stop reason and the summary clause, and confirm no revision phase is billed for a round with no findings",
+        "Trace 17-PATH-2 from the escalated answer through the revision tool's decision check and the round loop's collection to the package's open questions and the Provisional entry in the written prd.md, and confirm each step calls the next with no stub left",
+        "Trace 17-PATH-3 from the quoted directive through the refused decline to the recorded escalation, and confirm the refusal reached the model as a tool error rather than failing the run",
+        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: the round loop consumes the review tool's findings and the revision tool's answers, buildReview consumes the rounds, the pipeline consumes the escalations, and the summary clause consumes the record",
+        "Grep envelope/, specgen/ and cmd/spec/ for TODO and panic(\"not implemented\") and remove any that remain",
+        "Confirm no file of the repository still names accepted, rejected, accepted_count, rejected_count, no_findings or no_serious_findings as a review value: grep the source, the templates, docs/ and specification/",
+        "Write the ADR as docs/adr/NN-triage-every-review-finding-four-ways.md, NN being the next free number by the rule in CLAUDE.md, recording the four dispositions and what each requires, the machine-checkable counter-evidence and decision rules, two-clean-round convergence with the default of one round, the steering rubric that cannot be declined, and that this is a breaking change to envelope.Review which replaces the vocabulary ADR 09 records",
+        "Describe the triage and convergence rules in the round loop in docs/architecture.md, and recommend --adversarial-rounds 3 in docs/cli.md where the rounds are described",
+        "Run make doc and then make check"
+      ],
+      "touches": [
+        "cmd/spec/main_test.go",
+        "docs/adr/",
+        "docs/architecture.md",
+        "docs/cli.md"
+      ],
+      "depends_on": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "done_when": [
+        "`make check` passes, fmt, vet, lint, test and skills-check among it",
+        "no file under specgen/, envelope/, cmd/, docs/ or specification/ names accepted, rejected, accepted_count, rejected_count, no_findings or no_serious_findings as a value of the review",
+        "a run with the adversarial review and a round limit of 1 bills the same phases it bills before this change"
+      ],
+      "state": "pending"
+    }
+  ]
+}
