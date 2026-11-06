@@ -4,7 +4,7 @@ spec_name: "render_skills_from_one_source"
 title: "Render the skills for every agent from one source"
 status: "active"
 created_at: "2026-11-06T08:14:00Z"
-updated_at: "2026-11-06T08:22:26Z"
+updated_at: "2026-11-06T08:35:33Z"
 intent_hash: "0fa8296fc069cac263cae0437e0a2188564e76c83633c22bd3f7c4b8b5602fcd"
 schema_version: 2
 source: "docs/prd/03-render-the-skills-for-every-agent-from-one-source.md"
