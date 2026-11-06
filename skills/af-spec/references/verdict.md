@@ -4,8 +4,13 @@ What `af-spec` §10 reads: the stages of the verdict and the order to work in,
 the warnings worth acting on, and validating without `speca`.
 
 ```sh
+speca <NN> --render
 speca <NN> --validate
 ```
+
+`--render` writes `spec.md`, the package's render, which every save through
+the library writes beside the artifacts and a hand-written package lacks; it
+changes no other file. Render before every verdict once the files exist.
 
 This is the format's whole verdict: the four schemas, the cross-file rules
 C1–C11, and the rules across packages. Read `result.validation.errors` — each
@@ -31,6 +36,10 @@ Work in that order, because the stages gate each other:
 4. **`cross_spec_*`** — an unknown dependency, a cycle, a dependency with no
    actor in common. These need the other packages and are **not** checked by
    anything else, so this is the only call that catches them.
+
+Beside the stages, **`rendered`** compares `spec.md` with the render: a
+missing one is a warning, one that differs is an error naming the first line
+that differs. `speca <NN> --render` fixes either.
 
 Fix, ask again, and do not go on until `valid` is true. Then read the
 warnings: they never block, and three of them are worth acting on anyway.

@@ -25,7 +25,8 @@ the whole diff from the base branch:
   the spec did not ask for: take it out, or list it as unmet.
 - **The package.** `speca <package> --validate` still says `valid`, and
   `speca <package>` counts no task `pending` or `in_progress`.
-  `git diff <base> -- <package>` holds the task states and `updated_at`, and
+  `git diff <base> -- <package>` holds the task states, `updated_at` and
+  `spec.md`, and
   any re-encoding the report already names; anything else is a change to the
   spec, and it comes out.
 - **A clean environment.** Run the gate once more with an empty `HOME`, no

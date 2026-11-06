@@ -15,6 +15,13 @@ are flags, not subcommands.
 It reads the package and changes nothing. The only file it can write is the
 one `--markdown-file` names.
 
+Its unscoped render is also committed with the package: every save of a
+package through `afspec` writes `spec.md` beside the artifacts — one header
+line, a blank line, and exactly what `specr <spec>` returns in
+`result.markdown` — so that a pull request can be reviewed by reading it.
+`specr` does not write that file; `speca <spec> --render` does
+([ADR 14](adr/14-commit-the-rendered-package-beside-its-json.md)).
+
 `spec` writes a package from an idea, `specr` renders one, `speca` reports and
 changes its state. Each command's help and `specr --schema` say so, in the sentence
 `cli.SiblingCommands`; and `specr`'s `next` names the `speca` call that records a

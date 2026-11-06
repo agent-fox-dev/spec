@@ -305,8 +305,15 @@ so every fact a coder needs to implement belongs in a criterion or a task step.
 ## 10. The verdict
 
 ```sh
+speca <NN> --render
 speca <NN> --validate
 ```
+
+Every save through the library writes `spec.md`, the package's render, beside
+the artifacts, for a reviewer to read in the diff; you wrote the files by hand,
+so `--render` writes it, and nothing else. From here on render before every
+verdict: rule `rendered` warns about a `spec.md` that is missing and fails one
+that is not the render.
 
 This is the format's whole verdict: the four schemas, the cross-file rules
 C1–C11, and the rules across packages. Read
@@ -344,7 +351,7 @@ speca <NN> --status active
 ```
 
 It computes the hash of the `## Intent` section, writes it into
-`intent_hash`, and rewrites **all four artifacts** in the library's canonical
+`intent_hash`, and rewrites **all four artifacts** (and `spec.md`) in the library's canonical
 encoding — which is also what normalises anything your hand-written files
 spelled differently. Three things to know about it. It refuses a package with
 no `## Intent` to hash, and one that fails the package's **own** rules

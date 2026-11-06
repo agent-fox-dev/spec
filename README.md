@@ -14,7 +14,7 @@ A specification package ("spec") is the durable artifact that captures design
 intent, acceptance criteria, verification contracts, and implementation plans
 for one cohesive feature. Every spec lives in a numbered directory
 (`{NN}_{snake_case_name}/`) and contains four required artifacts plus one
-optional artifact:
+optional artifact, and the render generated from them:
 
 | Artifact | Format | Purpose |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ optional artifact:
 | `test_spec.json` | JSON (schema-validated) | How each requirement is verified: unit tests, property tests, edge-case tests, and smoke tests with computed coverage. |
 | `tasks.json` | JSON (schema-validated) | What work to do, in what order: task groups, subtasks with a state machine, cross-spec dependencies, and requirement-to-test traceability. |
 | `architecture.md` | Markdown (free-form) | Optional. Architectural context — modules, interfaces, data models, technology choices. No schema, not cross-validated. |
+| `spec.md` | Markdown (generated) | The whole package rendered as one document, what `specr <package>` returns, for a reviewer to read in a diff. Written by every save of the package, never read as data, and not part of its contract; `speca <package> --render` writes it again. |
 
 **Key properties:**
 
@@ -184,7 +185,9 @@ moves a package through its lifecycle with the library's `Transition` and
 `Supersede`, refuses a move the lifecycle does not allow with the way to get
 there, moves an archived or superseded package under `archive/`, and, when that
 move fails after the status was written, says so and is resumable: the same call
-moves the package and changes nothing else. The other forms write no file. `speca`
+moves the package and changes nothing else. The render form, `speca <spec>
+--render` (or `speca --render [--all]` for every package), writes the package's
+`spec.md` and no other file. The other forms write no file. `speca`
 makes no model or network call and reads no credential. Everything is in
 [docs/speca.md](docs/speca.md); the decision is
 [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
@@ -309,3 +312,4 @@ and no API key: the command's tests run against a scripted model.
 - [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
 - [ADR 13](docs/adr/13-pin-a-released-agentkit-go.md) — why `go.mod` pins a released agentkit-go and carries no `replace`
 - [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports
+- [ADR 14](docs/adr/14-commit-the-rendered-package-beside-its-json.md) — why every package carries its render, `spec.md`, and when a stale one blocks

@@ -2,9 +2,13 @@ package main
 
 import (
 	"maps"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
@@ -69,5 +73,116 @@ func TestAnAgentFollowsNextFromTheReportToTheFinishedTask(t *testing.T) {
 	}
 	if len(done.Next) == 0 || !sameCall(done.Next[0], claim(input, 2)) {
 		t.Errorf("after task 1 is done: next = %+v; want the claim of task 2", done.Next)
+	}
+}
+
+// An agent activates a draft whose render is current, and the activation writes
+// the render of the activated package: its new status and its intent hash.
+func TestAnAgentActivatesAPackageAndItsRenderIsWrittenWithIt(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	succeeds(t, root, "09", "--render")
+
+	_, r := succeeds(t, root, "09", "--status", "active")
+	if !slices.Equal(r.Changes, []envelope.Change{{Kind: "status", From: "draft", To: "active"}}) {
+		t.Fatalf("changes %+v; want draft → active", r.Changes)
+	}
+	got := renderedFile(t, dir)
+	if got != renderOf(t, dir) {
+		t.Error("spec.md is not the render of the activated package")
+	}
+	if !strings.Contains(got, "**Status:** active") || r.IntentHash == "" || !strings.Contains(got, r.IntentHash) {
+		t.Errorf("spec.md does not carry the new status and the intent hash %q", r.IntentHash)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp.*")); len(matches) > 0 {
+		t.Errorf("temp files were left behind: %v", matches)
+	}
+}
+
+// An agent edits a package by hand, is told by the verdict that its render is
+// stale and how to repair it, repairs it with one call, and the verdict is
+// clean again.
+func TestAnAgentIsToldItsRenderIsStaleAndRepairsIt(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setDependencies(t, dir) // the example depends on a spec 08 the root does not hold
+	succeeds(t, root, "09", "--render")
+	editFile(t, filepath.Join(dir, "requirements.json"), `"JSON-only stdout in agent mode"`, `"JSON-only stdout in agent mode, edited by hand"`)
+
+	_, v := succeeds(t, root, "09", "--validate")
+	var finding *envelope.ValidationItem
+	for i, e := range v.Validation.Errors {
+		if e.Check == "rendered" {
+			finding = &v.Validation.Errors[i]
+		}
+	}
+	if *v.Valid || finding == nil {
+		t.Fatalf("valid %v, errors %+v; want a rendered error", *v.Valid, v.Validation.Errors)
+	}
+	if !regexp.MustCompile(`line \d+`).MatchString(finding.Message) || !strings.Contains(finding.Message, "speca 09_agent_mode --render") {
+		t.Errorf("message %q does not name the line and the call that repairs it", finding.Message)
+	}
+
+	before := withoutRender(treeBytes(t, dir))
+	_, r := succeeds(t, root, "09", "--render")
+	if got := outcomes(r.Rendered); !slices.Equal(got, []string{".specs/09_agent_mode written"}) {
+		t.Errorf("rendered %v", got)
+	}
+	if !maps.Equal(before, withoutRender(treeBytes(t, dir))) {
+		t.Error("the render changed a file other than spec.md")
+	}
+
+	_, v = succeeds(t, root, "09", "--validate")
+	if !*v.Valid {
+		t.Errorf("the repaired package does not validate: %+v", v.Validation.Errors)
+	}
+	for _, e := range append(v.Validation.Errors, v.Validation.Warnings...) {
+		if e.Check == "rendered" {
+			t.Errorf("a rendered finding is left: %+v", e)
+		}
+	}
+}
+
+// A maintainer sees which renders a renderer change made stale, brings every
+// one of them up to date, archive included, and finds only spec.md changed.
+func TestAMaintainerBringsEveryRenderUpToDate(t *testing.T) {
+	root := t.TempDir()
+	dirs := []string{
+		addPackage(t, root, "01_a", "01", "a"), addPackage(t, root, "02_b", "02", "b"),
+		addPackage(t, root, "03_c", "03", "c"), addPackage(t, root, "archive/04_d", "04", "d"),
+	}
+	for _, dir := range dirs {
+		writeFile(t, filepath.Join(dir, afspec.RenderedFileName), "<!-- an earlier renderer -->\n\n# PRD\n")
+	}
+	specs := filepath.Join(root, ".specs")
+	before := snapshot(t, specs)
+	contents := treeBytes(t, specs)
+
+	_, dry := succeeds(t, root, "--render", "--all", "--dry-run")
+	want := []string{".specs/01_a written", ".specs/02_b written", ".specs/03_c written", ".specs/archive/04_d written"}
+	if got := outcomes(dry.Rendered); !dry.DryRun || !slices.Equal(got, want) {
+		t.Errorf("the dry run: dry_run %v, rendered %v; want %v", dry.DryRun, got, want)
+	}
+	if !maps.Equal(before, snapshot(t, specs)) {
+		t.Fatal("the dry run wrote to the spec root")
+	}
+
+	env, r := succeeds(t, root, "--render", "--all")
+	if got := outcomes(r.Rendered); !slices.Equal(got, want) {
+		t.Errorf("rendered %v; want %v", got, want)
+	}
+	if env.Summary != "speca: 4 written, 0 unchanged, 0 failed" {
+		t.Errorf("summary %q", env.Summary)
+	}
+	for _, dir := range dirs {
+		if renderedFile(t, dir) != renderOf(t, dir) {
+			t.Errorf("%s holds no current spec.md", dir)
+		}
+	}
+	after := treeBytes(t, specs)
+	for name := range after {
+		if after[name] != contents[name] && filepath.Base(name) != afspec.RenderedFileName {
+			t.Errorf("%s changed, and it is not a spec.md", name)
+		}
 	}
 }

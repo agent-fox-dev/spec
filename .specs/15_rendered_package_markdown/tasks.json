@@ -228,7 +228,7 @@
         "every package under .specs/, archive/ included, holds a spec.md that `speca --render --all --dry-run` reports as unchanged",
         "`git status --short` shows no file changed by the render other than a spec.md"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }
