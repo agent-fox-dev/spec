@@ -103,11 +103,11 @@ func TestPhases_EndingWithoutASubmissionIsNoResult(t *testing.T) {
 	}
 	t.Run("after a rejected artifact", func(t *testing.T) {
 		artifacts, _ := loadFixture(t, "01", "test_feature")
-		broken := deepCopy(t, artifacts[afspec.StepTestSpec])
-		broken["tests"].([]any)[0].(map[string]any)["verifies"] = []any{"01-REQ-99.1"}
-		runner, _ := fauxRunner(t, ws, toolCall("c1", ArtifactToolName(afspec.StepTestSpec), broken), faux.Text("I give up"))
+		broken := deepCopy(t, artifacts[afspec.StepTasks])
+		broken["tasks"].([]any)[0].(map[string]any)["criteria"] = []any{"REQ-99.1"}
+		runner, _ := fauxRunner(t, ws, toolCall("c1", ArtifactToolName(afspec.StepTasks), broken), faux.Text("I give up"))
 		a := &agentAuthor{runner: runner, ws: ws}
-		_, _, err := a.GenerateArtifact(context.Background(), artifactRequest{Step: afspec.StepTestSpec, Root: ws.Root(),
+		_, _, err := a.GenerateArtifact(context.Background(), artifactRequest{Step: afspec.StepTasks, Root: ws.Root(),
 			Partial: acceptedArtifacts(t, artifacts, afspec.StepRequirements)})
 		if agentrun.CategoryOf(err) != agentrun.CategoryNoResult || !strings.Contains(err.Error(), "1 submission(s) were rejected") {
 			t.Errorf("err = %v", err)
@@ -213,8 +213,8 @@ func TestWriteArchitecture_IsSentTheRunContextAndEveryArtifact(t *testing.T) {
 		t.Errorf("the system prompt lacks the run context:\n%s", sys)
 	}
 	user := requestUserText(reqs[0])
-	for _, want := range []string{"model.go holds the Widget.", "`a.go` — the loader", "## requirements.json", "## test_spec.json",
-		"## tasks.json", "01-REQ-1.1", "TS-01-1"} {
+	for _, want := range []string{"model.go holds the Widget.", "`a.go` — the loader", "## requirements.json",
+		"## tasks.json", "REQ-1.1", "PATH-1", "Load and save spec artifacts"} {
 		if !strings.Contains(user, want) {
 			t.Errorf("the architecture task lacks %q", want)
 		}
@@ -354,11 +354,8 @@ func TestPhases_AreGivenTheSteeringWithoutItsRecord(t *testing.T) {
 		"requirements": func(a *agentAuthor) error {
 			return generate(a, ws, afspec.StepRequirements, &afspec.PartialSpec{}, steer)
 		},
-		"test_spec": func(a *agentAuthor) error {
-			return generate(a, ws, afspec.StepTestSpec, acceptedArtifacts(t, artifacts, afspec.StepRequirements), steer)
-		},
 		"tasks": func(a *agentAuthor) error {
-			return generate(a, ws, afspec.StepTasks, acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec), steer)
+			return generate(a, ws, afspec.StepTasks, acceptedArtifacts(t, artifacts, afspec.StepRequirements), steer)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -373,6 +370,33 @@ func TestPhases_AreGivenTheSteeringWithoutItsRecord(t *testing.T) {
 				if strings.Contains(prompt, a.Date) || strings.Contains(prompt, a.Change) {
 					t.Errorf("the prompt carries the amendment of %s", a.Version)
 				}
+			}
+		})
+	}
+}
+
+// The requirements step of a lite package is told the profile the PRD phase
+// chose, since rule C7 holds its artifact to it; a full package's prompt, and
+// the tasks step's, say nothing of it.
+func TestGenerateArtifact_TellsTheRequirementsStepALiteProfile(t *testing.T) {
+	ws := newWorkspace(t)
+	for _, tc := range []struct {
+		step    afspec.GenerationStep
+		profile string
+		told    bool
+	}{
+		{afspec.StepRequirements, afspec.ProfileLite, true},
+		{afspec.StepRequirements, "", false},
+		{afspec.StepRequirements, afspec.ProfileFull, false},
+		{afspec.StepTasks, afspec.ProfileLite, false},
+	} {
+		t.Run(string(tc.step)+"/"+tc.profile, func(t *testing.T) {
+			runner, p := fauxRunner(t, ws, faux.Text("done"))
+			_, _, _ = (&agentAuthor{runner: runner, ws: ws}).GenerateArtifact(context.Background(), artifactRequest{
+				Step: tc.step, SpecProfile: tc.profile, Root: ws.Root(), Partial: &afspec.PartialSpec{Profile: tc.profile}})
+			user := requestUserText(firstRequest(t, p))
+			if told := strings.Contains(user, profileBlock(afspec.StepRequirements, afspec.ProfileLite)); told != tc.told {
+				t.Errorf("the prompt carries the profile block: %v, want %v:\n%s", told, tc.told, user)
 			}
 		})
 	}
@@ -414,7 +438,6 @@ func TestRun_NoReviewerSeesWhatOnlyTheAuthorSaw(t *testing.T) {
 	prd := prdArgs(t, "test_feature")
 	revisedPlan := map[string]any{
 		"requirements": artifacts[afspec.StepRequirements],
-		"test_spec":    artifacts[afspec.StepTestSpec],
 		"tasks":        deepCopy(t, artifacts[afspec.StepTasks]),
 		"dispositions": []any{fixed("R1-F1")},
 	}
@@ -430,7 +453,6 @@ func TestRun_NoReviewerSeesWhatOnlyTheAuthorSaw(t *testing.T) {
 		toolCall("v1", ToolSubmitPRDRevision, map[string]any{
 			"body": prd["body"].(string) + "\n## Design Decisions\n\n1. The wording is plain.\n", "dispositions": []any{fixed("R1-F1")}}),
 		toolCall("g1", ArtifactToolName(afspec.StepRequirements), artifacts[afspec.StepRequirements]),
-		toolCall("g2", ArtifactToolName(afspec.StepTestSpec), artifacts[afspec.StepTestSpec]),
 		thinkingAloud("g3", tasksCanary),
 		toolCall("g4", ArtifactToolName(afspec.StepTasks), artifacts[afspec.StepTasks]),
 		toolCall("q1", ToolSubmitPlanReview, finding("zero_decision", "task 1")),

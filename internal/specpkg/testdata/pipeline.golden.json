@@ -2,8 +2,8 @@
   "traceability": {
     "criteria_covered": 4,
     "paths_covered": 1,
-    "tests_unowned": [
-      "TS-01-3"
+    "criteria_unowned": [
+      "REQ-1.3"
     ]
   },
   "validation": {
@@ -12,10 +12,10 @@
     "warning_count": 0,
     "errors": [
       {
-        "check": "C7",
-        "artifact": "test_spec.json",
-        "entity": "TS-01-3",
-        "message": "test TS-01-3 is not owned by any task; add TS-01-3 to the tests of an existing task (the task that builds what it checks)"
+        "check": "C5",
+        "artifact": "requirements.json",
+        "entity": "REQ-1.3",
+        "message": "criterion REQ-1.3 is not owned by any task; add REQ-1.3, or its requirement, to the criteria of the task that builds it"
       }
     ]
   }

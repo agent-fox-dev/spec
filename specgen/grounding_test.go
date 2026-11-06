@@ -10,8 +10,8 @@ import (
 )
 
 // tasksTouching is a plan whose tasks touch the given paths, one list a task.
-func tasksTouching(touches ...[]string) *afspec.TasksV2Json {
-	plan := &afspec.TasksV2Json{}
+func tasksTouching(touches ...[]string) *afspec.TasksV3Json {
+	plan := &afspec.TasksV3Json{}
 	for i, t := range touches {
 		plan.Tasks = append(plan.Tasks, afspec.Task{Id: i + 1, Touches: t})
 	}
@@ -28,7 +28,7 @@ func TestGroundingFacts_SayWhetherEachPathExists(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name string
-		plan *afspec.TasksV2Json
+		plan *afspec.TasksV3Json
 		want []groundingFact
 	}{
 		{"files, directories and what is not there", tasksTouching([]string{"pkg/a.go", "missing.go"}, []string{"docs", "../outside.go"}),

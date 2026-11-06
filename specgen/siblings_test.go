@@ -139,7 +139,7 @@ func TestRun_ShowsTheRequirementsStepTheActorsOfAnEarlierScope(t *testing.T) {
 		switch {
 		case req.SpecName == "widget_github" && req.Step == afspec.StepRequirements:
 			seen = req.Actors
-		case req.SpecName == "widget_core" && req.Step == afspec.StepTestSpec:
+		case req.SpecName == "widget_core" && req.Step == afspec.StepTasks:
 			// The first package is not written until the second has its requirements.
 			wait(t, laterRequirements, "the second package's requirements")
 		}
@@ -167,7 +167,7 @@ func TestRun_ShowsTheRequirementsStepTheActorsOfAnEarlierScope(t *testing.T) {
 // The actors of a spec's paths are each named once, whatever their case,
 // since the rule ignores it, in alphabetical order.
 func TestActorsOf_NamesEachActorOnce(t *testing.T) {
-	r := &afspec.RequirementsV2Json{ExecutionPaths: []afspec.ExecutionPath{
+	r := &afspec.RequirementsV3Json{ExecutionPaths: []afspec.ExecutionPath{
 		{Steps: []afspec.PathStep{{Actor: "Hub"}, {Actor: " client "}, {Actor: ""}}},
 		{Steps: []afspec.PathStep{{Actor: "hub"}, {Actor: "agent-fox"}}},
 	}}

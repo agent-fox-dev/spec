@@ -34,14 +34,16 @@ import (
 // point. The artifacts come from afspec's valid fixture, so a pipeline that
 // mangles them fails here rather than in production.
 
-// fixtureDir is afspec's valid version 2 package.
+// fixtureDir is afspec's valid version 3 package.
 var fixtureDir = filepath.Join("..", "afspec", "testdata", "valid_spec")
 
 const fixtureSpecID = "01"
 
 // loadFixture reads the fixture's artifacts relabelled with the id and name
-// the pipeline will assign, so the rule that ids agree everywhere is
-// exercised rather than sidestepped, and returns them with its PRD body.
+// the pipeline will assign, so the rule that the identity agrees everywhere is
+// exercised rather than sidestepped, and returns them with its PRD body. The
+// ids inside an artifact carry no spec prefix in format v3, so they are left
+// as they are.
 func loadFixture(t *testing.T, specID, specName string) (map[afspec.GenerationStep]map[string]any, string) {
 	t.Helper()
 	artifacts := map[afspec.GenerationStep]map[string]any{}
@@ -50,9 +52,7 @@ func loadFixture(t *testing.T, specID, specName string) (map[afspec.GenerationSt
 		if err != nil {
 			t.Fatal(err)
 		}
-		text := strings.ReplaceAll(string(raw), `"`+fixtureSpecID+`-`, `"`+specID+`-`)
-		text = strings.ReplaceAll(text, `TS-`+fixtureSpecID+`-`, `TS-`+specID+`-`)
-		text = strings.ReplaceAll(text, `"spec_id": "`+fixtureSpecID+`"`, `"spec_id": "`+specID+`"`)
+		text := strings.ReplaceAll(string(raw), `"spec_id": "`+fixtureSpecID+`"`, `"spec_id": "`+specID+`"`)
 		text = strings.ReplaceAll(text, `"spec_name": "test_feature"`, `"spec_name": "`+specName+`"`)
 		var content map[string]any
 		if err := json.Unmarshal([]byte(text), &content); err != nil {
@@ -71,13 +71,14 @@ func loadFixture(t *testing.T, specID, specName string) (map[afspec.GenerationSt
 	return artifacts, body
 }
 
-// copyFixture copies the fixture package into dir as it is on disk.
+// copyFixture copies the fixture package into dir as it is on disk: the
+// contract files and the progress the tools wrote beside them.
 func copyFixture(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"} {
+	for _, f := range []string{"prd.md", afspec.RequirementsFileName, afspec.TasksFileName, afspec.ProgressFileName} {
 		b, err := os.ReadFile(filepath.Join(fixtureDir, f))
 		if err != nil {
 			t.Fatal(err)
@@ -120,7 +121,7 @@ type scriptedAuthor struct {
 	// standing in for a violation only whole-package validation can see.
 	skipStepValidation bool
 	// breakScope names the split scope whose tasks artifact is submitted
-	// with one test unowned, so that package does not validate.
+	// with one criterion unowned, so that package does not validate.
 	breakScope string
 
 	// followOn scripts the PRD phase for one scope of a split, by scope
@@ -189,7 +190,7 @@ func (a *scriptedAuthor) GenerateArtifact(_ context.Context, req artifactRequest
 	}
 	skip := a.skipStepValidation
 	if a.breakScope != "" && req.SpecName == a.breakScope && req.Step == afspec.StepTasks {
-		dropOneOwnedTest(content)
+		dropOneOwnedCriterion(content)
 		skip = true
 	}
 	// The pipeline validates through the same handler the tool uses, so the
@@ -200,11 +201,9 @@ func (a *scriptedAuthor) GenerateArtifact(_ context.Context, req artifactRequest
 			return nil, res, err
 		}
 		switch v := decoded.(type) {
-		case *afspec.RequirementsV2Json:
+		case *afspec.RequirementsV3Json:
 			req.Partial.Requirements = v
-		case *afspec.TestSpecV2Json:
-			req.Partial.TestSpec = v
-		case *afspec.TasksV2Json:
+		case *afspec.TasksV3Json:
 			req.Partial.Tasks = v
 		}
 		return content, res, nil
@@ -223,13 +222,13 @@ func (a *scriptedAuthor) WriteArchitecture(_ context.Context, req architectureRe
 	return a.arch, agentrun.Result{Name: "architecture", Turns: 2}, nil
 }
 
-// dropOneOwnedTest breaks the rule that every test is owned by a task: task
-// 1 owns the first tests, and dropping one leaves that test owned by nothing.
-func dropOneOwnedTest(tasksContent map[string]any) {
+// dropOneOwnedCriterion breaks rule C5, that every criterion is owned by a
+// task: task 1 owns the whole of REQ-1 by its requirement id, and naming two
+// of its three criteria instead leaves REQ-1.3 owned by nothing.
+func dropOneOwnedCriterion(tasksContent map[string]any) {
 	tasks := tasksContent["tasks"].([]any)
 	first := tasks[0].(map[string]any)
-	tests := first["tests"].([]any)
-	first["tests"] = tests[:len(tests)-1]
+	first["criteria"] = []any{"REQ-1.1", "REQ-1.2"}
 }
 
 func newAuthor(t *testing.T, specID, specName string) *scriptedAuthor {
@@ -1058,7 +1057,7 @@ func prdArgs(t *testing.T, name string, split ...string) map[string]any {
 	return args
 }
 
-// generationTurns script the three generation phases of one package.
+// generationTurns script the generation phases of one package.
 func generationTurns(t *testing.T, id, name string) []faux.Turn {
 	t.Helper()
 	artifacts, _ := loadFixture(t, id, name)

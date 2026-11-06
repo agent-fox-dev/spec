@@ -27,11 +27,14 @@ func TestRender_TheWholePackageIsTheCombinedRender(t *testing.T) {
 	if r.Scope != "spec" || r.Task != nil || r.SpecDir != filepath.Join(".specs", "01_test_feature") {
 		t.Errorf("scope %q task %+v dir %q", r.Scope, r.Task, r.SpecDir)
 	}
-	if got := strings.Join(r.Sections, ","); got != "prd,architecture,requirements,test_spec,tasks" {
+	if got := strings.Join(r.Sections, ","); got != "prd,architecture,requirements,tasks" {
 		t.Errorf("sections = %s", got)
 	}
 	if r.Tokens != afspec.EstimateTokens(r.Markdown) || !r.Valid || len(r.Tasks) != 3 {
-		t.Errorf("tokens %d valid %v tasks %d", r.Tokens, r.Valid, len(r.Tasks))
+		t.Errorf("tokens %d valid %v tasks %d; want the two tasks of the plan and the integration task", r.Tokens, r.Valid, len(r.Tasks))
+	}
+	if !strings.Contains(r.Markdown, "### 3. "+afspec.IntegrationTaskTitle+" (integration)") || strings.Contains(r.Markdown, "pending") {
+		t.Error("the render lacks the integration task, or shows a task state")
 	}
 }
 
@@ -48,12 +51,41 @@ func TestRender_ScopedToATask(t *testing.T) {
 		t.Fatalf("scope %q task %+v", r.Scope, r.Task)
 	}
 	parts := load(t, root, example).RenderIndividualScoped(2)
-	for _, key := range []string{"prd", "requirements", "test_spec", "tasks"} {
+	for _, key := range []string{"prd", "requirements", "tasks"} {
 		if !strings.Contains(r.Markdown, "# "+sectionHeading[key]+"\n\n"+parts[key]) {
 			t.Errorf("section %s is not the scoped render", key)
 		}
 	}
-	for _, want := range []string{"scoped to task 2", "09-REQ-1:** JSON-only stdout in agent mode (other task)", "TS-09-4"} {
+	for _, want := range []string{"scoped to task 2", "REQ-1:** JSON-only stdout in agent mode (other task)",
+		"r = run(env, 'spec status 99_missing')", "- 4. " + afspec.IntegrationTaskTitle + " (integration)"} {
+		if !strings.Contains(r.Markdown, want) {
+			t.Errorf("markdown lacks %q", want)
+		}
+	}
+}
+
+// A render scoped to the derived integration task, task N+1, is the library's
+// scoped render of it: every path in full, the contracts to confirm, and the
+// task's computed content.
+func TestRender_ScopedToTheIntegrationTask(t *testing.T) {
+	root := newRepo(t)
+	env, code, _ := run(t, "--dir", root, "9", "--task", fmt.Sprint(integrationTask))
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	r := env.Result
+	if r.Scope != "task" || r.Task == nil || r.Task.ID != integrationTask || r.Task.Kind != "integration" || r.Task.Title != afspec.IntegrationTaskTitle {
+		t.Fatalf("scope %q task %+v", r.Scope, r.Task)
+	}
+	parts := load(t, root, example).RenderIndividualScoped(integrationTask)
+	for _, key := range []string{"prd", "requirements", "tasks"} {
+		if !strings.Contains(r.Markdown, "# "+sectionHeading[key]+"\n\n"+parts[key]) {
+			t.Errorf("section %s is not the scoped render", key)
+		}
+	}
+	for _, want := range []string{"scoped to task 4", "## Contracts", "PATH-1:** Agent lists specs and parses the result (included below)",
+		"### PATH-1:", "### 4. " + afspec.IntegrationTaskTitle + " (integration)", "**Depends on:** 1, 2, 3", "Run the smoke check of PATH-1",
+		"- 3. Run the agent-mode commands end to end (implement)"} {
 		if !strings.Contains(r.Markdown, want) {
 			t.Errorf("markdown lacks %q", want)
 		}
@@ -83,7 +115,7 @@ func TestRender_OnlyTheSectionsNamed(t *testing.T) {
 	}
 }
 
-// --max-tokens drops the architecture first, then the tests' detail, and says
+// --max-tokens drops the architecture first, then the checks' detail, and says
 // which; past that, it warns that the render is still over.
 func TestRender_MaxTokensDropsDetailInOrder(t *testing.T) {
 	root := newRepo(t)
@@ -100,9 +132,10 @@ func TestRender_MaxTokensDropsDetailInOrder(t *testing.T) {
 	}{
 		{"a budget that fits drops nothing", []string{"1", "--max-tokens", "1000000"}, "", false},
 		{"the architecture goes first", []string{"1", "--max-tokens", strconv.Itoa(level1)}, "architecture", false},
-		{"then the tests' detail, and still over", []string{"1", "--max-tokens", "10"}, "architecture,test_detail", true},
-		{"a package with no architecture drops the tests' detail", []string{"9", "--max-tokens", "10"}, "test_detail", true},
-		{"a task render drops the same", []string{"1", "--task", "1", "--max-tokens", "10"}, "architecture,test_detail", true},
+		{"then the checks' detail, and still over", []string{"1", "--max-tokens", "10"}, "architecture,check_detail", true},
+		{"a package with no architecture drops the checks' detail", []string{"9", "--max-tokens", "10"}, "check_detail", true},
+		{"a task render drops the same", []string{"1", "--task", "1", "--max-tokens", "10"}, "architecture,check_detail", true},
+		{"a render of the integration task drops the same", []string{"1", "--task", "3", "--max-tokens", "10"}, "architecture,check_detail", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, code, _ := run(t, append([]string{"--dir", root}, tc.argv...)...)
@@ -145,11 +178,14 @@ func TestNext_SuggestsTheClaimAndTheNextRender(t *testing.T) {
 	const (
 		claim1 = "speca --task 1 --state in_progress"
 		claim2 = "speca --task 2 --state in_progress"
+		claim4 = "speca --task 4 --state in_progress"
 		done1  = "speca --task 1 --state done"
 		done3  = "speca --task 3 --state done"
+		done4  = "speca --task 4 --state done"
 		task1  = "specr --task 1"
 		task2  = "specr --task 2"
 		task3  = "specr --task 3"
+		task4  = "specr --task 4"
 	)
 	pending := []string{"pending", "pending", "pending"}
 	type tc struct {
@@ -183,7 +219,10 @@ func TestNext_SuggestsTheClaimAndTheNextRender(t *testing.T) {
 			argv: []string{"09"}, want: []string{task1}},
 		{name: "a first task that is not ready is not claimed", states: pending, deps: [][]int{{2}, nil, nil},
 			argv: []string{"09"}, want: []string{task1}},
-		{name: "a finished plan suggests nothing", states: []string{"done", "dropped", "done"}, argv: []string{"09"},
+		{name: "a plan whose tasks are all done or dropped claims the integration task", states: []string{"done", "dropped", "done"},
+			argv: []string{"09"}, want: []string{claim4, task4},
+			why: [][]string{{"task 4", "next ready task", "claim", "no other agent"}}},
+		{name: "a finished plan suggests nothing", states: []string{"done", "dropped", "done", "done"}, argv: []string{"09"},
 			want: []string{}},
 		// After a task render.
 		{name: "a ready task is claimed though another is in progress", states: []string{"pending", "pending", "in_progress"},
@@ -199,10 +238,19 @@ func TestNext_SuggestsTheClaimAndTheNextRender(t *testing.T) {
 			want: []string{task3}},
 		{name: "a task dropped has no call", states: []string{"done", "dropped", "pending"}, argv: []string{"09", "--task", "2"},
 			want: []string{task3}},
-		{name: "after the last task there is no render", states: pending, argv: []string{"09", "--task", "3"},
+		{name: "after the last task of the plan the integration task is rendered", states: pending, argv: []string{"09", "--task", "3"},
+			want: []string{task4}},
+		{name: "after the integration task there is no render", states: pending, argv: []string{"09", "--task", "4"},
 			want: []string{}},
-		{name: "the last task in progress has only its done call", states: []string{"done", "done", "in_progress"},
-			argv: []string{"09", "--task", "3"}, want: []string{done3}},
+		{name: "the last task of the plan in progress is recorded done, then the integration task rendered",
+			states: []string{"done", "done", "in_progress"}, argv: []string{"09", "--task", "3"}, want: []string{done3, task4}},
+		{name: "the integration task is claimed once every task is done or dropped", states: []string{"done", "dropped", "done"},
+			argv: []string{"09", "--task", "4"}, want: []string{claim4},
+			why: [][]string{{"claim", "task 4", "before working on it"}}},
+		{name: "the integration task is not claimed while a task of the plan is open", states: []string{"done", "done", "pending"},
+			argv: []string{"09", "--task", "4"}, want: []string{}},
+		{name: "the integration task in progress has only its done call", states: []string{"done", "done", "done", "in_progress"},
+			argv: []string{"09", "--task", "4"}, want: []string{done4}},
 	}
 	// A package that cannot take a write is offered no call of speca, and keeps
 	// its render suggestion.

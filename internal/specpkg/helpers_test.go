@@ -41,23 +41,21 @@ func sameDir(t *testing.T, got, want string) {
 	}
 }
 
-// brokenSpec is the v2 example with its plan and tests damaged in every way
-// the report names: a test no task owns, a criterion and a path no test
-// verifies, and a term in several criteria with no glossary entry.
+// brokenSpec is the v3 example damaged in every way the report names: a
+// criterion no task owns, a criterion whose shared check names nothing, and
+// a criterion that describes an error outcome without a contract. No path
+// can be uncovered: a schema-valid smoke check is the path's coverage.
 func brokenSpec(t *testing.T) *afspec.Spec {
 	t.Helper()
-	spec, err := afspec.LoadSpec(filepath.Join("..", "..", "afspec", "testdata", "v2_example"))
+	spec, err := afspec.LoadSpec(filepath.Join("..", "..", "afspec", "testdata", "v3_example"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec.Tasks.Tasks[0].Tests = []string{"TS-09-1", "TS-09-2"}
 	req := &spec.Requirements.Requirements[1]
-	req.Criteria = append(req.Criteria, afspec.Criterion{Id: "09-REQ-2.3", Pattern: afspec.CriterionPatternUbiquitous, Action: "keep the `Frobnicate` stable"})
-	spec.Requirements.ExecutionPaths = append(spec.Requirements.ExecutionPaths, afspec.ExecutionPath{
-		Id: "09-PATH-2", Title: "An unverified path", Steps: spec.Requirements.ExecutionPaths[0].Steps})
-	for i := range spec.Requirements.Requirements[0].Criteria {
-		spec.Requirements.Requirements[0].Criteria[i].Action += " using `Frobnicate`"
-	}
+	req.Criteria = append(req.Criteria,
+		afspec.UbiquitousCriterion("REQ-2.3", "", "keep the `Frobnicate` stable").WithSameCheckAs("REQ-9.9"),
+		afspec.UbiquitousCriterion("REQ-2.4", "", "report an error when `Frobnicate` is gone").WithCheck(afspec.CheckKindUnit, nil, ""))
+	spec.Tasks.Tasks[1].Criteria = append(spec.Tasks.Tasks[1].Criteria, "REQ-2.4")
 	return spec
 }
 

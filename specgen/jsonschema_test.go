@@ -87,17 +87,35 @@ func propertyNames(node any) []string {
 // keys by name at every depth, including inside `properties`, whose keys are
 // property names. The v2 test object's `title` and `then` were deleted while
 // `required` still listed them, so no argument object could satisfy the
-// schema declared for submit_test_spec.
+// schema declared for its tool. The v3 criterion has a `pattern` and the
+// requirement, the path and the task a `title`, all keywords.
 func TestToolSchema_KeepsAPropertyNamedLikeAKeyword(t *testing.T) {
-	s, err := ArtifactSchema(afspec.StepTestSpec)
+	s, err := ArtifactSchema(afspec.StepRequirements)
 	if err != nil {
 		t.Fatal(err)
 	}
-	test := s.Properties["tests"].Items
-	for _, name := range []string{"title", "then", "given", "when", "id", "kind", "verifies"} {
-		if test == nil || test.Properties[name] == nil {
-			t.Errorf("the test object lost its %q property", name)
+	requirement := s.Properties["requirements"].Items
+	for _, name := range []string{"id", "title", "rationale", "system", "criteria"} {
+		if requirement == nil || requirement.Properties[name] == nil {
+			t.Fatalf("the requirement object lost its %q property", name)
 		}
+	}
+	criterion := requirement.Properties["criteria"].Items
+	for _, name := range []string{"id", "pattern", "condition", "system", "action", "contract", "check"} {
+		if criterion == nil || criterion.Properties[name] == nil {
+			t.Errorf("the criterion object lost its %q property", name)
+		}
+	}
+	path := s.Properties["execution_paths"].Items
+	if path == nil || path.Properties["title"] == nil || path.Properties["smoke"] == nil {
+		t.Errorf("the execution path object lost its title or smoke: %+v", path)
+	}
+	tasks, err := ArtifactSchema(afspec.StepTasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task := tasks.Properties["tasks"].Items; task == nil || task.Properties["title"] == nil {
+		t.Errorf("the task object lost its title: %+v", task)
 	}
 }
 
@@ -148,20 +166,24 @@ func TestToolSchema_ResolvesRefsAndKeepsTheConstraints(t *testing.T) {
 	}
 
 	tasks, _ := ArtifactSchema(afspec.StepTasks)
-	if task := tasks.Properties["tasks"].Items; task == nil || len(task.Properties) == 0 {
-		t.Error("the task item schema is empty, so its $ref was not resolved")
+	task := tasks.Properties["tasks"].Items
+	if task == nil || len(task.Properties) == 0 {
+		t.Fatal("the task item schema is empty, so its $ref was not resolved")
 	}
-	s, _ := ArtifactSchema(afspec.StepTestSpec)
-	test := s.Properties["tests"].Items
-	if len(test.Properties["kind"].Enum) != 4 || test.Properties["id"].Pattern == "" ||
-		s.Properties["tests"].MinItems == nil || *s.Properties["tests"].MinItems != 1 ||
-		test.Properties["verifies"].UniqueItems == nil {
+	s, _ := ArtifactSchema(afspec.StepRequirements)
+	criterion := s.Properties["requirements"].Items.Properties["criteria"].Items
+	if len(criterion.Properties["pattern"].Enum) != 5 || criterion.Properties["id"].Pattern == "" ||
+		s.Properties["requirements"].MinItems == nil || *s.Properties["requirements"].MinItems != 1 ||
+		task.Properties["criteria"].UniqueItems == nil {
 		t.Error("an enum, pattern, minItems or uniqueItems was lost")
+	}
+	if check := criterion.Properties["check"]; check == nil || len(check.Properties["kind"].Enum) != 3 || check.Properties["same_as"].Pattern == "" {
+		t.Errorf("the check's $ref was not resolved, or its enum or pattern was lost: %+v", check)
 	}
 	if s.AdditionalProperties == nil || s.AdditionalProperties.Allowed {
 		t.Error("additionalProperties:false was lost")
 	}
-	raw, _, _ := ToolSchema(afspec.Schemas()[afspec.TestSpecSchemaName])
+	raw, _, _ := ToolSchema(afspec.Schemas()[afspec.RequirementsSchemaName])
 	if raw.Properties["schema_version"] == nil || !raw.Properties["schema_version"].HasConst {
 		t.Error("the schema_version const was lost")
 	}
@@ -176,8 +198,8 @@ func TestToolSchema_KeepsTheDocumentsPropertyOrder(t *testing.T) {
 	}
 	// The artifact's own fields are left out of the order with the rest of
 	// what the handler writes.
-	if ts, _ := ArtifactSchema(afspec.StepTestSpec); !slices.Equal(ts.PropertyOrder, []string{"tests"}) {
-		t.Errorf("test_spec PropertyOrder = %v", ts.PropertyOrder)
+	if ts, _ := ArtifactSchema(afspec.StepTasks); !slices.Equal(ts.PropertyOrder, []string{"test_commands", "dependencies", "tasks"}) {
+		t.Errorf("tasks PropertyOrder = %v", ts.PropertyOrder)
 	}
 }
 

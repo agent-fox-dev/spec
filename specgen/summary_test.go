@@ -35,12 +35,12 @@ func TestSummaryView_KeepsWhatACallerActsOn(t *testing.T) {
 	r := &Result{}
 	r.Package = Package{
 		SpecDir: ".specs/12_thing", SpecID: "12", SpecName: "thing", Title: "Thing", Status: "draft", Source: "text",
-		Artifacts: []string{"prd.md", "requirements.json"}, Requirements: 4, Criteria: 8, Tests: 10, Tasks: 5,
+		Artifacts: []string{"prd.md", "requirements.json"}, Requirements: 4, Criteria: 8, ExecutionPaths: 2, Tasks: 5,
 		Validation: ValidationReport{Valid: false, ErrorCount: 1, WarningCount: 2,
 			Errors:   []ValidationItem{{Check: "x", Message: "missing y"}},
 			Warnings: []ValidationItem{{Check: "w", Message: "minor"}}},
-		Traceability: TraceReport{CriteriaCovered: 6, CriteriaUncovered: []string{"C-1"},
-			PathsCovered: 3, PathsUncovered: []string{"P-2"}, TestsUnowned: []string{"TS-1"}},
+		Traceability: TraceReport{CriteriaCovered: 6, CriteriaUncovered: []string{"REQ-1.1"},
+			PathsCovered: 3, PathsUncovered: []string{"PATH-2"}, CriteriaUnowned: []string{"REQ-1.3"}},
 		OpenQuestions: []OpenQuestion{{Question: "what about x?", Decision: "assume x", Why: "no reply"}},
 		CommentURL:    "https://github.com/o/r/issues/1#comment",
 		Review: &Review{RoundsRun: 2, RoundsAllowed: 3, StopReason: "converged", FindingsCount: 4,
@@ -63,7 +63,7 @@ func TestSummaryView_KeepsWhatACallerActsOn(t *testing.T) {
 		t.Errorf("validation keys = %v", got)
 	}
 	if got := keysOf(m["traceability"].(map[string]any)); !slices.Equal(got,
-		[]string{"criteria_covered", "criteria_uncovered", "paths_covered", "paths_uncovered", "tests_unowned"}) {
+		[]string{"criteria_covered", "criteria_uncovered", "criteria_unowned", "paths_covered", "paths_uncovered"}) {
 		t.Errorf("traceability keys = %v", got)
 	}
 	if got := keysOf(m["review"].(map[string]any)); slices.Contains(got, "rounds") || !slices.Contains(got, "unanswered_count") {

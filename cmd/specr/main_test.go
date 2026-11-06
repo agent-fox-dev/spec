@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -205,10 +206,11 @@ func TestTask_ThatCannotBeScopedToIsAUsageError(t *testing.T) {
 		ends  string
 		hint  []string
 	}{
-		{"an unknown task lists the ids", nil, []string{"9", "--task", "7"}, nil, "has no task 7; its tasks are 1, 2, 3", []string{"1", "2", "3"}},
+		{"an unknown task lists the ids, the integration task's among them", nil, []string{"9", "--task", "7"}, nil,
+			"has no task 7; its tasks are 1, 2, 3, 4", []string{"1", "2", "3", "4"}},
 		{"a plan with no tasks says so", emptyPlan, []string{"9", "--task", "1"}, nil, "has no task 1; it has no tasks", nil},
 		{"a package in an older format names the version", newLegacyPackage, []string{"7", "--task", "1"},
-			[]string{"format version 1", "§13"}, "", nil},
+			[]string{"format version 1", "speca <package> --migrate"}, "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newRepo(t)
@@ -239,8 +241,8 @@ func TestTask_ThatCannotBeScopedToIsAUsageError(t *testing.T) {
 }
 
 // A package that reads but does not validate is rendered as it is, with a
-// warning: low for a v2 package that breaks a rule, high for a package in an
-// older format whose tests and tasks were not read.
+// warning: low for a v3 package that breaks a rule, high for a package in an
+// older format whose progress and tasks were not read.
 func TestValidation_APackageThatDoesNotValidateRendersWithAWarning(t *testing.T) {
 	brokenRule := func(t *testing.T, root string) {
 		tasks := filepath.Join(root, ".specs", example, "tasks.json")
@@ -248,7 +250,7 @@ func TestValidation_APackageThatDoesNotValidateRendersWithAWarning(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(tasks, bytes.Replace(b, []byte(`"TS-09-6"`), []byte(`"TS-09-99"`), 1), 0o644); err != nil {
+		if err := os.WriteFile(tasks, bytes.Replace(b, []byte(`"REQ-2.2"`), []byte(`"REQ-2.9"`), 1), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -260,8 +262,8 @@ func TestValidation_APackageThatDoesNotValidateRendersWithAWarning(t *testing.T)
 		says     string
 		tasks    int
 	}{
-		{"a broken rule", brokenRule, "9", "low", "does not validate", 3},
-		{"an older format", newLegacyPackage, "7", "high", "format version 1", 0},
+		{"a broken rule", brokenRule, "9", "low", "does not validate", 4},
+		{"an older format", newLegacyPackage, "7", "high", "speca <package> --migrate", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newRepo(t)
@@ -282,7 +284,8 @@ func TestValidation_APackageThatDoesNotValidateRendersWithAWarning(t *testing.T)
 }
 
 // Every task of a render carries ready, true for a pending task whose
-// dependencies are done, and so does the task rendered.
+// dependencies are done, the integration task included, and so does the task
+// rendered.
 func TestTasks_SayWhichAreReady(t *testing.T) {
 	ready := func(tasks []envelope.TaskInfo) []bool {
 		var out []bool
@@ -291,19 +294,23 @@ func TestTasks_SayWhichAreReady(t *testing.T) {
 		}
 		return out
 	}
-	// In the example task 2 depends on 1, and task 3 on 1 and 2.
+	// In the example task 2 depends on 1, task 3 on 1 and 2, and the
+	// integration task 4 on every task of the plan.
 	root := newRepo(t)
 	env, code, _ := run(t, "--dir", root, "09")
 	if code != cli.ExitOK {
 		t.Fatalf("code %d: %+v", code, env.Error)
 	}
-	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{true, false, false}) {
+	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{true, false, false, false}) {
 		t.Errorf("ready = %v; want only task 1", got)
+	}
+	if it := env.Result.Tasks[3]; it.ID != integrationTask || it.Kind != "integration" || !slices.Equal(it.DependsOn, []int{1, 2, 3}) {
+		t.Errorf("tasks[3] = %+v; want the integration task, depending on every task", it)
 	}
 
 	plan(t, filepath.Join(root, ".specs", example), []string{"done", "pending", "pending"}, nil)
 	env, _, _ = run(t, "--dir", root, "09", "--task", "2")
-	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{false, true, false}) {
+	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{false, true, false, false}) {
 		t.Errorf("with task 1 done, ready = %v; want only task 2", got)
 	}
 	if env.Result.Tasks[0].State != "done" {
@@ -311,6 +318,17 @@ func TestTasks_SayWhichAreReady(t *testing.T) {
 	}
 	if env.Result.Task == nil || env.Result.Task.ID != 2 || !env.Result.Task.Ready {
 		t.Errorf("result.task = %+v; want task 2, ready", env.Result.Task)
+	}
+
+	// The integration task is ready once every task of the plan is done or
+	// dropped, and is the task rendered when asked for.
+	plan(t, filepath.Join(root, ".specs", example), []string{"done", "dropped", "done"}, nil)
+	env, _, _ = run(t, "--dir", root, "09", "--task", fmt.Sprint(integrationTask))
+	if got := ready(env.Result.Tasks); !slices.Equal(got, []bool{false, false, false, true}) {
+		t.Errorf("with every task done or dropped, ready = %v; want only the integration task", got)
+	}
+	if env.Result.Task == nil || env.Result.Task.ID != integrationTask || env.Result.Task.Kind != "integration" || !env.Result.Task.Ready {
+		t.Errorf("result.task = %+v; want the integration task, ready", env.Result.Task)
 	}
 }
 
@@ -389,7 +407,7 @@ func TestMarkdown_IsNotHTMLEscaped(t *testing.T) {
 		t.Fatalf("code %d", code)
 	}
 	if !strings.Contains(stdout.String(), "&LoadError") {
-		t.Errorf("the test's pseudocode lost its & on stdout")
+		t.Errorf("the check's pseudocode lost its & on stdout")
 	}
 	for _, esc := range []string{"3c", "3e", "26"} {
 		if strings.Contains(stdout.String(), "\\u00"+esc) {

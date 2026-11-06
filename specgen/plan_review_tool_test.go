@@ -10,8 +10,9 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-// planUnderReview is the fixture's plan: its tasks, tests, criteria and
-// execution paths are the ids a plan finding's section may name.
+// planUnderReview is the fixture's plan: its tasks, the derived integration
+// task among them, its criteria and its execution paths are the ids a plan
+// finding's section may name.
 func planUnderReview(t *testing.T) *afspec.PartialSpec {
 	t.Helper()
 	artifacts, _ := loadFixture(t, "01", "test_feature")
@@ -85,13 +86,20 @@ func TestPlanReviewTool_TakesARubricAndASeverityOfItsSets(t *testing.T) {
 
 func TestPlanReviewTool_TakesASectionThatNamesAPlaceInThePlan(t *testing.T) {
 	plan := planUnderReview(t)
-	test, criterion, path := plan.TestSpec.Tests[0].Id, plan.Requirements.Requirements[0].Criteria[0].Id, plan.Requirements.ExecutionPaths[0].Id
+	criterion, path := plan.Requirements.Requirements[0].Criteria[0].Id, plan.Requirements.ExecutionPaths[0].Id
+	// The fixture stores two tasks; the integration task is the derived
+	// third, a place in the plan the reviewer reads.
+	spec := &afspec.Spec{Profile: plan.Profile, Requirements: plan.Requirements, Tasks: plan.Tasks}
+	integration, ok := spec.IntegrationTaskID()
+	if !ok || integration != 3 {
+		t.Fatalf("the integration task is %d, %v; want task 3", integration, ok)
+	}
 	for _, tc := range []struct {
 		section string
 		ok      bool
 	}{
-		{test, true}, {criterion, true}, {path, true}, {"task 2", true},
-		{"TS-99-1", false}, {"01-REQ-99.9", false}, {"task 99", false}, {"Goals", false},
+		{criterion, true}, {path, true}, {"task 2", true}, {fmt.Sprintf("task %d", integration), true},
+		{"REQ-99.9", false}, {"PATH-99", false}, {"task 99", false}, {fmt.Sprintf("task %d", integration+1), false}, {"Goals", false},
 	} {
 		t.Run(tc.section, func(t *testing.T) {
 			f := planFinding()
@@ -100,7 +108,7 @@ func TestPlanReviewTool_TakesASectionThatNamesAPlaceInThePlan(t *testing.T) {
 				planCase(t, plan, "", f)
 				return
 			}
-			planCase(t, plan, "", f, "finding 1", fmt.Sprintf("%q", tc.section), "a task by its number, a test id, a criterion id or an execution path id")
+			planCase(t, plan, "", f, "finding 1", fmt.Sprintf("%q", tc.section), "a task by its number, a criterion id or an execution path id")
 		})
 	}
 }
@@ -162,7 +170,7 @@ func TestPlanReviewTool_HoldsASteeringFindingToItsDirective(t *testing.T) {
 		f.Rubric, f.Severity, f.Evidence = "steering", severity, evidence
 		return f
 	}
-	planCase(t, plan, steeringBody, steering("major", `"`+steeringDirective+`" against TS-01-1's file`))
+	planCase(t, plan, steeringBody, steering("major", `"`+steeringDirective+`" against REQ-1.1's check`))
 	planCase(t, plan, steeringBody, steering("major", "`Tests are   organised by\nbehaviour, not by spec.` against task 1"))
 	planCase(t, plan, steeringBody, steering("major", `"Every test lives alone."`), "finding 1", "quote the directive it contradicts")
 	planCase(t, plan, steeringBody, steering("critical", `"`+steeringDirective+`"`))

@@ -18,9 +18,9 @@ import (
 )
 
 // An agent renders the package, runs the speca call next suggests first, and
-// tasks.json records the move: a whole render's claim moves task 1 to in
-// progress, and the render of a task in progress offers the call that records
-// it done.
+// progress.json records the move: a whole render's claim moves task 1 to in
+// progress, the render of a task in progress offers the call that records it
+// done, and the integration task, task N+1, moves like any other.
 func TestTheSpecaCallNextSuggestsWorksAgainstTheRealSpeca(t *testing.T) {
 	bin := buildSpeca(t)
 	for _, tc := range []struct {
@@ -34,6 +34,8 @@ func TestTheSpecaCallNextSuggestsWorksAgainstTheRealSpeca(t *testing.T) {
 			[]string{"--task", "1", "--state", "in_progress"}, "in_progress"},
 		{"the done call after a task render", []string{"in_progress", "pending", "pending"}, []string{"09", "--task", "1"},
 			[]string{"--task", "1", "--state", "done"}, "done"},
+		{"the claim of the integration task", []string{"done", "done", "done"}, []string{"09"},
+			[]string{"--task", "4", "--state", "in_progress"}, "in_progress"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := exampleWith(t, tc.states, nil)
@@ -46,8 +48,12 @@ func TestTheSpecaCallNextSuggestsWorksAgainstTheRealSpeca(t *testing.T) {
 			if status != cli.ExitOK || !out.OK || out.Result == nil || len(out.Result.Changes) != 1 {
 				t.Fatalf("speca %s: exit %d, error %+v", strings.Join(call.Flags, " "), status, out.Error)
 			}
-			if got := taskState(t, root, 1); got != tc.want {
-				t.Errorf("tasks.json says task 1 is %s; want %s", got, tc.want)
+			id, err := strconv.Atoi(tc.flags[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := taskState(t, root, id); got != tc.want {
+				t.Errorf("progress.json says task %d is %s; want %s", id, got, tc.want)
 			}
 		})
 	}
@@ -55,9 +61,10 @@ func TestTheSpecaCallNextSuggestsWorksAgainstTheRealSpeca(t *testing.T) {
 
 // For a package in any state, specr and speca claim the same task, or neither
 // does, and the task claimed is the one specr's render suggestion names. The
-// states are the tasks' states and their dependencies on earlier tasks; a
-// dependency on a later one is a package that does not validate, and has its
-// own test below.
+// states are the states of the three tasks of the plan and their dependencies
+// on earlier tasks, the integration task pending behind them; a dependency on
+// a later task is a package that does not validate, and has its own test
+// below.
 func TestSpecrAndSpecaClaimTheSameTask(t *testing.T) {
 	bin := buildSpeca(t)
 	taskStates := []string{"pending", "in_progress", "done", "dropped"}
@@ -128,6 +135,8 @@ func TestSpecrAndSpecaClaimTheSameTask(t *testing.T) {
 					// speca claims the first ready task, specr the first unfinished one: they
 					// differ only when that task is stuck, behind a dependency that is never done,
 					// and a task dropped is such a dependency. Without a dropped task they agree.
+					// The integration task is never the one claimed here: it waits for every
+					// task of the plan, the stuck one included.
 					stuck.Add(1)
 					if !slices.Contains(s.states, "dropped") {
 						t.Errorf("%s: speca claims %v and specr nothing, though no task is dropped", where, b)

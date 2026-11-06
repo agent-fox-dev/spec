@@ -10,12 +10,12 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-// planAsSubmitted is the plan's three artifacts as a reviser submits them,
+// planAsSubmitted is the plan's two artifacts as a reviser submits them,
 // each one a JSON object a test may edit.
 func planAsSubmitted(t *testing.T, plan *afspec.PartialSpec) map[string]map[string]any {
 	t.Helper()
 	out := map[string]map[string]any{}
-	for key, artifact := range map[string]any{"requirements": plan.Requirements, "test_spec": plan.TestSpec, "tasks": plan.Tasks} {
+	for key, artifact := range map[string]any{"requirements": plan.Requirements, "tasks": plan.Tasks} {
 		b, err := json.Marshal(artifact)
 		if err != nil {
 			t.Fatal(err)
@@ -55,8 +55,10 @@ func planFindings(rubrics ...string) []Finding {
 	return out
 }
 
-// A revision submits the three artifacts whole, and may change neither the
-// PRD, nor the spec's identity, nor a task's state, nor the actors.
+// A revision submits the two artifacts whole, and may change neither the
+// PRD, nor the spec's identity, nor the actors; a task's state is not in the
+// plan at all (it lives in progress.json), so a task carrying one is a key
+// the schema does not allow.
 func TestPlanRevisionTool_ChangesThePlanAndNothingElse(t *testing.T) {
 	plan := planUnderReview(t)
 	findings := planFindings("zero_decision")
@@ -78,7 +80,7 @@ func TestPlanRevisionTool_ChangesThePlanAndNothingElse(t *testing.T) {
 		extra map[string]any
 		says  []string // nil when accepted
 	}{
-		{"only the three artifacts", edit(retitled), nil, nil},
+		{"only the two artifacts", edit(retitled), nil, nil},
 		{"the PRD body", edit(retitled), map[string]any{"body": "## Intent\n\nAnother intent.\n"}, []string{"PRD", "body"}},
 		{"the spec id", edit(func(a map[string]map[string]any) { retitled(a); a["requirements"]["spec_id"] = "99" }), nil,
 			[]string{"spec_id", "requirements"}},
@@ -87,7 +89,7 @@ func TestPlanRevisionTool_ChangesThePlanAndNothingElse(t *testing.T) {
 		{"a task's state", edit(func(a map[string]map[string]any) {
 			retitled(a)
 			a["tasks"]["tasks"].([]any)[1].(map[string]any)["state"] = "done"
-		}), nil, []string{"state", "task 2"}},
+		}), nil, []string{"schema does not allow", "/tasks/1/state"}},
 		{"an actor", edit(func(a map[string]map[string]any) {
 			retitled(a)
 			firstPath(a)["steps"].([]any)[0].(map[string]any)["actor"] = "a stranger"
@@ -101,7 +103,7 @@ func TestPlanRevisionTool_ChangesThePlanAndNothingElse(t *testing.T) {
 			retitled(a)
 			a["requirements"]["spec_id"] = "99"
 			a["tasks"]["tasks"].([]any)[1].(map[string]any)["state"] = "done"
-		}), nil, []string{"spec_id", "task 2"}},
+		}), nil, []string{"spec_id", "/tasks/1/state"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, sink := revisePlan(t, plan, findings, tc.plan, tc.extra, fixed("R1-F1"))
@@ -135,18 +137,21 @@ func TestPlanRevisionTool_TurnsBackAPlanThatBreaksARule(t *testing.T) {
 		says []string
 	}{
 		{"a schema rule", func(a map[string]map[string]any) {
-			a["tasks"]["tasks"].([]any)[0].(map[string]any)["kind"] = "refactor"
+			a["tasks"]["tasks"].([]any)[0].(map[string]any)["title"] = ""
 		}, []string{"json_schema", "tasks.json"}},
+		{"a key the format no longer has", func(a map[string]map[string]any) {
+			a["tasks"]["tasks"].([]any)[0].(map[string]any)["kind"] = "refactor"
+		}, []string{"schema does not allow", "/tasks/0/kind"}},
 		{"a cross-file rule", func(a map[string]map[string]any) {
 			task := a["tasks"]["tasks"].([]any)[0].(map[string]any)
-			task["tests"] = []any{"TS-01-99"}
-		}, []string{"C6", "TS-01-99"}},
+			task["criteria"] = []any{"REQ-99.1"}
+		}, []string{"C4", "REQ-99.1"}},
 		{"three rules", func(a map[string]map[string]any) {
 			task := a["tasks"]["tasks"].([]any)[0].(map[string]any)
-			task["tests"] = []any{"TS-01-99"}
-			task["criteria"] = []any{"01-REQ-99.1"}
-			a["test_spec"]["tests"].([]any)[0].(map[string]any)["verifies"] = []any{"01-REQ-98.1"}
-		}, []string{"TS-01-99", "01-REQ-99.1", "01-REQ-98.1"}},
+			task["criteria"] = []any{"REQ-99.1"}
+			crit := a["requirements"]["requirements"].([]any)[1].(map[string]any)["criteria"].([]any)[0].(map[string]any)
+			crit["check"] = map[string]any{"same_as": "REQ-98.1"}
+		}, []string{"C3", "REQ-98.1", "C4", "REQ-99.1", "C5", "REQ-1.3"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := planAsSubmitted(t, plan)
