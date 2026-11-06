@@ -442,6 +442,7 @@ func fullySetSpec(t *testing.T) *Spec {
 	s := loadFixture(t, fixtureValidSpec)
 	str := func(v string) *string { return &v }
 	s.Owner, s.Source = "team-widgets", "https://example.com/issues/7"
+	s.SteeringVersion = "3.1.4"
 	s.Supersedes, s.Tags = []string{"00_old_loader"}, []string{"core", "io"}
 	s.IntentHash = str("sha256:abc123")
 	s.Requirements.Glossary = RequirementsV2JsonGlossary{"pipe | term": "a definition\nover two lines"}

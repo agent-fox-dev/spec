@@ -241,6 +241,7 @@ func (s *Spec) renderMetadata() string {
 	if s.SchemaVersion != 0 {
 		field("Schema version", fmt.Sprint(s.SchemaVersion))
 	}
+	field("Steering version", s.SteeringVersion)
 	field("Created", s.CreatedAt)
 	field("Updated", s.UpdatedAt)
 	field("Owner", s.Owner)

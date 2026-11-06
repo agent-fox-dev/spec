@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:39:19Z
-- **Updated:** 2026-11-06T12:47:39Z
+- **Updated:** 2026-11-06T14:11:51Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `ba0d73c0321f7fea64059d3368983dd14dfc7f389d101ca901e80d0c6accfe91`
 
@@ -961,7 +961,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 
 ## Tasks
 
-### [ ] 1. Carry an optional steering_version in the PRD frontmatter (implement, pending)
+### [x] 1. Carry an optional steering_version in the PRD frontmatter (implement, done)
 
 **Criteria:** 16-REQ-4.1, 16-REQ-4.4, 16-REQ-4.5
 

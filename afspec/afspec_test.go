@@ -337,3 +337,31 @@ func TestLoadSpec_ReadsNothingOfTheRender(t *testing.T) {
 		})
 	}
 }
+
+// steering_version is frontmatter, outside the hashed ## Intent, so an active
+// package takes a change to it without drifting.
+func TestSave_TakesAChangedSteeringVersionOnAnActivePackage(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	withFrontmatterLine(t, dir, `steering_version: "1.0.0"`)
+	activeInto(t, dir)
+	spec := loadFixture(t, dir)
+	if spec.SteeringVersion != "1.0.0" || spec.IntentHash == nil {
+		t.Fatalf("steering_version %q, intent_hash %v; want 1.0.0 on an active package", spec.SteeringVersion, spec.IntentHash)
+	}
+	before := *spec.IntentHash
+
+	spec.SteeringVersion = "2.0.0"
+	if err := spec.Save(dir); err != nil {
+		t.Fatalf("Save = %v", err)
+	}
+	again := loadFixture(t, dir)
+	if again.SteeringVersion != "2.0.0" || again.IntentHash == nil || *again.IntentHash != before {
+		t.Errorf("steering_version %q, intent_hash %v; want 2.0.0 and %s", again.SteeringVersion, again.IntentHash, before)
+	}
+	if hash, err := ComputeIntentHash(again.PRDBody); err != nil || hash != before {
+		t.Errorf("the intent hashes to %s (%v); want %s, no drift", hash, err, before)
+	}
+	if v := again.Validate(); !v.Valid {
+		t.Errorf("the package does not validate: %v", v.Errors)
+	}
+}

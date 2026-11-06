@@ -34,6 +34,9 @@ type Spec struct {
 	Tags          []string
 	IntentHash    *string
 	SchemaVersion int
+	// SteeringVersion is the version of the spec root's steering the package
+	// was written under, or "" when none was recorded.
+	SteeringVersion string
 
 	// PRD Markdown body (everything after the closing --- delimiter)
 	PRDBody string
@@ -139,26 +142,27 @@ func LoadSpec(dir string) (*Spec, error) {
 	// If architecture.md doesn't exist, that's fine — leave empty
 
 	spec := &Spec{
-		SpecID:        fm.SpecID,
-		SpecName:      fm.SpecName,
-		Title:         fm.Title,
-		Status:        fm.Status,
-		CreatedAt:     fm.CreatedAt,
-		UpdatedAt:     fm.UpdatedAt,
-		Owner:         fm.Owner,
-		Source:        fm.Source,
-		Supersedes:    fm.Supersedes,
-		Tags:          fm.Tags,
-		IntentHash:    fm.IntentHash,
-		SchemaVersion: fm.SchemaVersion,
-		PRDBody:       body,
-		Requirements:  &req,
-		TestSpec:      &ts,
-		Tasks:         &tasks,
-		Architecture:  architecture,
-		Dir:           dir,
-		unknown:       unknown,
-		fromDisk:      true,
+		SpecID:          fm.SpecID,
+		SpecName:        fm.SpecName,
+		Title:           fm.Title,
+		Status:          fm.Status,
+		CreatedAt:       fm.CreatedAt,
+		UpdatedAt:       fm.UpdatedAt,
+		Owner:           fm.Owner,
+		Source:          fm.Source,
+		Supersedes:      fm.Supersedes,
+		Tags:            fm.Tags,
+		IntentHash:      fm.IntentHash,
+		SchemaVersion:   fm.SchemaVersion,
+		SteeringVersion: fm.SteeringVersion,
+		PRDBody:         body,
+		Requirements:    &req,
+		TestSpec:        &ts,
+		Tasks:           &tasks,
+		Architecture:    architecture,
+		Dir:             dir,
+		unknown:         unknown,
+		fromDisk:        true,
 	}
 
 	// Capture immutable snapshot for active specs so Save can detect mutations

@@ -22,6 +22,9 @@ type prdFrontmatter struct {
 	Tags          []string `yaml:"tags"`
 	IntentHash    *string  `yaml:"intent_hash"`
 	SchemaVersion int      `yaml:"schema_version"`
+	// SteeringVersion is read as a plain string, so an empty value on disk is
+	// the field being absent, as an empty owner or source is.
+	SteeringVersion string `yaml:"steering_version"`
 }
 
 // parsePRD splits a prd.md file into its YAML frontmatter and Markdown body.
@@ -156,6 +159,12 @@ func renderPRD(s *Spec) []byte {
 	b.WriteString("schema_version: ")
 	b.WriteString(fmt.Sprintf("%d", s.SchemaVersion))
 	b.WriteByte('\n')
+
+	if s.SteeringVersion != "" {
+		b.WriteString("steering_version: ")
+		b.WriteString(renderYAMLString(s.SteeringVersion))
+		b.WriteByte('\n')
+	}
 
 	if s.Owner != "" {
 		b.WriteString("owner: ")

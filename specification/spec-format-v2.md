@@ -104,6 +104,7 @@ created_at: "2026-05-18T12:00:00Z"
 updated_at: "2026-05-18T12:00:00Z"
 intent_hash: null               # set at draft → active
 schema_version: 2
+steering_version: "2.0.1"       # optional
 owner: "author-name"            # optional
 source: "docs/prds/feature.md"  # optional
 supersedes: []                  # optional
@@ -121,6 +122,7 @@ tags: []                        # optional
 | `updated_at` | ISO 8601 | yes | Updated on every save. |
 | `intent_hash` | string or null | yes | SHA-256 of the `## Intent` body. Null while `draft`. |
 | `schema_version` | integer | yes | `2`. |
+| `steering_version` | string | no | The version of the spec root's `steering.md` the package was written under, `MAJOR.MINOR.PATCH` (three non-negative integers, no leading zeros). `spec` writes it when the steering is versioned. It is outside the hashed `## Intent`, so it may change after activation; an empty value is the field being absent. |
 | `owner`, `source`, `supersedes`, `tags` | | no | As in v1.3. Omitted means empty. |
 
 ### 4.2 Body

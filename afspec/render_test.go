@@ -108,7 +108,7 @@ func TestRender_DropsNothingFromThePackage(t *testing.T) {
 			}
 		}
 		for _, want := range []string{"01_test_feature", s.Title, s.Status, s.CreatedAt, s.UpdatedAt, s.Owner,
-			s.Source, "00_old_loader", "core", "io", "sha256:abc123", "Schema version:** 2",
+			s.Source, "00_old_loader", "core", "io", "sha256:abc123", "Schema version:** 2", "Steering version:** 3.1.4",
 			"verified", "_(optional)_"} {
 			if !strings.Contains(render, want) {
 				t.Errorf("%s: the metadata lacks %q", name, want)

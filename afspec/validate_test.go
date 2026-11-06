@@ -610,3 +610,35 @@ func inMemory(t *testing.T) *Spec {
 	s.Requirements, s.TestSpec, s.Tasks = loaded.Requirements, loaded.TestSpec, loaded.Tasks
 	return s
 }
+
+// A steering_version outside MAJOR.MINOR.PATCH is a schema error on prd.md; an
+// empty one is the field being absent.
+func TestValidate_RefusesASteeringVersionOutsideTheVersionForm(t *testing.T) {
+	for _, value := range []string{"2.1", "2.1.0.0", "02.1.0", "v2.1.0", "2.1.x", "2.1.0-rc1"} {
+		t.Run(value, func(t *testing.T) {
+			dir := copyFixture(t, fixtureValidSpec)
+			withFrontmatterLine(t, dir, `steering_version: "`+value+`"`)
+			v := loadFixture(t, dir).Validate()
+			var found []ValidationEntry
+			for _, e := range v.Errors {
+				if e.Check == "json_schema" && e.Artifact == "prd.md" && strings.Contains(e.Path, "steering_version") {
+					found = append(found, e)
+				}
+			}
+			if len(found) != 1 || v.Valid {
+				t.Errorf("valid %v, errors %+v; want one json_schema error on prd.md naming steering_version", v.Valid, v.Errors)
+			}
+		})
+	}
+	t.Run("empty", func(t *testing.T) {
+		dir := copyFixture(t, fixtureValidSpec)
+		withFrontmatterLine(t, dir, `steering_version: ""`)
+		spec := loadFixture(t, dir)
+		if v := spec.Validate(); !v.Valid {
+			t.Errorf("an empty steering_version made the package invalid: %v", v.Errors)
+		}
+		if out := string(renderPRD(spec)); strings.Contains(out, "steering_version") {
+			t.Errorf("an empty steering_version was written back:\n%s", out)
+		}
+	})
+}
