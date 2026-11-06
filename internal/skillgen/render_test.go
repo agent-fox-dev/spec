@@ -300,3 +300,100 @@ func TestMain_RendersWithNoCredentialAndNoReachableNetwork(t *testing.T) {
 		t.Errorf("stderr = %q, want nothing", stderr.String())
 	}
 }
+
+// docOf assembles a SKILL.md whose frontmatter and body are exactly the text
+// given, so a test controls the body's byte length to the byte.
+func docOf(frontmatter, body string) string {
+	return "---\n" + frontmatter + "\n---\n" + body
+}
+
+// bodyOfBytes returns a body of exactly n bytes that begins with lead, pads
+// with a byte the render has no rule about, and ends with a newline.
+func bodyOfBytes(lead string, n int) string {
+	if pad := n - len(lead) - 1; pad > 0 {
+		return lead + strings.Repeat("x", pad) + "\n"
+	}
+	return lead[:n-1] + "\n"
+}
+
+// the frontmatter is padded to exactly 300 bytes, so a case can show that its
+// size is counted in no measurement of the body.
+var paddedFrontmatter = func() string {
+	head := "name: af-x\ndescription: "
+	return head + strings.Repeat("d", 300-len(head)-1) + "."
+}()
+
+func TestReadSource_MeasuresTheBodyAgainstTheCeilingInBytesAfterSubstitution(t *testing.T) {
+	if len(paddedFrontmatter) != 300 {
+		t.Fatalf("the padded frontmatter is %d bytes, want 300", len(paddedFrontmatter))
+	}
+	for name, tc := range map[string]struct {
+		body      string
+		wantOver  bool
+		wantBytes string
+	}{
+		"exactly at the ceiling": {
+			body: bodyOfBytes("# af-x\n", bodyLimit),
+		},
+		"one byte over": {
+			body: bodyOfBytes("# af-x\n", bodyLimit+1), wantOver: true, wantBytes: "24,577",
+		},
+		"at the ceiling in characters but over it in bytes": {
+			// 24,575 single-byte runes and one two-byte rune: 24,576 characters
+			// and 24,577 bytes, which the ceiling counts.
+			body: strings.Repeat("x", bodyLimit-1) + "é", wantOver: true, wantBytes: "24,577",
+		},
+		"over before substitution and at the ceiling after it": {
+			// {{invoke af-impl}} is 18 bytes and /af-impl or $af-impl is 8, so
+			// the rendered body is 10 bytes shorter than the source's.
+			body: bodyOfBytes("{{invoke af-impl}}\n", bodyLimit+10),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := map[string]string{
+				"af-x/SKILL.md":    docOf(paddedFrontmatter, tc.body),
+				"af-impl/SKILL.md": skillFile("af-impl", "# af-impl\n"),
+			}
+			_, problems := readSource(tree(files), "skills")
+			if !tc.wantOver {
+				if len(problems) != 0 {
+					t.Fatalf("problems: %s", strings.Join(lines(problems), " | "))
+				}
+				return
+			}
+			// One line per agent the body is over for; every agent's prefix is
+			// one byte, so it is over for all four at the same size.
+			if len(problems) != len(agents) {
+				t.Fatalf("want %d problems, one per agent, got %d: %s",
+					len(agents), len(problems), strings.Join(lines(problems), " | "))
+			}
+			want := "skills/af-x/SKILL.md: body is " + tc.wantBytes +
+				" bytes for claude, " + commas(len(tc.body)-bodyLimit) + " over the 24,576-byte limit"
+			if got := lines(problems); !slices.Contains(got, want) {
+				t.Errorf("no problem reads\n  %s\ngot\n  %s", want, strings.Join(got, "\n  "))
+			}
+		})
+	}
+}
+
+func TestReadSource_DoesNotMeasureAReferenceFile(t *testing.T) {
+	files := map[string]string{
+		"af-x/SKILL.md":          docOf(paddedFrontmatter, bodyOfBytes("Read [references/big.md](references/big.md).\n", bodyLimit)),
+		"af-x/references/big.md": strings.Repeat("y", 60000),
+	}
+	src, problems := readSource(tree(files), "skills")
+	if len(problems) != 0 {
+		t.Fatalf("problems: %s", strings.Join(lines(problems), " | "))
+	}
+	if got := len(src.skills[0].refs["big.md"].data); got != 60000 {
+		t.Errorf("the reference file is %d bytes, want it rendered whole", got)
+	}
+}
+
+func TestCommas_WritesEveryNumberTheWayAMessageSpellsIt(t *testing.T) {
+	for in, want := range map[int]string{0: "0", 1: "1", 999: "999", 1000: "1,000", 24576: "24,576", 31204: "31,204", 1234567: "1,234,567"} {
+		if got := commas(in); got != want {
+			t.Errorf("commas(%d) = %q, want %q", in, got, want)
+		}
+	}
+}

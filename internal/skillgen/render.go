@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -181,4 +182,44 @@ func dedupe(problems []problem) []problem {
 		kept = append(kept, p)
 	}
 	return kept
+}
+
+// bodyLimit is the most bytes a rendered body may carry. The body loads with
+// the skill at every step of a run, while a reference file loads only at the
+// step that links it, so the ceiling is on the body alone and is measured in
+// bytes, because bytes are what load.
+const bodyLimit = 24576
+
+// checkAgents reports a rendered body over the ceiling, one line per agent it
+// is over for. Every agent's invocation prefix is one byte today, so the four
+// sizes coincide; the measure stays per agent because the criterion is, and an
+// agent with a longer prefix would need it.
+func (s *source) checkAgents() []problem {
+	var problems []problem
+	for _, sk := range s.skills {
+		for _, a := range agents {
+			size := len(renderSkill(sk, a).body)
+			if size <= bodyLimit {
+				continue
+			}
+			problems = append(problems, problem{sk.path, fmt.Sprintf(
+				"body is %s bytes for %s, %s over the %s-byte limit",
+				commas(size), a.name, commas(size-bodyLimit), commas(bodyLimit))})
+		}
+	}
+	return problems
+}
+
+// commas writes n with a comma every three digits, the way every number in a
+// message the render writes is spelled.
+func commas(n int) string {
+	digits := strconv.Itoa(n)
+	var out strings.Builder
+	for i, digit := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			out.WriteByte(',')
+		}
+		out.WriteRune(digit)
+	}
+	return out.String()
 }

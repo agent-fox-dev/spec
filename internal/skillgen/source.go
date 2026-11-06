@@ -102,6 +102,7 @@ func readSource(fsys fs.FS, root string) (*source, []problem) {
 		problems = append(problems, src.include(sk)...)
 	}
 	problems = append(problems, src.checkTexts()...)
+	problems = append(problems, src.checkAgents()...)
 	sort.Slice(problems, func(i, j int) bool {
 		if problems[i].path != problems[j].path {
 			return problems[i].path < problems[j].path
