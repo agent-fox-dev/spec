@@ -110,14 +110,12 @@ func (s *Spec) ComputeTraceability() TraceabilityMatrix {
 			tasks := append([]int{}, tasksFor[c.Id]...)
 			tasks = append(tasks, tasksFor[r.Id]...)
 			sort.Ints(tasks)
-			check := "smoke"
+			var check string
 			switch {
 			case c.Check.SameAs != nil:
 				check = "same as " + *c.Check.SameAs
 			case c.Check.Kind != nil:
 				check = string(*c.Check.Kind)
-			default:
-				check = ""
 			}
 			matrix.Links = append(matrix.Links, TraceLink{
 				Kind: "criterion", ID: c.Id, Check: check, Tasks: dedupeInts(tasks), Covered: covered[c.Id], Owned: len(tasks) > 0,
