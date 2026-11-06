@@ -9,7 +9,6 @@ import (
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/cli"
-	"github.com/agent-fox-dev/spec/internal/project"
 )
 
 // runRounds reviews prd adversarially before its package is generated, and
@@ -130,21 +129,22 @@ func failureReason(err error) string {
 func (e *runEnv) reviewRequest(prd PRD, split *splitContext, round, limit int, earlier []Finding) reviewRequest {
 	o := e.o
 	return reviewRequest{
-		Root:         e.root,
-		SourceKind:   o.Input.Kind.String(),
-		SourceOrigin: o.Input.Origin,
-		Input:        o.Input.Body,
-		Context:      o.Input.Context,
-		Profile:      e.profile,
-		Landscape:    e.landscapeNow(),
-		SpecRoot:     relativeTo(e.root, e.specsDir),
-		Steering:     project.Steering(e.specsDir),
-		RepoMap:      e.repoMap,
-		PRD:          prd,
-		Split:        split,
-		Round:        round,
-		Limit:        limit,
-		Earlier:      slices.Clone(earlier),
+		Root:            e.root,
+		SourceKind:      o.Input.Kind.String(),
+		SourceOrigin:    o.Input.Origin,
+		Input:           o.Input.Body,
+		Context:         o.Input.Context,
+		Profile:         e.profile,
+		Landscape:       e.landscapeNow(),
+		SpecRoot:        relativeTo(e.root, e.specsDir),
+		Steering:        e.steering.Body,
+		SteeringVersion: e.steering.Version,
+		RepoMap:         e.repoMap,
+		PRD:             prd,
+		Split:           split,
+		Round:           round,
+		Limit:           limit,
+		Earlier:         slices.Clone(earlier),
 	}
 }
 

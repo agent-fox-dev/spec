@@ -744,7 +744,7 @@ func TestRun_ZeroMapBudgetLeavesThePromptsWithoutAMap(t *testing.T) {
 			}
 		}
 	}
-	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root()).LanguageBlock(), "", "")
+	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root()).LanguageBlock(), "", "", "")
 	if got := blocksText(reqs[0].System); !strings.HasPrefix(got, wantSystem) {
 		t.Errorf("the PRD system prompt is not the one without a map:\n%q", got)
 	}

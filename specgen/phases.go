@@ -70,8 +70,11 @@ type prdRequest struct {
 	Landscape []afspec.SpecMeta
 	// SpecRoot is the directory the specs live in, relative to Root.
 	SpecRoot string
-	// Steering is the project's steering.md, or "".
-	Steering string
+	// Steering is the body of the project's steering.md, or "", and
+	// SteeringVersion its version, or "" when it is unversioned. The
+	// steering's amendment record is never carried.
+	Steering        string
+	SteeringVersion string
 	// Split is set when the PRD is one scope of a decided split: the plan
 	// and the index of the scope to write. Nil for an undivided input.
 	Split *splitContext
@@ -93,8 +96,11 @@ type reviewRequest struct {
 	Landscape []afspec.SpecMeta
 	// SpecRoot is the directory the specs live in, relative to Root.
 	SpecRoot string
-	// Steering is the project's steering.md, or "".
-	Steering string
+	// Steering is the body of the project's steering.md, or "", and
+	// SteeringVersion its version, or "" when it is unversioned. The
+	// steering's amendment record is never carried.
+	Steering        string
+	SteeringVersion string
 	// RepoMap is the run's repository map, or "".
 	RepoMap string
 	// PRD is the PRD under review: the PRD phase's, or the last revision's.
@@ -127,8 +133,11 @@ type artifactRequest struct {
 	Landscape []afspec.SpecMeta
 	// SpecRoot is the directory the specs live in, relative to Root.
 	SpecRoot string
-	// Steering is the project's steering.md, or "".
-	Steering string
+	// Steering is the body of the project's steering.md, or "", and
+	// SteeringVersion its version, or "" when it is unversioned. The
+	// steering's amendment record is never carried.
+	Steering        string
+	SteeringVersion string
 	// Partial carries the artifacts produced so far. The submit handler
 	// validates against it and writes the accepted artifact back into it.
 	Partial *afspec.PartialSpec
@@ -154,8 +163,9 @@ type architectureRequest struct {
 	RelevantFiles []RelevantFile
 	// Profile and Steering complete, with RepoMap, what every phase of the
 	// run is told about the project.
-	Profile  project.Profile
-	Steering string
+	Profile         project.Profile
+	Steering        string
+	SteeringVersion string
 	// RepoMap is the run's repository map, or "".
 	RepoMap string
 	// CodebaseNotes are what the PRD phase learned reading the code, or "".
@@ -176,7 +186,7 @@ func (a *agentAuthor) WritePRD(ctx context.Context, req prdRequest) (PRD, agentr
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:               "prd",
 		Kind:               agentrun.PhasePRD,
-		System:             prdSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
+		System:             prdSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap),
 		Prefix:             prdInputPrompt(req.Root, req.SourceKind, req.SourceOrigin, req.Input, req.Context),
 		User:               prdUserPrompt(req.Root, landscapeBlock(req.Landscape, req.SpecRoot), splitBlock(req.Split)),
 		RepoMap:            req.RepoMap,
@@ -235,7 +245,7 @@ func (a *agentAuthor) reviewPhase(kind, system, user string, req reviewRequest, 
 	return agentrun.Phase{
 		Name:               kind,
 		Kind:               kind,
-		System:             system + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
+		System:             system + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap),
 		User:               user,
 		RepoMap:            req.RepoMap,
 		Terminator:         terminator,
@@ -261,7 +271,7 @@ func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest)
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:   "generate:" + string(req.Step),
 		Kind:   string(req.Step),
-		System: generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
+		System: generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap),
 		User: generationUserPrompt(req.Step, req.SpecID, req.SpecName, req.Root, req.PRD,
 			codebaseNotesBlock(req.CodebaseNotes), landscapeBlock(req.Landscape, req.SpecRoot)+actorsBlock(req.Actors),
 			priorArtifactsBlock(*req.Partial, req.Step), relevantFilesBlock(req.RelevantFiles)),
@@ -299,7 +309,7 @@ func (a *agentAuthor) WriteArchitecture(ctx context.Context, req architectureReq
 	res, err := a.runner.Run(ctx, agentrun.Phase{
 		Name:               "architecture",
 		Kind:               agentrun.PhaseArchitecture,
-		System:             generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap),
+		System:             generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap),
 		User:               user,
 		RepoMap:            req.RepoMap,
 		Terminator:         ToolSubmitArchitecture,
