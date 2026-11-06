@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -205,5 +206,134 @@ func TestSave_KeepsAScaffoldLoadable(t *testing.T) {
 	}
 	if !reloaded.IsScaffold() {
 		t.Error("the reloaded scaffold is not reported as one")
+	}
+}
+
+// Every writer of a package also writes its render, spec.md, through the same
+// temporary files and renames as the artifacts.
+func TestSave_WritesTheRenderWithEveryWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(t *testing.T, dir string) *Spec
+	}{
+		{"Save on a draft", func(t *testing.T, dir string) *Spec {
+			spec := loadFixture(t, dir)
+			if err := spec.Save(dir); err != nil {
+				t.Fatalf("Save = %v", err)
+			}
+			return spec
+		}},
+		{"Save on an active package", func(t *testing.T, dir string) *Spec {
+			spec := loadFixture(t, activeInto(t, dir))
+			spec.Title = "Retitled"
+			if err := spec.Save(dir); err != nil {
+				t.Fatalf("Save = %v", err)
+			}
+			return spec
+		}},
+		{"Transition from draft to active", func(t *testing.T, dir string) *Spec {
+			next, err := loadFixture(t, dir).Transition("active", dir)
+			if err != nil {
+				t.Fatalf("Transition = %v", err)
+			}
+			return next
+		}},
+		{"Transition from active to sealed", func(t *testing.T, dir string) *Spec {
+			next, err := loadFixture(t, activeInto(t, dir)).Transition("sealed", dir)
+			if err != nil {
+				t.Fatalf("Transition = %v", err)
+			}
+			return next
+		}},
+		{"Supersede on a sealed package", func(t *testing.T, dir string) *Spec {
+			sealed, err := loadFixture(t, activeInto(t, dir)).Transition("sealed", dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := sealed.Supersede("02", dir)
+			if err != nil {
+				t.Fatalf("Supersede = %v", err)
+			}
+			return next
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := copyFixture(t, fixtureValidSpec)
+			written := tc.write(t, dir)
+
+			got, err := os.ReadFile(filepath.Join(dir, RenderedFileName))
+			if err != nil {
+				t.Fatalf("the write left no %s: %v", RenderedFileName, err)
+			}
+			if want := written.RenderedBytes(); string(got) != string(want) {
+				t.Errorf("%s is not the render of the package written:\n%s", RenderedFileName, firstDifference(string(want), string(got)))
+			}
+			for _, name := range entriesOf(t, dir) {
+				if strings.Contains(name, ".tmp.") {
+					t.Errorf("temp file %q survived the write", name)
+				}
+			}
+		})
+	}
+}
+
+// A save that cannot create its temporary files changes no file of the
+// package, the render included, whether or not one was there.
+func TestSave_ThatCannotWriteLeavesEveryFileAsItWas(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rendered string // the spec.md in the directory before the save; empty for none
+	}{
+		{"with no render", ""},
+		{"with a render", "a render written earlier\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := copyFixture(t, fixtureWithArch)
+			if tc.rendered != "" {
+				if err := os.WriteFile(filepath.Join(dir, RenderedFileName), []byte(tc.rendered), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			spec := loadFixture(t, dir)
+			spec.Title = "Changed"
+			before := treeOf(t, dir)
+			readOnly(t, dir)
+
+			err := spec.Save(dir)
+			var saveErr *SaveError
+			if !errors.As(err, &saveErr) {
+				t.Fatalf("Save into a read-only directory = %v; want a *SaveError", err)
+			}
+			if changed := changedFiles(before, treeOf(t, dir)); len(changed) > 0 {
+				t.Errorf("a failed save changed %v", changed)
+			}
+		})
+	}
+}
+
+// LoadSpec reads the artifacts and nothing else: whatever spec.md holds, the
+// package loaded is the same.
+func TestLoadSpec_ReadsNothingOfTheRender(t *testing.T) {
+	bare := loadFixture(t, copyFixture(t, fixtureWithArch))
+	bare.Dir = ""
+	const unrelated = "# Unrelated\n\nnothing the package says\n"
+	for _, tc := range []struct{ name, content string }{
+		{"its own render", string(bare.RenderedBytes())},
+		{"unrelated text", unrelated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := copyFixture(t, fixtureWithArch)
+			if err := os.WriteFile(filepath.Join(dir, RenderedFileName), []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			spec := loadFixture(t, dir)
+			spec.Dir = ""
+			if !reflect.DeepEqual(spec, bare) {
+				t.Error("a package loaded beside a spec.md differs from the one loaded without it")
+			}
+			if strings.Contains(spec.PRDBody, "Unrelated") || strings.Contains(spec.Architecture, "Unrelated") {
+				t.Error("the text of spec.md reached the loaded package")
+			}
+		})
 	}
 }

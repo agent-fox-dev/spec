@@ -66,7 +66,7 @@ The v1 schemas have no copy in `afspec/`: the library reads version 2 only.
 
 | Area | Files |
 | --- | --- |
-| Load and save, atomically and round-trip exact | `afspec.go`, `prd.go`, `marshal.go`, `create.go` |
+| Load and save, atomically and round-trip exact; every save writes the render, `spec.md`, beside the artifacts | `afspec.go`, `prd.go`, `marshal.go`, `create.go`, `render.go` |
 | Schema validation and the cross-file rules C1–C11 | `validate.go`, `schemas.go`, `unknown.go` |
 | Lifecycle (`draft → active → sealed`, superseded, archived) and the intent hash | `lifecycle.go`, `intent.go` |
 | Task state machine, readiness (`IsReady`) and the next task (`NextTask`) | `task.go` |
@@ -302,8 +302,8 @@ The forms that write do so only through the library. The task form:
 `plan.go` chooses the moves and applies them with `TransitionTask` (and, under
 `--force`, `CompleteTaskStates` and `ResetTaskStates`), so the state machine is
 `afspec`'s and not a copy; `task.go` sets `updated_at`, which `Save` does not, and
-calls `Spec.Save`, which writes every artifact through temporary files and then
-renames them, so that all of them are in the library's canonical encoding and
+calls `Spec.Save`, which writes every artifact, and the render `spec.md` beside
+them, through temporary files and then renames them, so that all of them are in the library's canonical encoding and
 have mode `0600` afterwards. A call that is refused, and a dry run, write nothing. Nothing
 outside the files that write may call `Save`, `Transition` or `Supersede` (`task.go`
 and the status form's files); a test of the sources checks it, and checks that the

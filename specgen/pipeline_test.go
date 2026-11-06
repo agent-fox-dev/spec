@@ -60,8 +60,11 @@ func TestRun_WritesAValidatedActivatedPackage(t *testing.T) {
 
 	dir := filepath.Join(ws.Root(), got.SpecDir)
 	files := dirNames(t, dir)
-	if !slices.Equal(files, []string{"prd.md", "requirements.json", "tasks.json", "test_spec.json"}) {
+	if !slices.Equal(files, []string{"prd.md", "requirements.json", "spec.md", "tasks.json", "test_spec.json"}) {
 		t.Errorf("package files = %v", files)
+	}
+	if want := []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json", "spec.md"}; !slices.Equal(got.Package.Artifacts, want) {
+		t.Errorf("artifacts = %v, want %v: the run reports every file it wrote", got.Package.Artifacts, want)
 	}
 	// The relevant files are reported, never written into the package.
 	for _, name := range files {
@@ -354,6 +357,9 @@ func TestRun_DryRunValidatesAndWritesNothing(t *testing.T) {
 	}
 	if exists(filepath.Join(ws.Root(), ".specs")) {
 		t.Error("--dry-run created the spec root")
+	}
+	if slices.Contains(got.Package.Artifacts, afspec.RenderedFileName) {
+		t.Errorf("artifacts = %v: a dry run wrote no render", got.Package.Artifacts)
 	}
 	if forge.commentCalls != 0 || len(o.Run.SideEffects()) != 0 {
 		t.Errorf("%d comments, side effects %+v", forge.commentCalls, o.Run.SideEffects())
@@ -876,7 +882,7 @@ func TestRun_TheReviewedPRDFeedsEverythingAfterIt(t *testing.T) {
 	}
 	dir := filepath.Join(ws.Root(), res.SpecDir)
 	files := dirNames(t, dir)
-	if !slices.Equal(files, []string{"architecture.md", "prd.md", "requirements.json", "tasks.json", "test_spec.json"}) {
+	if !slices.Equal(files, []string{"architecture.md", "prd.md", "requirements.json", "spec.md", "tasks.json", "test_spec.json"}) {
 		t.Errorf("package files = %v", files)
 	}
 	for _, f := range files {

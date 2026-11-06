@@ -495,7 +495,10 @@ written, such as `invalid_spec`, still names the package on disk.
 ### `result`
 
 `result` describes the first package this run wrote: `spec_dir`, `spec_id`,
-`spec_name`, `title`, `status`, `source`, the `artifacts` written, the counts
+`spec_name`, `title`, `status`, `source`, the `artifacts` written (`prd.md`, the
+three JSON artifacts, `architecture.md` with `--architecture`, and `spec.md`,
+the package's render, which every save writes beside them; a dry run lists no
+`spec.md`), the counts
 (`requirements`, `criteria`, `execution_paths`, `tests`, `tasks`), and:
 
 - `validation` — the format's verdict, every error naming its rule (`C1`…`C11`,
