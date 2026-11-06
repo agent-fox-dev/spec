@@ -1,0 +1,573 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "18",
+  "spec_name": "adversarial_plan_review",
+  "schema_version": 2,
+  "introduction": "A second adversarial stage reads the plan a run generated — its requirements, its test specification and its tasks — after the tasks phase and before the package is written. A fresh reviewer applies two written rubrics plus the project's steering directives: that a coder who holds the package and the code should have no design choice left to make, and that the plan must not name files or symbols that are not there. Whether a path exists is computed from the file system before the first round, not judged by a model. A fresh reviser answers every finding and submits the revised plan, which must still pass the format's own rules. The stage has its own flag, so a run that does not ask for it runs exactly the phases it runs today.",
+  "glossary": {
+    "grounding facts": "The list the run computes before the first round, naming for every path in every task's touches whether that path exists in the repository as a file or as a directory. It is a file system call over paths resolved against the repository root, never a model's judgment.",
+    "plan review phase": "The plan_review phase: a fresh agent conversation that reads the PRD, the rendered plan and the grounding facts and submits a list of findings, possibly empty.",
+    "plan revision phase": "The plan_revision phase: a fresh agent conversation, separate from the phases that generated the plan and from the reviewer, that answers every finding of a round and submits the revised three plan artifacts.",
+    "the Zero-Decision Rule": "The rubric that a coder who holds the package and the code should have no design choice left to make. A choice the plan does not make, and that a test or another task depends on, is a finding against it.",
+    "the last complete plan": "The plan the generating phases produced when no revision has finished, otherwise the plan the last finished revision submitted. It is what the package is written from when the rounds stop early.",
+    "the plan": "The three generated artifacts of a package taken together: requirements.json, test_spec.json and tasks.json. The PRD is not part of it, and neither is architecture.md."
+  },
+  "requirements": [
+    {
+      "id": "18-REQ-1",
+      "title": "The flag and its grammar",
+      "rationale": "A second review doubles what a review costs, so a run pays for it only by asking.",
+      "criteria": [
+        {
+          "id": "18-REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "a run is given the plan review flag",
+          "system": "specgen pipeline",
+          "action": "review and revise the plan of every package the run generates, after the tasks phase and before the architecture phase and the write",
+          "contract": "for each package, the rounds run after the last generation step and before the architecture phase, so the architecture is written from the revised plan and the package on disk holds the revised plan"
+        },
+        {
+          "id": "18-REQ-1.2",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any run not given the plan review flag, run no plan review and no plan revision phase",
+          "contract": "the flag is false by default; no package of the result carries a plan review; the phases run, the usage recorded and the cost are the ones the same run has before this change"
+        },
+        {
+          "id": "18-REQ-1.3",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "for any run, read the rounds flag as the most rounds each review the run does may take, the PRD's and the plan's counted separately, in the range 1 to 5 and defaulting to 1",
+          "contract": "with both reviews on and a limit of 3, each may run up to 3 rounds, so up to 12 review and revision phases per package; a value outside 1 to 5, an explicit 0 included, is a usage error with exit code 2"
+        },
+        {
+          "id": "18-REQ-1.4",
+          "pattern": "unwanted",
+          "condition": "the rounds flag is given with neither the PRD review flag nor the plan review flag",
+          "system": "spec command",
+          "action": "refuse the run as a usage error before any model call",
+          "contract": "exit code 2, the message naming the rounds flag's value and both review flags, and nothing read, written or billed"
+        },
+        {
+          "id": "18-REQ-1.5",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "for any run, treat the PRD review flag and the plan review flag as independent",
+          "contract": "either, both or neither is accepted; with the plan review alone no PRD review phase runs and the package carries no review; with the PRD review alone no plan review phase runs and the package carries no plan review; with both, each takes its own rounds"
+        },
+        {
+          "id": "18-REQ-1.6",
+          "pattern": "event_driven",
+          "condition": "a dry run is given the plan review flag",
+          "system": "specgen pipeline",
+          "action": "run the plan review and revision as it runs every other phase, and write nothing",
+          "contract": "the phases are billed and the result carries the plan review; no package directory is created and no artifact is written; the verdict is taken over the plan the run holds in memory"
+        },
+        {
+          "id": "18-REQ-1.7",
+          "pattern": "event_driven",
+          "condition": "a preflight run is given the plan review flag",
+          "system": "preflight",
+          "action": "count a plan review and a plan revision for every allowed round of every package still to be written, and name the two phases among the models it reports",
+          "contract": "the estimated phase count rises by twice the round limit for each package still to be written, as an upper bound since the rounds may stop early; the reported phase models list plan_review and plan_revision, and omit them when the flag is off; no model call is made"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-2",
+      "title": "Before the first round",
+      "rationale": "A review of a plan the validator already rejects pays a model to find what a function found for nothing.",
+      "criteria": [
+        {
+          "id": "18-REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "the tasks phase has produced a plan and the plan review is on",
+          "system": "specgen pipeline",
+          "action": "validate the plan in memory against the schemas and the cross-file rules C1 to C11 before the first round",
+          "contract": "the check is made over the plan the run holds, with no write and no model call, and reports every problem in one pass rather than one class at a time"
+        },
+        {
+          "id": "18-REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "the plan does not validate in memory",
+          "system": "specgen pipeline",
+          "action": "review no round of it, and go on to write and validate the package as a run without the plan review does",
+          "contract": "one high warning naming the scope and the number of errors; no plan review or revision phase is billed; the package carries no plan review; the package is written and the run fails on the same validation errors, with the same exit code, as a run without the flag"
+        },
+        {
+          "id": "18-REQ-2.3",
+          "pattern": "event_driven",
+          "condition": "the plan validates and the first round is about to run",
+          "system": "specgen pipeline",
+          "action": "list, for every path in every task's touches, whether that path exists in the repository as a file or as a directory",
+          "contract": "each path is resolved against the repository root before it is looked at, a path that resolves outside the root is listed as not existing, and the answer comes from the file system alone with no model call"
+        },
+        {
+          "id": "18-REQ-2.4",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any plan, build the grounding facts with one entry per distinct path, in the order the tasks name them",
+          "contract": "a path two tasks both name appears once; the order is the plan's task order and then each task's touches order; a plan whose tasks name no path at all gives an empty list and the rounds still run"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-3",
+      "title": "What the reviewer and the reviser are given",
+      "rationale": "A reviewer shown the original input would re-review the PRD; the plan answers to the PRD, not to the idea behind it.",
+      "criteria": [
+        {
+          "id": "18-REQ-3.1",
+          "pattern": "ubiquitous",
+          "system": "plan review phase",
+          "action": "for any round, run in a fresh conversation given the PRD as it stands after its own review, the rendered plan, the grounding facts, the PRD phase's codebase notes marked as the author's claims to check, and the steering with its version, the repository map, the read-only file tools and the code-search index every phase has",
+          "contract": "the prompt holds each of those; the conversation carries nothing from the generating phases or from an earlier round beyond the earlier findings; the notes are introduced as claims to check and not as facts"
+        },
+        {
+          "id": "18-REQ-3.2",
+          "pattern": "ubiquitous",
+          "system": "plan review phase",
+          "action": "for any round, leave the original input out of the prompt",
+          "contract": "no part of the run's input body and no part of its context block appears anywhere in the prompt, which is what a PRD review prompt built from the same run does carry"
+        },
+        {
+          "id": "18-REQ-3.3",
+          "pattern": "ubiquitous",
+          "system": "plan revision phase",
+          "action": "for any round, run in another fresh conversation given the PRD, the plan, the findings of that round, the grounding facts, the codebase notes and the same project context and tools as the reviewer",
+          "contract": "the prompt holds each of those; it is a conversation of its own, so neither the generating phases nor the reviewer's turns are in it"
+        },
+        {
+          "id": "18-REQ-3.4",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any plan, render it for the two phases as requirements, then test specification, then tasks, from the artifacts held in memory and through the same per-artifact renderers the package's own render uses",
+          "contract": "the three sections appear in that order under their own headings; the text of each is byte-identical to what the package's render gives for the same artifact; nothing of the plan is left out and no scope or budget is applied"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-4",
+      "title": "The two rubrics and the severities",
+      "rationale": "A reviewer with no written standard reports what it happens to notice, and a different sample of it every round.",
+      "criteria": [
+        {
+          "id": "18-REQ-4.1",
+          "pattern": "ubiquitous",
+          "system": "plan review phase",
+          "action": "for any finding, name the rubric it applies as one of zero_decision, grounding and steering",
+          "contract": "a finding carrying any other value, or none, turns the review back with one error naming the position and the three values, and nothing is recorded"
+        },
+        {
+          "id": "18-REQ-4.2",
+          "pattern": "ubiquitous",
+          "system": "plan review phase",
+          "action": "for any round, carry both rubrics in the prompt in full, as the questions each one asks",
+          "contract": "the prompt holds the five questions of the Zero-Decision Rule — where the code goes, whether every name, signature, error, message, format and order a test asserts is stated, whether a library, algorithm or data structure is left open where the choice shows, whether a step leaves the work open, and whether two coders following the task could write code one of the tests passes for one and fails for the other — and the four questions of grounding: whether each path in touches exists or a step creates it, whether each symbol a step or a test's pseudocode names exists or a task creates it, whether each claim about the existing code holds, and whether a test command runs each test given the file it will live in"
+        },
+        {
+          "id": "18-REQ-4.3",
+          "pattern": "ubiquitous",
+          "system": "plan review phase",
+          "action": "for any finding, accept the severity critical, major or minor only, with the meaning the prompt gives each for a plan",
+          "contract": "the prompt says critical is a plan that builds the wrong thing or whose tests contradict its criteria, major is a choice left to the coder that a test or another task depends on, a path or symbol that does not exist and that nothing creates, or a contradicted directive, and minor is a choice no test or task sees, or the wording; any other value turns the review back"
+        },
+        {
+          "id": "18-REQ-4.4",
+          "pattern": "unwanted",
+          "condition": "a finding's section names no task, test, criterion or execution path of the plan under review",
+          "system": "plan review phase",
+          "action": "turn the review back, naming every such finding and the kinds of place a section may name",
+          "contract": "a section is accepted when it is a test id, a criterion id or an execution path id of this plan, or names a task of it by its number; one error names each offending position and its section, and nothing is recorded"
+        },
+        {
+          "id": "18-REQ-4.5",
+          "pattern": "unwanted",
+          "condition": "a finding whose rubric is grounding says a path does not exist, and names a path the grounding facts do not list",
+          "system": "plan review phase",
+          "action": "turn the review back, naming every such finding",
+          "contract": "one error naming each offending position and the path, and saying the evidence of such a finding is the grounding fact for a path the plan's tasks name; nothing is recorded"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-5",
+      "title": "The finding, and the rules it inherits",
+      "rationale": "Two review stages a caller reads one record for must answer a finding the same way.",
+      "criteria": [
+        {
+          "id": "18-REQ-5.1",
+          "pattern": "unwanted",
+          "condition": "a plan finding has an empty severity, section, flaw, evidence or remedy",
+          "system": "plan review phase",
+          "action": "turn the review back, naming every such finding and the fields it left empty",
+          "contract": "one error naming each offending position with its empty fields and saying to fill in every field or leave the finding out; nothing is recorded"
+        },
+        {
+          "id": "18-REQ-5.2",
+          "pattern": "unwanted",
+          "condition": "a plan review submits more than 30 findings",
+          "system": "plan review phase",
+          "action": "turn the review back, saying how many were submitted and to keep the 30 that matter most",
+          "contract": "one error naming the count and the cap, and nothing is recorded; a submission of exactly 30 is accepted"
+        },
+        {
+          "id": "18-REQ-5.3",
+          "pattern": "ubiquitous",
+          "system": "round loop",
+          "action": "for any plan review, apply the triage, the repeat rules, the convergence rule and the record shape of the PRD review unchanged",
+          "contract": "each finding gets an id of the same form; the reviser answers every finding with one of the four dispositions under the same checks on a contest's counter-evidence and an escalation's fields; a contested finding may be raised again only through its reopens field with evidence the contest did not answer, and a declined or escalated one not at all; the rounds stop on two consecutive clean rounds, on the round limit, or as incomplete; and the record carries the same per-round and per-finding fields and the same six totals"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-6",
+      "title": "The revision",
+      "rationale": "A reviser free to change the PRD or the actors would undo decisions the scopes after it have already been handed.",
+      "criteria": [
+        {
+          "id": "18-REQ-6.1",
+          "pattern": "event_driven",
+          "condition": "a plan revision answers a round",
+          "system": "plan revision phase",
+          "action": "submit the revised requirements, test specification and tasks together with its answers",
+          "contract": "all three artifacts are submitted whole, the ones it did not change included, and the plan the next round reviews and the package is written from is the one submitted"
+        },
+        {
+          "id": "18-REQ-6.2",
+          "pattern": "unwanted",
+          "condition": "a plan revision changes the PRD, the spec id or spec name in any artifact, the state of a task, or the actors of the execution paths",
+          "system": "plan revision phase",
+          "action": "turn the revision back, naming each change it made",
+          "contract": "one error naming each of the four kinds of change it made and where; nothing is recorded; the actors are compared by name ignoring case, so reordering the paths or the steps is not a change"
+        },
+        {
+          "id": "18-REQ-6.3",
+          "pattern": "unwanted",
+          "condition": "a revised plan does not pass the schemas and the cross-file rules C1 to C11",
+          "system": "plan revision phase",
+          "action": "turn the revision back with each broken rule named, and ask again until it passes",
+          "contract": "one error naming every rule broken, each with the artifact and the entity it is about; the phase asks again until the plan passes, or until it runs out of turns or budget, in which case the round does not finish as 18-REQ-7.1 says"
+        },
+        {
+          "id": "18-REQ-6.4",
+          "pattern": "event_driven",
+          "condition": "the rounds of a plan have stopped",
+          "system": "specgen pipeline",
+          "action": "write the package from the last complete plan",
+          "contract": "the package on disk holds the plan the last finished revision submitted, or the plan the generating phases produced when no revision finished; the architecture phase, when asked for, is given that same plan"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-7",
+      "title": "When a round cannot finish",
+      "rationale": "The review improves a plan that is already complete, so a phase that fails should cost the review and never the package.",
+      "criteria": [
+        {
+          "id": "18-REQ-7.1",
+          "pattern": "event_driven",
+          "condition": "a plan review or a plan revision ends without a result, through a budget, a turn limit, a timeout, or a model or API error",
+          "system": "round loop",
+          "action": "stop the rounds and go on with the last complete plan",
+          "contract": "no further round is started; the stop reason is incomplete; the package is written from the last complete plan and is validated as it otherwise would be"
+        },
+        {
+          "id": "18-REQ-7.2",
+          "pattern": "event_driven",
+          "condition": "the rounds of a plan stopped because a phase did not finish",
+          "system": "specgen pipeline",
+          "action": "carry a high warning naming the scope, the round, which of the two phases failed and why it failed, and report the findings of a review whose revision did not finish as unanswered",
+          "contract": "one warning of its own code, severity high, naming the scope, the round number, plan_review or plan_revision, and the reason; every finding of that round carries the disposition unanswered; the findings of the rounds before it keep their answers"
+        },
+        {
+          "id": "18-REQ-7.3",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "for any run, let a failed plan review or plan revision change neither whether the run fails nor its exit code",
+          "contract": "a run whose package is written and validates exits 0 with the warning; a run that fails for another reason exits with that reason's code; an interrupt of the run is not this case and still fails the run as aborted at the phase it stopped"
+        },
+        {
+          "id": "18-REQ-7.4",
+          "pattern": "event_driven",
+          "condition": "the run has already spent its total budget when a plan review or a plan revision is about to start",
+          "system": "round loop",
+          "action": "start neither, stop the rounds as 18-REQ-7.1 says, and name the budget in the warning",
+          "contract": "the budget is checked before each plan review and before each plan revision; the warning says what the run has spent of what ceiling; the package is still written from the last complete plan"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-8",
+      "title": "Splits",
+      "rationale": "A scope's plan review must not make the next scope's PRD phase wait, or a split costs its rounds twice over in wall clock.",
+      "criteria": [
+        {
+          "id": "18-REQ-8.1",
+          "pattern": "event_driven",
+          "condition": "a run writes a split with the plan review on",
+          "system": "split coordinator",
+          "action": "run each scope's plan rounds after that scope's own tasks phase, and start the next scope's PRD and requirements phases without waiting for them",
+          "contract": "the rounds of a scope run inside that scope's own package build; the next scope's PRD phase starts while they are still running, within the run's parallelism limit"
+        },
+        {
+          "id": "18-REQ-8.2",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any split, keep the check of a scope's package against the other specs waiting for the package before it to be written",
+          "contract": "the rules across specs are applied to a scope only after the earlier scopes' packages are on disk, as they are before this change; the plan review changes none of that ordering"
+        },
+        {
+          "id": "18-REQ-8.3",
+          "pattern": "event_driven",
+          "condition": "a split is resumed from a plan an earlier run left",
+          "system": "split coordinator",
+          "action": "review the plans of the packages this run writes, and no others",
+          "contract": "a scope the earlier run already wrote gets no plan review and no plan revision phase in this run, and its package on disk is not changed; each scope this run writes gets its own rounds"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-9",
+      "title": "Output and models",
+      "rationale": "A stage a caller cannot see in the result, or price before the run, is one nobody turns on twice.",
+      "criteria": [
+        {
+          "id": "18-REQ-9.1",
+          "pattern": "event_driven",
+          "condition": "the plan review was on for a run",
+          "system": "specgen pipeline",
+          "action": "carry on each package of the result a plan review record with the shape of the PRD review's",
+          "contract": "the record has the same fields as the PRD review's — the rounds with their clean flags and findings, the six totals and the stop reason — under a field of its own; it is absent from every package of a run without the flag"
+        },
+        {
+          "id": "18-REQ-9.2",
+          "pattern": "event_driven",
+          "condition": "a run reviewed at least one plan",
+          "system": "spec command",
+          "action": "add a clause to the summary sentence naming the rounds run, the findings raised and the number fixed",
+          "contract": "the clause reads for example plan review: 2 rounds, 5 findings, 4 fixed, counted over every package of the run, and stands beside the PRD review's clause when both reviews ran; it is absent when no plan was reviewed"
+        },
+        {
+          "id": "18-REQ-9.3",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any plan round, report each of its two phases on the progress stream with the scope it belongs to and the round it is",
+          "contract": "a line names the scope as the other phases of a split name it, what it is doing, and the round number out of the limit, for example that scope 2 of 3 is reviewing the plan in round 1 of 2"
+        },
+        {
+          "id": "18-REQ-9.4",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "for any run, accept plan_review and plan_revision as phase names wherever a model may be chosen per phase, and list them among the phases a run reports",
+          "contract": "a per-phase model choice naming either is accepted and applied; a run reports both among its phase models when the plan review is on and omits them when it is off; the two names are in the ordered list of phases, after the tasks phase"
+        },
+        {
+          "id": "18-REQ-9.5",
+          "pattern": "ubiquitous",
+          "system": "spec command",
+          "action": "for any tier, run plan_review and plan_revision at the model and effort that tier gives the requirements phase",
+          "contract": "the simple tier runs both on claude-sonnet-5-5 at medium effort, the standard tier on claude-sonnet-5-5 at high, and the advanced tier on claude-opus-5-5 at high; each tier names the two phases explicitly rather than leaving them to its base entry, which for the advanced tier would be a higher effort"
+        },
+        {
+          "id": "18-REQ-9.6",
+          "pattern": "ubiquitous",
+          "system": "specgen pipeline",
+          "action": "for any plan review or plan revision, apply the per-phase budget, turn, timeout and token ceilings to it as to a phase of its own",
+          "contract": "each of the two phases gets the whole of each ceiling rather than sharing one with the round or with the generating phases, exactly as a PRD review phase does, and a phase that reaches one ends without a result as 18-REQ-7.1 says"
+        }
+      ]
+    },
+    {
+      "id": "18-REQ-10",
+      "title": "Steering alignment in the plan review",
+      "rationale": "The plans in this repository contradict a directive the project added, and nothing reported it.",
+      "criteria": [
+        {
+          "id": "18-REQ-10.1",
+          "pattern": "event_driven",
+          "condition": "a plan is reviewed and the spec root's steering body says something",
+          "system": "plan review phase",
+          "action": "check the plan against every directive of it and raise a contradiction as a finding whose rubric is steering",
+          "contract": "the prompt carries the directives and the instruction to check the plan against them, and such a finding is recorded with the rubric steering beside the findings of the other two rubrics"
+        },
+        {
+          "id": "18-REQ-10.2",
+          "pattern": "unwanted",
+          "condition": "a finding of a plan review whose rubric is steering has evidence that quotes no passage appearing in the steering body verbatim, whitespace aside",
+          "system": "plan review phase",
+          "action": "turn the review back, naming every such finding",
+          "contract": "one error naming each offending position and saying the evidence must quote the directive it contradicts and the text of the plan that contradicts it; nothing is recorded"
+        },
+        {
+          "id": "18-REQ-10.3",
+          "pattern": "unwanted",
+          "condition": "a finding of a plan review whose rubric is steering is submitted with the severity minor",
+          "system": "plan review phase",
+          "action": "turn the review back, naming every such finding",
+          "contract": "one error naming each offending position and saying such a finding is critical or major; nothing is recorded"
+        },
+        {
+          "id": "18-REQ-10.4",
+          "pattern": "unwanted",
+          "condition": "a finding of a plan review whose rubric is steering is answered declined",
+          "system": "plan revision phase",
+          "action": "turn the revision back, naming every such finding",
+          "contract": "one error naming each offending id with its rubric and saying such a finding is fixed, contested or escalated; nothing is recorded; a finding of either other rubric may still be declined with a reason"
+        },
+        {
+          "id": "18-REQ-10.5",
+          "pattern": "event_driven",
+          "condition": "the spec root's steering body says nothing, or the run was not given the plan review flag",
+          "system": "specgen pipeline",
+          "action": "check no alignment of the plan and raise no finding under that rubric",
+          "contract": "no finding of any plan round carries the rubric steering; without the flag no plan round runs at all; with an empty steering the prompt carries no steering block and the review tool accepts the other two rubrics alone"
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "18-PATH-1",
+      "title": "A run reviews the plan and the reviser grounds a path that is not there",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs spec with the plan review flag on an input whose tasks name a test file that does not exist"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "generates the plan, validates it in memory, and computes the grounding facts over every path the tasks name"
+        },
+        {
+          "actor": "plan review phase",
+          "action": "reads the PRD, the rendered plan and the grounding facts, and raises a major grounding finding on the path nothing creates"
+        },
+        {
+          "actor": "plan revision phase",
+          "action": "answers it fixed, changes the task's touches to a path that exists, and submits the three revised artifacts"
+        },
+        {
+          "actor": "round loop",
+          "action": "re-checks the revised plan against the schemas and C1 to C11, accepts it, and stops the rounds at the limit"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "writes the package from the revised plan and validates it"
+        },
+        {
+          "actor": "user",
+          "action": "reads the plan review record and the summary clause, and finds the corrected path in the written tasks.json"
+        }
+      ]
+    },
+    {
+      "id": "18-PATH-2",
+      "title": "An invalid plan is not reviewed and the run fails on the errors it already had",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs spec with the plan review flag on an input whose generated plan leaves a criterion with no test"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "validates the plan in memory, finds the broken rule, and reviews no round of it"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "carries a high warning naming the scope and the number of errors, and writes and validates the package as a run without the flag does"
+        },
+        {
+          "actor": "spec command",
+          "action": "fails on the same validation errors with the same exit code, the package on disk and each error naming its rule"
+        },
+        {
+          "actor": "user",
+          "action": "reads the warning and sees that no plan review or revision phase was billed"
+        }
+      ]
+    },
+    {
+      "id": "18-PATH-3",
+      "title": "A split reviews each scope's plan without holding up the next scope's PRD",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs spec with the plan review flag on an input that splits into three scopes"
+        },
+        {
+          "actor": "split coordinator",
+          "action": "writes the first scope's PRD and starts its package build"
+        },
+        {
+          "actor": "plan review phase",
+          "action": "reviews the first scope's plan after its tasks phase"
+        },
+        {
+          "actor": "split coordinator",
+          "action": "starts the second scope's PRD phase while those rounds are still running"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "holds the second scope's check against the other specs until the first scope's package is on disk"
+        },
+        {
+          "actor": "user",
+          "action": "reads a plan review record for each of the three packages the run wrote"
+        }
+      ]
+    },
+    {
+      "id": "18-PATH-4",
+      "title": "A preflight prices the plan review before any model is called",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs spec with the preflight flag, the plan review flag and a round limit of 3"
+        },
+        {
+          "actor": "preflight",
+          "action": "makes every check the ordinary run makes before its first model call, and counts two phases for each of the three allowed rounds on top of the generating phases"
+        },
+        {
+          "actor": "preflight",
+          "action": "names plan_review and plan_revision among the phase models, each with the model and effort its tier gives the requirements phase"
+        },
+        {
+          "actor": "spec command",
+          "action": "reports the checklist, the phase count and the ceiling, and makes no model call and writes no package"
+        },
+        {
+          "actor": "user",
+          "action": "reads the upper bound and decides whether to run it"
+        }
+      ]
+    }
+  ],
+  "external_apis": [
+    {
+      "package": "github.com/agent-fox-dev/spec/afspec",
+      "version": "this repository",
+      "verified": true,
+      "symbols": [
+        {
+          "name": "ValidateGenerationStepComplete",
+          "import_path": "github.com/agent-fox-dev/spec/afspec",
+          "signature": "func ValidateGenerationStepComplete(step GenerationStep, partial PartialSpec) ValidationResult"
+        }
+      ]
+    },
+    {
+      "package": "github.com/agent-fox-dev/agentkit-go",
+      "version": "v0.9.0",
+      "verified": true,
+      "symbols": [
+        {
+          "name": "Workspace.Resolve",
+          "import_path": "github.com/agent-fox-dev/agentkit-go/workspace",
+          "signature": "func (w *Workspace) Resolve(p string) (string, error)"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,386 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "18",
+  "spec_name": "adversarial_plan_review",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./envelope/... ./internal/agentrun/... ./specgen/... ./cmd/spec/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "17",
+      "reason": "the plan review applies its four dispositions, its counter-evidence and decision checks, its repeat rules, its two-clean-round convergence and its record shape unchanged, and extends the steering rubric it introduces to the plan"
+    },
+    {
+      "spec": "09",
+      "reason": "the reviewer interface, runRounds, reviewPhase, the 30-finding cap, the evidence rules, the R<round>-F<n> ids and the failure handling are its machinery, reused for the plan"
+    },
+    {
+      "spec": "16",
+      "reason": "the plan reviewer is given the steering body with its version, as that package defines both, and quotes a steering finding's directive against that body"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Add the two phase names and give every tier their model and effort",
+      "criteria": [
+        "18-REQ-9.4",
+        "18-REQ-9.5"
+      ],
+      "tests": [
+        "TS-18-28"
+      ],
+      "steps": [
+        "Add the tier and per-phase behaviours to internal/agentrun/models_test.go, extending TestResolvePlan_ATierChoosesAModelPerPhase and TestParsePhaseChoice, and confirm they fail",
+        "In internal/agentrun/models.go add PhasePlanReview = \"plan_review\" and PhasePlanRevision = \"plan_revision\" beside the PRD review's constants, and put both into Phases after PhaseTasks so the ordered list reads in the order a package is built",
+        "In tierTable give each of the three tiers an explicit entry for both phases equal to that tier's requirements entry: sonnet-5-5 at medium for SIMPLE, sonnet-5-5 at high for STANDARD and opus-5-5 at high for ADVANCED — ADVANCED's base is xhigh, so leaving them to base would not give the effort the table asks for",
+        "Confirm a per-phase model choice naming either phase parses and applies to that phase alone, the parser reading the name from Phases",
+        "Document the two phase names in docs/configuration.md among those a per-phase model choice accepts, and in the phase table of docs/cli.md"
+      ],
+      "touches": [
+        "internal/agentrun/models.go",
+        "internal/agentrun/models_test.go",
+        "docs/configuration.md",
+        "docs/cli.md"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Compute the grounding facts and add the plan review phase with its rubrics",
+      "criteria": [
+        "18-REQ-2.3",
+        "18-REQ-2.4",
+        "18-REQ-3.1",
+        "18-REQ-3.2",
+        "18-REQ-3.3",
+        "18-REQ-3.4",
+        "18-REQ-4.1",
+        "18-REQ-4.2",
+        "18-REQ-4.3",
+        "18-REQ-4.4",
+        "18-REQ-4.5",
+        "18-REQ-5.1",
+        "18-REQ-5.2",
+        "18-REQ-10.2",
+        "18-REQ-10.3"
+      ],
+      "tests": [
+        "TS-18-7",
+        "TS-18-8",
+        "TS-18-9",
+        "TS-18-10",
+        "TS-18-11",
+        "TS-18-12",
+        "TS-18-13",
+        "TS-18-14",
+        "TS-18-15",
+        "TS-18-16"
+      ],
+      "steps": [
+        "Add the grounding behaviours to a new specgen/grounding_test.go, the prompt behaviours to specgen/prompts_test.go and the reviewer's checks to a new specgen/plan_review_tool_test.go, and confirm they fail",
+        "Add specgen/grounding.go: for every path in every task's touches, resolve it with workspace.Resolve and call os.Stat, reporting it as existing when the stat succeeds whether it is a file or a directory, and as not existing when the resolve or the stat fails — so a path outside the repository root is not existing; keep one entry per distinct path in task order and then touches order",
+        "Add specgen/plan_review_tool.go with the terminating tool of the plan review: the submission schema of the PRD review's plus a rubric enum of zero_decision, grounding and steering, with the description of each, and the same 30-finding cap",
+        "Check every finding over the whole submission and report every offender in one error, as the PRD review's tool does: an empty severity, section, flaw, evidence or remedy, naming the fields; a rubric or a severity outside its set; and more than 30 findings, naming the count and the cap",
+        "Check a finding's section against the plan under review: accept a test id, a criterion id or an execution path id of this plan, or a task of it named by its number, and refuse anything else naming the position, the section and the kinds of place a section may name",
+        "Check a grounding finding that says a path does not exist: the path it names must be one the grounding facts list, and a finding naming any other path is refused, naming the position and the path; a finding of another rubric is not checked this way",
+        "Check a steering finding as the PRD review's tool does: its evidence must quote a passage appearing in the steering body under sameEvidence's normalisation, and its severity must not be minor, each refusal naming the position and what is wrong",
+        "Add specgen/templates/plan_review_system.md with both rubrics in full — the five questions of the Zero-Decision Rule and the four of grounding, as the package's requirements give them — the three severities with their meaning for a plan, the rule that every finding names its rubric and its place by id, and the steering rubric",
+        "Add specgen/templates/plan_review_user.md and the prompt builders in specgen/prompts.go: the PRD as it stands, the rendered plan, the grounding facts, the codebase notes introduced as the author's claims to check, and the earlier rounds' findings; carry no part of the input body and no part of the context block",
+        "Render the plan for both phases from the artifacts held in memory, through (*RequirementsV2Json).Render, (*TestSpecV2Json).Render and (*TasksV2Json).Render in that order under their own headings, with no scope and no budget, so each section is byte-identical to the package's own render of that artifact",
+        "Add specgen/templates/plan_revision_user.md and its builder with the PRD, the plan, this round's findings, the grounding facts, the codebase notes and the same project context, and no part of the input",
+        "Add a Review method for the plan to the reviewer interface in specgen/phases.go and implement it on agentAuthor through reviewPhase, so the phase gets the read-only file tools, the code-search index, the run context block and the token ceiling every review phase gets"
+      ],
+      "touches": [
+        "specgen/grounding.go",
+        "specgen/grounding_test.go",
+        "specgen/plan_review_tool.go",
+        "specgen/plan_review_tool_test.go",
+        "specgen/prompts.go",
+        "specgen/prompts_test.go",
+        "specgen/phases.go",
+        "specgen/templates/plan_review_system.md",
+        "specgen/templates/plan_review_user.md",
+        "specgen/templates/plan_revision_user.md"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Add the plan revision phase and the checks on what it may change",
+      "criteria": [
+        "18-REQ-6.1",
+        "18-REQ-6.2",
+        "18-REQ-6.3",
+        "18-REQ-10.4"
+      ],
+      "tests": [
+        "TS-18-18",
+        "TS-18-19",
+        "TS-18-20"
+      ],
+      "steps": [
+        "Add the revision's behaviours to a new specgen/plan_revision_tool_test.go, and confirm they fail",
+        "Add specgen/plan_revision_tool.go with the terminating tool of the plan revision: the three plan artifacts submitted whole, and the answers in the shape the PRD review's revision tool takes, so the four dispositions and their checks are the same code path",
+        "Refuse a submission that changes the PRD body, the spec id or spec name in any artifact, the state of a task, or the actors of the execution paths, with one error naming each kind of change and where; compare actors by name ignoring case so reordering the paths or a path's steps is no change",
+        "Refuse a submission whose plan does not pass afspec.ValidateGenerationStepComplete(afspec.StepTasks, partial), with one error naming every rule it broke, each with the artifact and the entity it is about, so the phase asks again until it passes or runs out of turns or budget",
+        "Refuse a declined answer to a finding whose rubric is steering, with one error naming the id and its rubric and saying such a finding is fixed, contested or escalated; leave a finding of either other rubric free to be declined with a reason",
+        "Add specgen/templates/plan_revision_system.md: what the reviser may change and what it may not, that it submits all three artifacts whole, that the revised plan must pass the format's own rules, and the four dispositions with what each requires as the PRD revision's prompt gives them",
+        "Add a Revise method for the plan to the reviewer interface in specgen/phases.go and implement it on agentAuthor through reviewPhase, with the plan revision phase name"
+      ],
+      "touches": [
+        "specgen/plan_revision_tool.go",
+        "specgen/plan_revision_tool_test.go",
+        "specgen/phases.go",
+        "specgen/templates/plan_revision_system.md"
+      ],
+      "depends_on": [
+        2
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Wire the stage into the pipeline behind its flag, with the gate before the first round",
+      "criteria": [
+        "18-REQ-1.1",
+        "18-REQ-1.2",
+        "18-REQ-1.5",
+        "18-REQ-1.6",
+        "18-REQ-2.1",
+        "18-REQ-2.2",
+        "18-REQ-6.4"
+      ],
+      "tests": [
+        "TS-18-1",
+        "TS-18-2",
+        "TS-18-4",
+        "TS-18-6",
+        "TS-18-22"
+      ],
+      "steps": [
+        "Add the ordering, the flag-independence, the dry-run, the gate and the last-complete-plan behaviours to specgen/pipeline_test.go, and confirm they fail",
+        "Add AdversarialPlan to specgen.Options beside Adversarial, and register --adversarial-plan in cmd/spec/main.go with the sentence that a fresh agent looks for the flaws in every plan the run generates and another revises it, and pass it through specOptions",
+        "In buildPackage in specgen/pipeline.go, after the last generation step and before the architecture phase, validate the plan with afspec.ValidateGenerationStepComplete(afspec.StepTasks, partial) when the flag is on",
+        "When that validation fails, raise one high warning of a new code naming the scope and the number of errors, run no round, and fall through to the write and the verdict so the run fails on the same errors with the same exit code as a run without the flag",
+        "When it passes, compute the grounding facts once for the package and run the rounds, then set spec.Requirements, spec.TestSpec and spec.Tasks from the plan the rounds returned, so the architecture phase and the write both get the last complete plan",
+        "Confirm the two review flags stay independent: each is read on its own, each takes its own rounds, and a run with neither runs exactly the phases it runs today",
+        "Confirm a dry run bills the two phases and carries the record while writing nothing, the validation and the verdict being taken over the plan held in memory",
+        "Describe the plan review in docs/architecture.md as a stage of the pipeline between the tasks phase and the architecture phase, and add --adversarial-plan and the skipped warning to docs/cli.md"
+      ],
+      "touches": [
+        "specgen/pipeline.go",
+        "specgen/pipeline_test.go",
+        "cmd/spec/main.go",
+        "envelope/warn.go",
+        "internal/cli/warn.go",
+        "docs/architecture.md",
+        "docs/cli.md"
+      ],
+      "depends_on": [
+        2,
+        3
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Run the plan rounds on the PRD review's rules, and survive a phase that fails",
+      "criteria": [
+        "18-REQ-5.3",
+        "18-REQ-7.1",
+        "18-REQ-7.2",
+        "18-REQ-7.3",
+        "18-REQ-7.4",
+        "18-REQ-9.3",
+        "18-REQ-9.6"
+      ],
+      "tests": [
+        "TS-18-21",
+        "TS-18-23",
+        "TS-18-24",
+        "TS-18-27",
+        "TS-18-29"
+      ],
+      "steps": [
+        "Add the round-loop, failure, budget, progress and ceiling behaviours to specgen/rounds_test.go, specgen/phases_test.go and specgen/pipeline_test.go, and confirm they fail",
+        "Add the plan's round loop to specgen/rounds.go beside runRounds, sharing its structure: a round is one review and, when the review raised anything, one revision; each round after the first is handed the earlier findings with their answers; and the ids are of the same form",
+        "Apply the triage, the repeat rules and the two-clean-round convergence of the PRD review unchanged, so the stop reason is converged, rounds_exhausted or incomplete and never another value, and the record carries the same per-round and per-finding fields and the same six totals",
+        "When a plan review or revision ends without a result, stop the rounds, hand back the last complete plan, and raise one high warning of a new code naming the scope, the round, plan_review or plan_revision, and why it failed",
+        "Mark every finding of a round whose revision did not finish unanswered, leaving the earlier rounds' answers as they were",
+        "Check the total budget before each plan review and each plan revision, stopping the rounds the same way and naming what the run has spent of what ceiling in the warning",
+        "Let neither failure change whether the run fails or its exit code, and keep a cancelled context failing the run as aborted at the phase it stopped, as the PRD rounds do",
+        "Report each phase on the progress stream with its scope and the round out of the limit, and report what each review raised counted by severity",
+        "Give each plan phase the whole of every per-phase budget, turn, timeout and token ceiling through reviewPhase, as a PRD review phase gets them",
+        "Add the two warning codes to envelope/warn.go and internal/cli/warn.go with their stage, and document both in docs/cli.md"
+      ],
+      "touches": [
+        "specgen/rounds.go",
+        "specgen/rounds_test.go",
+        "specgen/phases.go",
+        "specgen/phases_test.go",
+        "specgen/pipeline.go",
+        "specgen/pipeline_test.go",
+        "envelope/warn.go",
+        "internal/cli/warn.go",
+        "docs/cli.md"
+      ],
+      "depends_on": [
+        4
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "implement",
+      "title": "Make the rounds flag serve both reviews and price the stage in the preflight",
+      "criteria": [
+        "18-REQ-1.3",
+        "18-REQ-1.4",
+        "18-REQ-1.7"
+      ],
+      "tests": [
+        "TS-18-3",
+        "TS-18-5"
+      ],
+      "steps": [
+        "Add the flag-grammar cases to cmd/spec/main_test.go and the preflight cases to specgen/pipeline_test.go, and confirm they fail",
+        "In PreCheck in cmd/spec/main.go refuse the rounds flag when neither --adversarial nor --adversarial-plan is given, with a message naming its value and both flags, and keep the 1-to-5 range check as it is",
+        "Confirm the rounds flag is read as the limit for each review separately, so with both reviews on and a limit of 3 a package may run up to twelve review and revision phases",
+        "In RunPreflight in specgen/pipeline.go count two more phases per allowed round per package still to be written when the plan review is on, beside the two the PRD review already adds, as an upper bound",
+        "In phaseModels name plan_review and plan_revision when the plan review is on and omit them when it is off, as it already does for the PRD review's two phases",
+        "Update docs/cli.md for the new meaning of --adversarial-rounds, the preflight's phase count with each review, and the usage error"
+      ],
+      "touches": [
+        "cmd/spec/main.go",
+        "cmd/spec/main_test.go",
+        "specgen/pipeline.go",
+        "specgen/pipeline_test.go",
+        "docs/cli.md"
+      ],
+      "depends_on": [
+        4
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 7,
+      "kind": "implement",
+      "title": "Review each scope's plan in a split without holding up the next scope",
+      "criteria": [
+        "18-REQ-8.1",
+        "18-REQ-8.2",
+        "18-REQ-8.3"
+      ],
+      "tests": [
+        "TS-18-25"
+      ],
+      "steps": [
+        "Add the split behaviours to specgen/split_run_test.go, and confirm they fail",
+        "Keep the plan rounds inside each scope's own package build in specgen/pipeline.go, not in the split coordinator where the PRD rounds run, so the next scope's PRD phase is not made to wait for them",
+        "Confirm the next scope's PRD and requirements phases start while a scope's plan rounds are still running, within the run's parallelism limit",
+        "Leave the ordering of the checks across specs as it is: a scope's package is checked against the other specs only after the packages before it are on disk",
+        "Confirm a resumed split runs the plan rounds for the scopes it writes and none for a scope an earlier run already wrote, whose package on disk is not touched",
+        "Note in docs/architecture.md where a scope's plan rounds run, beside the note on where its PRD rounds run"
+      ],
+      "touches": [
+        "specgen/pipeline.go",
+        "specgen/split_run.go",
+        "specgen/split_run_test.go",
+        "docs/architecture.md"
+      ],
+      "depends_on": [
+        4,
+        5
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 8,
+      "kind": "implement",
+      "title": "Report the plan review in the result, the summary and the steering rubric",
+      "criteria": [
+        "18-REQ-9.1",
+        "18-REQ-9.2",
+        "18-REQ-10.1",
+        "18-REQ-10.5"
+      ],
+      "tests": [
+        "TS-18-17",
+        "TS-18-26"
+      ],
+      "steps": [
+        "Add the record, summary and alignment behaviours to specgen/pipeline_test.go, and confirm they fail",
+        "Add a plan review field to envelope.Package of the same type as its review field, with the description sentence the other fields carry, and set it from the rounds when the flag was on, leaving it absent otherwise",
+        "Add the plan review's clause to the summary sentence in specgen/pipeline.go beside the PRD review's, naming the rounds run, the findings raised and the number fixed, counted over every package of the run, and leaving it out when no plan was reviewed",
+        "Keep the plan review's record out of nothing the summary view keeps: carry it under --detail summary without its rounds, as the PRD review's record is carried",
+        "Give the plan reviewer the steering body with its version, from the same run environment value the other phases read, so the prompt carries the directives and the instruction to check the plan against them",
+        "Raise no finding under the steering rubric where the steering body says nothing: the prompt then carries no steering block and the tool accepts the other two rubrics alone",
+        "Document the plan review record and the new summary clause in docs/cli.md, and the two rubrics and what a steering finding needs"
+      ],
+      "touches": [
+        "envelope/spec_result.go",
+        "specgen/pipeline.go",
+        "specgen/pipeline_test.go",
+        "specgen/summary.go",
+        "specgen/rounds.go",
+        "docs/cli.md"
+      ],
+      "depends_on": [
+        4,
+        5
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 9,
+      "kind": "integration",
+      "title": "Verify the four paths end to end and record the stage in an ADR",
+      "tests": [
+        "TS-18-30",
+        "TS-18-31",
+        "TS-18-32",
+        "TS-18-33"
+      ],
+      "steps": [
+        "Add the four end-to-end cases to cmd/spec/main_test.go, beside TestAdversarial_GeneratesThePackageFromTheRevisedPRD and TestPreflight_ReportsTheChecklistAndWritesNothing, each against a real temporary repository and the scripted model, and confirm they pass",
+        "Trace 18-PATH-1 from the generated plan through the in-memory validation, the grounding facts, the review and the revision to the corrected touches in the written tasks.json, and confirm each step calls the next with no stub left",
+        "Trace 18-PATH-2 from the invalid plan through the gate to the warning and the unchanged failure, and confirm no plan phase was billed",
+        "Trace 18-PATH-3 from the split coordinator through each scope's own package build to three plan review records, and confirm the next scope's PRD phase overlapped the previous scope's rounds",
+        "Trace 18-PATH-4 from the preflight flags to the phase count and the two phase models, and confirm no model call was made",
+        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: the pipeline consumes the in-memory validation and the grounding facts, the review tool consumes the plan and the facts, the round loop consumes the reviewer's findings and the reviser's plan, the write consumes the last complete plan, and the summary consumes the record",
+        "Grep specgen/, envelope/, internal/agentrun/ and cmd/spec/ for TODO and panic(\"not implemented\") and remove any that remain",
+        "Confirm the plan review's prompts carry no part of the run's input: grep the recorded prompts of an end-to-end run for the input body and the context block",
+        "Write the ADR as docs/adr/NN-review-the-plan-adversarially.md, NN being the next free number by the rule in CLAUDE.md, recording the stage's own flag and why it is not part of --adversarial, the two rubrics, the grounding facts as computed rather than judged, that an invalid plan is not reviewed, that the reviser may change the three artifacts and not the actors, and the two new phase names with their tier entries",
+        "Run make doc and then make check"
+      ],
+      "touches": [
+        "cmd/spec/main_test.go",
+        "docs/adr/"
+      ],
+      "depends_on": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "done_when": [
+        "`make check` passes, fmt, vet, lint, test and skills-check among it",
+        "a run with neither review flag bills exactly the phases it bills before this change",
+        "no prompt of a plan review or plan revision phase holds any part of the run's input body or context block"
+      ],
+      "state": "pending"
+    }
+  ]
+}
