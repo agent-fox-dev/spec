@@ -53,6 +53,8 @@ type author interface {
 type reviewer interface {
 	Review(context.Context, reviewRequest) ([]Finding, agentrun.Result, error)
 	Revise(context.Context, revisionRequest) (PRD, []Disposition, agentrun.Result, error)
+	// ReviewPlan reviews a package's plan, as Review reviews its PRD.
+	ReviewPlan(context.Context, planReviewRequest) ([]Finding, agentrun.Result, error)
 }
 
 // agentAuthor runs the review phases too, against the same Runner.
@@ -218,6 +220,24 @@ func (a *agentAuthor) Review(ctx context.Context, req reviewRequest) ([]Finding,
 	findings, ok := sink.get()
 	if !ok {
 		return nil, res, agentrun.NoResultError(agentrun.PhasePRDReview, ToolSubmitPRDReview, res)
+	}
+	return findings, res, nil
+}
+
+// ReviewPlan runs one plan review phase: a fresh conversation that reads the
+// PRD, the rendered plan and its grounding facts, never the input, and
+// submits the plan's flaws, each under a rubric of the plan's.
+func (a *agentAuthor) ReviewPlan(ctx context.Context, req planReviewRequest) ([]Finding, agentrun.Result, error) {
+	var sink reviewSink
+	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePlanReview, planReviewSystemPrompt(),
+		planReviewUserPrompt(req), req.reviewRequest, ToolSubmitPlanReview,
+		newPlanReviewTool(&sink, req.Round, req.Earlier, req.Plan, req.Facts, req.Steering)))
+	if err != nil {
+		return nil, res, err
+	}
+	findings, ok := sink.get()
+	if !ok {
+		return nil, res, agentrun.NoResultError(agentrun.PhasePlanReview, ToolSubmitPlanReview, res)
 	}
 	return findings, res, nil
 }

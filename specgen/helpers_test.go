@@ -419,9 +419,35 @@ type scriptedReviewer struct {
 	onReview func(req reviewRequest)
 	onRevise func(req revisionRequest)
 
-	mu         sync.Mutex
-	reviewReqs []reviewRequest
-	reviseReqs []revisionRequest
+	// planReviews script the plan reviews, one outcome per call.
+	planReviews []reviewOutcome
+
+	mu             sync.Mutex
+	reviewReqs     []reviewRequest
+	reviseReqs     []revisionRequest
+	planReviewReqs []planReviewRequest
+}
+
+func (s *scriptedReviewer) ReviewPlan(_ context.Context, req planReviewRequest) ([]Finding, agentrun.Result, error) {
+	s.mu.Lock()
+	i := len(s.planReviewReqs)
+	s.planReviewReqs = append(s.planReviewReqs, req)
+	s.mu.Unlock()
+	if i >= len(s.planReviews) {
+		s.t.Fatalf("plan review %d was not scripted", i+1)
+	}
+	out := s.planReviews[i]
+	res := agentrun.Result{Name: agentrun.PhasePlanReview, Turns: 2, Model: fakeModel}
+	res.Usage.CostUSD = out.cost
+	if out.err != nil {
+		return nil, res, out.err
+	}
+	findings := make([]Finding, len(out.severities))
+	for n, sev := range out.severities {
+		findings[n] = Finding{ID: fmt.Sprintf("R%d-F%d", req.Round, n+1), Severity: sev, Rubric: "zero_decision",
+			Section: "task 1", Flaw: fmt.Sprintf("plan flaw %d.%d%s", req.Round, n+1, out.mark), Evidence: "e" + out.mark, Remedy: "r"}
+	}
+	return findings, res, nil
 }
 
 func (s *scriptedReviewer) Review(_ context.Context, req reviewRequest) ([]Finding, agentrun.Result, error) {
@@ -586,6 +612,11 @@ func (f failingReviewer) Review(context.Context, reviewRequest) ([]Finding, agen
 func (f failingReviewer) Revise(context.Context, revisionRequest) (PRD, []Disposition, agentrun.Result, error) {
 	f.t.Fatal("a revision ran")
 	return PRD{}, nil, agentrun.Result{}, nil
+}
+
+func (f failingReviewer) ReviewPlan(context.Context, planReviewRequest) ([]Finding, agentrun.Result, error) {
+	f.t.Fatal("a plan review ran")
+	return nil, agentrun.Result{}, nil
 }
 
 // newWorkspace is an empty Go module.

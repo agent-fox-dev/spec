@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T13:31:22Z
-- **Updated:** 2026-11-06T14:53:21Z
+- **Updated:** 2026-11-06T14:57:35Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691`
 
@@ -1513,7 +1513,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 2. Compute the grounding facts and add the plan review phase with its rubrics (implement, pending)
+### [x] 2. Compute the grounding facts and add the plan review phase with its rubrics (implement, done)
 
 **Criteria:** 18-REQ-2.3, 18-REQ-2.4, 18-REQ-3.1, 18-REQ-3.2, 18-REQ-3.3, 18-REQ-3.4, 18-REQ-4.1, 18-REQ-4.2, 18-REQ-4.3, 18-REQ-4.4, 18-REQ-4.5, 18-REQ-5.1, 18-REQ-5.2, 18-REQ-10.2, 18-REQ-10.3
 

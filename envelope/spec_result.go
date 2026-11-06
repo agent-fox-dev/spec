@@ -271,6 +271,11 @@ const (
 	// RubricSteering is a contradiction of a directive of the project's
 	// steering.
 	RubricSteering = "steering"
+	// RubricZeroDecision is a design choice a plan leaves to its coder.
+	RubricZeroDecision = "zero_decision"
+	// RubricGrounding is a path, symbol or claim a plan names that is not
+	// there.
+	RubricGrounding = "grounding"
 )
 
 // Why the rounds of a review stopped.

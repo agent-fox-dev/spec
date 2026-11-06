@@ -99,6 +99,9 @@ const ToolSubmitPRDReview = "submit_prd_review"
 const ToolSubmitPRDRevision = "submit_prd_revision"
     ToolSubmitPRDRevision is the terminating tool of the revision phase.
 
+const ToolSubmitPlanReview = "submit_plan_review"
+    ToolSubmitPlanReview is the terminating tool of the plan review phase.
+
 
 FUNCTIONS
 
