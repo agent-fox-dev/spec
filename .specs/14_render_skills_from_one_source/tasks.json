@@ -362,7 +362,7 @@
         "the six before-and-after runs are recorded in the pull request description, with any difference named",
         "the pull request description carries the list of deliberate cuts, each with its reason"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

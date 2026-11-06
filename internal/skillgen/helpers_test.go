@@ -77,3 +77,42 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 		}
 	}
 }
+
+// copyTree copies a directory tree, for the behaviours that need a source tree
+// they may break without touching the repository's own.
+func copyTree(t *testing.T, from, to string) {
+	t.Helper()
+	err := filepath.WalkDir(from, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(from, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(to, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// appendTo adds text to a file, to break a copied source tree on purpose.
+func appendTo(t *testing.T, path, text string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, text...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
