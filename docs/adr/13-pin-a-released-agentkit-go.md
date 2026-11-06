@@ -61,9 +61,14 @@ require (
 
 ## Consequences
 
-- `go install github.com/agent-fox-dev/spec/cmd/spec@<version>` works, and the
-  README no longer has to say it does not. This is the first half of a release
-  (`docs/spec-kit-comparison.md` §7.1, item 6).
+- `go install github.com/agent-fox-dev/spec/cmd/spec@main` works. Verified
+  against the commit that merged this change: it installs as
+  `v1.4.2-0.20261106104458-0693d2f6e842` and runs. `@latest` still does not,
+  but no longer because of the `replace`: the newest tag, `v1.4.1`, predates
+  the Go commands and holds no `cmd/` directory, so no release contains them.
+  Removing the `replace` is what made either possible, and it is the first half
+  of cutting a release (`docs/spec-kit-comparison.md` §7.1, item 6); the second
+  half is a tag.
 - `make check` and `make test` run offline.
 - A build is reproducible from the source tree, because the pin only moves when
   a commit moves it.

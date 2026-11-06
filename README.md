@@ -248,8 +248,13 @@ prints, e.g. `spec v1.4.1 (commit 94f3890, built 2026-10-14T06:33:13Z)`.
 Or install a command without a checkout:
 
 ```bash
-go install github.com/agent-fox-dev/spec/cmd/spec@latest     # or cmd/specr, cmd/speca
+go install github.com/agent-fox-dev/spec/cmd/spec@main     # or cmd/specr, cmd/speca
 ```
+
+`@latest` does not work yet, and not because of the `replace` any more: the
+newest tag, `v1.4.1`, predates the Go commands and holds no `cmd/` directory at
+all, so no release contains them. Tagging one makes `@latest` and an explicit
+`@v<version>` work.
 
 `go.mod` pins a released agentkit-go (`v0.9.0`) and carries no `replace`, so
 every target builds the committed pin and no make target needs the network
