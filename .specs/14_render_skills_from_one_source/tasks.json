@@ -1,0 +1,368 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "spec_id": "14",
+  "spec_name": "render_skills_from_one_source",
+  "schema_version": 2,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./internal/skillgen/... -count=1"
+  },
+  "dependencies": [],
+  "tasks": [
+    {
+      "id": 1,
+      "kind": "implement",
+      "title": "Read the skill source tree and resolve the files each skill links",
+      "criteria": [
+        "14-REQ-1"
+      ],
+      "tests": [
+        "TS-14-1",
+        "TS-14-2",
+        "TS-14-3",
+        "TS-14-4",
+        "TS-14-5"
+      ],
+      "steps": [
+        "Create internal/skillgen as package main, with source_test.go holding the behaviours of this task over testing/fstest.MapFS trees, and confirm they fail",
+        "In source.go, read a source directory with io/fs: every directory directly under it whose name does not begin with an underscore is a skill, and skills/_shared/references/ is the shared pool",
+        "Split each SKILL.md into the raw frontmatter text between the two --- lines and the body that follows the closing line, keeping both as bytes so later steps can filter the frontmatter without re-marshalling it",
+        "Collect the Markdown links in a body or a reference file whose target is references/<file>.md, and resolve each one in the skill's own references/ first and in the shared pool second",
+        "Walk the links transitively from SKILL.md through the reference files already included, so that a file is included when the skill links it or an included file links it, and no other file is",
+        "Report a link that resolves in neither directory with the message the criterion gives, naming the source file, the target and both directories",
+        "Report a name present in both the skill's own references/ and the shared pool, and a skill directory with no SKILL.md, no frontmatter, or frontmatter that go-yaml refuses, each as one `<source path>: <problem>` line"
+      ],
+      "touches": [
+        "internal/skillgen/source.go",
+        "internal/skillgen/source_test.go"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 2,
+      "kind": "implement",
+      "title": "Check a skill's name and description against the Agent Skills rule",
+      "criteria": [
+        "14-REQ-3"
+      ],
+      "tests": [
+        "TS-14-6",
+        "TS-14-7"
+      ],
+      "steps": [
+        "Add the name and description tables to internal/skillgen/render_test.go and confirm they fail",
+        "Parse the frontmatter text with go-yaml into a struct carrying name and description, and report frontmatter that is not YAML as the problem task 1 defines",
+        "Report a missing name, a name that differs from its directory's name, and a name that is not 1 to 64 characters of lowercase letters, digits and single hyphens with neither first nor last character a hyphen, each naming the rule broken",
+        "Report a missing description, an empty description and a description longer than 1,024 characters, and accept one of exactly 1,024"
+      ],
+      "touches": [
+        "internal/skillgen/render.go",
+        "internal/skillgen/render_test.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 3,
+      "kind": "implement",
+      "title": "Render one skill for one agent: the frontmatter, the token and nothing else",
+      "criteria": [
+        "14-REQ-2.2",
+        "14-REQ-2.3",
+        "14-REQ-2.6",
+        "14-REQ-5"
+      ],
+      "tests": [
+        "TS-14-8",
+        "TS-14-9",
+        "TS-14-10",
+        "TS-14-11",
+        "TS-14-16"
+      ],
+      "steps": [
+        "Add the per-agent frontmatter, token and forbidden-text behaviours to internal/skillgen/render_test.go and confirm they fail",
+        "Define the four agents in one table: the frontmatter keys each one keeps and whether {{invoke <name>}} becomes /<name> or $<name>",
+        "Filter the frontmatter line by line on its top-level keys, keeping a kept key's own line and its continuation lines verbatim and in the source's order, so the source's key order and text survive (see Design Decision 18)",
+        "Replace every {{invoke <name>}} in the body and in each reference file with the agent's syntax, and change no other byte",
+        "Report a {{invoke <name>}} naming no directory under the source, and any other {{...}} token, each naming the source file and the token",
+        "Report $ARGUMENTS, and /<name> or $<name> for a skill under the source, matching a name only where the character before it is the start of a line, whitespace, a backtick, an opening parenthesis, an opening bracket or a double quote and the character after it is the end of a line, whitespace or punctuation, so that the path skills/af-impl in prose is not reported (see Design Decision 19)",
+        "Keep the package's imports to the standard library and github.com/goccy/go-yaml, so that no run reads a credential or reaches the network"
+      ],
+      "touches": [
+        "internal/skillgen/render.go",
+        "internal/skillgen/render_test.go",
+        "internal/skillgen/agents.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 4,
+      "kind": "implement",
+      "title": "Enforce the 24,576-byte ceiling on a rendered body",
+      "criteria": [
+        "14-REQ-4"
+      ],
+      "tests": [
+        "TS-14-12"
+      ],
+      "steps": [
+        "Add the ceiling table to internal/skillgen/render_test.go, with the boundary, a multi-byte body and a body that grows past the limit only after the codex substitution, and confirm it fails",
+        "Measure a rendered body as len of the bytes that follow the line closing the frontmatter, after the token has been replaced for that agent, and accept exactly 24,576",
+        "Report a longer body as `<source path>: body is <n> bytes for <agent>, <n-24576> over the 24,576-byte limit`, with the thousands separators the criterion shows",
+        "Measure the body for each of the four agents separately, and measure no reference file"
+      ],
+      "touches": [
+        "internal/skillgen/render.go",
+        "internal/skillgen/render_test.go"
+      ],
+      "depends_on": [
+        3
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 5,
+      "kind": "implement",
+      "title": "Report every problem of a run, and warn about a reference file nothing links",
+      "criteria": [
+        "14-REQ-6"
+      ],
+      "tests": [
+        "TS-14-13",
+        "TS-14-14"
+      ],
+      "steps": [
+        "Add the reporting behaviours to internal/skillgen/check_test.go, over a tree with four problems at once and over a tree with two unlinked reference files, and confirm they fail",
+        "Collect the problems of the whole source tree in one pass rather than returning at the first, and write them to stderr one to a line as `<source path>: <problem>`",
+        "Exit non-zero on any problem and write no file for any agent, leaving an existing output directory exactly as it was",
+        "Warn about a file in a skill's own references/ that nothing links as `<path>: linked by nothing; not rendered`, and about a file in the shared pool that no skill links, both on stderr with the exit code left at 0"
+      ],
+      "touches": [
+        "internal/skillgen/check.go",
+        "internal/skillgen/check_test.go",
+        "internal/skillgen/main.go"
+      ],
+      "depends_on": [
+        1
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 6,
+      "kind": "implement",
+      "title": "Write the output tree for every agent, the same bytes every run",
+      "criteria": [
+        "14-REQ-2.1",
+        "14-REQ-2.4",
+        "14-REQ-2.5"
+      ],
+      "tests": [
+        "TS-14-15"
+      ],
+      "steps": [
+        "Add the output-tree, rerun and stale-file behaviours to internal/skillgen/render_test.go against a real temporary directory, and confirm they fail",
+        "Give main.go its flags: --source (default skills), --out (default build/skills), --check, --install, --uninstall, --agent, --project and --skills-dir, with an unknown flag refused",
+        "Write <out>/<agent>/<name>/SKILL.md and <out>/<agent>/<name>/references/<file>.md for the four agents and every skill, walking the skills and the agents in sorted order so the run is reproducible",
+        "Run every check first and write nothing on a problem; only once every check has passed, remove <out> and write it again, so that a file or a skill removed from the source is not left behind and a failed run leaves the previous output untouched",
+        "Write every file with the same mode and the same bytes on every run, taking nothing from the clock, the environment or map iteration order",
+        "Under --check, run every check and write nothing"
+      ],
+      "touches": [
+        "internal/skillgen/main.go",
+        "internal/skillgen/render.go",
+        "internal/skillgen/render_test.go"
+      ],
+      "depends_on": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 7,
+      "kind": "implement",
+      "title": "Resolve an agent's install directory, and refuse an unknown agent or a bad PROJECT",
+      "criteria": [
+        "14-REQ-7.2",
+        "14-REQ-7.6",
+        "14-REQ-7.7"
+      ],
+      "tests": [
+        "TS-14-17",
+        "TS-14-20"
+      ],
+      "steps": [
+        "Add the directory-resolution table and the two refusals to internal/skillgen/install_test.go, over a temporary HOME and with CODEX_HOME both set and unset, and confirm they fail",
+        "Resolve the directory as --skills-dir when it is given; else, when --project is given, as the agent's project directory from the install table; else as the agent's user directory, reading CODEX_HOME for codex and falling back to ~/.codex/skills when it is unset",
+        "Refuse an --agent outside the four with `unknown agent \"<value>\"; one of: claude, codex, cursor, copilot` on stderr, a non-zero exit code and nothing written",
+        "Refuse a --project that is not an existing directory with `PROJECT <path> is not a directory`, a non-zero exit code and nothing written, including when the path is a regular file",
+        "Check both refusals before reading the source tree, so that neither renders anything"
+      ],
+      "touches": [
+        "internal/skillgen/install.go",
+        "internal/skillgen/install_test.go",
+        "internal/skillgen/agents.go"
+      ],
+      "depends_on": [
+        6
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 8,
+      "kind": "implement",
+      "title": "Install and uninstall the skills in the resolved directory",
+      "criteria": [
+        "14-REQ-7.1",
+        "14-REQ-7.3",
+        "14-REQ-7.4",
+        "14-REQ-7.5",
+        "14-REQ-7.8",
+        "14-REQ-8"
+      ],
+      "tests": [
+        "TS-14-18",
+        "TS-14-19",
+        "TS-14-21",
+        "TS-14-22"
+      ],
+      "steps": [
+        "Add the install and uninstall behaviours to internal/skillgen/install_test.go, over a directory that already holds a stale reference file, an unrelated skill and a loose file, and confirm they fail",
+        "Under --install, default the agent to claude, render for that agent alone, then replace <dir>/<name>/ whole for each skill, creating <dir> if it is absent and touching no other entry under it",
+        "Print `installed: <name> -> <dir>/<name>` on stdout for each skill and exit 0",
+        "On any problem in the source tree, install nothing, print the problems as the render does and exit non-zero, leaving <dir> exactly as it was",
+        "Warn as `warning: <agent> also loads <path>/<name>; it will see <name> twice` when the agent also loads another directory that already holds that name, from the compatibility table in the PRD's Background, and install all the same",
+        "Under --uninstall, resolve the directory by the same rule, remove <dir>/<name> for each of af-prd, af-spec and af-impl, print `removed: <name>` for each one removed, skip a name that is absent without a line, and remove nothing else under <dir>"
+      ],
+      "touches": [
+        "internal/skillgen/install.go",
+        "internal/skillgen/install_test.go",
+        "internal/skillgen/main.go"
+      ],
+      "depends_on": [
+        7
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 9,
+      "kind": "implement",
+      "title": "Move the three skills into the source layout and split their bodies under the ceiling",
+      "criteria": [
+        "14-REQ-9"
+      ],
+      "tests": [
+        "TS-14-23"
+      ],
+      "steps": [
+        "Add TS-14-23 to internal/skillgen/render_test.go, reading the repository's own skills/ tree, and confirm it fails because the tree is still three extensionless files",
+        "git mv skills/af-prd, skills/af-spec and skills/af-impl to skills/<name>/SKILL.md, and create skills/_shared/references/ and a references/ directory under each skill",
+        "Write skills/_shared/references/prd-shape.md with the PRD's sections in order and what each holds, from af-prd §4, and the vague words and the size of one package, from af-prd §6; link it from af-prd §4 and §6 and from af-spec §1 and §5, so af-spec no longer depends on af-prd being loaded to know the shape",
+        "Write skills/_shared/references/speca-specr.md with the result fields of speca and specr, their exit codes 0, 1 and 2, writing --markdown-file and stdout to files outside the repository, the make build line and what to do when the commands are not installed; link it from all three skills",
+        "Write the six af-spec reference files of the PRD's table — prd-frontmatter.md, requirements.md, test-spec.md, tasks.md, architecture.md and verdict.md — moving the detail of §5 to §10 into them, and the three af-impl ones — test-first.md, conformance.md and landing.md",
+        "Open each step whose detail moved with `Read [references/<file>.md](references/<file>.md) in full before …`, and keep in every body the opening paragraph of rules, the run's order and its list of reasons to stop, every numbered step with the commands that gate it, Never, and the report",
+        "Keep every rule that stops a run, every gate and every item of Never in a body, never only in a reference file",
+        "Replace the five $ARGUMENTS with words naming the argument, and the three slash invocations with {{invoke af-prd}} and {{invoke af-impl}}; add disable-model-invocation: true to af-impl's frontmatter and leave af-prd's and af-spec's without it",
+        "Run go run ./internal/skillgen --check until it reports no problem and no warning, and confirm every body is at most 24,576 bytes for all four agents",
+        "While splitting, keep a list of every instruction deliberately cut, each with its reason, for the pull request description, so that nothing is lost without a word"
+      ],
+      "touches": [
+        "skills/af-prd/SKILL.md",
+        "skills/af-spec/SKILL.md",
+        "skills/af-impl/SKILL.md",
+        "skills/_shared/references/prd-shape.md",
+        "skills/_shared/references/speca-specr.md",
+        "skills/af-spec/references/",
+        "skills/af-impl/references/",
+        "internal/skillgen/render_test.go"
+      ],
+      "depends_on": [
+        6
+      ],
+      "done_when": [
+        "go run ./internal/skillgen --check reports no problem and no warning over the committed skills/ tree",
+        "every rendered body is at most 24,576 bytes for claude, codex, cursor and copilot",
+        "every instruction of the three pre-change skills is in a body, in a reference file, or in the list of deliberate cuts written for the pull request description"
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 10,
+      "kind": "implement",
+      "title": "Wire the render into make and document the source layout, the render and the install",
+      "criteria": [
+        "14-REQ-10"
+      ],
+      "tests": [
+        "TS-14-24"
+      ],
+      "steps": [
+        "Add TS-14-24 to internal/skillgen/make_test.go, reading make help and the plans of make -n check and make -n clean, and confirm it fails",
+        "Add SKILLS_SRC ?= skills and SKILLS_OUT ?= build/skills to the Makefile, and the targets skills and skills-check, each with its ## description and neither depending on $(AGENTKIT_DEP), so that no render target reaches the network",
+        "Rewrite install-skills and uninstall-skills to call go run ./internal/skillgen with --install or --uninstall and to pass AGENT, PROJECT and SKILLS_DIR through, keeping AGENT's default of claude so make install-skills does what it did",
+        "Add skills-check to the check target after test, and confirm clean still removes the directory that holds build/skills",
+        "Update the Agent Skills section of README.md: the four agents, the install line for each, the note that a Claude Code install already reaches Copilot, and the new targets in its table of make targets",
+        "Document AGENT, PROJECT, SKILLS_DIR, SKILLS_SRC and SKILLS_OUT in docs/configuration.md",
+        "Describe the source layout, the render and the install in docs/architecture.md, including that the render lives in internal/skillgen and adds no command",
+        "Write docs/adr/12-render-the-skills-for-every-agent-from-one-source.md recording the decision, the frontmatter table and the install table, each row with the date it was confirmed against that vendor's documentation, and settle Design Decisions 14 and 15 of the PRD",
+        "Add a line for skills/ and one for internal/skillgen to the Repository Layout section of AGENTS.md, which CLAUDE.md is a symlink to"
+      ],
+      "touches": [
+        "Makefile",
+        "internal/skillgen/make_test.go",
+        "README.md",
+        "docs/configuration.md",
+        "docs/architecture.md",
+        "docs/adr/12-render-the-skills-for-every-agent-from-one-source.md",
+        "AGENTS.md"
+      ],
+      "depends_on": [
+        8,
+        9
+      ],
+      "state": "pending"
+    },
+    {
+      "id": 11,
+      "kind": "integration",
+      "title": "Verify the three paths end to end and that the skills still behave the same",
+      "tests": [
+        "TS-14-25",
+        "TS-14-26",
+        "TS-14-27"
+      ],
+      "steps": [
+        "Add the three smoke tests to internal/skillgen/smoke_test.go, each running the real make target in the checkout, and confirm they pass",
+        "Trace 14-PATH-1 from make skills through the source reader, the per-agent render and the writer to build/skills, and confirm each step calls the next with no stub left",
+        "Trace 14-PATH-2 from make install-skills AGENT=codex PROJECT=<path> through the directory resolution and the whole-directory replacement to the installed tree, and back out again through make uninstall-skills",
+        "Trace 14-PATH-3 from make skills-check over a broken source to the lines on stderr and the absent output tree, and confirm make check fails the same way",
+        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: the problems the checks return reach main.go's stderr and exit code, and the resolved directory reaches the install writer",
+        "Grep internal/skillgen for TODO and panic(\"not implemented\") and remove any that remain",
+        "Run each of the three skills once in Claude Code and once in Codex, in a scratch repository, before the change and after it, on the same input: af-prd on an idea of two sentences, af-spec on a PRD of one or two requirement areas, af-impl on a package of two tasks",
+        "For each run after the change, confirm it reads each linked reference file at the step that links it, takes the same gates, and ends at the same stop or the same end, and that the af-spec run ends with a package speca --validate reports valid",
+        "Write what each pair of runs showed, any difference, and the list of deliberate cuts from task 9 into the pull request description"
+      ],
+      "touches": [
+        "internal/skillgen/smoke_test.go"
+      ],
+      "depends_on": [
+        10
+      ],
+      "done_when": [
+        "make test passes and make lint reports nothing",
+        "make skills-check reports no problem and no warning over the committed skills/ tree",
+        "the six before-and-after runs are recorded in the pull request description, with any difference named",
+        "the pull request description carries the list of deliberate cuts, each with its reason"
+      ],
+      "state": "pending"
+    }
+  ]
+}
