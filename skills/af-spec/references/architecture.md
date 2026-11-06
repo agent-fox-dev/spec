@@ -1,6 +1,6 @@
 # architecture.md
 
-What `af-spec` §9 writes, when it writes it at all: when the file is worth
+What `af-spec` §8 writes, when it writes it at all: when the file is worth
 having, its sections, and the two constraints on it.
 
 Write it only when the person asks, or when the PRD carries design detail

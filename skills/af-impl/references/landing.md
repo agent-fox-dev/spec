@@ -12,7 +12,7 @@ missing.
   holds: the open items first, if any, under the one heading
   `## Not complete: open items`; the spec's deviations and how the tasks
   handled them, grouped by the survey's kinds; one entry per task with its
-  commit, files changed, test verdicts, the test each of its test ids maps
+  commit, files changed, test verdicts, the test each of its criteria maps
   to, and any test-first deviation; the
   verification, before and after, as measured; and the conformance findings
   and what was done about each. Every claim in it comes from something that
