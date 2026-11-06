@@ -4,7 +4,7 @@ spec_name: "review_triage_convergence"
 title: "Triage every review finding four ways and converge on two clean rounds"
 status: "active"
 created_at: "2026-11-06T12:57:04Z"
-updated_at: "2026-11-06T14:44:01Z"
+updated_at: "2026-11-06T14:46:10Z"
 intent_hash: "d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109"
 schema_version: 2
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"

@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:57:04Z
-- **Updated:** 2026-11-06T14:44:01Z
+- **Updated:** 2026-11-06T14:46:10Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109`
 
@@ -1226,7 +1226,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 5. Check the PRD against the steering directives, and report the review in the summary (implement, pending)
+### [x] 5. Check the PRD against the steering directives, and report the review in the summary (implement, done)
 
 **Criteria:** 17-REQ-5.7, 17-REQ-6.1, 17-REQ-6.2, 17-REQ-6.3, 17-REQ-6.4
 

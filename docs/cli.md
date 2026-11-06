@@ -143,7 +143,11 @@ A **round** is one review and, when the review raised anything, one revision:
   - the input and `--context`;
   - the PRD phase's `codebase_notes`, labelled as the author's claims to check
     against the code;
-  - the steering, the repository map and the existing specs;
+  - the steering, the repository map and the existing specs; when the
+    steering says something, the review checks the PRD against every
+    directive, and a contradiction is a `steering` finding quoting the
+    directive. A `steering` finding is fixed, contested or escalated, never
+    declined: if a directive is wrong, the remedy is to amend the steering;
   - in a split, the split, what the earlier scopes deliver, and that another
     scope's work is not a dropped ask.
 
@@ -153,6 +157,11 @@ A **round** is one review and, when the review raised anything, one revision:
   `evidence`, `remedy` and `reopens`. The run numbers them `R<round>-F<n>`. A
   submission is turned back when it has more than 30 findings, a finding with an
   empty field, or a rubric other than the two, or when a finding:
+  - has the rubric `steering` and the severity `minor` (a steering finding is
+    `critical` or `major`);
+  - has the rubric `steering` and evidence that quotes no passage of the
+    steering body verbatim, whitespace aside (with no steering, no finding can
+    have that rubric);
   - reopens anything in round 1;
   - reopens an id no earlier round raised, or one that was not contested
     (fixed, declined, escalated or unanswered);
@@ -442,8 +451,9 @@ done, never beside a non-zero `exit_code` or an `error`. `status` is derived
 from the exit code. `summary` is one sentence of at most 200 characters, with a
 clause counting high-severity warnings on a success. With `--adversarial` it
 also counts the reviews of every package, after the open questions:
-`spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 fixed`
-(`review: 1 round, 0 findings` when nothing was found).
+`spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings (1 steering), 7 fixed`
+(`review: 1 round, 0 findings` when nothing was found; the parenthesis counts
+the findings with the rubric `steering`, and is left out when there are none).
 
 `usage.input_tokens` is net of the prompt cache; the cache figures are what
 make it agree with `cost_usd`. Each phase in `usage.phases[]` carries the same

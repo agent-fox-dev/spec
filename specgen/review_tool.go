@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -74,12 +75,14 @@ func reviewSchema() *schema.Schema {
 
 // newReviewTool is the terminator of round round's review. earlier are the
 // findings of the rounds before it, with their dispositions, so a repeat of
-// a settled finding can be told apart from a new one.
+// a settled finding can be told apart from a new one. steering is the body of
+// the project's steering, which a steering finding must quote; with none, no
+// finding can carry that rubric.
 //
 // Every check runs over the whole submission and one error names every
 // offender, so the reviewer corrects them in one turn. A submission that
 // fails any check records nothing.
-func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
+func newReviewTool(sink *reviewSink, round int, earlier []Finding, steering string) core.Tool {
 	byID := make(map[string]Finding, len(earlier))
 	for _, f := range earlier {
 		byID[f.ID] = f
@@ -110,7 +113,7 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 			var problems []string
 			unsupported := false
 			for i := range payload.Findings {
-				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID)
+				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID, steering)
 				problems = append(problems, p...)
 				unsupported = unsupported || empty
 			}
@@ -140,7 +143,7 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 // checkFinding normalises the finding at position pos of round round's
 // review and says what is wrong with it, and whether a field is empty.
 // earlier are the earlier rounds' findings, byID the same by id.
-func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding) (problems []string, empty bool) {
+func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding, steering string) (problems []string, empty bool) {
 	for _, s := range []*string{&f.Severity, &f.Rubric, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
 		*s = strings.TrimSpace(*s)
 	}
@@ -165,6 +168,17 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 	}
 	if !slices.Contains(rubrics, f.Rubric) {
 		problems = append(problems, fmt.Sprintf("finding %d has rubric %q; it is prd or steering", pos, f.Rubric))
+	}
+	if f.Rubric == envelope.RubricSteering {
+		if f.Severity == envelope.SeverityMinor {
+			problems = append(problems, fmt.Sprintf("finding %d has the rubric steering and the severity minor: "+
+				"a steering finding is critical or major", pos))
+		}
+		if f.Evidence != "" && !quotesSteering(f.Evidence, steering) {
+			problems = append(problems, fmt.Sprintf("finding %d has the rubric steering, and its evidence quotes no "+
+				"passage of the steering: the evidence of a steering finding must quote the directive it contradicts, "+
+				"verbatim", pos))
+		}
 	}
 
 	// A declined or escalated finding is settled: it may not be raised again,
@@ -212,6 +226,38 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		}
 	}
 	return problems, len(missing) > 0
+}
+
+// quoted is the text a piece of evidence quotes: between double quotes,
+// typographic quotes or backticks, or on a line opening with >.
+var quoted = regexp.MustCompile("\"([^\"]+)\"|“([^”]+)”|`([^`]+)`|(?m)^\\s*>\\s*(.+)$")
+
+// quotesSteering reports whether evidence quotes a passage of the steering
+// body, whitespace aside: one of its quotations, or, when it has none, the
+// whole of it. A passage under ten characters is not a quotation of a
+// directive. A steering that says nothing is quoted by nothing.
+func quotesSteering(evidence, steering string) bool {
+	body := normaliseEvidence(steering)
+	if body == "" {
+		return false
+	}
+	var passages []string
+	for _, m := range quoted.FindAllStringSubmatch(evidence, -1) {
+		for _, g := range m[1:] {
+			if g != "" {
+				passages = append(passages, g)
+			}
+		}
+	}
+	if len(passages) == 0 {
+		passages = []string{evidence}
+	}
+	for _, p := range passages {
+		if p = normaliseEvidence(p); len(p) >= 10 && strings.Contains(body, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // normaliseEvidence trims s and collapses every run of whitespace inside it

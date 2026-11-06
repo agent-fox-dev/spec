@@ -184,7 +184,7 @@ func (r Result) Summary() string {
 // when none was reviewed.
 func reviewClause(pkgs []Package) string {
 	reviewed := false
-	var rounds, findings, fixed int
+	var rounds, findings, fixed, steering int
 	for _, p := range pkgs {
 		if p.Review == nil {
 			continue
@@ -193,11 +193,21 @@ func reviewClause(pkgs []Package) string {
 		rounds += p.Review.RoundsRun
 		findings += p.Review.FindingsCount
 		fixed += p.Review.FixedCount
+		for _, round := range p.Review.Rounds {
+			for _, f := range round.Findings {
+				if f.Rubric == envelope.RubricSteering {
+					steering++
+				}
+			}
+		}
 	}
 	if !reviewed {
 		return ""
 	}
 	clause := fmt.Sprintf("review: %s, %s", countOf(rounds, "round"), countOf(findings, "finding"))
+	if steering > 0 {
+		clause += fmt.Sprintf(" (%d steering)", steering)
+	}
 	if findings > 0 {
 		clause += fmt.Sprintf(", %d fixed", fixed)
 	}

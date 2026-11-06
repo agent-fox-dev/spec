@@ -75,7 +75,7 @@ func TestReviewTool_AcceptsAWellFormedReview(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var sink reviewSink
-			r := submitReview(t, newReviewTool(&sink, tc.round, tc.earlier), tc.findings)
+			r := submitReview(t, newReviewTool(&sink, tc.round, tc.earlier, ""), tc.findings)
 			if !r.OK || !r.Terminate {
 				t.Fatalf("%+v", r)
 			}
@@ -136,7 +136,7 @@ func TestReviewTool_TurnsBackAnInvalidReview(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var sink reviewSink
-			r := submitReview(t, newReviewTool(&sink, tc.round, tc.earlier), tc.findings)
+			r := submitReview(t, newReviewTool(&sink, tc.round, tc.earlier, ""), tc.findings)
 			if r.OK || r.Terminate || r.Error != tc.code {
 				t.Fatalf("result %+v, want %s", r, tc.code)
 			}
@@ -156,7 +156,7 @@ func TestReviewTool_TurnsBackAnInvalidReview(t *testing.T) {
 		})
 	}
 	var sink reviewSink
-	if r := newReviewTool(&sink, 1, nil).Execute(context.Background(), json.RawMessage(`{"findings":"none"}`)); r.OK ||
+	if r := newReviewTool(&sink, 1, nil, "").Execute(context.Background(), json.RawMessage(`{"findings":"none"}`)); r.OK ||
 		r.Error != "invalid_arguments" {
 		t.Errorf("arguments that are not a review: %+v", r)
 	}
@@ -258,11 +258,89 @@ func TestReviewTool_HoldsALaterRoundToWhatWasSettled(t *testing.T) {
 			if tc.round == 1 {
 				earlier = nil
 			}
-			r := submitReview(t, newReviewTool(&sink, tc.round, earlier), []reviewInput{tc.finding})
+			r := submitReview(t, newReviewTool(&sink, tc.round, earlier, ""), []reviewInput{tc.finding})
 			got, recorded := sink.get()
 			if tc.says == nil {
 				if !r.OK || !recorded || got[0].Reopens != tc.finding.Reopens {
 					t.Errorf("turned back or mis-recorded: %+v, %+v", r, got)
+				}
+				return
+			}
+			if r.OK || recorded {
+				t.Fatalf("accepted: %+v", r)
+			}
+			for _, w := range tc.says {
+				if !strings.Contains(r.Detail, w) {
+					t.Errorf("the error does not say %q: %s", w, r.Detail)
+				}
+			}
+		})
+	}
+}
+
+const steeringDirective = "Tests are organised by behaviour, not by spec."
+
+// steeringBody is a steering body holding the directive.
+var steeringBody = "# Steering\n\n- " + steeringDirective + "\n- Use make check.\n"
+
+// Every finding carries a rubric of prd or steering, and nothing else.
+func TestReviewTool_TakesARubricOfPRDOrSteering(t *testing.T) {
+	steering := wellFormed(2)
+	steering.Rubric, steering.Evidence = "steering", `"`+steeringDirective+`" — the PRD adds a per-spec test file`
+	other := wellFormed(3)
+	other.Rubric = "style"
+
+	var sink reviewSink
+	r := submitReview(t, newReviewTool(&sink, 1, nil, steeringBody), []reviewInput{wellFormed(1), steering})
+	got, ok := sink.get()
+	if !r.OK || !ok || got[0].Rubric != "prd" || got[1].Rubric != "steering" {
+		t.Fatalf("result %+v, recorded %+v", r, got)
+	}
+	for _, rubric := range []string{"style", ""} {
+		f := wellFormed(3)
+		f.Rubric = rubric
+		var sink reviewSink
+		r := submitReview(t, newReviewTool(&sink, 1, nil, steeringBody), []reviewInput{wellFormed(1), f})
+		if _, recorded := sink.get(); r.OK || recorded || !strings.Contains(r.Detail, "finding 2") ||
+			!strings.Contains(r.Detail, "prd") || !strings.Contains(r.Detail, "steering") {
+			t.Errorf("rubric %q: %+v; want the position and the two values", rubric, r)
+		}
+	}
+}
+
+// A steering finding quotes the directive it contradicts, whitespace aside,
+// and is critical or major.
+func TestReviewTool_HoldsASteeringFindingToItsDirective(t *testing.T) {
+	finding := func(severity, evidence string) reviewInput {
+		f := wellFormed(1)
+		f.Rubric, f.Severity, f.Evidence = "steering", severity, evidence
+		return f
+	}
+	for _, tc := range []struct {
+		name  string
+		f     reviewInput
+		says  []string // nil when accepted
+		empty bool     // a steering body that says nothing
+	}{
+		{"quoting the directive", finding("major", `"`+steeringDirective+`" against "a test file per spec"`), nil, false},
+		{"the quote spaced differently", finding("major", "`Tests are   organised\nby behaviour, not by spec.` against the PRD"), nil, false},
+		{"quoting nothing from the steering", finding("major", `"Every test lives in its own package."`),
+			[]string{"finding 1", "quote the directive it contradicts"}, false},
+		{"critical", finding("critical", `"`+steeringDirective+`"`), nil, false},
+		{"minor", finding("minor", `"`+steeringDirective+`"`), []string{"finding 1", "critical or major"}, false},
+		{"a steering that says nothing", finding("major", `"`+steeringDirective+`"`), []string{"finding 1", "quote the directive"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := steeringBody
+			if tc.empty {
+				body = ""
+			}
+			var sink reviewSink
+			r := submitReview(t, newReviewTool(&sink, 1, nil, body), []reviewInput{tc.f})
+			_, recorded := sink.get()
+			if tc.says == nil {
+				if !r.OK || !recorded {
+					t.Errorf("turned back: %+v", r)
 				}
 				return
 			}

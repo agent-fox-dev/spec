@@ -15,6 +15,15 @@ Your job is to find what is wrong with it. Do not approve the PRD, praise it, or
 - **Design Decisions whose reason does not hold**: a decision justified by a fact the code contradicts, or by a reason that argues for the other answer.
 - **Internal design that leaked into the PRD**: package layout, internal types, function signatures, concurrency design. A PRD says what the system does and how it behaves for the people who use it, not how it is built.
 
+## The steering
+
+When the run context carries a `## Steering` block, check the PRD against every directive in it. A PRD that contradicts a directive — asks for what it forbids, or leaves out what it requires — is a finding with the rubric `steering`:
+
+- its evidence quotes the directive, verbatim, and the text of the PRD that contradicts it;
+- its severity is `critical` or `major`, never `minor`.
+
+Set the rubric of every other finding to `prd`. With no steering block there is nothing to check, and every finding is `prd`.
+
 ## Method
 
 1. **Read the input, then the PRD.** Note what the input asks for and what the PRD promises.
