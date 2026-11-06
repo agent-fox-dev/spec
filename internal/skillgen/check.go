@@ -21,7 +21,7 @@ func (s *source) unlinked() []problem {
 // in name order so a run reports the same lines every time.
 func notLinked(pool map[string]*ref, linked map[string]bool) []problem {
 	var warnings []problem
-	for _, name := range sortedNames(pool) {
+	for _, name := range sortedKeys(pool) {
 		if r := pool[name]; !linked[r.from] {
 			warnings = append(warnings, problem{r.from, "linked by nothing; not rendered"})
 		}

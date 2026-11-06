@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -292,12 +294,18 @@ func TestMain_RendersWithNoCredentialAndNoReachableNetwork(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
 
+	out := filepath.Join(t.TempDir(), "skills")
 	var stdout, stderr bytes.Buffer
-	if code := Main([]string{"--source", dir}, &stdout, &stderr); code != 0 {
+	if code := Main([]string{"--source", dir, "--out", out}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("code %d, stderr %q", code, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want nothing", stderr.String())
+	}
+	for _, a := range agents {
+		if _, err := os.Stat(filepath.Join(out, a.name, "af-spec", skillDoc)); err != nil {
+			t.Errorf("%s: %v", a.name, err)
+		}
 	}
 }
 

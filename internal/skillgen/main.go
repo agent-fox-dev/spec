@@ -2,7 +2,7 @@
 // that loads skills from a directory, and installs them into that agent's skill
 // directory.
 //
-//	go run ./internal/skillgen [--source DIR] [--out DIR]
+//	go run ./internal/skillgen [--source DIR] [--out DIR] [--check]
 //
 // It is not installed: make runs it, so the repository's public surface does
 // not grow. It makes no model call, no network call and reads no credential,
@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // defaultSource is the skills tree the render reads, and defaultOut where it
@@ -36,11 +37,19 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	source := flags.String("source", defaultSource, "the skills tree to read")
 	out := flags.String("out", defaultOut, "where to write the rendered skills")
+	check := flags.Bool("check", false, "run the checks and write nothing")
 	if err := flags.Parse(argv); err != nil {
 		return exitUsage
 	}
 	if *source == "" || *out == "" {
 		fmt.Fprintln(stderr, "skillgen: --source and --out must name a directory")
+		return exitUsage
+	}
+	// The render replaces its output directory whole, so a mistaken --out would
+	// take the tree it names with it.
+	if clean := filepath.Clean(*out); clean == "." || clean == string(filepath.Separator) ||
+		clean == filepath.Clean(*source) {
+		fmt.Fprintf(stderr, "skillgen: --out %s would be replaced whole; name a directory of its own\n", *out)
 		return exitUsage
 	}
 
@@ -54,6 +63,13 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	// Nothing is written while the source tree holds a problem, so a failed run
 	// leaves the previous output exactly as it was.
 	if len(problems) > 0 {
+		return exitProblem
+	}
+	if *check {
+		return exitOK
+	}
+	if err := src.write(*out); err != nil {
+		fmt.Fprintln(stderr, "skillgen: "+err.Error())
 		return exitProblem
 	}
 	return exitOK

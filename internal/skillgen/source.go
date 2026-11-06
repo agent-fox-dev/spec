@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -199,7 +201,7 @@ func readRefs(fsys fs.FS, dir, root string) map[string]*ref {
 // one skill cannot drift from its siblings without a word.
 func (s *source) shadowed(sk *skill) []problem {
 	var problems []problem
-	for _, name := range sortedNames(sk.own) {
+	for _, name := range sortedKeys(sk.own) {
 		if _, both := s.shared[name]; !both {
 			continue
 		}
@@ -261,7 +263,7 @@ func (s *source) checkTexts() []problem {
 	checked := map[string]bool{}
 	for _, sk := range s.skills {
 		problems = append(problems, checkTokens(sk.path, sk.body, names)...)
-		for _, name := range sortedNames(sk.refs) {
+		for _, name := range sortedKeys(sk.refs) {
 			r := sk.refs[name]
 			if checked[r.from] {
 				continue
@@ -288,13 +290,8 @@ func linkedRefs(text string) []string {
 	return found
 }
 
-// sortedNames returns a reference map's keys in order, so that every message
-// the render writes comes out the same on every run.
-func sortedNames(refs map[string]*ref) []string {
-	names := make([]string, 0, len(refs))
-	for name := range refs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+// sortedKeys returns a map's keys in order, so that every message the render
+// writes and every file it writes comes out the same on every run.
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }
