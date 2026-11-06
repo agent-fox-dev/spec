@@ -101,6 +101,7 @@ func readSource(fsys fs.FS, root string) (*source, []problem) {
 		problems = append(problems, src.shadowed(sk)...)
 		problems = append(problems, src.include(sk)...)
 	}
+	problems = append(problems, src.checkTexts()...)
 	sort.Slice(problems, func(i, j int) bool {
 		if problems[i].path != problems[j].path {
 			return problems[i].path < problems[j].path
@@ -236,6 +237,36 @@ func (s *source) include(sk *skill) []problem {
 			}
 			sk.refs[name] = target
 			queue = append(queue, target)
+		}
+	}
+	return problems
+}
+
+// names is the set of skill names an invocation may name.
+func (s *source) names() map[string]bool {
+	names := make(map[string]bool, len(s.skills))
+	for _, sk := range s.skills {
+		names[sk.name] = true
+	}
+	return names
+}
+
+// checkTexts reports the token and agent-specific-text problems of every source
+// file, each file once: a shared reference file is included by several skills,
+// but it is one file for an author to fix.
+func (s *source) checkTexts() []problem {
+	names := s.names()
+	var problems []problem
+	checked := map[string]bool{}
+	for _, sk := range s.skills {
+		problems = append(problems, checkTokens(sk.path, sk.body, names)...)
+		for _, name := range sortedNames(sk.refs) {
+			r := sk.refs[name]
+			if checked[r.from] {
+				continue
+			}
+			checked[r.from] = true
+			problems = append(problems, checkTokens(r.from, string(r.data), names)...)
 		}
 	}
 	return problems

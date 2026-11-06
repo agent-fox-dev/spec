@@ -26,6 +26,29 @@ var nameRule = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 const nameRuleText = "1 to 64 characters of lowercase letters, digits and single hyphens, " +
 	"with neither the first nor the last character a hyphen"
 
+// topLevelKey matches a frontmatter line that opens a key at the top level. A
+// line it does not match continues the key before it, which is why the filter
+// works on lines and not on a parsed mapping: the source's key order and the
+// text of each value survive (see ADR 12).
+var topLevelKey = regexp.MustCompile(`^([A-Za-z0-9_.-]+):`)
+
+// invokeToken is the one token the render replaces, and braceToken is every
+// brace token, so that one the render does not understand is reported rather
+// than passed through to an agent that would show it to the user.
+var (
+	invokeToken = regexp.MustCompile(`\{\{invoke ([a-z0-9-]+)\}\}`)
+	braceToken  = regexp.MustCompile(`\{\{[^{}]*\}\}`)
+)
+
+// argumentPlaceholder is Claude Code's own placeholder for a skill's argument.
+// A skill that carries it works in Claude Code and nowhere else.
+const argumentPlaceholder = "$ARGUMENTS"
+
+// ownSyntax matches a skill named in an agent's own invocation syntax, but only
+// where the name stands alone: the delimiters on both sides keep a path such as
+// skills/af-impl, written in prose, from being reported (see ADR 12).
+var ownSyntax = regexp.MustCompile("(?m)(^|[\\s`(\\[\"])([/$])([a-z0-9-]+)($|[\\s[:punct:]])")
+
 // meta is the part of a frontmatter the render reads. Every other key is
 // carried through or dropped by the agent's key list, never interpreted.
 type meta struct {
@@ -57,4 +80,105 @@ func checkMeta(sk *skill) []problem {
 			utf8.RuneCountInString(description))})
 	}
 	return problems
+}
+
+// rendered is one skill as one agent receives it.
+type rendered struct {
+	doc  string            // the whole SKILL.md, frontmatter and body
+	body string            // the part after the closing delimiter, which carries the ceiling
+	refs map[string]string // the included reference files, by base name
+}
+
+// renderSkill renders one skill for one agent: the frontmatter filtered to the
+// keys that agent reads, and the invocation token replaced. Nothing else in the
+// body or in a reference file changes.
+func renderSkill(sk *skill, a agent) rendered {
+	out := rendered{
+		body: a.substitute(sk.body),
+		refs: make(map[string]string, len(sk.refs)),
+	}
+	out.doc = delimiter + "\n" + filterFrontmatter(sk.frontmatter, a.keys) + "\n" + delimiter + "\n" + out.body
+	for name, r := range sk.refs {
+		out.refs[name] = a.substitute(string(r.data))
+	}
+	return out
+}
+
+// substitute replaces every invocation token with this agent's syntax. It is
+// the only text the render rewrites. The replacement is computed and not a
+// template, because codex's prefix is "$", which a template would read as the
+// start of a group reference.
+func (a agent) substitute(text string) string {
+	return invokeToken.ReplaceAllStringFunc(text, func(token string) string {
+		return a.invoke + invokeToken.FindStringSubmatch(token)[1]
+	})
+}
+
+// filterFrontmatter keeps only the keys given, in the order the source gives
+// them, each with its own line and its continuation lines verbatim. A line that
+// does not open a top-level key belongs to the key above it, so a value spread
+// over several lines is kept or dropped whole.
+func filterFrontmatter(frontmatter string, keys []string) string {
+	wanted := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		wanted[key] = true
+	}
+	var kept []string
+	keeping := false
+	for _, line := range strings.Split(frontmatter, "\n") {
+		if match := topLevelKey.FindStringSubmatch(line); match != nil {
+			keeping = wanted[match[1]]
+		}
+		if keeping {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// checkTokens reports the brace tokens and the agent-specific text one source
+// file must not carry. skills is the set of names an invocation may name.
+func checkTokens(path, text string, skills map[string]bool) []problem {
+	var problems []problem
+	for _, token := range braceToken.FindAllString(text, -1) {
+		match := invokeToken.FindStringSubmatch(token)
+		switch {
+		case match == nil:
+			problems = append(problems, problem{path, fmt.Sprintf(
+				"holds %s; the only token the render replaces is {{invoke <name>}}", token)})
+		case !skills[match[1]]:
+			problems = append(problems, problem{path, fmt.Sprintf(
+				"holds %s, and %s is no skill under the source", token, match[1])})
+		}
+	}
+	if strings.Contains(text, argumentPlaceholder) {
+		problems = append(problems, problem{path, fmt.Sprintf(
+			"holds %s; name the argument in words, which every agent reads the same, "+
+				"and another skill as {{invoke <name>}}", argumentPlaceholder)})
+	}
+	for _, match := range ownSyntax.FindAllStringSubmatch(text, -1) {
+		name := match[3]
+		if !skills[name] {
+			continue
+		}
+		problems = append(problems, problem{path, fmt.Sprintf(
+			"holds %s%s, one agent's own invocation syntax; write it as {{invoke %s}}",
+			match[2], name, name)})
+	}
+	return dedupe(problems)
+}
+
+// dedupe drops the repeats a file with the same token twice would produce, so
+// one mistake is one line for the author to fix.
+func dedupe(problems []problem) []problem {
+	seen := map[problem]bool{}
+	kept := problems[:0]
+	for _, p := range problems {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		kept = append(kept, p)
+	}
+	return kept
 }

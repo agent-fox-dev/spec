@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -59,4 +61,19 @@ func onlyProblem(t *testing.T, problems []problem) string {
 		t.Fatalf("want exactly one problem, got %d: %s", len(problems), strings.Join(lines(problems), " | "))
 	}
 	return problems[0].String()
+}
+
+// writeTree writes an in-memory tree to a real directory, for the behaviours
+// that need os.DirFS or a tree the render writes into.
+func writeTree(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for name, data := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
