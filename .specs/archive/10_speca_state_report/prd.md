@@ -2,9 +2,9 @@
 spec_id: "10"
 spec_name: "speca_state_report"
 title: "speca: report a spec package's state from the shell"
-status: "active"
+status: "archived"
 created_at: "2026-10-22T07:23:01.807482Z"
-updated_at: "2026-10-22T07:23:01.807482Z"
+updated_at: "2026-11-06T15:39:56Z"
 intent_hash: "72a28f44629e25835193cef851f8a7f699d3f0bb567baa252077ecd8d1da5c51"
 schema_version: 2
 source: "docs/prd/02-change-the-state-of-a-package-with-its-own-command.md"

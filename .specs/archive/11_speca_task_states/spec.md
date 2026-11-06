@@ -4,10 +4,10 @@
 
 - **Spec:** `11_speca_task_states` (id `11`, name `speca_task_states`)
 - **Title:** speca: change the state of a package's tasks
-- **Status:** active
+- **Status:** archived
 - **Schema version:** 2
 - **Created:** 2026-10-22T07:30:22.814235Z
-- **Updated:** 2026-10-22T07:30:22.814235Z
+- **Updated:** 2026-11-06T15:39:56Z
 - **Source:** docs/prd/02-change-the-state-of-a-package-with-its-own-command.md
 - **Intent hash:** `cbc694a5761e9e7b068e3446dfc496a192d57bdf81188ae91e8c70a2969986da`
 

@@ -4,10 +4,10 @@
 
 - **Spec:** `14_render_skills_from_one_source` (id `14`, name `render_skills_from_one_source`)
 - **Title:** Render the skills for every agent from one source
-- **Status:** active
+- **Status:** archived
 - **Schema version:** 2
 - **Created:** 2026-11-06T08:14:00Z
-- **Updated:** 2026-11-06T09:12:33Z
+- **Updated:** 2026-11-06T15:39:57Z
 - **Source:** docs/prd/03-render-the-skills-for-every-agent-from-one-source.md
 - **Intent hash:** `0fa8296fc069cac263cae0437e0a2188564e76c83633c22bd3f7c4b8b5602fcd`
 

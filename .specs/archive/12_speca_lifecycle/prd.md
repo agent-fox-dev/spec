@@ -2,9 +2,9 @@
 spec_id: "12"
 spec_name: "speca_lifecycle"
 title: "speca: change a spec package's lifecycle status from the shell"
-status: "active"
+status: "archived"
 created_at: "2026-10-22T07:38:59.238888Z"
-updated_at: "2026-10-22T07:38:59.238888Z"
+updated_at: "2026-11-06T15:39:57Z"
 intent_hash: "41b432c6da8f9ce99881f49e1f81acc48c449a79a999a82ad9a26d7cf1650419"
 schema_version: 2
 source: "docs/prd/02-change-the-state-of-a-package-with-its-own-command.md"
