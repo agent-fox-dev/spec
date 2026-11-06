@@ -3,7 +3,10 @@ package afspec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -1064,20 +1067,73 @@ func (s *Spec) Validate() ValidationResult {
 
 	// Cross-file rules resolve IDs against artifacts the schema has already
 	// rejected, so running them on a schema-invalid spec only adds noise.
+	renderedErrs, renderedWarns := s.checkRendered()
 	if !schemaResult.Valid {
 		return ValidationResult{
 			Valid:    false,
-			Errors:   schemaResult.Errors,
-			Warnings: schemaResult.Warnings,
+			Errors:   append(schemaResult.Errors, renderedErrs...),
+			Warnings: append(schemaResult.Warnings, renderedWarns...),
 		}
 	}
 
 	crossFile := s.ValidateCrossFile()
+	errs := append(crossFile.Errors, renderedErrs...)
 	return ValidationResult{
-		Valid:    len(crossFile.Errors) == 0,
-		Errors:   crossFile.Errors,
-		Warnings: append(schemaResult.Warnings, crossFile.Warnings...),
+		Valid:    len(errs) == 0,
+		Errors:   errs,
+		Warnings: append(append(schemaResult.Warnings, crossFile.Warnings...), renderedWarns...),
 	}
+}
+
+// checkRendered is the rule rendered: the RenderedFileName in the directory a
+// package was read from must be its render. A missing file is a warning, the
+// ordinary state of a package written before every save wrote one. A file that
+// differs, or that is there and cannot be read, is an error while the package
+// can still be saved and so rendered again, and a warning once it is sealed,
+// superseded or archived: a change of the renderer must not make history
+// invalid (ADR 14). A package not read from disk has no file to compare.
+func (s *Spec) checkRendered() (errs, warns []ValidationEntry) {
+	if !s.fromDisk || s.Dir == "" {
+		return nil, nil
+	}
+	call := fmt.Sprintf("speca %s --render", filepath.Base(s.Dir))
+	entry := func(category, msg string) ValidationEntry {
+		return ValidationEntry{Category: category, Check: "rendered", Artifact: RenderedFileName, EntityID: s.SpecID, Message: msg}
+	}
+	got, err := os.ReadFile(filepath.Join(s.Dir, RenderedFileName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, []ValidationEntry{entry("warning", fmt.Sprintf("%s is missing; run %s", RenderedFileName, call))}
+	}
+	var msg string
+	switch {
+	case err != nil:
+		msg = fmt.Sprintf("%s cannot be read (%v); run %s", RenderedFileName, err, call)
+	default:
+		line, same := firstDifferingLine(s.RenderedBytes(), got)
+		if same {
+			return nil, nil
+		}
+		msg = fmt.Sprintf("%s is not the package's render from line %d on; run %s", RenderedFileName, line, call)
+	}
+	if s.Status == "draft" || s.Status == "active" {
+		return []ValidationEntry{entry("integrity", msg)}, nil
+	}
+	return nil, []ValidationEntry{entry("warning", msg)}
+}
+
+// firstDifferingLine is the 1-based number of the first line where got differs
+// from want, and whether they are equal.
+func firstDifferingLine(want, got []byte) (int, bool) {
+	if bytes.Equal(want, got) {
+		return 0, true
+	}
+	w, g := bytes.Split(want, []byte("\n")), bytes.Split(got, []byte("\n"))
+	for i := range min(len(w), len(g)) {
+		if !bytes.Equal(w[i], g[i]) {
+			return i + 1, false
+		}
+	}
+	return min(len(w), len(g)) + 1, false
 }
 
 // ---------------------------------------------------------------------------

@@ -507,3 +507,13 @@ func activeInto(t *testing.T, dir string) string {
 	}
 	return dir
 }
+
+// withRender writes the render of the package in dir to its RenderedFileName,
+// as a save would, and returns dir.
+func withRender(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, RenderedFileName), loadFixture(t, dir).RenderedBytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}

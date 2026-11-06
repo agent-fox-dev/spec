@@ -254,6 +254,37 @@ func TestStatus_RefusesATakenArchiveDestination(t *testing.T) {
 	}
 }
 
+// A draft whose spec.md is not its render does not validate, so its activation
+// is refused and the message names the call that renders it; --force activates
+// it with a warning that names the rule.
+func TestStatus_RefusesToActivateADraftWhoseRenderIsStale(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	writeFile(t, filepath.Join(dir, afspec.RenderedFileName), "a render of something else\n")
+
+	argv := []string{"09", "--status", "active"}
+	e := refusedAt(t, root, "validate", envelope.CategoryInvalidSpec, argv...)
+	if e == nil {
+		return
+	}
+	saysAll(t, argv, e.Message, "rendered", "speca .specs/09_agent_mode --render")
+	if spec := loadSpec(t, dir); spec.Status != "draft" || spec.IntentHash != nil {
+		t.Errorf("on disk: status %q, intent_hash %v; want draft and no hash", spec.Status, spec.IntentHash)
+	}
+
+	env, r := succeeds(t, root, "09", "--status", "active", "--force")
+	if r.Status != "active" {
+		t.Errorf("status %q; want active with --force", r.Status)
+	}
+	named := false
+	for _, w := range env.Warnings {
+		named = named || (w.Code == cli.WarnSpecInvalid && w.Severity == "high" && strings.Contains(w.Message, "rendered"))
+	}
+	if !named {
+		t.Errorf("warnings %+v; want a high spec_invalid warning naming rendered", env.Warnings)
+	}
+}
+
 // A draft that validates and has an intent is activated: the status and the
 // hash of the intent are written, and the package stays where it is.
 func TestStatus_ActivatesADraft(t *testing.T) {

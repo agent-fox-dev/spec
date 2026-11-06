@@ -57,6 +57,12 @@ type Spec struct {
 	// are recorded here for ValidateSchema to report.
 	unknown map[string][]string
 
+	// fromDisk is true for a package LoadSpec read, and for the copies a
+	// lifecycle move makes of one. Only such a package is held to the
+	// RenderedFileName in its directory: a generation run's dry run sets Dir
+	// on a package it never wrote.
+	fromDisk bool
+
 	// loaded holds an immutable snapshot of identity fields captured at load
 	// time (or at activation via Transition). Non-nil when the spec was loaded
 	// in an active state or transitioned to active, enabling Save to reject
@@ -152,6 +158,7 @@ func LoadSpec(dir string) (*Spec, error) {
 		Architecture:  architecture,
 		Dir:           dir,
 		unknown:       unknown,
+		fromDisk:      true,
 	}
 
 	// Capture immutable snapshot for active specs so Save can detect mutations

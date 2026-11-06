@@ -31,7 +31,8 @@ library's `Spec.Save`. The status form moves a package through its lifecycle
 superseded package under `archive/`. `Save`, `Transition` and `Supersede` rewrite
 **every** artifact of the package (`prd.md`, `requirements.json`,
 `test_spec.json`, `tasks.json`, and `architecture.md` when there is one) in its
-canonical encoding, through temporary files that they rename. What a call changes
+canonical encoding, and write `spec.md`, the package's render, beside them,
+through temporary files that they rename. What a call changes
 in content is the task states or the status, and `updated_at`, but formatting the
 encoding does not keep (a YAML comment in the frontmatter of `prd.md`, say) is
 lost, and the files are left with mode `0600`, because the temporary files are
@@ -174,6 +175,23 @@ spec root as it is then, before it activates the package. Of what that finds it 
 A package under the root that fails to load is left out of the run. A spec root
 that cannot be read skips the cross-spec rules, with a `specs_dir_unreadable`
 warning, and the verdict is the package's own.
+
+The package's own validation includes the rule `rendered` (format v2 §10.2),
+which compares the package's `spec.md` with its render, in `artifact`
+`spec.md`:
+
+| `spec.md` | `draft` or `active` | `sealed`, `superseded` or `archived` |
+|---|---|---|
+| absent | warning: `spec.md is missing; run speca <dir> --render` | the same warning |
+| not the render, from some line on | error: `spec.md is not the package's render from line N on; run speca <dir> --render` | the same, as a warning |
+| there and unreadable | error: `spec.md cannot be read (<reason>); run speca <dir> --render` | the same, as a warning |
+| the render | nothing | nothing |
+
+`<dir>` is the name of the package's directory. Because the rule is part of the
+package's own validation, the report's `valid`, each `--list` entry's `valid`
+and the status form's activation check see it too: a draft whose `spec.md` is
+stale is not activated until `speca <spec> --render` writes it again (or
+`--force` activates it with a high `spec_invalid` warning naming `rendered`).
 
 **A package that does not validate is a successful call:** exit 0, `valid`
 `false`. Exit 1 is for a call that could not do its job.
