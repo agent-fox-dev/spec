@@ -12,8 +12,8 @@ github.com/RoaringBitmap/roaring/v2 v2.19.0 h1:zsWtVE+biht4eVl0YDLvykUqGkftR3Qc5
 github.com/RoaringBitmap/roaring/v2 v2.19.0/go.mod h1:SfT3of9nYh3vis1dIbCj4Yw6KQGujTN+f345nrN/0JA=
 github.com/agent-fox-dev/agentkit-go v0.9.0 h1:2yk1MhUE40FBf+oSi8+FlTh/FZADPZSMxfCUMmNSoiQ=
 github.com/agent-fox-dev/agentkit-go v0.9.0/go.mod h1:5pDOULAggGq1z0q1PczzvH5HKJtiW01l7GHKG3f0DJ0=
-github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261026174114-de24b69a5bad h1:XRQtvSbkjOUKof/Hjb38KhnXpnmnIsLhVoSamBungUw=
-github.com/agent-fox-dev/agentkit-go/codesearch v0.0.0-20261026174114-de24b69a5bad/go.mod h1:ZM35mlUgMrfBxLupR9Gpx/V1R+iASwQ5cL8g92+6hcI=
+github.com/agent-fox-dev/agentkit-go/codesearch v0.9.0 h1:KSAnsZcfAmSjBA/zS4rDVP54YFbONmx0O9gDCHJP1UE=
+github.com/agent-fox-dev/agentkit-go/codesearch v0.9.0/go.mod h1:mJ/+Q2mNsDa7QGbhfXNnXPDlbiGCycTuolOFJz8NE44=
 github.com/anthropics/anthropic-sdk-go v1.79.1 h1:R+DGl2fpI8mIg7OGjEEHpr1WN7HOja76sz89Z2DMcqk=
 github.com/anthropics/anthropic-sdk-go v1.79.1/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/aws/aws-sdk-go-v2 v1.38.0 h1:UCRQ5mlqcFk9HJDIqENSLR3wiG1VTWlyUfLDEvY7RxU=
