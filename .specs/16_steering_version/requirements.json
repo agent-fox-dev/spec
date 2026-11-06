@@ -1,0 +1,333 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "spec_id": "16",
+  "spec_name": "steering_version",
+  "schema_version": 2,
+  "introduction": "The project's steering directives gain a version and a dated record of their amendments, carried in YAML frontmatter the directives themselves never see. Every phase still receives the directives, now with the version named and the record withheld. A package records in its PRD frontmatter the version it was generated against, and the verdict names, for a draft or active package written under an earlier version, the amendments made since. Nothing is refused because of it: a package that has fallen behind is reported, and a person who has checked it clears the warning by changing the field.",
+  "glossary": {
+    "MAJOR bump": "An amendment that raised the first number of the version, which by the documented meaning marks a directive removed, or changed so that a package or code that followed it may now break it.",
+    "amendment": "One entry of the steering's record: a version in the version form, a date in YYYY-MM-DD and a non-empty sentence saying what changed. The entries are newest first, their versions strictly decreasing and their dates not increasing, and the first entry's version is the file's version.",
+    "steering_malformed": "The warning a command raises for a steering file whose frontmatter breaks one or more of the well-formedness rules. It is high, it names every rule broken, and it never changes a command's exit code.",
+    "steering_version": "Both the optional PRD frontmatter field that records which steering version a package was generated against, and the name of the verdict rule that compares that field with the spec root's steering.",
+    "the version form": "Three non-negative integers separated by full stops, with no leading zeros and nothing after the third: MAJOR.MINOR.PATCH. Two versions in this form are compared as three integers, never as text.",
+    "versioned": "Said of a steering file that opens with well-formed frontmatter and whose body says something. Such a file has a version a package can record. A file with no frontmatter, one whose frontmatter breaks a rule, and one whose body says nothing are all unversioned."
+  },
+  "requirements": [
+    {
+      "id": "16-REQ-1",
+      "title": "Reading the steering's version and its record",
+      "rationale": "A version nothing can read is a comment; the reader is what turns the record into something the verdict and the prompts can use.",
+      "criteria": [
+        {
+          "id": "16-REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "steering.md opens with a YAML frontmatter block delimited by lines of three hyphens",
+          "system": "steering reader",
+          "action": "read the version and the amendments from that block, and take everything after the closing delimiter as the body",
+          "contract": "the body a caller receives holds none of the frontmatter's bytes; the version is the frontmatter's version; the amendments are its list in file order, newest first"
+        },
+        {
+          "id": "16-REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "steering.md does not open with a frontmatter block",
+          "system": "steering reader",
+          "action": "take the whole file as the body, report no version and no amendment, and raise no warning",
+          "contract": "the body is the file's bytes as they are, the steering is unversioned, no warning is raised, and every caller behaves as it does today"
+        },
+        {
+          "id": "16-REQ-1.3",
+          "pattern": "ubiquitous",
+          "system": "steering reader",
+          "action": "for any steering file, treat its frontmatter as well-formed exactly when it holds only the keys version and amendments, its version is in the version form, it holds at least one amendment, every amendment has a version in that form, a date in YYYY-MM-DD and a non-empty change, the amendment versions strictly decrease, the amendment dates do not increase, and the first amendment's version is the file's version",
+          "contract": "a file meeting every rule is versioned and raises no warning; a file breaking any one of them is malformed, as 16-REQ-2.1 says. The rules are checked in the order they are listed above, and a rule whose subject an earlier broken rule has already rejected is not checked: an absent version breaks only \"the version is in the version form\", and an amendment with no version breaks only \"every amendment has a version in that form\", so one fault is one named rule"
+        },
+        {
+          "id": "16-REQ-1.4",
+          "pattern": "ubiquitous",
+          "system": "steering reader",
+          "action": "for any two versions in the version form, compare them as three integers rather than as text",
+          "contract": "2.10.0 is newer than 2.9.0, 1.0.1 is newer than 1.0.0, 2.0.0 is newer than 1.99.99, and 1.0.0 equals 1.0.0"
+        },
+        {
+          "id": "16-REQ-1.5",
+          "pattern": "event_driven",
+          "condition": "a steering file's body, taken after the frontmatter, is empty, is only the placeholder marker, is only the bare heading, or is over the 24 KB bound",
+          "system": "steering reader",
+          "action": "report the file as nothing: no body, no version and no amendment",
+          "contract": "the body is the empty string and the steering is unversioned, so a package written against it records no version; the bound is measured over the body alone, so a file whose body is within it and whose frontmatter pushes the whole file over is read as it would be without the frontmatter"
+        }
+      ]
+    },
+    {
+      "id": "16-REQ-2",
+      "title": "A steering file whose frontmatter breaks a rule",
+      "rationale": "A record nobody checks drifts into fiction, and a run that stopped because of a mistyped date would make the record cost more than it is worth.",
+      "criteria": [
+        {
+          "id": "16-REQ-2.1",
+          "pattern": "unwanted",
+          "condition": "a steering file's frontmatter breaks one or more of the well-formedness rules",
+          "system": "steering reader",
+          "action": "report every rule it breaks, return the body all the same, and report the version as absent",
+          "contract": "the reader names each broken rule, one per rule, in a fixed order; the body is what follows the closing delimiter; the steering is unversioned, so nothing records a version against it"
+        },
+        {
+          "id": "16-REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "a steering file opens with a frontmatter delimiter that is never closed",
+          "system": "steering reader",
+          "action": "report it as malformed, take the whole file as the body, and report the version as absent",
+          "contract": "one broken rule is named, saying the frontmatter has no closing delimiter; the body is the file's bytes as they are; the steering is unversioned"
+        },
+        {
+          "id": "16-REQ-2.3",
+          "pattern": "event_driven",
+          "condition": "spec runs against a spec root whose steering file is malformed",
+          "system": "spec",
+          "action": "raise one high steering_malformed warning naming every broken rule, before the first model call, and run every phase as it would otherwise",
+          "contract": "exactly one warning with code steering_malformed and severity high, at stage preflight, whose message names each broken rule; the exit code is the one the run would have had; every phase is given the body"
+        },
+        {
+          "id": "16-REQ-2.4",
+          "pattern": "event_driven",
+          "condition": "speca <package> --validate runs against a spec root whose steering file is malformed",
+          "system": "speca",
+          "action": "raise the same warning once and give the verdict it would otherwise give",
+          "contract": "exactly one high steering_malformed warning at stage preflight; exit code 0; result.valid and every entry of result.validation are what they are under an unversioned steering"
+        }
+      ]
+    },
+    {
+      "id": "16-REQ-3",
+      "title": "What every phase is given",
+      "rationale": "A phase needs the directives and the version they carry; the history of how they got there is cost without use.",
+      "criteria": [
+        {
+          "id": "16-REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "a phase's prompt is built and the spec root's steering is versioned",
+          "system": "specgen",
+          "action": "put the body in the steering block and name the version in it",
+          "contract": "the block holds the line \"Steering version <version>\" before the body, and the text between the BEGIN STEERING and END STEERING markers holds none of the frontmatter's bytes"
+        },
+        {
+          "id": "16-REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "a phase's prompt is built and the steering is unversioned or malformed",
+          "system": "specgen",
+          "action": "build the steering block as it is built today, with no version line",
+          "contract": "the block is byte-identical to the one built from the same directive text before this change"
+        },
+        {
+          "id": "16-REQ-3.3",
+          "pattern": "ubiquitous",
+          "system": "specgen",
+          "action": "for any steering file and any phase, keep the amendment record out of the prompt",
+          "contract": "no amendment's date and no amendment's change text appears anywhere in the prompt, for every phase that is given the steering: the split decision, the three artifact phases, the architecture phase and the PRD review"
+        },
+        {
+          "id": "16-REQ-3.4",
+          "pattern": "event_driven",
+          "condition": "the steering has nothing to say, by 16-REQ-1.5 or because the file is missing, a symlink or unreadable",
+          "system": "specgen",
+          "action": "put no steering block in the prompt",
+          "contract": "the prompt holds no \"## Steering\" heading, no BEGIN STEERING marker and no version line, as today"
+        }
+      ]
+    },
+    {
+      "id": "16-REQ-4",
+      "title": "The package's record of the version",
+      "rationale": "The verdict can only name the amendments a package missed if the package says which version it was written under.",
+      "criteria": [
+        {
+          "id": "16-REQ-4.1",
+          "pattern": "ubiquitous",
+          "system": "afspec",
+          "action": "for any package, carry an optional steering_version in the PRD frontmatter and round-trip it through a save and a load",
+          "contract": "a package whose prd.md holds steering_version loads with that value, and a save writes the same key with the same value, after schema_version and before owner; a package without it loads without it and a save writes no such key; both still validate"
+        },
+        {
+          "id": "16-REQ-4.2",
+          "pattern": "event_driven",
+          "condition": "spec writes a package and the spec root's steering is versioned",
+          "system": "spec",
+          "action": "write the steering's version into that package's prd.md",
+          "contract": "the written prd.md holds steering_version with the steering's version, for every package a split writes, and each package still validates"
+        },
+        {
+          "id": "16-REQ-4.3",
+          "pattern": "event_driven",
+          "condition": "spec writes a package and the steering is unversioned, is malformed or has nothing to say",
+          "system": "spec",
+          "action": "leave the field out of the package it writes",
+          "contract": "the written prd.md holds no steering_version key at all, rather than an empty or null one"
+        },
+        {
+          "id": "16-REQ-4.4",
+          "pattern": "unwanted",
+          "condition": "a prd.md holds a steering_version that is not in the version form",
+          "system": "afspec",
+          "action": "report it as a schema error on prd.md",
+          "contract": "one error with check json_schema and artifact prd.md whose path names steering_version; result.valid is false"
+        },
+        {
+          "id": "16-REQ-4.5",
+          "pattern": "event_driven",
+          "condition": "the steering_version of an active package is changed in its prd.md and the package is saved",
+          "system": "afspec",
+          "action": "accept the write and leave the intent hash as it was",
+          "contract": "the save returns no error, the intent_hash in prd.md is unchanged, no intent drift is reported, and the package still validates"
+        }
+      ]
+    },
+    {
+      "id": "16-REQ-5",
+      "title": "The steering_version rule in the verdict",
+      "rationale": "Someone has to be told which amendments a package was not written under, and the verdict is where a person already looks.",
+      "criteria": [
+        {
+          "id": "16-REQ-5.1",
+          "pattern": "event_driven",
+          "condition": "the verdict is taken on a draft or active package whose steering_version equals the spec root's steering version",
+          "system": "verdict",
+          "action": "report nothing under the rule steering_version",
+          "contract": "no entry with check \"steering_version\" is in the verdict's errors or warnings"
+        },
+        {
+          "id": "16-REQ-5.2",
+          "pattern": "event_driven",
+          "condition": "the verdict is taken on a draft or active package whose steering_version is older than the spec root's steering version",
+          "system": "verdict",
+          "action": "report one warning under the rule steering_version naming both versions and every amendment made after the package's version",
+          "contract": "one warning with check \"steering_version\" and artifact \"prd.md\", whose message holds the package's version, the steering's version, and for each amendment newer than the package's, newest first, its version, its date and its change"
+        },
+        {
+          "id": "16-REQ-5.3",
+          "pattern": "complex_event",
+          "condition": "the verdict is taken on a draft or active package whose steering_version is older than the spec root's",
+          "guard": "one of the amendments made since raised the MAJOR number",
+          "system": "verdict",
+          "action": "say in that same warning that a directive the package was written under has been removed or changed",
+          "contract": "the one warning of 16-REQ-5.2 also carries that sentence, and no second entry under the rule is reported"
+        },
+        {
+          "id": "16-REQ-5.4",
+          "pattern": "event_driven",
+          "condition": "the verdict is taken on a draft or active package whose steering_version is newer than the spec root's, or names a version the amendment record does not hold",
+          "system": "verdict",
+          "action": "report one warning under the rule steering_version that says which of the two it is",
+          "contract": "one warning with check \"steering_version\" and artifact \"prd.md\", naming the package's version and the steering's, and saying either that the package's version is newer than the steering's or that it is in no amendment of the record"
+        },
+        {
+          "id": "16-REQ-5.5",
+          "pattern": "ubiquitous",
+          "system": "verdict",
+          "action": "for any package that is sealed, superseded or archived, for any package with no steering_version, and under a steering that is unversioned or malformed, report nothing under the rule steering_version",
+          "contract": "no entry with check \"steering_version\" is reported, whatever the two versions are"
+        },
+        {
+          "id": "16-REQ-5.6",
+          "pattern": "ubiquitous",
+          "system": "verdict",
+          "action": "for any package, report every finding of the rule steering_version as a warning and never as an error",
+          "contract": "no error with check \"steering_version\" is ever reported, so the rule never makes result.valid false and never refuses an activation"
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "16-PATH-1",
+      "title": "A maintainer amends the steering and the verdict names what a package missed",
+      "steps": [
+        {
+          "actor": "maintainer",
+          "action": "adds a directive to steering.md and a new amendment at the top of the record, raising the MINOR number"
+        },
+        {
+          "actor": "maintainer",
+          "action": "runs speca <package> --validate on an active package written under the earlier version"
+        },
+        {
+          "actor": "speca",
+          "action": "reads the spec root's steering, compares the two versions, and reports one warning under the rule steering_version naming both and the amendment made since"
+        },
+        {
+          "actor": "maintainer",
+          "action": "reads the package against that amendment, finds it still holds, and changes steering_version in its prd.md to the new version"
+        },
+        {
+          "actor": "speca",
+          "action": "takes the verdict again and reports no finding under the rule, the versions now being equal"
+        }
+      ]
+    },
+    {
+      "id": "16-PATH-2",
+      "title": "A run records in the package the steering version it was generated against",
+      "steps": [
+        {
+          "actor": "user",
+          "action": "runs spec on an input against a spec root whose steering is versioned"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "reads the steering once, and gives every phase the body with the version named and the amendment record withheld"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "writes the package with steering_version set to the steering's version"
+        },
+        {
+          "actor": "spec command",
+          "action": "validates what it wrote and reports no finding under the rule steering_version, the versions being equal"
+        },
+        {
+          "actor": "user",
+          "action": "reads the written prd.md and finds the steering version the package was generated against"
+        }
+      ]
+    },
+    {
+      "id": "16-PATH-3",
+      "title": "A run against a malformed record warns once and uses the directives all the same",
+      "steps": [
+        {
+          "actor": "maintainer",
+          "action": "mistypes a version in the amendment record, so that the amendment versions no longer strictly decrease"
+        },
+        {
+          "actor": "user",
+          "action": "runs spec on an input against that spec root"
+        },
+        {
+          "actor": "spec command",
+          "action": "raises one high steering_malformed warning at preflight, naming the broken rule, before the first model call"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "gives every phase the directives all the same, with no version named"
+        },
+        {
+          "actor": "specgen pipeline",
+          "action": "writes the package with no steering_version, the version being absent, and the run ends with the exit code it would have had"
+        }
+      ]
+    }
+  ],
+  "external_apis": [
+    {
+      "package": "github.com/goccy/go-yaml",
+      "version": "v1.19.2",
+      "verified": true,
+      "symbols": [
+        {
+          "name": "Unmarshal",
+          "import_path": "github.com/goccy/go-yaml",
+          "signature": "func Unmarshal(data []byte, v interface{}) error"
+        }
+      ]
+    }
+  ]
+}

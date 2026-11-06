@@ -1,0 +1,398 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/test_spec.v2.json",
+  "spec_id": "16",
+  "spec_name": "steering_version",
+  "schema_version": 2,
+  "tests": [
+    {
+      "id": "TS-16-1",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-1.1",
+        "16-REQ-1.2"
+      ],
+      "title": "The reader splits well-formed frontmatter from the body, and reads a file without frontmatter whole",
+      "given": [
+        "a steering file with frontmatter holding a version and two amendments, and the same directives with no frontmatter at all"
+      ],
+      "when": "the steering is read from the spec root",
+      "then": [
+        "with frontmatter, the body is the text after the closing delimiter and holds none of the frontmatter's bytes",
+        "the version is the frontmatter's version and the amendments are its two entries in file order, newest first",
+        "without frontmatter, the body is the file's bytes exactly as they are",
+        "without frontmatter, no version and no amendment is reported and no broken rule is named"
+      ],
+      "pseudocode": "table in internal/project/steering_test.go, beside TestSteering_ReturnsTheDirectives: write the case's file into a temp spec root; s = project.ReadSteering(dir); assert s.Body == case.body; assert s.Version == case.version; assert s.Amendments == case.amendments; assert s.Problems is empty"
+    },
+    {
+      "id": "TS-16-2",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-1.3",
+        "16-REQ-2.1"
+      ],
+      "title": "A well-formed record is accepted and each malformed shape names exactly the rule it breaks",
+      "given": [
+        "a frontmatter that meets every well-formedness rule",
+        "one frontmatter per rule that breaks only that rule: an unknown key, no version, no amendments key, an empty amendment list, a version with a leading zero, a version with four numbers, an amendment with no date, an amendment with an empty change, a date that is not YYYY-MM-DD, two amendment versions that do not strictly decrease, two dates that increase, and a first amendment whose version is not the file's",
+        "one frontmatter that breaks three rules at once"
+      ],
+      "when": "each file is read",
+      "then": [
+        "the well-formed file is versioned and names no broken rule",
+        "each single-fault file names exactly one broken rule, and the rule named is the one it breaks: the rules are checked in the order they are listed, and a rule whose subject an earlier broken rule has rejected is not checked, so an absent version and an amendment with no version each name one rule and not two",
+        "the file that breaks three names all three, in a fixed order that is the same on every run",
+        "every malformed file still returns its body, and reports no version"
+      ],
+      "pseudocode": "table in internal/project/steering_test.go, one case per rule: s = project.ReadSteering(dir); assert s.Problems == case.problems; assert s.Version == \"\"; assert s.Body == case.body"
+    },
+    {
+      "id": "TS-16-3",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-2.2"
+      ],
+      "title": "A frontmatter delimiter that is never closed is malformed and the whole file is the body",
+      "given": [
+        "a steering file that opens with a line of three hyphens and holds no closing delimiter"
+      ],
+      "when": "the steering is read",
+      "then": [
+        "exactly one broken rule is named, saying the frontmatter has no closing delimiter",
+        "the body is the file's bytes as they are, the opening delimiter among them",
+        "no version and no amendment is reported"
+      ],
+      "pseudocode": "in internal/project/steering_test.go: s = project.ReadSteering(dir); assert len(s.Problems) == 1 and it names the missing closing delimiter; assert s.Body == the whole file; assert s.Version == \"\""
+    },
+    {
+      "id": "TS-16-4",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-1.4"
+      ],
+      "title": "Two versions are compared as three integers, not as text",
+      "given": [
+        "pairs of versions in the version form: 2.10.0 and 2.9.0, 1.0.1 and 1.0.0, 2.0.0 and 1.99.99, 1.0.0 and 1.0.0, and 0.0.0 and 0.0.1"
+      ],
+      "when": "each pair is compared",
+      "then": [
+        "2.10.0 is newer than 2.9.0, which a text comparison would get wrong",
+        "1.0.1 is newer than 1.0.0 and 2.0.0 is newer than 1.99.99",
+        "1.0.0 and 1.0.0 compare equal",
+        "the comparison is antisymmetric: swapping the pair reverses the answer"
+      ],
+      "pseudocode": "table in internal/project/steering_test.go: assert compare(case.a, case.b) == case.want and compare(case.b, case.a) == -case.want"
+    },
+    {
+      "id": "TS-16-5",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-1.5"
+      ],
+      "title": "The body checks are made on the body after the frontmatter, and a file with nothing to say has no version",
+      "given": [
+        "versioned files whose body in turn is empty, is only the placeholder marker, is only the bare heading, and is one byte over the 24 KB bound",
+        "a versioned file whose body is just within the bound and whose body and frontmatter together are over it"
+      ],
+      "when": "each file is read",
+      "then": [
+        "each of the first four reads as nothing: an empty body, no version and no amendment",
+        "the fifth is read in full, with its body and its version, because the bound is measured over the body alone",
+        "none of the five names a broken rule"
+      ],
+      "pseudocode": "table in internal/project/steering_test.go, beside TestSteering_IgnoresAFileWithNothingToSay: build each body around maxSteeringBytes; s = project.ReadSteering(dir); assert s.Body == case.body and s.Version == case.version"
+    },
+    {
+      "id": "TS-16-6",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-3.1",
+        "16-REQ-3.2",
+        "16-REQ-3.4"
+      ],
+      "title": "The steering block names the version when there is one, and is unchanged when there is not",
+      "given": [
+        "directive text with a version, the same text with no version, and a steering with nothing to say"
+      ],
+      "when": "the steering block of a phase prompt is built for each",
+      "then": [
+        "with a version the block holds the line naming it before the body, between the heading and the BEGIN STEERING marker",
+        "the text between the BEGIN and END markers is the body alone, with none of the frontmatter's bytes",
+        "with no version the block is byte-identical to the one built from the same text before this change",
+        "with nothing to say the block is empty: no heading, no marker and no version line"
+      ],
+      "pseudocode": "table in specgen/prompts_test.go, beside TestRunContextBlock: got = steeringBlock(case.body, case.version); assert got == case.want, the no-version case compared against the block this repository built before the change"
+    },
+    {
+      "id": "TS-16-7",
+      "kind": "integration",
+      "verifies": [
+        "16-REQ-3.3"
+      ],
+      "title": "The amendment record reaches none of the prompts that are given the steering",
+      "given": [
+        "a versioned steering whose amendments carry distinctive dates and change sentences that appear nowhere else"
+      ],
+      "when": "the prompt is built for each phase that is handed the steering: the split decision, the requirements, test specification and tasks phases, the architecture phase and the PRD review",
+      "then": [
+        "no prompt holds any amendment's date",
+        "no prompt holds any amendment's change sentence",
+        "every prompt does hold the directive text and the version line"
+      ],
+      "pseudocode": "in specgen/phases_test.go, over the six prompt builders: for each prompt — assert !strings.Contains(prompt, amendment.Date) and !strings.Contains(prompt, amendment.Change) for every amendment; assert strings.Contains(prompt, directiveText)"
+    },
+    {
+      "id": "TS-16-8",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-4.1"
+      ],
+      "title": "An optional steering_version round-trips through the PRD frontmatter in a fixed position",
+      "given": [
+        "a prd.md whose frontmatter holds steering_version, and one whose frontmatter does not"
+      ],
+      "when": "each package is loaded, saved and loaded again",
+      "then": [
+        "the one with the field loads with its value and the save writes the same key with the same value",
+        "the key is written after schema_version and before owner",
+        "the one without the field loads without it and the save writes no steering_version key, neither empty nor null",
+        "both packages validate, and both round-trip byte-identically"
+      ],
+      "pseudocode": "table in afspec/prd_test.go, beside the other frontmatter round-trip tests: s = LoadSpec(dir); assert s.SteeringVersion == case.want; Save(dir); assert the rendered prd.md lines between schema_version and owner; assert LoadSpec(dir) equals s; assert s.Validate().Valid"
+    },
+    {
+      "id": "TS-16-9",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-4.4"
+      ],
+      "title": "A steering_version that is not in the version form is a schema error on prd.md",
+      "given": [
+        "packages whose prd.md carries steering_version in turn as 2.1, 2.1.0.0, 02.1.0, v2.1.0, 2.1.x and 2.1.0-rc1, and one that carries it as the empty string"
+      ],
+      "when": "each package is validated",
+      "then": [
+        "each of the six malformed values gives one error whose check is json_schema and whose artifact is prd.md",
+        "the error's path names steering_version, and the result is not valid",
+        "the empty value is read as the field being absent: no error is reported, the result is valid, and a save writes no steering_version key"
+      ],
+      "pseudocode": "table in afspec/validate_test.go, beside TestValidate_ReportsAnUnknownKeyOnDisk: write the case's frontmatter; v = LoadSpec(dir).Validate(); assert v.Valid == case.valid; for the malformed cases assert one error with Check \"json_schema\", Artifact \"prd.md\" and \"steering_version\" in its Path; for the empty case assert no such error and that renderPRD omits the key"
+    },
+    {
+      "id": "TS-16-10",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-4.5"
+      ],
+      "title": "Changing steering_version on an active package is accepted and leaves the intent hash alone",
+      "given": [
+        "an active package with an intent hash and a steering_version of 1.0.0"
+      ],
+      "when": "the field is changed to 2.0.0 and the package is saved, then loaded again",
+      "then": [
+        "the save returns no error",
+        "the intent_hash in prd.md is the same before and after",
+        "no intent drift is reported for the package",
+        "the reloaded package carries the new value and still validates"
+      ],
+      "pseudocode": "in afspec/afspec_test.go, beside TestSave_RefusesIntentDriftOnAnActiveSpec: s = LoadSpec(dir); before = *s.IntentHash; s.SteeringVersion = \"2.0.0\"; assert s.Save(dir) == nil; r = LoadSpec(dir); assert *r.IntentHash == before; assert !specpkg.IntentDrift(r); assert r.SteeringVersion == \"2.0.0\""
+    },
+    {
+      "id": "TS-16-11",
+      "kind": "integration",
+      "verifies": [
+        "16-REQ-4.2",
+        "16-REQ-4.3"
+      ],
+      "title": "A run writes the steering's version into the package, and leaves the field out when there is none",
+      "given": [
+        "a run against a spec root whose steering is in turn versioned, unversioned, malformed, and a bare heading with nothing to say"
+      ],
+      "when": "the pipeline builds and writes a package, once for a single scope and once for a split of two scopes",
+      "then": [
+        "under a versioned steering every package written holds steering_version with the steering's version",
+        "under each of the other three no package holds a steering_version key at all",
+        "every package written validates in all four cases"
+      ],
+      "pseudocode": "table in specgen/pipeline_test.go, beside the tests that read a written package's prd.md: run the pipeline against the scripted model; for each written package assert the frontmatter's steering_version is case.want or absent; assert the reported validation is valid"
+    },
+    {
+      "id": "TS-16-12",
+      "kind": "integration",
+      "verifies": [
+        "16-REQ-2.3"
+      ],
+      "title": "A run against a malformed record warns once at preflight and runs every phase all the same",
+      "given": [
+        "a spec root whose steering frontmatter breaks two rules, and a scripted model that answers every phase"
+      ],
+      "when": "the pipeline runs against it",
+      "then": [
+        "exactly one warning with code steering_malformed and severity high is in the envelope, at stage preflight",
+        "its message names both broken rules",
+        "the warning is raised before the first model call",
+        "every phase is given the directive body, and the run's exit code is the one it would have had under an unversioned steering"
+      ],
+      "pseudocode": "in specgen/pipeline_test.go, beside TestPipeline's preflight-warning cases: run the pipeline; ws = warnings(run, \"steering_malformed\"); assert len(ws) == 1 and ws[0].Severity == \"high\" and ws[0].Stage == \"preflight\"; assert the recorded prompts hold the directive body; assert the exit code matches the unversioned run"
+    },
+    {
+      "id": "TS-16-13",
+      "kind": "integration",
+      "verifies": [
+        "16-REQ-2.4"
+      ],
+      "title": "speca --validate warns once about a malformed record and gives the verdict it would otherwise give",
+      "given": [
+        "a spec root holding a valid package and a steering file whose frontmatter breaks one rule"
+      ],
+      "when": "speca <package> --validate is run against it, and then again with the frontmatter removed",
+      "then": [
+        "the first call carries exactly one high steering_malformed warning at stage preflight, naming the broken rule",
+        "the exit code is 0",
+        "result.valid and every entry of result.validation are the same in both calls",
+        "the report form, speca <package> without --validate, carries no such warning"
+      ],
+      "pseudocode": "in cmd/speca/verdict_test.go, beside TestVerdict_WithAnUnreadableSpecRoot: code = Main([\"--dir\", root, ref, \"--validate\"], &out, &err); assert code == 0; env = decode(out); assert one warning steering_malformed, severity high, stage preflight; compare env.result.validation with the run against the frontmatter-free file"
+    },
+    {
+      "id": "TS-16-14",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-5.1",
+        "16-REQ-5.2",
+        "16-REQ-5.3"
+      ],
+      "title": "The rule says nothing for an equal version and names the amendments a package missed",
+      "given": [
+        "a spec root whose steering is at 2.1.0 with a record of 2.1.0, 2.0.0, 1.1.0 and 1.0.0",
+        "draft and active packages whose steering_version is in turn 2.1.0, 2.0.0 and 1.1.0"
+      ],
+      "when": "the verdict is taken on each package",
+      "then": [
+        "at 2.1.0 no entry whose check is steering_version is reported",
+        "at 2.0.0 exactly one warning is reported, naming 2.0.0, 2.1.0 and the 2.1.0 amendment with its date and change, and nothing of the older amendments",
+        "at 1.1.0 the one warning names the 2.1.0 and 2.0.0 amendments, newest first, and also says that a directive the package was written under has been removed or changed, 2.0.0 having raised the MAJOR number",
+        "at 2.0.0, where no amendment since raised the MAJOR number, that sentence is absent",
+        "the entry's artifact is prd.md, and no second entry under the rule is reported in any case"
+      ],
+      "pseudocode": "table in internal/specpkg/steering_test.go: write the steering into a temp spec root; v, err = specpkg.Verdict(specsDir, spec); assert err == nil; got = entries(v, \"steering_version\"); assert got matches case.want in count, severity and the substrings it must carry"
+    },
+    {
+      "id": "TS-16-15",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-5.4"
+      ],
+      "title": "The rule says so when a package claims a version the steering has not reached or has never had",
+      "given": [
+        "a spec root whose steering is at 2.0.0 with a record of 2.0.0 and 1.0.0",
+        "draft packages whose steering_version is in turn 3.0.0 and 1.5.0"
+      ],
+      "when": "the verdict is taken on each package",
+      "then": [
+        "at 3.0.0 one warning names both versions and says the package's version is newer than the steering's",
+        "at 1.5.0 one warning names both versions and says the version is in no amendment of the record",
+        "both entries have check steering_version and artifact prd.md",
+        "neither case reports a second entry under the rule"
+      ],
+      "pseudocode": "table in internal/specpkg/steering_test.go: v, _ = specpkg.Verdict(specsDir, spec); got = entries(v, \"steering_version\"); assert len(got) == 1 and its message carries both versions and case.says"
+    },
+    {
+      "id": "TS-16-16",
+      "kind": "unit",
+      "verifies": [
+        "16-REQ-5.5",
+        "16-REQ-5.6"
+      ],
+      "title": "The rule stays silent where it does not apply, and is never an error",
+      "given": [
+        "a spec root whose steering is at 2.0.0",
+        "packages that differ from it in turn by being sealed, superseded or archived, by carrying no steering_version, and by sitting under a steering that is unversioned and under one that is malformed"
+      ],
+      "when": "the verdict is taken on each",
+      "then": [
+        "no entry whose check is steering_version is reported in any of the cases",
+        "across every case of this test and of TS-16-14 and TS-16-15, no error whose check is steering_version is ever reported",
+        "result.valid is decided by the other rules alone"
+      ],
+      "pseudocode": "table in internal/specpkg/steering_test.go: for each case — v, _ = specpkg.Verdict(specsDir, spec); assert entries(v, \"steering_version\") is empty; and over every case assert no entry with that check is in v.Errors"
+    },
+    {
+      "id": "TS-16-17",
+      "kind": "smoke",
+      "verifies": [
+        "16-PATH-1"
+      ],
+      "title": "A maintainer amends the steering, reads what a package missed, and clears the warning",
+      "given": [
+        "a real spec root holding an active package with steering_version 1.0.0 and a steering file at 1.0.0"
+      ],
+      "when": "a directive and an amendment at 1.1.0 are added to the real steering file, speca <package> --validate is run, the field in prd.md is changed to 1.1.0, and the verdict is taken again",
+      "then": [
+        "the first verdict carries one warning under the rule steering_version naming 1.0.0, 1.1.0 and the new amendment with its date and change",
+        "both verdicts exit 0 and report the package as valid",
+        "the second verdict carries no finding under the rule",
+        "nothing but prd.md changed in the package between the two calls"
+      ],
+      "pseudocode": "end-to-end case in cmd/speca/e2e_test.go, beside TestAnAgentFollowsNextFromTheReportToTheFinishedTask: copy a fixture package and a versioned steering into a real temp spec root; v1 = decode(Main([ref, \"--validate\"])); assert the warning; rewrite the field in prd.md; v2 = decode(Main([ref, \"--validate\"])); assert no steering_version entry",
+      "real_components": [
+        "the speca command through Main",
+        "the steering reader over a real steering.md",
+        "the verdict over a real spec root",
+        "a real package directory on the file system"
+      ]
+    },
+    {
+      "id": "TS-16-18",
+      "kind": "smoke",
+      "verifies": [
+        "16-PATH-2"
+      ],
+      "title": "A run against a versioned steering records the version in the package it writes",
+      "given": [
+        "a real repository with a spec root whose steering.md is versioned, and the scripted model that answers every phase"
+      ],
+      "when": "the spec command is run on an idea end to end",
+      "then": [
+        "the run exits 0 and reports the package as valid",
+        "the written prd.md holds steering_version with the steering's version",
+        "the verdict the run reports carries no finding under the rule steering_version",
+        "the prompts the scripted model saw hold the version line and none of the amendment record"
+      ],
+      "pseudocode": "end-to-end case in cmd/spec/main_test.go, beside TestSpec_WritesAValidPackageFromAnIdea: write a versioned steering into the temp repository's spec root; code = Main(argv, &out, &err) against the faux provider; assert code == 0; read the written prd.md and assert the field; assert the recorded prompts hold \"Steering version\" and no amendment date",
+      "real_components": [
+        "the spec command through Main",
+        "the specgen pipeline and its phases",
+        "the steering reader over a real steering.md",
+        "the afspec library's write and the verdict",
+        "a real repository and spec root on the file system"
+      ]
+    },
+    {
+      "id": "TS-16-19",
+      "kind": "smoke",
+      "verifies": [
+        "16-PATH-3"
+      ],
+      "title": "A run against a malformed record warns once, uses the directives, and writes no version",
+      "given": [
+        "a real repository whose steering.md has a mistyped version in its record, so the amendment versions do not strictly decrease, and the scripted model that answers every phase"
+      ],
+      "when": "the spec command is run on an idea end to end",
+      "then": [
+        "the run carries exactly one high steering_malformed warning at stage preflight, naming the broken rule",
+        "the run exits with the code it would have had under an unversioned steering, and the package is written and valid",
+        "the prompts the scripted model saw hold the directive body and no version line",
+        "the written prd.md holds no steering_version key"
+      ],
+      "pseudocode": "end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = Main(argv, &out, &err); env = decode(out); assert one steering_malformed warning at preflight; assert the written prd.md has no steering_version; assert the recorded prompts hold the body and not \"Steering version\"",
+      "real_components": [
+        "the spec command through Main",
+        "the specgen pipeline and its phases",
+        "the steering reader over a real steering.md",
+        "the afspec library's write",
+        "a real repository and spec root on the file system"
+      ]
+    }
+  ]
+}
