@@ -137,7 +137,7 @@ func TestValidateGenerationStepComplete_ReportsEveryProblemInOnePass(t *testing.
 	partial := partialFrom(t, StepRequirements, StepTasks)
 	tasks := *partial.Tasks
 	tasks.Tasks = append([]Task{}, tasks.Tasks...)
-	tasks.Tasks[0].Title = ""                  // violates minLength
+	tasks.Tasks[0].Title = ""                   // violates minLength
 	tasks.Tasks[1].Criteria = []string{"REQ-1"} // leaves REQ-2.1 unowned
 	partial.Tasks = &tasks
 

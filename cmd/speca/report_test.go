@@ -17,7 +17,7 @@ func TestReport_CarriesThePackagesIdentity(t *testing.T) {
 	root := newRepo(t)
 	rich := pkgDir(root, "09_agent_mode")
 	activate(t, rich)
-	editFile(t, filepath.Join(rich, "prd.md"), `schema_version: 2`, "schema_version: 2\nsupersedes: [\"07\"]\ntags: [\"agent\", \"cli\"]")
+	editFile(t, filepath.Join(rich, "prd.md"), `schema_version: 3`, "schema_version: 3\nsupersedes: [\"07\"]\nprofile: \"full\"")
 	addPackage(t, root, "08_plain", "08", "plain")
 
 	env, code, _ := run(t, "--dir", root, "09")
@@ -30,12 +30,12 @@ func TestReport_CarriesThePackagesIdentity(t *testing.T) {
 		r.CreatedAt != "2026-09-08T09:00:00Z" || r.UpdatedAt == "" {
 		t.Errorf("identity = %+v", r)
 	}
-	if len(r.IntentHash) != 64 || !slices.Equal(r.Supersedes, []string{"07"}) || !slices.Equal(r.Tags, []string{"agent", "cli"}) {
-		t.Errorf("intent_hash %q supersedes %v tags %v", r.IntentHash, r.Supersedes, r.Tags)
+	if len(r.IntentHash) != 64 || !slices.Equal(r.Supersedes, []string{"07"}) || r.Profile != "full" {
+		t.Errorf("intent_hash %q supersedes %v profile %q", r.IntentHash, r.Supersedes, r.Profile)
 	}
 
 	_, raw := rawRun(t, "--dir", root, "08")
-	for _, absent := range []string{"intent_hash", "supersedes", "tags"} {
+	for _, absent := range []string{"intent_hash", "supersedes", "profile"} {
 		if _, ok := raw[absent]; ok {
 			t.Errorf("a package with no %s writes it: %s", absent, raw[absent])
 		}
@@ -64,8 +64,8 @@ func TestReport_SaysWhetherThePackageValidates(t *testing.T) {
 	if env.ExitCode != cli.ExitOK || string(raw["valid"]) != "false" {
 		t.Fatalf("exit %d, valid = %s; want 0 and false", env.ExitCode, raw["valid"])
 	}
-	if got := result(t, env).FailingRules; !slices.Equal(got, []string{"C6", "C7", "C9"}) {
-		t.Errorf("failing_rules = %v; want C6 C7 C9", got)
+	if got := result(t, env).FailingRules; !slices.Equal(got, []string{"C4", "C5"}) {
+		t.Errorf("failing_rules = %v; want C4 C5", got)
 	}
 	if len(env.Warnings) != 0 {
 		t.Errorf("a package that does not validate raises %v; want no warning", warningCodes(env))
@@ -104,8 +104,9 @@ func TestReport_IntentDrift(t *testing.T) {
 	}
 }
 
-// The report lists every task with its readiness, counts them by state, and
-// names the task to work on: one in progress before a ready one.
+// The report lists every task with its readiness, the derived integration
+// task last, counts them by state, and names the task to work on: one in
+// progress before a ready one.
 func TestReport_ListsAndCountsTheTasks(t *testing.T) {
 	root := newRepo(t)
 	setTasks(t, pkgDir(root, "09_agent_mode"),
@@ -114,9 +115,10 @@ func TestReport_ListsAndCountsTheTasks(t *testing.T) {
 		planTask(3, "pending", []int{1}), // its dependency is done: ready
 		planTask(4, "pending", []int{2}), // its dependency is under way: blocked
 		planTask(5, "dropped", []int{1}),
+		// The integration task, 6, is pending and blocked while 2 is under way.
 	)
 	setTasks(t, addPackage(t, root, "11_empty", "11", "empty"))
-	setTasks(t, addPackage(t, root, "12_finished", "12", "finished"), planTask(1, "done", nil), planTask(2, "done", []int{1}), planTask(3, "dropped", []int{2}))
+	setTasks(t, addPackage(t, root, "12_finished", "12", "finished"), planTask(1, "done", nil), planTask(2, "done", []int{1}), planTask(3, "dropped", []int{2}), integrationTask("done"))
 
 	env, code, _ := run(t, "--dir", root, "09")
 	r := result(t, env)
@@ -125,14 +127,20 @@ func TestReport_ListsAndCountsTheTasks(t *testing.T) {
 	}
 	var taskIDs []int
 	var ready []bool
+	var kinds []string
 	for _, task := range r.Tasks {
 		taskIDs = append(taskIDs, task.ID)
 		ready = append(ready, task.Ready)
+		kinds = append(kinds, task.Kind)
 	}
-	if !slices.Equal(taskIDs, []int{1, 2, 3, 4, 5}) || !slices.Equal(ready, []bool{false, false, true, false, false}) {
+	if !slices.Equal(taskIDs, []int{1, 2, 3, 4, 5, 6}) || !slices.Equal(ready, []bool{false, false, true, false, false, false}) {
 		t.Errorf("tasks %v ready %v", taskIDs, ready)
 	}
-	if want := (envelope.TaskCounts{Pending: 2, InProgress: 1, Done: 1, Dropped: 1, Total: 5}); r.TaskCounts == nil || *r.TaskCounts != want {
+	if !slices.Equal(kinds, []string{"implement", "implement", "implement", "implement", "implement", "integration"}) ||
+		r.Tasks[5].Title != "Verify every execution path end to end" || !slices.Equal(r.Tasks[5].DependsOn, []int{1, 2, 3, 4, 5}) {
+		t.Errorf("kinds %v, the last task %+v; want the integration task last, depending on every other", kinds, r.Tasks[5])
+	}
+	if want := (envelope.TaskCounts{Pending: 3, InProgress: 1, Done: 1, Dropped: 1, Total: 6}); r.TaskCounts == nil || *r.TaskCounts != want {
 		t.Errorf("task_counts = %+v; want %+v", r.TaskCounts, want)
 	}
 	if r.NextTask == nil || r.NextTask.ID != 2 || r.NextTask.State != "in_progress" {
@@ -152,12 +160,13 @@ func TestReport_ListsAndCountsTheTasks(t *testing.T) {
 	}
 
 	env, _, _ = run(t, "--dir", root, "12")
-	if result(t, env).NextTask != nil || result(t, env).TaskCounts.Done != 2 {
+	if result(t, env).NextTask != nil || result(t, env).TaskCounts.Done != 3 {
 		t.Errorf("a finished plan: next_task %+v counts %+v", result(t, env).NextTask, result(t, env).TaskCounts)
 	}
 }
 
-// For any plan, the counts add up to the tasks listed.
+// For any plan, the counts add up to the tasks listed: the tasks of
+// tasks.json and, when there is one, their integration task.
 func TestReport_TaskCountsAddUp(t *testing.T) {
 	root := newRepo(t)
 	dir := pkgDir(root, "09_agent_mode")
@@ -177,7 +186,12 @@ func TestReport_TaskCountsAddUp(t *testing.T) {
 			}
 			tasks = append(tasks, planTask(id, wantTaskStates[rng.IntN(len(wantTaskStates))], deps))
 		}
+		tasks = append(tasks, integrationTask(wantTaskStates[rng.IntN(len(wantTaskStates))]))
 		setTasks(t, dir, tasks...)
+		listed := n
+		if n > 0 {
+			listed++
+		}
 
 		env, code, _ := run(t, "--dir", root, "09")
 		r := result(t, env)
@@ -185,7 +199,7 @@ func TestReport_TaskCountsAddUp(t *testing.T) {
 			t.Fatalf("code %d: %+v", code, env.Error)
 		}
 		c := r.TaskCounts
-		if c.Total != len(r.Tasks) || c.Total != n || c.Total != c.Pending+c.InProgress+c.Done+c.Dropped {
+		if c.Total != len(r.Tasks) || c.Total != listed || c.Total != c.Pending+c.InProgress+c.Done+c.Dropped {
 			t.Fatalf("%d tasks: counts %+v, %d listed", n, *c, len(r.Tasks))
 		}
 	}
@@ -307,9 +321,11 @@ func TestReport_SuggestsTheStatusCallTheClaimAndTheRender(t *testing.T) {
 		"a draft with no intent":                    {removeIntent, []envelope.Next{claim(dir, 1), render(1)}},
 		"a draft that does not validate":            {breakValidity, []envelope.Next{claim(dir, 1), render(1)}},
 		"a draft that holds a key":                  {withFrontmatterKey, []envelope.Next{claim(dir, 1), render(1)}},
+		// The plan validates, so the draft is told to activate; the task in
+		// progress is rendered, not claimed.
 		"a task in progress": {func(t *testing.T, dir string) {
 			setTasks(t, dir, planTask(1, "in_progress", nil), planTask(2, "pending", []int{}))
-		}, []envelope.Next{render(1)}},
+		}, []envelope.Next{activateIt, render(1)}},
 		"a sealed package": {func(t *testing.T, dir string) { setStatus(t, dir, "sealed") }, []envelope.Next{render(1)}},
 		"an active package whose intent drifted": {func(t *testing.T, dir string) {
 			activate(t, dir)
@@ -317,8 +333,12 @@ func TestReport_SuggestsTheStatusCallTheClaimAndTheRender(t *testing.T) {
 		}, []envelope.Next{render(1)}},
 		"an active package with no task open": {func(t *testing.T, dir string) {
 			activate(t, dir)
-			setTasks(t, dir, planTask(1, "done", nil), planTask(2, "dropped", []int{}))
+			setTasks(t, dir, planTask(1, "done", nil), planTask(2, "dropped", []int{}), integrationTask("done"))
 		}, []envelope.Next{{Tool: "speca", Input: dir, Flags: []string{"--status", "sealed"}}}},
+		"an active package with only the integration task open": {func(t *testing.T, dir string) {
+			activate(t, dir)
+			setTasks(t, dir, planTask(1, "done", nil), planTask(2, "dropped", []int{}))
+		}, []envelope.Next{claim(dir, 3), render(3)}},
 		"an active package with a task open": {func(t *testing.T, dir string) {
 			activate(t, dir)
 			setTasks(t, dir, planTask(1, "done", nil), planTask(2, "pending", nil))
@@ -371,8 +391,9 @@ func TestReport_ASuggestedStatusCallIsNeverRefused(t *testing.T) {
 		"the intent removed": removeIntent,
 	}
 	plans := map[string][]map[string]any{
-		"no tasks": {}, "all done": {planTask(1, "done", nil)}, "one pending": {planTask(1, "pending", nil)},
-		"one in progress": {planTask(1, "in_progress", nil)}, "done and an optional open one": {planTask(1, "done", nil), planWithOpenTasks()[1]},
+		"no tasks": {}, "all done": {planTask(1, "done", nil)}, "all done, the integration task too": {planTask(1, "done", nil), integrationTask("done")},
+		"one pending": {planTask(1, "pending", nil)}, "one in progress": {planTask(1, "in_progress", nil)},
+		"done and one open": {planTask(1, "done", nil), planWithOpenTasks()[1]},
 	}
 
 	recipes := map[string]func(t *testing.T, dir string){}

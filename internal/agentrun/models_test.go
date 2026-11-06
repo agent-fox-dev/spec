@@ -65,19 +65,19 @@ func TestResolvePlan_ATierChoosesAModelPerPhase(t *testing.T) {
 		"SIMPLE": {
 			PhasePRD: "claude-sonnet-5-5/medium", PhasePRDReview: "claude-sonnet-5-5/medium", PhasePRDRevision: "claude-sonnet-5-5/medium",
 			PhaseRequirements: "claude-sonnet-5-5/medium",
-			PhaseTasks: "claude-sonnet-5-5/low", PhaseArchitecture: "claude-sonnet-5-5/low",
+			PhaseTasks:        "claude-sonnet-5-5/low", PhaseArchitecture: "claude-sonnet-5-5/low",
 			PhasePlanReview: "claude-sonnet-5-5/medium", PhasePlanRevision: "claude-sonnet-5-5/medium",
 		},
 		"STANDARD": {
 			PhasePRD: "claude-sonnet-5-5/high", PhasePRDReview: "claude-sonnet-5-5/high", PhasePRDRevision: "claude-sonnet-5-5/high",
 			PhaseRequirements: "claude-sonnet-5-5/high",
-			PhaseTasks: "claude-sonnet-5-5/medium", PhaseArchitecture: "claude-sonnet-5-5/medium",
+			PhaseTasks:        "claude-sonnet-5-5/medium", PhaseArchitecture: "claude-sonnet-5-5/medium",
 			PhasePlanReview: "claude-sonnet-5-5/high", PhasePlanRevision: "claude-sonnet-5-5/high",
 		},
 		"advanced": {
 			PhasePRD: "claude-opus-5-5/xhigh", PhasePRDReview: "claude-opus-5-5/xhigh", PhasePRDRevision: "claude-opus-5-5/xhigh",
 			PhaseRequirements: "claude-opus-5-5/high",
-			PhaseTasks: "claude-sonnet-5-5/high", PhaseArchitecture: "claude-sonnet-5-5/high",
+			PhaseTasks:        "claude-sonnet-5-5/high", PhaseArchitecture: "claude-sonnet-5-5/high",
 			PhasePlanReview: "claude-opus-5-5/high", PhasePlanRevision: "claude-opus-5-5/high",
 		},
 	} {

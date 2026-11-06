@@ -140,7 +140,7 @@ func ToolSchema(raw []byte) (*schema.Schema, []string, error)
     and the difference is not cosmetic. That pipeline walked every map in the
     document and deleted keys by name at every depth, which is correct for a
     schema object and wrong for a `properties` map, whose keys are property
-    NAMES. The v2 test object has properties called `title` and `then`;
+    NAMES. The v2 test object had properties called `title` and `then`;
     both were deleted from the tool schema while `required` still listed them
     and additionalProperties stayed false, so the schema handed to the model for
     submit_test_spec could not be satisfied by any argument object. This walk

@@ -88,7 +88,7 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		spec.Progress.UpdatedAt = spec.UpdatedAt
 		// The report is on the package as written, which holds none of the keys
 		// the write deletes.
-		validity = validateWritten(spec)
+		validity = validateWritten(spec, afspec.ProgressFileName)
 		if !c.opts.dryRun {
 			if failure := writeProgress(spec, name); failure != nil {
 				return c.onDisk(dir, failure)
@@ -314,13 +314,17 @@ func frontmatterUnknownKeys(dir string) []string {
 	return out
 }
 
-// validateWritten is the verdict on the package as a save writes it: Validate
-// without the keys the decode dropped, which the save leaves out. It runs the
-// library's two stages as Validate does, the cross-file rules only when the
-// schema holds.
-func validateWritten(spec *afspec.Spec) afspec.ValidationResult {
+// validateWritten is the verdict on the package as a write leaves it:
+// Validate without the unknown keys of the artifacts the write re-encodes,
+// which it leaves out. The task form writes progress.json alone, so only
+// its keys go; the status form saves every artifact, so all of them do. It
+// runs the library's two stages as Validate does, the cross-file rules only
+// when the schema holds.
+func validateWritten(spec *afspec.Spec, written ...string) afspec.ValidationResult {
 	schema := spec.ValidateSchema()
-	errs := slices.DeleteFunc(slices.Clone(schema.Errors), func(e afspec.ValidationEntry) bool { return e.Check == "unknown_field" })
+	errs := slices.DeleteFunc(slices.Clone(schema.Errors), func(e afspec.ValidationEntry) bool {
+		return e.Check == "unknown_field" && (len(written) == 0 || slices.Contains(written, e.Artifact))
+	})
 	if len(errs) > 0 {
 		return afspec.ValidationResult{Valid: false, Errors: errs, Warnings: schema.Warnings}
 	}

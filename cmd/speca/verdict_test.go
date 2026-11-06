@@ -28,7 +28,7 @@ func TestVerdict_HoldsTheVerdictAndNothingElse(t *testing.T) {
 	if r.SpecDir != filepath.Join(".specs", "09_agent_mode") || r.SpecID != "09" || r.Status != "draft" || r.Title == "" || r.CreatedAt == "" {
 		t.Errorf("identity = %+v", r)
 	}
-	if tr := r.Traceability; tr == nil || tr.CriteriaCovered != 5 || tr.PathsCovered != 1 || len(tr.CriteriaUncovered) != 0 || len(tr.PathsUncovered) != 0 || len(tr.TestsUnowned) != 0 {
+	if tr := r.Traceability; tr == nil || tr.CriteriaCovered != 5 || tr.PathsCovered != 1 || len(tr.CriteriaUncovered) != 0 || len(tr.PathsUncovered) != 0 || len(tr.CriteriaUnowned) != 0 {
 		t.Errorf("traceability = %+v", tr)
 	}
 	for _, absent := range []string{"tasks", "task_counts", "next_task", "allowed_status", "depends_on", "dependents", "failing_rules", "packages", "intent_drift"} {
@@ -42,15 +42,14 @@ func TestVerdict_HoldsTheVerdictAndNothingElse(t *testing.T) {
 		}
 	}
 
-	// Damage the package: a test that does not exist breaks rules, and a term in
-	// every criterion with no glossary entry is a warning.
+	// Damage the package: a task that claims a criterion the package does not
+	// have breaks rules, and a criterion that names an error outcome without a
+	// contract is a warning.
 	breakValidity(t, pkg)
 	editJSON(t, filepath.Join(pkg, "requirements.json"), func(m map[string]any) {
-		for _, req := range m["requirements"].([]any) {
-			for _, c := range req.(map[string]any)["criteria"].([]any) {
-				c.(map[string]any)["action"] = c.(map[string]any)["action"].(string) + " using `Frobnicate`"
-			}
-		}
+		c := m["requirements"].([]any)[0].(map[string]any)["criteria"].([]any)[0].(map[string]any)
+		c["action"] = c["action"].(string) + ", or fail with an error"
+		delete(c, "contract")
 	})
 	env, _ = rawRun(t, "--dir", root, "09", "--validate")
 	r = result(t, env)
@@ -66,10 +65,10 @@ func TestVerdict_HoldsTheVerdictAndNothingElse(t *testing.T) {
 			t.Errorf("finding %+v lacks a rule, an artifact or a message", it)
 		}
 	}
-	if !slices.Contains(checks(v.Errors), "C7") || !slices.Contains(checks(v.Warnings), "glossary_hint") {
+	if !slices.Contains(checks(v.Errors), "C4") || !slices.Contains(checks(v.Warnings), "missing_contract") {
 		t.Errorf("errors %v warnings %v", checks(v.Errors), checks(v.Warnings))
 	}
-	if !strings.Contains(env.Summary, "does not validate") || !strings.Contains(env.Summary, "C7") || len(env.Next) != 0 {
+	if !strings.Contains(env.Summary, "does not validate") || !strings.Contains(env.Summary, "C4") || len(env.Next) != 0 {
 		t.Errorf("summary %q, next %+v; want the rules and no suggestion", env.Summary, env.Next)
 	}
 
@@ -101,8 +100,6 @@ func TestVerdict_KeepsTheCrossSpecFindingsOfThePackage(t *testing.T) {
 	setDependencies(t, b, "01", "03") // 01 and 02 are a cycle; 03 shares no actor with 02
 	setDependencies(t, old, "98")
 	setActors(t, c, "nobody else")
-	setGlossaryTerm(t, b, "frobnicate", "as b defines it")
-	setGlossaryTerm(t, c, "frobnicate", "as c defines it")
 
 	// verdict is the rules of the errors and of the warnings --validate reports.
 	verdict := func(ref string) (errs, warns []string, report *envelope.ValidationReport) {
@@ -126,18 +123,15 @@ func TestVerdict_KeepsTheCrossSpecFindingsOfThePackage(t *testing.T) {
 		t.Errorf("A: the cycle is reported as %+v", cycle)
 	}
 
-	// B: the cycle, and its actor error; not A's unknown dependency.
+	// B: the cycle, and its actor error; not A's unknown dependency. The
+	// cross-spec rules raise no warning: its warnings are its own.
 	ownErrs, ownWarns := ownChecks(t, b)
 	errs, warns, report := verdict("02")
 	if want := append(slices.Clone(ownErrs), "cross_spec_cycle", "cross_spec_actor"); !slices.Equal(errs, want) {
 		t.Errorf("B: errors %v; want %v", errs, want)
 	}
-	// The library gives a glossary conflict no rule and no artifact, and a
-	// verdict names the rule of every finding; the conflict is about the term.
-	glossary := report.Warnings[len(report.Warnings)-1]
-	if want := append(slices.Clone(ownWarns), "cross_spec_glossary"); !slices.Equal(warns, want) ||
-		glossary.Entity != "frobnicate" || glossary.Artifact != "requirements.json" || glossary.Message == "" {
-		t.Errorf("B: warnings %v, last %+v; want its own and the glossary conflict over frobnicate", warns, glossary)
+	if !slices.Equal(warns, ownWarns) {
+		t.Errorf("B: warnings %v; want its own, %v", warns, ownWarns)
 	}
 	for _, it := range report.Errors {
 		if it.Check == "cross_spec_unknown_dependency" {
@@ -145,17 +139,14 @@ func TestVerdict_KeepsTheCrossSpecFindingsOfThePackage(t *testing.T) {
 		}
 	}
 
-	// C: the glossary warning for a term it defines. It has an edge, so the
-	// cycle, which names no package, is kept too.
-	errs, _, report = verdict("03")
+	// C has an edge, so the cycle, which names no package, is kept too; the
+	// actor error is B's, which names C's actors, not C's own.
+	errs, _, _ = verdict("03")
 	if !slices.Contains(errs, "cross_spec_cycle") || slices.Contains(errs, "cross_spec_actor") {
 		t.Errorf("C: errors %v", errs)
 	}
-	if len(report.Warnings) == 0 || report.Warnings[len(report.Warnings)-1].Entity != "frobnicate" {
-		t.Errorf("C: warnings %+v; want the glossary conflict over frobnicate", report.Warnings)
-	}
 
-	// D has no edge, so the cycle is not its business, and defines no term in conflict.
+	// D has no edge, so the cycle is not its business.
 	ownErrs, ownWarns = ownChecks(t, d)
 	errs, warns, _ = verdict("04")
 	if !slices.Equal(errs, ownErrs) || !slices.Equal(warns, ownWarns) {

@@ -21,6 +21,13 @@ func TestSummary(t *testing.T) {
 	taskForm := func(changes []envelope.Change, dry bool) *Result {
 		return &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/11_x", Changes: changes, DryRun: dry}, taskForm: true}
 	}
+	migrateForm := func(dry bool, outcomes ...string) *Result {
+		entries := []envelope.MigratedInfo{}
+		for _, o := range outcomes {
+			entries = append(entries, envelope.MigratedInfo{Migrated: o})
+		}
+		return &Result{AdminResult: envelope.AdminResult{Migrated: entries, DryRun: dry}, migrateForm: true}
+	}
 
 	for name, tc := range map[string]struct {
 		r    *Result
@@ -56,6 +63,12 @@ func TestSummary(t *testing.T) {
 		"one task moved, dry run": {taskForm([]envelope.Change{task(2, "pending", "in_progress")}, true), "speca: 11_x task 2 pending → in_progress (dry run, nothing written)"},
 		"several tasks, dry run":  {taskForm([]envelope.Change{task(2, "in_progress", "done"), task(3, "in_progress", "done")}, true), "speca: 11_x tasks 2, 3 → done (dry run, nothing written)"},
 		"no task moved, dry run":  {taskForm(nil, true), "speca: 11_x no task changed (dry run, nothing written)"},
+
+		// The migrate form counts what was written as version 3, what was
+		// version 3 already and what failed, and the dry run.
+		"a migration":            {migrateForm(false, "written", "unchanged", "unchanged", "failed"), "speca: 1 written, 2 unchanged, 1 failed"},
+		"a migration of nothing": {migrateForm(false), "speca: 0 written, 0 unchanged, 0 failed"},
+		"a migration, dry run":   {migrateForm(true, "written"), "speca: 1 written, 0 unchanged, 0 failed (dry run, nothing written)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := tc.r.Summary(); got != tc.want {
@@ -173,11 +186,13 @@ func TestNext_NoneWhenNothingWouldHelp(t *testing.T) {
 		{SpecDir: ".specs/03_p", LoadError: "cannot read prd.md"},
 		{SpecDir: ".specs/04_p", Status: "sealed", TaskCounts: &envelope.TaskCounts{}},
 	}}}
+	migrated := &Result{AdminResult: envelope.AdminResult{Migrated: []envelope.MigratedInfo{{SpecDir: ".specs/01_p", Migrated: "written"}}}, migrateForm: true}
 	for name, r := range map[string]*Result{
 		"the verdict":              verdict,
 		"a report without a task":  report16("sealed", 7, 7, nil, true),
 		"a list without a package": idle,
 		"an empty list":            listOf(),
+		"the migrate form":         migrated,
 	} {
 		if got := r.Next(); len(got) != 0 {
 			t.Errorf("%s: Next = %+v; want none", name, got)

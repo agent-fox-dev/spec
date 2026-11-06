@@ -76,7 +76,7 @@ func withFrontmatterLine(t *testing.T, dir, line string) {
 // in its place, and is never written where it is not.
 func TestOptionalFrontmatter_RoundTripsInItsPlace(t *testing.T) {
 	for _, tc := range []struct {
-		name, line                   string
+		name, line                string
 		wantProfile, wantSteering string
 	}{
 		{"steering set", `steering_version: "2.0.1"`, "", "2.0.1"},
