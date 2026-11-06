@@ -405,3 +405,45 @@ func TestCommas_WritesEveryNumberTheWayAMessageSpellsIt(t *testing.T) {
 		}
 	}
 }
+
+// repoSkills is the repository's own skills tree, relative to this package.
+const repoSkills = "../../skills"
+
+func TestMain_RendersTheRepositorysOwnSkillsTreeForEveryAgent(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "skills")
+
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--source", repoSkills, "--out", out}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("code %d, stderr:\n%s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("the render reported something:\n%s", stderr.String())
+	}
+
+	src, problems := readSource(os.DirFS(repoSkills), repoSkills)
+	if len(problems) != 0 {
+		t.Fatalf("problems: %s", strings.Join(lines(problems), " | "))
+	}
+	if len(src.skills) == 0 {
+		t.Fatal("the repository's skills tree holds no skill")
+	}
+	for _, a := range agents {
+		for _, sk := range src.skills {
+			doc := filepath.Join(out, a.name, sk.name, skillDoc)
+			data, err := os.ReadFile(doc)
+			if err != nil {
+				t.Errorf("%s: %v", a.name, err)
+				continue
+			}
+			_, body, split := splitFrontmatter(string(data))
+			if !split {
+				t.Errorf("%s/%s: the rendered document has no frontmatter", a.name, sk.name)
+				continue
+			}
+			if len(body) > bodyLimit {
+				t.Errorf("%s/%s: body is %s bytes, over the %s-byte limit",
+					a.name, sk.name, commas(len(body)), commas(bodyLimit))
+			}
+		}
+	}
+}

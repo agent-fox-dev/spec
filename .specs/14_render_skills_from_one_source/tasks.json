@@ -292,7 +292,7 @@
         "every rendered body is at most 24,576 bytes for claude, codex, cursor and copilot",
         "every instruction of the three pre-change skills is in a body, in a reference file, or in the list of deliberate cuts written for the pull request description"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 10,
