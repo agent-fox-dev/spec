@@ -1227,6 +1227,9 @@ func phaseModels(r *agentrun.Runner, architecture, adversarial bool) string {
 		if (phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision) && !adversarial {
 			continue
 		}
+		if phase == agentrun.PhasePlanReview || phase == agentrun.PhasePlanRevision {
+			continue // no run reviews the plan yet
+		}
 		parts = append(parts, phase+" "+r.ModelFor(phase).String())
 	}
 	return strings.Join(parts, "; ")

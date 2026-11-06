@@ -39,11 +39,14 @@ const (
 	PhaseTestSpec     = "test_spec"
 	PhaseTasks        = "tasks"
 	PhaseArchitecture = "architecture"
+	PhasePlanReview   = "plan_review"
+	PhasePlanRevision = "plan_revision"
 )
 
 // Phases are the phases a model can be chosen for, in the order a package is
 // built.
-var Phases = []string{PhasePRD, PhasePRDReview, PhasePRDRevision, PhaseRequirements, PhaseTestSpec, PhaseTasks, PhaseArchitecture}
+var Phases = []string{PhasePRD, PhasePRDReview, PhasePRDRevision, PhaseRequirements, PhaseTestSpec, PhaseTasks,
+	PhasePlanReview, PhasePlanRevision, PhaseArchitecture}
 
 // tierEntry pairs a catalog model id with the effort the tier prescribes.
 // Separating model from effort lets two tiers share a model while running it
@@ -81,6 +84,8 @@ var tierTable = map[ModelTier]tier{
 	TierSimple: {
 		base: tierEntry{"claude-sonnet-5-5", core.EffortMedium},
 		phases: map[string]tierEntry{
+			PhasePlanReview:   {"claude-sonnet-5-5", core.EffortMedium},
+			PhasePlanRevision: {"claude-sonnet-5-5", core.EffortMedium},
 			PhaseTestSpec:     {"claude-sonnet-5-5", core.EffortLow},
 			PhaseTasks:        {"claude-sonnet-5-5", core.EffortLow},
 			PhaseArchitecture: {"claude-sonnet-5-5", core.EffortLow},
@@ -89,6 +94,8 @@ var tierTable = map[ModelTier]tier{
 	TierStandard: {
 		base: tierEntry{"claude-sonnet-5-5", core.EffortHigh},
 		phases: map[string]tierEntry{
+			PhasePlanReview:   {"claude-sonnet-5-5", core.EffortHigh},
+			PhasePlanRevision: {"claude-sonnet-5-5", core.EffortHigh},
 			PhaseTestSpec:     {"claude-sonnet-5-5", core.EffortMedium},
 			PhaseTasks:        {"claude-sonnet-5-5", core.EffortMedium},
 			PhaseArchitecture: {"claude-sonnet-5-5", core.EffortMedium},
@@ -98,6 +105,8 @@ var tierTable = map[ModelTier]tier{
 		base: tierEntry{"claude-opus-5-5", core.EffortXHigh},
 		phases: map[string]tierEntry{
 			PhaseRequirements: {"claude-opus-5-5", core.EffortHigh},
+			PhasePlanReview:   {"claude-opus-5-5", core.EffortHigh},
+			PhasePlanRevision: {"claude-opus-5-5", core.EffortHigh},
 			PhaseTestSpec:     {"claude-sonnet-5-5", core.EffortHigh},
 			PhaseTasks:        {"claude-sonnet-5-5", core.EffortHigh},
 			PhaseArchitecture: {"claude-sonnet-5-5", core.EffortHigh},

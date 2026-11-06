@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T13:31:22Z
-- **Updated:** 2026-11-06T13:40:34Z
+- **Updated:** 2026-11-06T14:53:21Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691`
 
@@ -1486,7 +1486,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 
 ## Tasks
 
-### [ ] 1. Add the two phase names and give every tier their model and effort (implement, pending)
+### [x] 1. Add the two phase names and give every tier their model and effort (implement, done)
 
 **Criteria:** 18-REQ-9.4, 18-REQ-9.5
 

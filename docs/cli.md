@@ -332,7 +332,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--dir` | `.` | the repository to work in; the file tools cannot reach outside it |
 | `--model` | `$AF_MODEL`, else `$AGENTKIT_MODEL`, else `STANDARD` | a tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or a model id from AgentKit's catalog (an `anthropic/` prefix is accepted). An id the catalog does not list is refused, since it would have no price and no budget could stop it |
 | `--effort` | `$AF_MODEL_EFFORT`, else each phase's tier effort | `off`, `low`, `medium`, `high`, `xhigh`, `max`, for every phase. An effort a phase's model does not take is lowered to the highest it does, with an `effort_clamped` warning naming the phases |
-| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `test_spec`, `tasks` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
+| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `test_spec`, `tasks`, `plan_review`, `plan_revision` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
 | `--max-turns` | 60 | per-phase turn ceiling, also the repair budget |
 | `--max-tokens` | 65536 | the output token cap of one model response in every phase. The model's thinking is spent from the same cap as its reply, so a phase on a high effort can use it up before it calls its submit tool; that fails as `no_result`, and this is the flag to raise. The model's own output ceiling still applies, so a larger value than it allows is lowered to it. Not `specr --max-tokens`, which is a render budget |
 | `--budget` | 5.00 | per-phase spend ceiling, in dollars |
@@ -348,7 +348,7 @@ architecture turn them into structure the validator checks, and every turn of
 a phase pays for its effort, the turns that only read a file included. So the
 later phases run lower:
 
-| Tier | `prd` | `requirements` | `test_spec`, `tasks`, `architecture` |
+| Tier | `prd` | `requirements`, `plan_review`, `plan_revision` | `test_spec`, `tasks`, `architecture` |
 |---|---|---|---|
 | `SIMPLE` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `low` |
 | `STANDARD` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `medium` |
@@ -358,7 +358,9 @@ later phases run lower:
 the judgment writing one does. A `--phase-model prd=…` does not move them;
 `--phase-model prd_review=…` does. They are listed in `model.phases`, the
 `--phase-model` help and `effort_clamped` whether or not `--adversarial` is on,
-since those describe the resolved plan.
+since those describe the resolved plan. `plan_review` and `plan_revision`
+run on the `requirements` column, which each tier names for them explicitly:
+judging a plan takes the judgment writing its requirements does.
 
 A model id given to `--model` runs every phase, at `--effort` or none. To run
 everything at one effort, give `--effort`; to change one phase, give
