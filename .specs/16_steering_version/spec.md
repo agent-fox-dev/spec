@@ -4,10 +4,10 @@
 
 - **Spec:** `16_steering_version` (id `16`, name `steering_version`)
 - **Title:** Version the steering and record which version a package was written under
-- **Status:** active
+- **Status:** sealed
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:39:19Z
-- **Updated:** 2026-11-06T14:25:28Z
+- **Updated:** 2026-11-06T15:38:02Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `ba0d73c0321f7fea64059d3368983dd14dfc7f389d101ca901e80d0c6accfe91`
 
