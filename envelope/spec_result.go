@@ -175,7 +175,7 @@ type Review struct {
 	RoundsRun int `json:"rounds_run"`
 	// RoundsAllowed is the round limit, --adversarial-rounds or 1.
 	RoundsAllowed int `json:"rounds_allowed"`
-	// StopReason is the one reason the rounds stopped: one of the
+	// StopReason is the one reason the rounds stopped: one of the three
 	// ReviewStop constants.
 	StopReason string `json:"stop_reason"`
 	// The totals over every round, derived from the rounds. FindingsCount is
@@ -275,16 +275,14 @@ const (
 
 // Why the rounds of a review stopped.
 const (
-	// ReviewStopNoFindings means the last review raised none.
-	ReviewStopNoFindings = "no_findings"
-	// ReviewStopNoSeriousFindings means the last review raised only minor
-	// findings, and its revision finished.
-	ReviewStopNoSeriousFindings = "no_serious_findings"
-	// ReviewStopRoundsExhausted means the last review raised a critical or
-	// major finding, its revision finished, and the round limit was reached.
+	// ReviewStopConverged means two consecutive rounds were clean: their
+	// reviews raised nothing critical or major.
+	ReviewStopConverged = "converged"
+	// ReviewStopRoundsExhausted means the round limit was reached without two
+	// consecutive clean rounds. A limit of one always stops so, or as
+	// incomplete.
 	ReviewStopRoundsExhausted = "rounds_exhausted"
 	// ReviewStopIncomplete means a review or revision did not finish, or the
 	// total budget stopped the rounds. It wins over every other reason.
 	ReviewStopIncomplete = "incomplete"
-	ReviewStopConverged  = "converged"
 )

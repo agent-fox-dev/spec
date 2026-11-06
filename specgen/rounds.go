@@ -15,10 +15,12 @@ import (
 // returns the last complete PRD and the record of how it got there.
 //
 // A round is one review and, when the review raised anything, one revision
-// of its findings. Another round follows only when the round's review raised
-// a critical or major finding and the limit has not been reached: a review
-// with nothing serious does not justify paying for another. Each round
-// reviews the PRD the previous revision left, and every round after the
+// of its findings: the minor findings of a clean round are revised too, and a
+// review with nothing has nothing to answer. A round is clean when its review
+// raised nothing critical or major. The rounds stop as converged once two
+// consecutive rounds were clean — one clean review is a single sample — and
+// as exhausted at the limit, so a limit of one never converges (ADR 16). Each
+// round reviews the PRD the previous revision left, and every round after the
 // first is shown the earlier findings with what became of them.
 //
 // A review or revision that does not finish, or a --total-budget already
@@ -34,6 +36,7 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 	var rounds []ReviewRound
 	var earlier []Finding
 	stop := envelope.ReviewStopIncomplete
+	cleanBefore := false
 
 	for round := 1; round <= limit; round++ {
 		if reason, spent := e.overTotalBudget(); spent {
@@ -55,43 +58,45 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 		if findings == nil {
 			findings = []Finding{}
 		}
-		rounds = append(rounds, ReviewRound{Round: round, Findings: findings})
-		o.Progress.Step(agentrun.PhasePRDReview, "%sthe review raised %s", prefixed(label), bySeverity(findings))
-		if len(findings) == 0 {
-			stop = envelope.ReviewStopNoFindings
-			break
+		clean := !serious(findings)
+		rounds = append(rounds, ReviewRound{Round: round, Clean: clean, Findings: findings})
+		state := "not clean"
+		if clean {
+			state = "clean"
 		}
+		o.Progress.Step(agentrun.PhasePRDReview, "%sthe review raised %s; the round is %s", prefixed(label), bySeverity(findings), state)
 
-		answer(findings, nil)
-		if reason, spent := e.overTotalBudget(); spent {
-			e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, reason)
-			break
-		}
-		done = o.Progress.Begin("%srevising the PRD (round %d of %d)", prefixed(label), round, limit)
-		revised, dispositions, stats, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
-		recordPhase(o.Run, stats, prd.SpecName)
-		done(cli.PhaseSummary(stats))
-		if err != nil {
-			if ctx.Err() != nil {
-				return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDRevision, agentrun.CategoryAborted, err))
+		if len(findings) > 0 {
+			answer(findings, nil)
+			if reason, spent := e.overTotalBudget(); spent {
+				e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, reason)
+				break
 			}
-			e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, failureReason(err))
+			done = o.Progress.Begin("%srevising the PRD (round %d of %d)", prefixed(label), round, limit)
+			revised, dispositions, stats, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
+			recordPhase(o.Run, stats, prd.SpecName)
+			done(cli.PhaseSummary(stats))
+			if err != nil {
+				if ctx.Err() != nil {
+					return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDRevision, agentrun.CategoryAborted, err))
+				}
+				e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, failureReason(err))
+				break
+			}
+			answer(findings, dispositions)
+			o.Progress.Step(agentrun.PhasePRDRevision, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
+			prd = revised
+			earlier = append(earlier, findings...)
+		}
+
+		if clean && cleanBefore {
+			stop = envelope.ReviewStopConverged
 			break
 		}
-		answer(findings, dispositions)
-		o.Progress.Step(agentrun.PhasePRDRevision, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
-		prd = revised
-		earlier = append(earlier, findings...)
-
-		switch {
-		case !serious(findings):
-			stop = envelope.ReviewStopNoSeriousFindings
-		case round == limit:
+		cleanBefore = clean
+		if round == limit {
 			stop = envelope.ReviewStopRoundsExhausted
-		default:
-			continue
 		}
-		break
 	}
 	return prd, buildReview(rounds, limit, stop), nil
 }

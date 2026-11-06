@@ -498,7 +498,7 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	}
 	r := env.Result
 	if r.Review == nil || r.Review.RoundsRun != 2 || r.Review.RoundsAllowed != 2 ||
-		r.Review.StopReason != envelope.ReviewStopNoFindings || r.Review.Rounds[0].Findings[0].ID != "R1-F1" ||
+		r.Review.StopReason != envelope.ReviewStopRoundsExhausted || r.Review.Rounds[0].Findings[0].ID != "R1-F1" ||
 		r.Review.Rounds[0].Findings[0].Disposition != envelope.DispositionFixed {
 		t.Errorf("review = %+v", r.Review)
 	}

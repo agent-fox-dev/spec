@@ -39,46 +39,113 @@ func incompleteWarnings(e *runEnv) []cli.Warning {
 	return out
 }
 
-// Another round follows only a round whose review raised a critical or major
-// finding, and only below the limit.
-func TestRunRounds_StopForTheRightReason(t *testing.T) {
+// The rounds stop as converged on two consecutive clean rounds, a clean round
+// being one whose review raised nothing critical or major, and as exhausted at
+// the limit otherwise; a limit of one never converges.
+func TestRunRounds_ConvergeOnTwoConsecutiveCleanRounds(t *testing.T) {
+	none, minor, major := reviewOutcome{}, reviewOutcome{severities: []string{"minor"}}, reviewOutcome{severities: []string{"major"}}
 	for _, tc := range []struct {
-		name               string
-		limit              int
-		reviews            []reviewOutcome
-		revisions          []revisionOutcome
-		wantReviews, wantR int
-		stop               string
+		name    string
+		limit   int
+		reviews []reviewOutcome
+		stop    string
+		rounds  int
 	}{
-		{"a review with no findings", 3, []reviewOutcome{{}}, nil, 1, 0, envelope.ReviewStopNoFindings},
-		{"only minor findings", 5, []reviewOutcome{{severities: []string{"minor", "minor"}}}, []revisionOutcome{{}},
-			1, 1, envelope.ReviewStopNoSeriousFindings},
-		{"a major finding, then none", 2, []reviewOutcome{{severities: []string{"major", "minor"}}, {}}, []revisionOutcome{{}},
-			2, 1, envelope.ReviewStopNoFindings},
-		{"a critical finding at the limit", 2,
-			[]reviewOutcome{{severities: []string{"critical"}}, {severities: []string{"critical"}}}, []revisionOutcome{{}, {}},
-			2, 2, envelope.ReviewStopRoundsExhausted},
+		{"clean then clean", 3, []reviewOutcome{none, minor}, envelope.ReviewStopConverged, 2},
+		{"clean, major, clean, clean", 5, []reviewOutcome{minor, major, none, minor}, envelope.ReviewStopConverged, 4},
+		{"major to the limit", 3, []reviewOutcome{major, major, major}, envelope.ReviewStopRoundsExhausted, 3},
+		{"clean rounds that are not consecutive", 3, []reviewOutcome{none, major, minor}, envelope.ReviewStopRoundsExhausted, 3},
+		{"one clean round at a limit of 1", 1, []reviewOutcome{none}, envelope.ReviewStopRoundsExhausted, 1},
+		{"one minor round at a limit of 1", 1, []reviewOutcome{minor}, envelope.ReviewStopRoundsExhausted, 1},
+		{"one major round at a limit of 1", 1, []reviewOutcome{major}, envelope.ReviewStopRoundsExhausted, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rv := &scriptedReviewer{t: t, reviews: tc.reviews, revisions: tc.revisions}
-			prd := roundPRD()
-			out, review, err := roundEnv(t, rv, tc.limit).runRounds(context.Background(), prd, "", nil)
+			rv := &scriptedReviewer{t: t, reviews: tc.reviews, revisions: make([]revisionOutcome, len(tc.reviews))}
+			_, review, err := roundEnv(t, rv, tc.limit).runRounds(context.Background(), roundPRD(), "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reviews, revisions := rv.counts(); reviews != tc.wantReviews || revisions != tc.wantR {
-				t.Errorf("reviews %d, revisions %d; want %d, %d", reviews, revisions, tc.wantReviews, tc.wantR)
+			if review.StopReason != tc.stop || review.RoundsRun != tc.rounds || review.RoundsAllowed != tc.limit {
+				t.Errorf("stop %q after %d rounds; want %q after %d", review.StopReason, review.RoundsRun, tc.stop, tc.rounds)
 			}
-			if review.StopReason != tc.stop || review.RoundsRun != tc.wantReviews || review.RoundsAllowed != tc.limit {
-				t.Errorf("review = %+v", review)
+			if reviews, _ := rv.counts(); reviews != tc.rounds {
+				t.Errorf("%d reviews ran; want %d", reviews, tc.rounds)
 			}
-			for i, round := range review.Rounds {
-				if round.Round != i+1 || round.Findings == nil {
-					t.Errorf("round %d = %+v", i+1, round)
+		})
+	}
+}
+
+// A round whose review raised only minor findings is clean and still revised;
+// one whose review raised nothing is clean and not revised; and a clean round
+// stops nothing unless the round before it was clean.
+func TestRunRounds_ReviseAMinorRoundAndNotAnEmptyOne(t *testing.T) {
+	rv := &scriptedReviewer{t: t,
+		reviews:   []reviewOutcome{{severities: []string{"major"}}, {severities: []string{"minor", "minor"}}, {}},
+		revisions: []revisionOutcome{{}, {}},
+	}
+	_, review, err := roundEnv(t, rv, 3).runRounds(context.Background(), roundPRD(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []bool{review.Rounds[0].Clean, review.Rounds[1].Clean, review.Rounds[2].Clean}; !slices.Equal(got, []bool{false, true, true}) {
+		t.Errorf("clean = %v; want false, true, true", got)
+	}
+	if reviews, revisions := rv.counts(); reviews != 3 || revisions != 2 {
+		t.Errorf("reviews %d, revisions %d; want 3 and 2: the minor round revised, the empty one not", reviews, revisions)
+	}
+	for _, f := range review.Rounds[1].Findings {
+		if f.Disposition != envelope.DispositionFixed {
+			t.Errorf("%s of the minor round is %s; want it answered", f.ID, f.Disposition)
+		}
+	}
+	if review.StopReason != envelope.ReviewStopConverged {
+		t.Errorf("stop %q; want converged on rounds 2 and 3", review.StopReason)
+	}
+}
+
+// A phase that does not finish stops the rounds as incomplete, whatever else
+// held — a round that would have converged included — and the findings of a
+// revision that did not finish are unanswered while the earlier rounds keep
+// their answers.
+func TestRunRounds_AnUnfinishedPhaseIsIncompleteWhateverElseHeld(t *testing.T) {
+	failed := errors.New("the phase failed")
+	minor, major := []string{"minor"}, []string{"major"}
+	for _, tc := range []struct {
+		name      string
+		budget    float64
+		reviews   []reviewOutcome
+		revisions []revisionOutcome
+		answered  []string // the dispositions of each round's first finding
+	}{
+		{"round 1's review", 0, []reviewOutcome{{err: failed}}, nil, nil},
+		{"round 1's revision", 0, []reviewOutcome{{severities: major}}, []revisionOutcome{{err: failed}}, []string{"unanswered"}},
+		{"round 2's revision, after a clean round 1 and a clean round 2", 0,
+			[]reviewOutcome{{severities: minor}, {severities: minor}}, []revisionOutcome{{}, {err: failed}}, []string{"fixed", "unanswered"}},
+		{"the budget before round 2", 1, []reviewOutcome{{severities: major}}, []revisionOutcome{{cost: 1}}, []string{"fixed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rv := &scriptedReviewer{t: t, reviews: tc.reviews, revisions: tc.revisions}
+			e := roundEnv(t, rv, 3)
+			e.o.TotalBudgetUSD = tc.budget
+			prd := roundPRD()
+			out, review, err := e.runRounds(context.Background(), prd, "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if review.StopReason != envelope.ReviewStopIncomplete {
+				t.Errorf("stop %q; want incomplete", review.StopReason)
+			}
+			for i, want := range tc.answered {
+				if got := review.Rounds[i].Findings[0]; got.Disposition != want || (want == "unanswered" && got.Reason != "") {
+					t.Errorf("round %d: %+v; want %s", i+1, got, want)
 				}
 			}
-			if (tc.wantR == 0) != (out.Body == prd.Body) {
-				t.Errorf("body %q after %d revisions", out.Body, tc.wantR)
+			ws := incompleteWarnings(e)
+			if len(ws) != 1 || ws[0].Severity != "high" || !strings.Contains(ws[0].Message, "widget_cache") {
+				t.Errorf("warnings %+v; want one high warning naming the scope", ws)
+			}
+			if fixedRounds := slices.Index(tc.answered, "unanswered"); fixedRounds == 0 && out.Body != prd.Body {
+				t.Errorf("the PRD %q is not the last complete one", out.Body)
 			}
 		})
 	}
@@ -181,6 +248,8 @@ func outcomeSequence(rng *rand.Rand, limit int) ([]reviewOutcome, []revisionOutc
 func expectedStop(limit int, budget float64, reviews []reviewOutcome, revisions []revisionOutcome) (string, int) {
 	spent := 0.0
 	over := func() bool { return budget > 0 && spent >= budget }
+	before := false // whether the round before was clean
+	revised := 0    // revisions run: a round with no findings has none
 	for round := 1; round <= limit; round++ {
 		if over() {
 			return envelope.ReviewStopIncomplete, round - 1
@@ -190,20 +259,22 @@ func expectedStop(limit int, budget float64, reviews []reviewOutcome, revisions 
 		if r.err != nil {
 			return envelope.ReviewStopIncomplete, round
 		}
-		if len(r.severities) == 0 {
-			return envelope.ReviewStopNoFindings, round
+		clean := !slices.ContainsFunc(r.severities, func(s string) bool { return s != "minor" })
+		if len(r.severities) > 0 {
+			if over() {
+				return envelope.ReviewStopIncomplete, round
+			}
+			v := revisions[revised]
+			revised++
+			spent += v.cost
+			if v.err != nil {
+				return envelope.ReviewStopIncomplete, round
+			}
 		}
-		if over() {
-			return envelope.ReviewStopIncomplete, round
+		if clean && before {
+			return envelope.ReviewStopConverged, round
 		}
-		v := revisions[round-1]
-		spent += v.cost
-		if v.err != nil {
-			return envelope.ReviewStopIncomplete, round
-		}
-		if !slices.ContainsFunc(r.severities, func(s string) bool { return s != "minor" }) {
-			return envelope.ReviewStopNoSeriousFindings, round
-		}
+		before = clean
 		if round == limit {
 			return envelope.ReviewStopRoundsExhausted, round
 		}
@@ -514,8 +585,10 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 // and its round of the limit, ended by every phase's footer, and followed by
 // the findings by severity or the answers by disposition.
 func TestRunRounds_ReportEachPhaseWithItsScopeAndRound(t *testing.T) {
+	// The first and last scopes converge on two empty reviews; the second
+	// raises a critical finding, is revised, and stops at the limit.
 	rv := &scriptedReviewer{t: t,
-		reviews:   []reviewOutcome{{}, {severities: []string{"critical", "minor", "minor"}}, {}, {}},
+		reviews:   []reviewOutcome{{}, {}, {severities: []string{"critical", "minor", "minor"}}, {}, {}, {}},
 		revisions: []revisionOutcome{{contest: []int{1}}},
 	}
 	var stderr lockedWriter
@@ -533,7 +606,7 @@ func TestRunRounds_ReportEachPhaseWithItsScopeAndRound(t *testing.T) {
 		"[spec] scope 2 of 3 (widget_github): revising the PRD (round 1 of 2)\n",
 		"[spec] scope 2 of 3 (widget_github): reviewing the PRD (round 2 of 2)\n",
 		"scope 2 of 3 (widget_github): reviewing the PRD (round 1 of 2) done (",
-		footer, "1 critical, 2 minor", "2 fixed, 1 contested", "no findings",
+		footer, "1 critical, 2 minor; the round is not clean", "2 fixed, 1 contested", "no findings; the round is clean",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stderr has no %q:\n%s", want, out)

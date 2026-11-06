@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:57:04Z
-- **Updated:** 2026-11-06T14:40:06Z
+- **Updated:** 2026-11-06T14:44:01Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109`
 
@@ -1196,7 +1196,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 4. Converge on two consecutive clean rounds (implement, pending)
+### [x] 4. Converge on two consecutive clean rounds (implement, done)
 
 **Criteria:** 17-REQ-1.7, 17-REQ-4.1, 17-REQ-4.2, 17-REQ-4.3, 17-REQ-4.4, 17-REQ-4.5, 17-REQ-4.6, 17-REQ-4.7, 17-REQ-5.1
 

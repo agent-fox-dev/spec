@@ -201,18 +201,26 @@ A **round** is one review and, when the review raised anything, one revision:
     phase's tool would refuse (`missing_intent`, `frontmatter_in_body`,
     `invalid_relevant_files`).
 
-Another round follows only when the round's review raised a `critical` or
-`major` finding and fewer than `--adversarial-rounds` rounds have run. Each
+A round is **clean** when its review raised no `critical` and no `major`
+finding. A clean round's `minor` findings are still revised; a review that
+raised nothing has no revision. The rounds go on until two consecutive rounds
+are clean, or `--adversarial-rounds` rounds have run. Each
 round reviews the PRD the last revision left, and every round after the first
 is shown the earlier findings with their rubrics, dispositions and the fields
 each answer carries.
 `result.review.stop_reason` says why the rounds stopped:
 
-- `no_findings`: the last review raised none.
-- `no_serious_findings`: only `minor` ones, which were revised.
-- `rounds_exhausted`: a `critical` or `major` finding in the last allowed
-  round.
-- `incomplete`: a phase that did not finish, or the budget.
+- `converged`: two consecutive rounds were clean.
+- `rounds_exhausted`: the allowed rounds ran without two consecutive clean
+  ones.
+- `incomplete`: a phase that did not finish, or the budget. It wins over the
+  other two, a round that would have converged included.
+
+With the default of one round the rounds stop as `rounds_exhausted` or
+`incomplete` and never converge: one round costs what it always did, and the
+result says honestly that a single review is a single sample. Converging takes
+at least two rounds; `--adversarial-rounds 3` gives a PRD with one serious flaw
+the room to be fixed and then reviewed clean twice.
 
 **When a round cannot finish.** A review or revision can stop at its budget,
 turns or `--phase-timeout`, on a refusal, or on a model, API or internal error.
@@ -237,7 +245,7 @@ comment.
 
 Each review and revision is a phase in the progress lines
 (`scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)`), followed
-by `the review raised 1 critical, 2 minor` or
+by `the review raised 1 critical, 2 minor; the round is not clean` or
 `the revision answered: 2 fixed, 1 contested`. Each one is also a
 `prd_review` or `prd_revision` entry in `usage.phases[]`.
 
