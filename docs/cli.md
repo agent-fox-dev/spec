@@ -277,6 +277,26 @@ computes the **grounding facts**: for every path in every task's `touches`,
 whether it exists in the repository as a file or a directory, resolved inside
 the repository and looked at on the file system, not judged by a model.
 
+The rounds are the PRD review's, applied to the plan unchanged: the same
+`R<round>-F<n>` ids, the four dispositions and their checks, the repeat rules,
+convergence on two consecutive clean rounds, the six totals, and
+`--adversarial-rounds` as the limit — counted apart from the PRD's rounds.
+Each round is a `plan_review` phase (tool `submit_plan_review`) and, when it
+raised anything, a `plan_revision` phase (tool `submit_plan_revision`), each a
+fresh conversation with the whole of every per-phase ceiling, the read-only
+file tools and the code-search index. Neither is shown the input or
+`--context`: the plan answers to the PRD.
+
+A plan review or revision that does not finish — its budget, turns,
+`--phase-timeout`, a model or API error, or a `--total-budget` already spent
+before it starts — stops the rounds as `incomplete` with a `high`
+`plan_review_incomplete` warning naming the scope, the round, the phase and
+why. The findings of a revision that did not finish are `unanswered`, the
+package is written from the last complete plan, and the run's exit code does
+not change. An interrupt fails the run as aborted at `plan_review` or
+`plan_revision`. Progress names each phase:
+`scope 2 of 3 (widget_github): reviewing the plan (round 1 of 2)`.
+
 ### The project audit
 
 The project's language is detected from its manifest (`go.mod`, `Cargo.toml`,
@@ -633,6 +653,8 @@ Under `--detail summary` (the default) `result` keeps `spec_dir`, `spec_id`,
 | `comment_not_posted` | low | report |
 | `output_not_written` | low | emit |
 | `prd_review_incomplete` | high | prd_review |
+| `plan_review_skipped` | high | plan_review |
+| `plan_review_incomplete` | high | plan_review |
 
 `steering_malformed` is raised once, before the first model call, when the spec
 root's `steering.md` opens with frontmatter that breaks one of its rules

@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T13:31:22Z
-- **Updated:** 2026-11-06T15:04:10Z
+- **Updated:** 2026-11-06T15:06:01Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691`
 
@@ -1621,7 +1621,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 5. Run the plan rounds on the PRD review's rules, and survive a phase that fails (implement, pending)
+### [x] 5. Run the plan rounds on the PRD review's rules, and survive a phase that fails (implement, done)
 
 **Criteria:** 18-REQ-5.3, 18-REQ-7.1, 18-REQ-7.2, 18-REQ-7.3, 18-REQ-7.4, 18-REQ-9.3, 18-REQ-9.6
 

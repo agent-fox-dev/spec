@@ -1659,3 +1659,45 @@ func TestRun_WritesTheLastCompletePlan(t *testing.T) {
 		})
 	}
 }
+
+// A plan phase that fails changes neither whether the run fails nor its exit
+// code; an interrupt still aborts the run.
+func TestRun_AFailedPlanPhaseDoesNotFailTheRun(t *testing.T) {
+	failed := errors.New("the plan review failed")
+	t.Run("everything else succeeds", func(t *testing.T) {
+		rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{err: failed}}}
+		o := planOptions(t, newAuthor(t, "01", "test_feature"), rv, 1)
+		got, err := Run(context.Background(), o)
+		if err != nil || !got.Validation.Valid {
+			t.Fatalf("Run: %v", err)
+		}
+		if got.PlanReview == nil || got.PlanReview.StopReason != envelope.ReviewStopIncomplete {
+			t.Errorf("plan review %+v; want it incomplete", got.PlanReview)
+		}
+	})
+	t.Run("the package does not validate", func(t *testing.T) {
+		run := func(plan bool) error {
+			a := newAuthor(t, "01", "test_feature")
+			a.shapes = map[string]packageShape{"test_feature": {dependsOn: "42"}} // a dependency the root lacks
+			rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{err: failed}}}
+			o := newOptions(newWorkspace(t), a)
+			o.AdversarialPlan, o.reviewer = plan, rv
+			_, err := Run(context.Background(), o)
+			return err
+		}
+		on, off := run(true), run(false)
+		if on == nil || off == nil || agentrun.CategoryOf(on) != agentrun.CategoryOf(off) || on.Error() != off.Error() {
+			t.Errorf("errors %v and %v; want the same failure", on, off)
+		}
+	})
+	t.Run("an interrupt", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{err: phaseErr(agentrun.PhasePlanReview, agentrun.CategoryAborted)}},
+			onPlanReview: func() { cancel() }}
+		_, err := Run(ctx, planOptions(t, newAuthor(t, "01", "test_feature"), rv, 1))
+		if f := asFailure(t, err); f.Stage != agentrun.PhasePlanReview || f.Category != agentrun.CategoryAborted {
+			t.Errorf("err = %v; want aborted at plan_review", err)
+		}
+	})
+}

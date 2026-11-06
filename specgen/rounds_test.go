@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/cli"
@@ -614,5 +615,159 @@ func TestRunRounds_ReportEachPhaseWithItsScopeAndRound(t *testing.T) {
 	}
 	if strings.Index(out, "1 critical, 2 minor") < strings.Index(out, "scope 2 of 3 (widget_github): reviewing the PRD (round 1 of 2) done") {
 		t.Error("the severity line comes before the review ends")
+	}
+}
+
+// planRounds runs the plan rounds of the fixture's plan with rv at limit.
+func planRounds(t *testing.T, rv *scriptedReviewer, limit int, label string) (*runEnv, afspec.PartialSpec, *Review) {
+	t.Helper()
+	e := roundEnv(t, rv, limit)
+	plan, review, err := e.runPlanRounds(context.Background(), roundPRD(), *planUnderReview(t), nil, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e, plan, review
+}
+
+// The plan rounds are the PRD's: the same ids, answers, convergence and
+// record.
+func TestRunPlanRounds_ApplyThePRDReviewsRules(t *testing.T) {
+	escalation := Disposition{Disposition: "escalated", Question: "Q?", Options: []string{"A.", "B."}, Decision: "A.", Reason: "unsure"}
+	rv := &scriptedReviewer{t: t,
+		planReviews: []reviewOutcome{{severities: []string{"major", "major", "minor", "minor"}}, {severities: []string{"minor"}}, {}},
+		planRevisions: []revisionOutcome{
+			{contest: []int{1}, answers: map[int]Disposition{2: escalation, 3: {Disposition: "declined", Reason: "a later package"}}},
+			{},
+		},
+	}
+	_, plan, review := planRounds(t, rv, 3, "")
+	if review.StopReason != envelope.ReviewStopConverged || review.RoundsRun != 3 {
+		t.Fatalf("stop %q after %d rounds; want converged after 3", review.StopReason, review.RoundsRun)
+	}
+	if got := []bool{review.Rounds[0].Clean, review.Rounds[1].Clean, review.Rounds[2].Clean}; !slices.Equal(got, []bool{false, true, true}) {
+		t.Errorf("clean = %v", got)
+	}
+	var dispositions []string
+	for _, f := range review.Rounds[0].Findings {
+		dispositions = append(dispositions, f.Disposition)
+	}
+	if !slices.Equal(dispositions, []string{"fixed", "contested", "escalated", "declined"}) || review.Rounds[0].Findings[3].ID != "R1-F4" {
+		t.Errorf("round 1: %v, last id %s", dispositions, review.Rounds[0].Findings[3].ID)
+	}
+	if sum := review.FixedCount + review.ContestedCount + review.EscalatedCount + review.DeclinedCount + review.UnansweredCount; sum != review.FindingsCount || review.FindingsCount != 5 {
+		t.Errorf("findings %d, the five counts sum to %d", review.FindingsCount, sum)
+	}
+	if plan.Tasks.Tasks[0].Title != "revised in round 2" {
+		t.Errorf("the plan returned has task 1 titled %q; want the last revision's", plan.Tasks.Tasks[0].Title)
+	}
+	if earlier := rv.planReviewReqs[1].Earlier; len(earlier) != 4 || earlier[1].Disposition != "contested" {
+		t.Errorf("round 2 was handed %+v; want round 1's findings with their answers", earlier)
+	}
+
+	// The tools hold a plan's answers and repeats to the same rules.
+	settled := []Finding{{ID: "R1-F1", Severity: "major", Rubric: "zero_decision", Section: "task 1", Flaw: "open", Evidence: "e", Remedy: "r", Disposition: "declined", Reason: "later"}}
+	var sink reviewSink
+	repeat := planFinding()
+	repeat.Section, repeat.Flaw = "task 1", "open"
+	if r := submitReview(t, newPlanReviewTool(&sink, 2, settled, planUnderReview(t), nil, ""), []reviewInput{repeat}); r.OK ||
+		!strings.Contains(r.Detail, "declined") {
+		t.Errorf("a declined plan finding raised again: %+v", r)
+	}
+	r, _ := revisePlan(t, planUnderReview(t), planFindings("grounding"), planAsSubmitted(t, planUnderReview(t)), nil,
+		contest("R1-F1", "it holds", "a quote that is nowhere"))
+	if r.OK || !strings.Contains(r.Detail, "counter-evidence") {
+		t.Errorf("a plan contest without counter-evidence the run finds: %+v", r)
+	}
+}
+
+// A plan phase that does not finish stops the rounds as incomplete with a
+// warning of the plan's own, and leaves its round's findings unanswered.
+func TestRunPlanRounds_AnUnfinishedPhaseStopsTheRounds(t *testing.T) {
+	failed := errors.New("the phase failed")
+	major := []string{"major"}
+	for _, tc := range []struct {
+		name      string
+		budget    float64
+		reviews   []reviewOutcome
+		revisions []revisionOutcome
+		phase     string
+		says      string
+		answered  []string
+		title     string
+	}{
+		{"round 1's review", 0, []reviewOutcome{{err: failed}}, nil, "plan_review", "the phase failed", nil, ""},
+		{"round 1's revision", 0, []reviewOutcome{{severities: major}}, []revisionOutcome{{err: failed}}, "plan_revision", "the phase failed",
+			[]string{"unanswered"}, ""},
+		{"round 2's revision", 0, []reviewOutcome{{severities: major}, {severities: major}}, []revisionOutcome{{}, {err: failed}},
+			"plan_revision", "the phase failed", []string{"fixed", "unanswered"}, "revised in round 1"},
+		{"the budget before round 2's review", 1, []reviewOutcome{{severities: major}}, []revisionOutcome{{cost: 1}}, "plan_review", "total budget",
+			[]string{"fixed"}, "revised in round 1"},
+		{"the budget before round 2's revision", 2, []reviewOutcome{{severities: major}, {severities: major, cost: 1}}, []revisionOutcome{{cost: 1}},
+			"plan_revision", "total budget", []string{"fixed", "unanswered"}, "revised in round 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rv := &scriptedReviewer{t: t, planReviews: tc.reviews, planRevisions: tc.revisions}
+			e := roundEnv(t, rv, 3)
+			e.o.TotalBudgetUSD = tc.budget
+			original := *planUnderReview(t)
+			plan, review, err := e.runPlanRounds(context.Background(), roundPRD(), original, nil, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if review.StopReason != envelope.ReviewStopIncomplete {
+				t.Errorf("stop %q; want incomplete", review.StopReason)
+			}
+			for i, want := range tc.answered {
+				if got := review.Rounds[i].Findings[0].Disposition; got != want {
+					t.Errorf("round %d: %s; want %s", i+1, got, want)
+				}
+			}
+			var ws []cli.Warning
+			for _, w := range e.o.Run.Warnings() {
+				if w.Code == cli.WarnPlanReviewIncomplete {
+					ws = append(ws, w)
+				}
+			}
+			if len(ws) != 1 || ws[0].Severity != "high" || !strings.Contains(ws[0].Message, "widget_cache") ||
+				!strings.Contains(ws[0].Message, tc.phase) || !strings.Contains(ws[0].Message, tc.says) {
+				t.Errorf("warnings %+v; want one high plan_review_incomplete naming the scope, %s and %q", ws, tc.phase, tc.says)
+			}
+			want := tc.title
+			if want == "" {
+				want = original.Tasks.Tasks[0].Title
+			}
+			if plan.Tasks.Tasks[0].Title != want {
+				t.Errorf("the plan returned has task 1 titled %q; want %q", plan.Tasks.Tasks[0].Title, want)
+			}
+		})
+	}
+}
+
+// Each plan phase is a progress line naming the scope and the round, and each
+// review's findings are counted by severity.
+func TestRunPlanRounds_ReportEachPhaseWithItsScopeAndRound(t *testing.T) {
+	for _, label := range []string{"scope 2 of 3 (widget_github)", ""} {
+		rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{severities: []string{"major", "minor"}}, {}}, planRevisions: []revisionOutcome{{}}}
+		var stderr lockedWriter
+		e := roundEnv(t, rv, 2)
+		e.o.Progress = cli.NewProgress(&stderr, "spec", false, false, false)
+		if _, _, err := e.runPlanRounds(context.Background(), roundPRD(), *planUnderReview(t), nil, label); err != nil {
+			t.Fatal(err)
+		}
+		prefix := ""
+		if label != "" {
+			prefix = label + ": "
+		}
+		out := stderr.w.String()
+		for _, want := range []string{
+			"[spec] " + prefix + "reviewing the plan (round 1 of 2)",
+			"[spec] " + prefix + "revising the plan (round 1 of 2)",
+			"[spec] " + prefix + "reviewing the plan (round 2 of 2)",
+			"1 major, 1 minor",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("label %q: stderr has no %q:\n%s", label, want, out)
+			}
+		}
 	}
 }

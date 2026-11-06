@@ -47,6 +47,16 @@ var everyPhase = []struct {
 			Findings: roundFindings("R1-F1")})
 		return err
 	}},
+	{"plan_review", []string{ToolSubmitPlanReview}, func(ctx context.Context, a *agentAuthor, ws *workspace.Workspace) error {
+		_, _, err := a.ReviewPlan(ctx, planReviewRequest{reviewRequest: reviewRequest{Root: ws.Root(), Round: 1, Limit: 1},
+			Plan: &afspec.PartialSpec{}})
+		return err
+	}},
+	{"plan_revision", []string{ToolSubmitPlanRevision}, func(ctx context.Context, a *agentAuthor, ws *workspace.Workspace) error {
+		_, _, _, err := a.RevisePlan(ctx, planRevisionRequest{planReviewRequest: planReviewRequest{
+			reviewRequest: reviewRequest{Root: ws.Root(), Round: 1, Limit: 1}, Plan: &afspec.PartialSpec{}}, Findings: roundFindings("R1-F1")})
+		return err
+	}},
 }
 
 // Every phase is offered its own tools, the read-only file tools and, with an
