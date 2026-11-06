@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T13:31:22Z
-- **Updated:** 2026-11-06T15:07:28Z
+- **Updated:** 2026-11-06T15:08:31Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691`
 
@@ -1691,7 +1691,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 7. Review each scope's plan in a split without holding up the next scope (implement, pending)
+### [x] 7. Review each scope's plan in a split without holding up the next scope (implement, done)
 
 **Criteria:** 18-REQ-8.1, 18-REQ-8.2, 18-REQ-8.3
 

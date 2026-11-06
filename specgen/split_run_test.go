@@ -762,3 +762,67 @@ func TestRun_EveryPackageOfASplitCarriesItsReview(t *testing.T) {
 		t.Errorf("follow-on packages = %+v", got.FollowOnSpecs)
 	}
 }
+
+// Each scope's plan is reviewed inside its own package build, so the next
+// scope's PRD is written while an earlier scope's plan is still under review;
+// and a resumed split reviews only the plans of the packages it writes.
+func TestRun_ASplitReviewsEachScopesPlanInItsOwnBuild(t *testing.T) {
+	ws := newWorkspace(t)
+	a := &concurrentAuthor{inner: splitAuthor(t)}
+	secondPRD := make(chan struct{})
+	var once sync.Once
+	a.beforePRD = func(req prdRequest) {
+		if req.Split != nil && req.Split.Scope().Name == "widget_github" {
+			once.Do(func() { close(secondPRD) })
+		}
+	}
+	rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{}, {}, {}},
+		onPlanReview: func(req planReviewRequest) {
+			if req.PRD.SpecName == "widget_core" {
+				// That could not happen if the plan rounds held up the next scope.
+				wait(t, secondPRD, "the second scope's PRD")
+			}
+		}}
+	o := fileOptions(ws, a)
+	o.MaxParallel, o.AdversarialPlan, o.reviewer = 3, true, rv
+	got, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, p := range packages(got) {
+		if p.PlanReview == nil || !p.Validation.Valid {
+			t.Errorf("%s: plan review %+v, valid %v", p.SpecDir, p.PlanReview, p.Validation.Valid)
+		}
+	}
+	if len(rv.planReviewReqs) != 3 {
+		t.Errorf("%d plan reviews; want one per scope", len(rv.planReviewReqs))
+	}
+
+	// A split stopped after its first package, then resumed.
+	ws = newWorkspace(t)
+	first := splitAuthor(t)
+	first.followOnErr["widget_github"] = errors.New("budget exceeded")
+	o = fileOptions(ws, first)
+	o.AdversarialPlan, o.reviewer = true, &scriptedReviewer{t: t, planReviews: []reviewOutcome{{}}}
+	if _, err := Run(context.Background(), o); err == nil {
+		t.Fatal("the first run should stop at the second scope")
+	}
+	written := filepath.Join(ws.Root(), ".specs", "01_widget_core")
+	before := dirHash(t, written)
+	resumed := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{}, {}}}
+	o = fileOptions(ws, splitAuthor(t))
+	o.AdversarialPlan, o.reviewer = true, resumed
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	var scopes []string
+	for _, req := range resumed.planReviewReqs {
+		scopes = append(scopes, req.PRD.SpecName)
+	}
+	if !slices.Equal(scopes, []string{"widget_github", "widget_adopt"}) {
+		t.Errorf("the resumed run reviewed the plans of %v; want only the scopes it wrote", scopes)
+	}
+	if dirHash(t, written) != before {
+		t.Error("the resumed run changed the package the first run wrote")
+	}
+}

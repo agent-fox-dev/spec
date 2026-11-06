@@ -1708,7 +1708,7 @@ func TestRun_AFailedPlanPhaseDoesNotFailTheRun(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{err: phaseErr(agentrun.PhasePlanReview, agentrun.CategoryAborted)}},
-			onPlanReview: func() { cancel() }}
+			onPlanReview: func(planReviewRequest) { cancel() }}
 		_, err := Run(ctx, planOptions(t, newAuthor(t, "01", "test_feature"), rv, 1))
 		if f := asFailure(t, err); f.Stage != agentrun.PhasePlanReview || f.Category != agentrun.CategoryAborted {
 			t.Errorf("err = %v; want aborted at plan_review", err)

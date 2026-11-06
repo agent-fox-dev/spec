@@ -427,7 +427,7 @@ type scriptedReviewer struct {
 	planReviews   []reviewOutcome
 	planRevisions []revisionOutcome
 	// onPlanReview, when set, runs at the start of each plan review.
-	onPlanReview func()
+	onPlanReview func(req planReviewRequest)
 
 	mu             sync.Mutex
 	reviewReqs     []reviewRequest
@@ -490,7 +490,7 @@ func (s *scriptedReviewer) ReviewPlan(_ context.Context, req planReviewRequest) 
 	s.planReviewReqs = append(s.planReviewReqs, req)
 	s.mu.Unlock()
 	if s.onPlanReview != nil {
-		s.onPlanReview()
+		s.onPlanReview(req)
 	}
 	if i >= len(s.planReviews) {
 		s.t.Fatalf("plan review %d was not scripted", i+1)

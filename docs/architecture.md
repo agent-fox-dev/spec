@@ -149,6 +149,11 @@ combinators (`schema`) and the indexed search (`codesearch`).
    the last complete PRD. A split runs each
    scope's rounds in the coordinator, after its PRD phase and before its
    number is reserved, so the next scope's PRD phase is shown the revised PRD.
+   A scope's plan rounds (`--adversarial-plan`) run elsewhere: inside its own
+   package build, after its tasks phase, so the next scope's PRD and
+   requirements phases do not wait for them; the check across specs still
+   waits for the packages before it, and a resumed split reviews only the
+   plans of the packages it writes.
 4. For each package: a spec number is reserved by creating its directory; the
    **requirements**, **test spec** and **tasks** phases run in that order, each
    a fresh agent that sees the PRD and the artifacts before it; with
