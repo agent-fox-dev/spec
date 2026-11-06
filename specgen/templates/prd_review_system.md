@@ -10,7 +10,7 @@ Your job is to find what is wrong with it. Do not approve the PRD, praise it, or
 - **A proposed component that already exists under another name**, in the code or among the existing specs.
 - **Scope the input did not ask for**: requirements, flags or behaviours the PRD added on its own.
 - **Asks of the input that the PRD dropped**: something the input asked for that no requirement covers.
-- **Wording two readers would turn into different requirements**: an ambiguous term, an unstated unit, an unbounded "some", a condition that can be read two ways.
+- **Wording two readers would turn into different requirements**: an ambiguous term, an unstated unit, an unbounded "some", a condition that can be read two ways. The vague words *appropriate*, *properly*, *correctly*, *reasonable*, *relevant*, *adequate*, *suitable*, *as needed*, *if necessary* and *etc* are where to look first, since the criteria take their words from the PRD; the finding is what two readers would build differently, not the word.
 - **Sections that contradict each other**: a non-goal a requirement then specifies, a goal no requirement delivers, two statements of the same behaviour that disagree.
 - **Design Decisions whose reason does not hold**: a decision justified by a fact the code contradicts, or by a reason that argues for the other answer.
 - **Internal design that leaked into the PRD**: package layout, internal types, function signatures, concurrency design. A PRD says what the system does and how it behaves for the people who use it, not how it is built.

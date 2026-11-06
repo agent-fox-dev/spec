@@ -25,6 +25,9 @@ type prdFrontmatter struct {
 	// SteeringVersion is read as a plain string, so an empty value on disk is
 	// the field being absent, as an empty owner or source is.
 	SteeringVersion string `yaml:"steering_version"`
+	// Extensions are the frontmatter's extension keys (extensions.go), read
+	// from a second decode into a map.
+	Extensions map[string]any `yaml:"-"`
 }
 
 // parsePRD splits a prd.md file into its YAML frontmatter and Markdown body.
@@ -80,6 +83,13 @@ func parsePRD(data []byte, filePath string) (*prdFrontmatter, string, error) {
 			File: filePath,
 			Err:  &SpecError{Msg: fmt.Sprintf("failed to parse YAML frontmatter: %s", err)},
 		}
+	}
+
+	// The struct decode drops the extension keys; a decode into a map keeps
+	// them, for every save to write back.
+	var all map[string]any
+	if yaml.Unmarshal([]byte(frontmatterStr), &all) == nil {
+		fm.Extensions = frontmatterExtensions(all)
 	}
 
 	// Validate required fields
@@ -188,6 +198,10 @@ func renderPRD(s *Spec) []byte {
 		b.WriteString("tags: ")
 		b.WriteString(renderYAMLList(s.Tags))
 		b.WriteByte('\n')
+	}
+
+	if set := s.extensions["prd.md"]; set != nil {
+		renderFrontmatterExtensions(&b, set[""])
 	}
 
 	b.WriteString("---\n")

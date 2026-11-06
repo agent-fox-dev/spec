@@ -21,6 +21,7 @@
     }
   },
   "required": ["$schema", "spec_id", "spec_name", "schema_version", "test_commands", "dependencies", "tasks"],
+  "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
   "additionalProperties": false,
   "$defs": {
     "test_commands": {
@@ -31,6 +32,7 @@
         "spec_tests": { "type": "string", "minLength": 1 }
       },
       "required": ["all_tests", "linter"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },
     "dependency": {
@@ -40,6 +42,7 @@
         "reason": { "type": "string", "minLength": 1 }
       },
       "required": ["spec", "reason"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },
     "task": {
@@ -67,6 +70,7 @@
         "optional": { "type": "boolean" }
       },
       "required": ["id", "kind", "title", "tests", "steps", "state"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false,
       "allOf": [
         {

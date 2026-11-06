@@ -216,6 +216,25 @@ func TestToolSchema_CarriesEveryKeyword(t *testing.T) {
 	}
 }
 
+// The format's schemas allow extension keys on every object, and the
+// generator writes none: the tool schema a phase is offered does not carry
+// the allowance.
+func TestArtifactSchema_DoesNotOfferExtensionKeys(t *testing.T) {
+	for _, step := range afspec.GenerationSteps {
+		s, err := ArtifactSchema(step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "patternProperties") || strings.Contains(string(raw), "^x-") {
+			t.Errorf("the %s tool schema offers extension keys", step)
+		}
+	}
+}
+
 func TestToolSchema_MakesATypeArrayWithNullNullable(t *testing.T) {
 	s, _ := toolSchema(t, `{"type":["string","null"]}`)
 	if s.Type != schema.TypeString || !s.Nullable {

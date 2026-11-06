@@ -29,6 +29,9 @@ const (
 const DefaultSpecDirName = ".specs"
     DefaultSpecDirName is where spec packages live under the repository root.
 
+const ExtensionPrefix = "x-"
+    ExtensionPrefix begins every extension key.
+
 const RenderedFileName = "spec.md"
     RenderedFileName is the name of the file every save writes beside a
     package's artifacts: its whole render, for a reviewer to read in a diff.
@@ -93,6 +96,9 @@ func HasIntent(body string) bool
     HasIntent reports whether body carries the intent section ComputeIntentHash
     hashes, by the same rule: a checker that accepted another spelling would
     pass a PRD that activation then refuses.
+
+func IsExtensionKey(key string) bool
+    IsExtensionKey reports whether key is an extension key.
 
 func IsSpecDirName(name string) bool
     IsSpecDirName validates whether a directory name matches the NN_snake_case
@@ -185,8 +191,9 @@ func Schemas() map[string][]byte
 
 func UnknownFields(raw any, target any) []string
     UnknownFields lists, as JSON pointers (`/tasks/0/done-when`), the keys in
-    raw — a decoded JSON value — that the type of target, a pointer to the Go
-    value it decodes into, has no field for. Nil when there are none.
+    raw — a decoded JSON value — that the type of target, a pointer to the
+    Go value it decodes into, has no field for. Nil when there are none. An
+    extension key (IsExtensionKey) is allowed by every schema and is not listed.
 
 func ValidTaskTransition(current, target TaskState) bool
     ValidTaskTransition reports whether current → target is allowed.
@@ -791,10 +798,12 @@ func (s *Spec) RenderIndividual(opts ...RenderOption) map[string]string
     "architecture". The same truncation levels as RenderCombined apply.
 
 func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[string]string
-    RenderIndividualScoped renders the spec scoped to one task (§11.1): the
-    PRD body and architecture unfiltered; the requirements that own the task's
-    criteria in full and all others as one line each; the task's tests in full;
-    the paths those tests verify; the task in full and all others as one line.
+    RenderIndividualScoped renders the spec scoped to one task (§11.1):
+    the PRD body without its Background and Requirements sections, which the
+    criteria below restate, and the architecture unfiltered; the requirements
+    that own the task's criteria in full and all others as one line each;
+    the task's tests in full; the paths those tests verify; the task in full and
+    all others as one line.
 
     Because rules C7 and C8 guarantee that every task lists its own tests and
     criteria, the v1 inference chain (traceability lookup, then text matching,
@@ -1119,7 +1128,7 @@ type ValidationEntry struct {
 	Artifact string // the artifact file the issue was found in
 	Path     string // JSON path (InstanceLocation) for schema errors
 	Keyword  string // KeywordLocation for schema errors
-	Check    string // rule name: "json_schema", "completeness", "C1".."C11", "scope_limit", "vague_language", …
+	Check    string // rule name: "json_schema", "completeness", "C1".."C11", "scope_limit", "missing_contract", …
 	EntityID string // the entity the entry is about
 	Value    string // optional value context
 }

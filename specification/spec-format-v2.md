@@ -315,7 +315,7 @@ Each rule is tagged with its enforcement mechanism.
 1. **[schema]** Every criterion has a non-empty `action`.
 2. **[validator, error]** Every `unwanted` criterion has a `contract`.
 3. **[validator, warning]** A spec has at most 10 requirements; a requirement has at most 8 criteria. Beyond that, split the spec.
-4. **[validator, warning]** Criterion fields avoid vague words (`appropriate`, `properly`, `correctly`, `reasonable`, `as needed`, `etc`).
+4. **[generation hint, review rubric]** Criterion fields avoid vague words (`appropriate`, `properly`, `correctly`, `reasonable`, `relevant`, `adequate`, `suitable`, `as needed`, `if necessary`, `etc`). The validator matches no words (design rule 3): the generator sends a criterion that holds one back to its phase once, and the PRD review and the plan review rubrics list them.
 5. **[generation instruction]** For every requirement the coordinator considers, and where applicable writes a criterion for: empty or null input; boundary values; operation failure; authorization failure; concurrent operation. For anything that spawns processes, loops, retries or calls a service: timeout, resource cleanup on failure, iteration cap, and the rule that library code returns errors instead of terminating the process.
 6. **[generation instruction]** Prefer measurable constraints over qualitative language.
 
@@ -481,7 +481,7 @@ gone.
 | `tests` | array of strings | yes | Test IDs this task must make pass. Non-empty. |
 | `steps` | array of strings | yes | Non-empty. What to do, in order. Concrete enough that a coder with the scoped render (§11) needs nothing else. |
 | `touches` | array of strings | no | Files, packages or modules the task is expected to create or modify. Anchors the coder and gives the integration task a checklist. |
-| `depends_on` | array of integers | no | Task IDs that must be `done` first. Absent means "the previous task". Enables parallel dispatch of independent tasks. Must reference lower IDs. |
+| `depends_on` | array of integers | no | Task IDs that must be `done` first. Absent means "the previous task" in array order. Enables parallel dispatch of independent tasks. Must reference lower IDs. The generator omits a `depends_on` that names only the previous task. |
 | `done_when` | array of strings | no | Extra completion checks beyond the implicit ones. |
 | `state` | enum | yes | `pending`, `in_progress`, `done`, `dropped`. |
 | `optional` | boolean | no | Default `false`. |
@@ -553,6 +553,7 @@ No traceability array is stored, so it cannot drift.
 4. **[validator, warning]** A task owns at most 10 tests and at most 12 steps. Larger tasks are split.
 5. **[validator, warning]** A spec has at most 12 tasks.
 6. **[generation instruction]** Group by requirement, not by layer: a task delivers one or two requirements end to end (model, logic, interface, tests), so that each task leaves the system in a working state.
+7. **[generation hint]** A step says a behaviour to add or a decision already taken, not an edit. No step and no `touches` entry names a line of a file (`store.go:88`, "line 88") or quotes a block of code: both are wrong after the first commit that moves them. Files are named in `touches`. The generator sends a tasks artifact that names a line back to its phase once; the validator does not check it.
 
 ---
 
@@ -570,7 +571,20 @@ afterwards; superseding adds a deprecation banner and moves the old spec to
 ### 10.1 Schema validation
 
 Per-file JSON Schema validation (`*.v2.json`). Rejects unknown fields,
-missing required fields, bad enums. The EARS field constraints of §6.2.1
+missing required fields, bad enums.
+
+**Extension keys.** Every object of the four schemas accepts a key that
+begins with `x-`, with any value, for a team's own metadata (an issue key, an
+estimate). The format gives it no meaning, the validator does not report it,
+and the render does not show it. The library keeps every extension key of the
+three JSON artifacts and of the PRD frontmatter through a load and a save: a
+save writes each back on the object it was read from, after the object's own
+fields, in key order, and in the frontmatter after the format's fields with
+its value as compact JSON. An object in an array is found by its `id` when it
+has one and by its position otherwise, so a key on an object a mutation
+removed is not written. The glossary is a map of terms, not an object with
+fields, and has no extension keys. The generator writes none, and refuses one
+in a model's artifact. The EARS field constraints of §6.2.1
 are expressed in the schema with a single conditional per pattern on the
 `condition`/`guard` fields.
 
@@ -592,9 +606,10 @@ All rules are errors unless stated otherwise.
 | C10 | Every `unwanted` criterion has a non-empty `contract`. | requirements |
 | C11 | `real_components` is present and non-empty exactly when `kind` is `smoke`. | test_spec |
 
-Warnings (never block): scope limits (§6.5.3, §7.3.4, §8.6.4–5), vague
-language (§6.5.4), glossary hints (§10.3), criteria without a `contract`
-whose action mentions an error outcome.
+Warnings (never block): scope limits (§6.5.3, §7.3.4, §8.6.4–5), glossary
+hints (§10.3), criteria without a `contract` whose action mentions an error
+outcome. Vague wording (§6.5.4) and line references (§8.6.7) are the
+generator's hints, not warnings of the validator.
 
 Rule `rendered` compares `spec.md` (§3) with the package's render. It applies
 to a package read from disk, not to one held only in memory.
@@ -655,7 +670,7 @@ Rendering is deterministic: same JSON in, same Markdown out.
 |---|---|
 | Per-file | Markdown for one artifact. |
 | Combined | PRD frontmatter and body, then `architecture.md` if present, then requirements, tests, tasks. |
-| Scoped to task `N` | PRD frontmatter, body and architecture unfiltered; the requirements that own the task's criteria in full and all others as one line each; the paths verified by the task's tests in full and all others as one line each; the introduction, glossary and every external API; the task's tests in full and all others as one line each; the test commands and dependencies; task `N` in full and all other tasks as one line each. |
+| Scoped to task `N` | PRD frontmatter and body without its `## Background` and `## Requirements` sections, which the task's criteria restate, and one line in their place that names them and says they are in `prd.md` and `spec.md`; the architecture unfiltered; the requirements that own the task's criteria in full and all others as one line each; the paths verified by the task's tests in full and all others as one line each; the introduction, glossary and every external API; the task's tests in full and all others as one line each; the test commands and dependencies; task `N` in full and all other tasks as one line each. |
 
 The scoped render is what a coder receives. Because C7 and C8 guarantee
 that every task lists its tests and criteria, the v1 inference chain
@@ -675,9 +690,10 @@ does not exist in v2.
   the cross-spec `dependencies`, and each external API symbol's import path,
   signature and notes. The exceptions are the artifacts' `$schema` and their
   copies of the spec's identity, which repeat the frontmatter, and a
-  criterion's `pattern`, which its EARS sentence carries. A scoped render
-  names what the task does not own by id and title. Only a caller's token
-  budget drops more.
+  criterion's `pattern`, which its EARS sentence carries, and the extension
+  keys (§10.1), which are a team's data, not the format's. A scoped render
+  names what the task does not own by id and title, and the PRD sections it
+  leaves out by name. Only a caller's token budget drops more.
 - A value inside a table cell has `|` escaped and newlines written as
   `<br>`, so it stays in its cell.
 

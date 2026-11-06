@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
 	"github.com/agent-fox-dev/agentkit-go/workspace"
 
@@ -382,4 +383,112 @@ func generate(a *agentAuthor, ws *workspace.Workspace, step afspec.GenerationSte
 	_, _, err := a.GenerateArtifact(context.Background(), artifactRequest{Step: step, Root: ws.Root(), Partial: partial,
 		Steering: steer.Body, SteeringVersion: steer.Version})
 	return err
+}
+
+// The canaries of TestRun_NoReviewerSeesWhatOnlyTheAuthorSaw: facts in no
+// file and no prompt, each placed where only one party can carry it.
+const (
+	authorCanary  = "AUTHOR-CANARY-7f3a: the author alone wrote this"
+	tasksCanary   = "TASKS-CANARY-91c2: the tasks phase alone wrote this"
+	inputCanary   = "INPUT-CANARY-c04e"
+	contextCanary = "CONTEXT-CANARY-5d18"
+)
+
+// thinkingAloud is a model turn that says text and then lists the files, so
+// that what it said is in the next request of the same conversation.
+func thinkingAloud(id, text string) faux.Turn {
+	return faux.FauxAssistantMessage(core.StopReasonToolUse, faux.FauxText(text), faux.FauxToolCall(id, "list_files", `{}`))
+}
+
+// A reviewer is fresh only if its request carries nothing the author's
+// conversation held. One whole run, with a finding in each review so that
+// both revision phases run, checks every request the provider received: no
+// PRD review or revision request carries what the PRD phase said, and no plan
+// review or revision request carries that, what the tasks phase said, the
+// input or the --context block (ADR 17). Each canary is also shown to reach
+// the requests where it belongs, so the test cannot pass by placing it
+// nowhere.
+func TestRun_NoReviewerSeesWhatOnlyTheAuthorSaw(t *testing.T) {
+	ws := newWorkspace(t)
+	artifacts, _ := loadFixture(t, "01", "test_feature")
+	prd := prdArgs(t, "test_feature")
+	revisedPlan := map[string]any{
+		"requirements": artifacts[afspec.StepRequirements],
+		"test_spec":    artifacts[afspec.StepTestSpec],
+		"tasks":        deepCopy(t, artifacts[afspec.StepTasks]),
+		"dispositions": []any{fixed("R1-F1")},
+	}
+	revisedPlan["tasks"].(map[string]any)["tasks"].([]any)[0].(map[string]any)["title"] = "Load and save every spec artifact"
+	finding := func(rubric, section string) map[string]any {
+		return map[string]any{"findings": []any{map[string]any{"severity": "minor", "rubric": rubric, "section": section,
+			"flaw": "the wording could be tighter", "evidence": "Test Feature", "remedy": "say it plainly", "reopens": ""}}}
+	}
+	runner, p := fauxRunner(t, ws,
+		thinkingAloud("a1", authorCanary),
+		toolCall("p1", ToolSubmitPRD, prd),
+		toolCall("r1", ToolSubmitPRDReview, finding("prd", "Goals")),
+		toolCall("v1", ToolSubmitPRDRevision, map[string]any{
+			"body": prd["body"].(string) + "\n## Design Decisions\n\n1. The wording is plain.\n", "dispositions": []any{fixed("R1-F1")}}),
+		toolCall("g1", ArtifactToolName(afspec.StepRequirements), artifacts[afspec.StepRequirements]),
+		toolCall("g2", ArtifactToolName(afspec.StepTestSpec), artifacts[afspec.StepTestSpec]),
+		thinkingAloud("g3", tasksCanary),
+		toolCall("g4", ArtifactToolName(afspec.StepTasks), artifacts[afspec.StepTasks]),
+		toolCall("q1", ToolSubmitPlanReview, finding("zero_decision", "task 1")),
+		toolCall("w1", ToolSubmitPlanRevision, revisedPlan),
+	)
+	a := &agentAuthor{runner: runner, ws: ws}
+	o := newOptions(ws, a)
+	o.Input.Body += "\n" + inputCanary
+	o.Input.Context = "## Additional context\n\n" + contextCanary + "\n"
+	o.Adversarial, o.AdversarialPlan, o.AdversarialRounds, o.reviewer = true, true, 1, a
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	phaseOf := func(names []string) string {
+		for _, tool := range []string{ToolSubmitPRD, ToolSubmitPRDReview, ToolSubmitPRDRevision, ToolSubmitPlanReview,
+			ToolSubmitPlanRevision, ArtifactToolName(afspec.StepTasks)} {
+			if slices.Contains(names, tool) {
+				return tool
+			}
+		}
+		return ""
+	}
+	forbidden := map[string][]string{
+		ToolSubmitPRDReview:    {authorCanary, tasksCanary},
+		ToolSubmitPRDRevision:  {authorCanary, tasksCanary},
+		ToolSubmitPlanReview:   {authorCanary, tasksCanary, inputCanary, contextCanary},
+		ToolSubmitPlanRevision: {authorCanary, tasksCanary, inputCanary, contextCanary},
+	}
+	reached := map[string]bool{}
+	phases := map[string]int{}
+	for _, req := range p.Requests() {
+		phase := phaseOf(toolNames(req))
+		phases[phase]++
+		seen := blocksText(req.System) + prefixText(req) + transcript(req)
+		for _, canary := range []string{authorCanary, tasksCanary, inputCanary, contextCanary} {
+			if !strings.Contains(seen, canary) {
+				continue
+			}
+			reached[phase+" "+canary] = true
+			if slices.Contains(forbidden[phase], canary) {
+				t.Errorf("a %s request carries %q", phase, canary)
+			}
+		}
+	}
+	for _, phase := range []string{ToolSubmitPRDReview, ToolSubmitPRDRevision, ToolSubmitPlanReview, ToolSubmitPlanRevision} {
+		if phases[phase] == 0 {
+			t.Errorf("no %s request reached the model: the run did not take the path under test", phase)
+		}
+	}
+	for _, want := range []string{
+		ToolSubmitPRD + " " + authorCanary,
+		ArtifactToolName(afspec.StepTasks) + " " + tasksCanary,
+		ToolSubmitPRDReview + " " + inputCanary,
+		ToolSubmitPRDReview + " " + contextCanary,
+	} {
+		if !reached[want] {
+			t.Errorf("the canary never reached where it belongs: %s", want)
+		}
+	}
 }

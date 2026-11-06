@@ -95,10 +95,11 @@ not submit a body that has one.
 
 ## No vague words
 
-The format's validator flags `appropriate`,
+`spec` sends its criteria back once for `appropriate`,
 `properly`, `correctly`, `reasonable`, `relevant`, `adequate`, `suitable`,
-`as needed`, `if necessary` and `etc` in the criteria `spec` writes, and
-the criteria take their words from the PRD. Say what each one stands for.
+`as needed`, `if necessary` and `etc`, and both adversarial reviews look for
+them; the criteria take their words from the PRD. Say what each one stands
+for.
 
 ## The size of one package
 

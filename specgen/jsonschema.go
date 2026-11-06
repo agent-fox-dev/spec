@@ -267,6 +267,10 @@ func (c *schemaConv) keyword(s *schema.Schema, key string, v orderedValue, path 
 		s.ExclusiveMaximum = jsonFloatPtr(v)
 	case "multipleOf":
 		s.MultipleOf = jsonFloatPtr(v)
+	case "patternProperties":
+		// The format's schemas allow extension keys ("^x-") on every
+		// object, for a team's own metadata. The generator writes none and
+		// DecodeArtifact refuses one, so the model is not offered them.
 	default:
 		// An unmodelled keyword rides through in authored order rather than
 		// being silently dropped: the schema is somebody else's document and

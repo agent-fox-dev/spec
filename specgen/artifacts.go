@@ -381,6 +381,9 @@ func settleArtifact(content map[string]any, step afspec.GenerationStep, partial 
 	if partial.SpecName != "" {
 		content["spec_name"] = partial.SpecName
 	}
+	if step == afspec.StepTasks {
+		omitDefaultDependencies(content)
+	}
 	code, err := checkArtifact(content, step, partial, audit, sink.reviewDue())
 	if err != nil {
 		sink.reject(content, err.Error())
@@ -401,9 +404,10 @@ func settleArtifact(content map[string]any, step afspec.GenerationStep, partial 
 // and is sent back once for its warnings.
 const codeReviewWarnings = "review_warnings"
 
-// reviewedChecks are the warnings sent back to the step whose artifact they
-// are on. Each is something the model can fix in place.
-var reviewedChecks = []string{"vague_language", "missing_contract", "scope_limit"}
+// reviewedChecks are the validator's warnings sent back to the step whose
+// artifact they are on. Each is something the model can fix in place. The
+// generator's own hints (generatorHints) are sent back with them.
+var reviewedChecks = []string{"missing_contract", "scope_limit"}
 
 // maxReviewedWarnings bounds the list sent back: past it, the model is told
 // how many more there are.
@@ -424,8 +428,8 @@ func reviewedWarnings(all []afspec.ValidationEntry, step afspec.GenerationStep) 
 
 func reviewMessage(step afspec.GenerationStep, warnings []afspec.ValidationEntry) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "the %s artifact passes every rule, and the validator has %d warning(s) on it: "+
-		"wording or sizing that a reader of the spec, or the coder implementing it, would trip over.\n",
+	fmt.Fprintf(&b, "the %s artifact passes every rule, and the checks have %d warning(s) on it: "+
+		"wording, sizing or line numbers that a reader of the spec, or the coder implementing it, would trip over.\n",
 		step, len(warnings))
 	shown := warnings
 	if len(shown) > maxReviewedWarnings {
@@ -435,7 +439,8 @@ func reviewMessage(step afspec.GenerationStep, warnings []afspec.ValidationEntry
 	if n := len(warnings) - len(shown); n > 0 {
 		fmt.Fprintf(&b, "- and %d more of the same kinds\n", n)
 	}
-	fmt.Fprintf(&b, "Fix the ones worth fixing: a vague word becomes the observable behaviour it stands for. "+
+	fmt.Fprintf(&b, "Fix the ones worth fixing: a vague word becomes the observable behaviour it stands for, "+
+		"and a line number becomes the behaviour the step adds, with the file in touches. "+
 		"Use %s to change just those fields, or %s for the whole artifact. To keep the artifact as it is, "+
 		"call %s with no operations. Your next submission is accepted with whatever warnings remain.",
 		PatchToolName(step), ArtifactToolName(step), PatchToolName(step))
@@ -487,7 +492,7 @@ func checkArtifact(content map[string]any, step afspec.GenerationStep, partial *
 				ruleErrs = append(ruleErrs, e)
 			}
 		}
-		warnings = reviewedWarnings(result.Warnings, step)
+		warnings = append(reviewedWarnings(result.Warnings, step), generatorHints(step, decoded)...)
 	}
 	var auditErr error
 	if audit != nil {

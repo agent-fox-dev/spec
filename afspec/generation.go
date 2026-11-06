@@ -73,6 +73,13 @@ func DecodeArtifact(step GenerationStep, content map[string]any) (any, error) {
 			return fmt.Errorf("the %s artifact has key(s) the schema does not allow: %s; remove them",
 				step, strings.Join(keys, ", "))
 		}
+		// An extension key is a team's, and the generator writes none: one
+		// in a model's artifact is a mistake, refused by its path as an
+		// unknown key is.
+		if keys := extensionPaths(content, out); len(keys) > 0 {
+			return fmt.Errorf("the %s artifact has extension key(s), which the generator does not write: %s; remove them",
+				step, strings.Join(keys, ", "))
+		}
 		return nil
 	}
 	switch step {

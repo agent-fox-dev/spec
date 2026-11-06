@@ -19,7 +19,8 @@ var unmarshalerType = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 
 // UnknownFields lists, as JSON pointers (`/tasks/0/done-when`), the keys in
 // raw — a decoded JSON value — that the type of target, a pointer to the Go
-// value it decodes into, has no field for. Nil when there are none.
+// value it decodes into, has no field for. Nil when there are none. An
+// extension key (IsExtensionKey) is allowed by every schema and is not listed.
 func UnknownFields(raw any, target any) []string {
 	return unknownIn(raw, reflect.TypeOf(target), "")
 }
@@ -46,6 +47,9 @@ func unknownIn(v any, t reflect.Type, path string) []string {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
+			if IsExtensionKey(k) {
+				continue
+			}
 			p := path + "/" + k
 			ft, known := fields[k]
 			if !known {

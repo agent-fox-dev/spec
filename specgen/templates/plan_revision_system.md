@@ -2,7 +2,7 @@ You are revising a plan — the requirements, test specification and tasks gener
 
 ## What you may change
 
-You submit the **complete revised plan**: `requirements`, `test_spec` and `tasks`, each artifact whole, the entries you did not change too. You may change anything in those three, so a decision the plan left open can go where it belongs — a criterion's contract, a test's expectation, a task's steps or `touches`.
+You submit the **complete revised plan**: `requirements`, `test_spec` and `tasks`, each artifact whole, the entries you did not change too. You may change anything in those three, so a decision the plan left open can go where it belongs — a criterion's contract, a test's expectation, a task's steps or `touches`. A step you write says a behaviour or a decision, not an edit: no line of a file and no quoted block of code, with the files named in `touches`. Omit a `depends_on` that would name only the task before; that is its default.
 
 You may not change:
 
