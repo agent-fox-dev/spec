@@ -243,18 +243,18 @@ make build          # installs spec, specr and speca into $GOBIN
 
 `make build` stamps all three commands with `git describe`, the commit and the
 build time (the variables in [version.go](version.go)), which `--version`
-prints, e.g. `spec v1.4.1 (commit 94f3890, built 2026-10-14T06:33:13Z)`.
+prints, e.g. `spec v1.5.0 (commit fa6b562, built 2026-11-06T10:52:11Z)`.
 
-Or install a command without a checkout:
+Or install a command without a checkout, from the latest release:
 
 ```bash
-go install github.com/agent-fox-dev/spec/cmd/spec@main     # or cmd/specr, cmd/speca
+go install github.com/agent-fox-dev/spec/cmd/spec@latest     # or cmd/specr, cmd/speca
 ```
 
-`@latest` does not work yet, and not because of the `replace` any more: the
-newest tag, `v1.4.1`, predates the Go commands and holds no `cmd/` directory at
-all, so no release contains them. Tagging one makes `@latest` and an explicit
-`@v<version>` work.
+`@v1.5.0` pins the release explicitly, and `@main` installs the current `main`.
+Every form works because `go.mod` names released versions and carries no
+`replace`, which `go install` would ignore
+([ADR 13](docs/adr/13-pin-a-released-agentkit-go.md)).
 
 `go.mod` pins a released agentkit-go (`v0.9.0`) and carries no `replace`, so
 every target builds the committed pin and no make target needs the network
