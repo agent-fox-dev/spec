@@ -134,9 +134,19 @@ combinators (`schema`) and the indexed search (`codesearch`).
 3. The **PRD phase** runs, unless a plan is being resumed. It may report a
    split, which is recorded as `<first_scope>.split.json` in the spec root.
    With `--adversarial`, the PRD then goes through its **review rounds**
-   (`specgen/rounds.go`, [ADR 09](adr/09-review-the-prd-adversarially.md)):
-   a `prd_review` phase finds its flaws, a `prd_revision` phase answers them,
-   and the package is built from the last complete PRD. A split runs each
+   (`specgen/rounds.go`, [ADR 09](adr/09-review-the-prd-adversarially.md),
+   [ADR 16](adr/16-triage-every-review-finding-four-ways.md)): a
+   `prd_review` phase finds its flaws, each with a rubric (`prd`, or
+   `steering` for a contradiction of a directive), and a `prd_revision` phase
+   answers every one `fixed`, `contested`, `escalated` or `declined`. The
+   tools check what the run can check — a contest's counter-evidence against
+   the PRD, the input and the repository, an escalation's decision against the
+   revised body, that a critical or steering finding is not declined, that a
+   later round does not raise a settled finding again — and the round loop
+   stops once two consecutive rounds are clean (no critical or major
+   finding), at the round limit, or as incomplete. The escalations are added
+   to the open questions once the rounds stop, and the package is built from
+   the last complete PRD. A split runs each
    scope's rounds in the coordinator, after its PRD phase and before its
    number is reserved, so the next scope's PRD phase is shown the revised PRD.
 4. For each package: a spec number is reserved by creating its directory; the

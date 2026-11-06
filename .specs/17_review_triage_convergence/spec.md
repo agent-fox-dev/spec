@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:57:04Z
-- **Updated:** 2026-11-06T14:46:10Z
+- **Updated:** 2026-11-06T14:48:18Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109`
 
@@ -1261,7 +1261,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 6. Verify the three paths end to end and record the break in an ADR (integration, pending)
+### [x] 6. Verify the three paths end to end and record the break in an ADR (integration, done)
 
 **Tests:** TS-17-20, TS-17-21, TS-17-22
 

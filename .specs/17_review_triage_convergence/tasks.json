@@ -265,7 +265,7 @@
         "no file under specgen/, envelope/, cmd/, docs/ or specification/ names accepted, rejected, accepted_count, rejected_count, no_findings or no_serious_findings as a value of the review",
         "a run with the adversarial review and a round limit of 1 bills the same phases it bills before this change"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

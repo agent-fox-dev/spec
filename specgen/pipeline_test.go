@@ -1161,7 +1161,9 @@ func TestRunPreflight_ReportsTheCodeSearchIndex(t *testing.T) {
 	}
 }
 
-func reviewOf(rounds, findings, fixed int) *Review { return reviewWithSteering(rounds, findings, fixed, 0) }
+func reviewOf(rounds, findings, fixed int) *Review {
+	return reviewWithSteering(rounds, findings, fixed, 0)
+}
 
 // reviewWithSteering is a review whose round holds findings findings, the
 // first steering of them with the steering rubric.

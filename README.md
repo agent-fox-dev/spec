@@ -113,7 +113,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--max-tokens` | The output token cap of one model response, thinking included (default 65536) |
 | `--preflight` | Run every check that would refuse the run, then stop before any model call |
 | `--max-parallel` | How many packages of a split are generated at once (default 3) |
-| `--adversarial`, `--adversarial-rounds` | Have a fresh agent look for flaws in every PRD, and another revise it, before the package is generated; up to 1–5 rounds (default 1) |
+| `--adversarial`, `--adversarial-rounds` | Have a fresh agent look for flaws in every PRD, the steering's directives among them, and another answer each one fixed, contested, escalated or declined, before the package is generated; up to 1–5 rounds (default 1), stopping once two consecutive rounds raise nothing serious (`3` gives a PRD room to converge) |
 
 The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
 Bedrock. Every flag, the envelope, the error categories and the warning codes
@@ -314,3 +314,4 @@ and no API key: the command's tests run against a scripted model.
 - [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports
 - [ADR 14](docs/adr/14-commit-the-rendered-package-beside-its-json.md) — why every package carries its render, `spec.md`, and when a stale one blocks
 - [ADR 15](docs/adr/15-version-the-steering.md) — why the steering carries a version and a record of its amendments, and what a package records of it
+- [ADR 16](docs/adr/16-triage-every-review-finding-four-ways.md) — why a review finding is fixed, contested, escalated or declined, and the review converges on two clean rounds

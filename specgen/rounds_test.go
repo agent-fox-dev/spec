@@ -176,8 +176,8 @@ func TestRunRounds_ReviewWhatTheLastRevisionLeft(t *testing.T) {
 }
 
 // A later round's reviewer and reviser are both sent every earlier finding
-// with its id, disposition and reason, and the reviewer the rule on rejected
-// findings; round 1 has no earlier rounds.
+// with its id, disposition and the fields of its answer, and the reviewer the
+// rules on repeats; round 1 has no earlier rounds.
 func TestRunRounds_SendLaterRoundsTheEarlierFindings(t *testing.T) {
 	rv := &scriptedReviewer{t: t,
 		reviews:   []reviewOutcome{{severities: []string{"major", "major"}}, {severities: []string{"minor"}}},
