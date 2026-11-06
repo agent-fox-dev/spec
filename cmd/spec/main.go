@@ -66,6 +66,9 @@ early is resumed by running spec on the same input again.
 agent looks for its flaws and another revises it to answer them, for up to
 --adversarial-rounds rounds (default 1). A review that cannot finish is a
 warning, not a failure: the package is generated from the last complete PRD.
+--adversarial-plan reviews every package's plan — its requirements, tests and
+tasks — after the tasks phase and before the package is written, against the
+Zero-Decision Rule and codebase grounding; the two reviews are independent.
 
 Everything the model does here is read-only. The only thing written is the
 spec package itself, by this program, after the run.
@@ -91,6 +94,7 @@ type specFlags struct {
 	comment      bool
 	maxParallel  int
 	adversarial  bool
+	plan         bool
 	rounds       roundsFlag
 }
 
@@ -140,6 +144,9 @@ func (f *specFlags) register(fs *flag.FlagSet) {
 		"how many packages of a split are generated at once, beside the next scope's PRD; 1 writes the scopes one after another")
 	fs.BoolVar(&f.adversarial, "adversarial", false,
 		"have a fresh agent look for flaws in every PRD, and another revise it to answer them, before the package is generated")
+	fs.BoolVar(&f.plan, "adversarial-plan", false,
+		"have a fresh agent look for the flaws in every plan the run generates — a design choice left to the coder, a path or "+
+			"symbol that is not there — and another revise it, after the tasks phase and before the package is written")
 	fs.Var(&f.rounds, "adversarial-rounds",
 		"the most review rounds a PRD gets with --adversarial, 1 to 5 (default 1); the rounds stop once a review finds nothing critical or major")
 }
@@ -159,6 +166,7 @@ func (f *specFlags) specOptions(d cli.Deps) specgen.Options {
 		Comment:           f.comment,
 		MaxParallel:       f.maxParallel,
 		Adversarial:       f.adversarial,
+		AdversarialPlan:   f.plan,
 		AdversarialRounds: f.adversarialRounds(),
 		DryRun:            d.Common.DryRun,
 		TotalBudgetUSD:    d.Common.TotalBudgetUSD,

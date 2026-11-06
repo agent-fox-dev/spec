@@ -80,6 +80,9 @@ type Package struct {
 	// generated from it. It is present exactly when the run had
 	// --adversarial on.
 	Review *Review `json:"review,omitempty"`
+	// PlanReview is how the plan was reviewed and revised before the package
+	// was written, with --adversarial-plan; absent without it.
+	PlanReview *Review `json:"plan_review,omitempty"`
 
 	// Detail records which view of this result was emitted: "summary" or
 	// "full". It is present on both.

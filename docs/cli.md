@@ -258,6 +258,25 @@ by `the review raised 1 critical, 2 minor; the round is not clean` or
 `the revision answered: 2 fixed, 1 contested`. Each one is also a
 `prd_review` or `prd_revision` entry in `usage.phases[]`.
 
+### The plan review (`--adversarial-plan`)
+
+With `--adversarial-plan`, the plan of every package the run generates —
+`requirements.json`, `test_spec.json` and `tasks.json` — is reviewed after the
+tasks phase and before the architecture phase and the write, so
+`architecture.md` is written from the revised plan. It is independent of
+`--adversarial`: either, both or neither may be given, and a run with neither
+runs the phases it always ran. A dry run reviews the plan too and writes
+nothing.
+
+Before the first round the plan is validated in memory against the schemas
+and C1 to C11. A plan that does not validate is not reviewed: a `high`
+`plan_review_skipped` warning names the scope and the number of errors, no
+plan phase runs, and the package is written and validated as it would be
+without the flag, failing the run on the same errors. Otherwise the run
+computes the **grounding facts**: for every path in every task's `touches`,
+whether it exists in the repository as a file or a directory, resolved inside
+the repository and looked at on the file system, not judged by a model.
+
 ### The project audit
 
 The project's language is detected from its manifest (`go.mod`, `Cargo.toml`,
@@ -323,6 +342,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--comment` | off | post the finished PRD back to the issue the input came from; needs an issue input and a forge token (`GITHUB_TOKEN`/`GH_TOKEN` or `GITLAB_TOKEN`). An invalid package's PRD is not posted |
 | `--max-parallel` | 3 | how many packages of a split are generated at once, beside the next scope's PRD phase; `1` writes the scopes one after another; less is a usage error |
 | `--adversarial` | off | review every PRD the run writes before its package is generated: a fresh agent looks for its flaws and another revises it to answer them (see [the adversarial review](#the-adversarial-review---adversarial)) |
+| `--adversarial-plan` | off | review the plan of every package the run generates — its requirements, tests and tasks — after the tasks phase and before the architecture phase and the write: a fresh agent looks for its flaws against the Zero-Decision Rule and codebase grounding, and another revises it (see [the plan review](#the-plan-review---adversarial-plan)). Independent of `--adversarial` |
 | `--adversarial-rounds` | 1 | the most review rounds a PRD gets, 1 to 5; the rounds stop once a review raises nothing `critical` or `major`. A value outside 1 to 5 (an explicit `0` included), or the flag without `--adversarial`, is a usage error; a non-integer is refused by the flag parser |
 
 ### The model and the ceilings

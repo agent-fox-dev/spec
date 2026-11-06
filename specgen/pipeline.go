@@ -65,8 +65,13 @@ type Options struct {
 	// generated: a fresh agent looks for its flaws and another revises it to
 	// answer them, for up to AdversarialRounds rounds.
 	Adversarial bool
-	// AdversarialRounds is the round limit, 1 to 5. The command passes 1
-	// when --adversarial is given without --adversarial-rounds.
+	// AdversarialPlan reviews and revises the plan of every package the run
+	// generates, after the tasks phase and before the architecture phase and
+	// the write, independently of Adversarial.
+	AdversarialPlan bool
+	// AdversarialRounds is the round limit of each review, the PRD's and the
+	// plan's counted separately, 1 to 5. The command passes 1 when a review
+	// is asked for without --adversarial-rounds.
 	AdversarialRounds int
 
 	// MaxParallel is how many packages of a split are generated at once. The
@@ -485,7 +490,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	specsDir := resolveSpecsDir(o, root)
 
 	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author, reviewer: o.reviewer}
-	if env.author == nil || (env.reviewer == nil && o.Adversarial) {
+	if env.author == nil || (env.reviewer == nil && (o.Adversarial || o.AdversarialPlan)) {
 		phases := &agentAuthor{runner: o.Runner, ws: o.Workspace, codeSearch: o.Index != nil}
 		if env.author == nil {
 			env.author = phases
@@ -776,6 +781,26 @@ func prefixed(label string) string {
 	return label + ": "
 }
 
+// reviewPlan is the plan review of one package, after its tasks phase: the
+// plan as the review left it, and the record. A plan that does not validate
+// in memory is not reviewed — the review would pay to find what the validator
+// already found — and goes on, with a warning, to be written and validated as
+// it is, failing the run as it would without the review. Otherwise the
+// grounding facts are computed once and the rounds run.
+func (e *runEnv) reviewPlan(ctx context.Context, prd PRD, plan afspec.PartialSpec, label string) (afspec.PartialSpec, *Review, error) {
+	if v := afspec.ValidateGenerationStepComplete(afspec.StepTasks, plan); !v.Valid {
+		e.o.Run.Warn(cli.WarnPlanReviewSkipped, "high", "the plan of %s does not validate (%s), so it is not reviewed; "+
+			"the package is written and validated as it is", prd.SpecName, countOf(len(v.Errors), "error"))
+		return plan, nil, nil
+	}
+	facts := groundingFacts(e.o.Workspace, plan.Tasks)
+	reviewed, review, err := e.runPlanRounds(ctx, prd, plan, facts, label)
+	if err != nil {
+		return plan, nil, err
+	}
+	return reviewed, review, nil
+}
+
 // unwritten is pkg as a run that failed before writing it reports it: what
 // the PRD phase decided, and nothing that says a package exists. Nothing is
 // written until every phase has finished, and the reservation is removed, so
@@ -878,6 +903,13 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			sib.endRequirements(actorsOf(partial.Requirements))
 		}
 		pkg.Artifacts = append(pkg.Artifacts, afspec.ArtifactFileName(step))
+	}
+	if o.AdversarialPlan {
+		reviewed, planReview, err := e.reviewPlan(ctx, prd, partial, label)
+		if err != nil {
+			return unwritten(pkg), err
+		}
+		partial, pkg.PlanReview = reviewed, planReview
 	}
 	spec.Requirements = partial.Requirements
 	spec.TestSpec = partial.TestSpec

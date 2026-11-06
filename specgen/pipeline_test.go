@@ -1484,3 +1484,178 @@ func TestRun_ChecksTheSteeringOnlyWhenItSaysSomethingAndThePRDIsReviewed(t *test
 		})
 	}
 }
+
+// planOptions is newOptions with the plan review on and rv as its model half.
+func planOptions(t *testing.T, a author, rv reviewer, rounds int) Options {
+	t.Helper()
+	o := newOptions(newWorkspace(t), a)
+	o.AdversarialPlan, o.AdversarialRounds, o.reviewer = true, rounds, rv
+	return o
+}
+
+// phasesRun are the names of the phases a run recorded, in order.
+func phasesRun(o Options, got *Result) []string {
+	var names []string
+	for _, p := range o.Run.Envelope(cli.ExitOK, got, nil).Usage.Phases {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+// writtenTaskTitle is the title of task 1 in the tasks.json a run wrote.
+func writtenTaskTitle(t *testing.T, o Options, got *Result) string {
+	t.Helper()
+	loaded, err := afspec.LoadSpec(filepath.Join(o.Workspace.Root(), got.SpecDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loaded.Tasks.Tasks[0].Title
+}
+
+// The plan is reviewed after the tasks phase and before the architecture
+// phase, which is given the revised plan, and the package holds it.
+func TestRun_ReviewsThePlanBetweenTheTasksAndTheArchitecture(t *testing.T) {
+	a := newAuthor(t, "01", "test_feature")
+	a.arch = "# Architecture: test_feature\n"
+	rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{severities: []string{"major"}}}, planRevisions: []revisionOutcome{{}}}
+	o := planOptions(t, a, rv, 1)
+	o.Architecture = true
+	got, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []string{"prd", "generate:requirements", "generate:test_spec", "generate:tasks", "plan_review", "plan_revision", "architecture"}
+	if names := phasesRun(o, got); !slices.Equal(names, want) {
+		t.Errorf("phases = %v; want %v", names, want)
+	}
+	if title := a.archReqs[0].Partial.Tasks.Tasks[0].Title; title != "revised in round 1" {
+		t.Errorf("the architecture was given task 1 titled %q; want the revised plan", title)
+	}
+	if title := writtenTaskTitle(t, o, got); title != "revised in round 1" {
+		t.Errorf("the written plan has task 1 titled %q; want the revised plan", title)
+	}
+}
+
+// The two review flags are independent, and a run with neither runs the
+// phases it always ran.
+func TestRun_TheTwoReviewsAreIndependent(t *testing.T) {
+	gen := []string{"prd", "generate:requirements", "generate:test_spec", "generate:tasks"}
+	for _, tc := range []struct {
+		name      string
+		prd, plan bool
+		want      []string
+	}{
+		{"neither", false, false, gen},
+		{"the PRD review", true, false, []string{"prd", "prd_review", "generate:requirements", "generate:test_spec", "generate:tasks"}},
+		{"the plan review", false, true, append(slices.Clone(gen), "plan_review")},
+		{"both", true, true, []string{"prd", "prd_review", "generate:requirements", "generate:test_spec", "generate:tasks", "plan_review"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rv := &scriptedReviewer{t: t, reviews: []reviewOutcome{{}}, planReviews: []reviewOutcome{{}}}
+			o := newOptions(newWorkspace(t), newAuthor(t, "01", "test_feature"))
+			o.Adversarial, o.AdversarialPlan, o.AdversarialRounds, o.reviewer = tc.prd, tc.plan, 1, rv
+			if !tc.prd && !tc.plan {
+				o.reviewer = failingReviewer{t}
+			}
+			got, err := Run(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if names := phasesRun(o, got); !slices.Equal(names, tc.want) {
+				t.Errorf("phases = %v; want %v", names, tc.want)
+			}
+			if (got.Review != nil) != tc.prd || (got.PlanReview != nil) != tc.plan {
+				t.Errorf("review %v, plan review %v; want %v and %v", got.Review != nil, got.PlanReview != nil, tc.prd, tc.plan)
+			}
+		})
+	}
+}
+
+// A dry run reviews the plan and writes nothing.
+func TestRun_ADryRunReviewsThePlanAndWritesNothing(t *testing.T) {
+	rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{severities: []string{"major"}}}, planRevisions: []revisionOutcome{{}}}
+	o := planOptions(t, newAuthor(t, "01", "test_feature"), rv, 1)
+	o.DryRun = true
+	got, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if names := phasesRun(o, got); !slices.Contains(names, "plan_review") || !slices.Contains(names, "plan_revision") {
+		t.Errorf("phases = %v; want the plan's two", names)
+	}
+	if got.PlanReview == nil || !got.Validation.Valid {
+		t.Errorf("plan review %+v, valid %v", got.PlanReview, got.Validation.Valid)
+	}
+	if exists(filepath.Join(o.Workspace.Root(), ".specs")) {
+		t.Error("a dry run created the spec root")
+	}
+}
+
+// A plan that does not validate is not reviewed: one high warning, no plan
+// phase, and the run fails on the errors it would have failed on anyway.
+func TestRun_DoesNotReviewAPlanThatDoesNotValidate(t *testing.T) {
+	run := func(plan bool) (*Result, error, Options) {
+		a := newAuthor(t, "01", "test_feature")
+		a.breakScope = "test_feature"
+		o := newOptions(newWorkspace(t), a)
+		o.AdversarialPlan, o.reviewer = plan, failingReviewer{t}
+		got, err := Run(context.Background(), o)
+		return got, err, o
+	}
+	got, err, o := run(true)
+	_, errOff, _ := run(false)
+	if err == nil || errOff == nil || err.Error() != errOff.Error() {
+		t.Fatalf("errors %v and %v; want the same failure with the flag on and off", err, errOff)
+	}
+	var skipped []cli.Warning
+	for _, w := range o.Run.Envelope(cli.ExitFailed, got, nil).Warnings {
+		if w.Code == cli.WarnPlanReviewSkipped {
+			skipped = append(skipped, w)
+		}
+	}
+	if len(skipped) != 1 || skipped[0].Severity != "high" || !strings.Contains(skipped[0].Message, "test_feature") ||
+		!strings.Contains(skipped[0].Message, "1 error") {
+		t.Errorf("warnings %+v; want one high plan_review_skipped naming the scope and the error count", skipped)
+	}
+	if got.PlanReview != nil || slices.Contains(phasesRun(o, got), "plan_review") {
+		t.Errorf("plan review %+v, phases %v; want none", got.PlanReview, phasesRun(o, got))
+	}
+}
+
+// The package is written from the last complete plan, and the architecture
+// is given the same plan.
+func TestRun_WritesTheLastCompletePlan(t *testing.T) {
+	failed := errors.New("the revision failed")
+	for _, tc := range []struct {
+		name      string
+		reviews   []reviewOutcome
+		revisions []revisionOutcome
+		want      string
+	}{
+		{"two finished revisions", []reviewOutcome{{severities: []string{"major"}}, {severities: []string{"major"}}}, []revisionOutcome{{}, {}}, "revised in round 2"},
+		{"one finished and one not", []reviewOutcome{{severities: []string{"major"}}, {severities: []string{"major"}}}, []revisionOutcome{{}, {err: failed}}, "revised in round 1"},
+		{"none finished", []reviewOutcome{{severities: []string{"major"}}}, []revisionOutcome{{err: failed}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAuthor(t, "01", "test_feature")
+			a.arch = "# Architecture: test_feature\n"
+			want := tc.want
+			if want == "" {
+				want = a.artifacts[afspec.StepTasks]["tasks"].([]any)[0].(map[string]any)["title"].(string)
+			}
+			rv := &scriptedReviewer{t: t, planReviews: tc.reviews, planRevisions: tc.revisions}
+			o := planOptions(t, a, rv, 2)
+			o.Architecture = true
+			got, err := Run(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if title := writtenTaskTitle(t, o, got); title != want {
+				t.Errorf("the written plan has task 1 titled %q; want %q", title, want)
+			}
+			if title := a.archReqs[0].Partial.Tasks.Tasks[0].Title; title != want {
+				t.Errorf("the architecture was given task 1 titled %q; want %q", title, want)
+			}
+		})
+	}
+}

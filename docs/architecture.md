@@ -151,8 +151,14 @@ combinators (`schema`) and the indexed search (`codesearch`).
    number is reserved, so the next scope's PRD phase is shown the revised PRD.
 4. For each package: a spec number is reserved by creating its directory; the
    **requirements**, **test spec** and **tasks** phases run in that order, each
-   a fresh agent that sees the PRD and the artifacts before it; the optional
-   **architecture** phase runs; the package is saved with `afspec`, read back,
+   a fresh agent that sees the PRD and the artifacts before it; with
+   `--adversarial-plan` the plan then goes through its **plan review rounds**
+   (`specgen/rounds.go` `runPlanRounds`, on the same loop as the PRD's):
+   a plan that does not validate in memory is not reviewed, otherwise the
+   grounding facts are computed once and a `plan_review` and a
+   `plan_revision` phase run each round, and the package carries on with the
+   last complete plan; the optional **architecture** phase runs, from that
+   plan; the package is saved with `afspec`, read back,
    validated, activated, and its PRD posted under `--comment`. Validated is
    `specpkg.Verdict`, the verdict `speca --validate` gives: the package's own
    rules and the rules across specs that concern it, run over the spec root as
