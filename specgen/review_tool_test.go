@@ -209,3 +209,71 @@ func TestSameEvidence_IgnoresOnlyWhitespace(t *testing.T) {
 		}
 	}
 }
+
+// settledRound is round 1 with one finding answered each way, every one with
+// its own section, flaw and evidence.
+func settledRound() []Finding {
+	f := func(n int, disposition string) Finding {
+		return Finding{ID: fmt.Sprintf("R1-F%d", n), Severity: "major", Rubric: "prd", Section: fmt.Sprintf("S%d", n),
+			Flaw: fmt.Sprintf("flaw %d", n), Evidence: fmt.Sprintf("evidence %d", n), Remedy: "r", Disposition: disposition}
+	}
+	return []Finding{f(1, "fixed"), f(2, "contested"), f(3, "declined"), f(4, "escalated"), f(5, "unanswered")}
+}
+
+// A contested finding may be raised again only through reopens, with evidence
+// the contest did not answer; a declined or escalated one may not be raised
+// again at all; and only a contested finding of an earlier round may be
+// reopened.
+func TestReviewTool_HoldsALaterRoundToWhatWasSettled(t *testing.T) {
+	repeat := func(n int, reopens, evidence string) reviewInput {
+		return reviewInput{Severity: "major", Rubric: "prd", Section: fmt.Sprintf("S%d", n), Flaw: fmt.Sprintf("flaw  %d", n),
+			Evidence: evidence, Remedy: "r", Reopens: reopens}
+	}
+	reopening := func(id string) reviewInput {
+		f := wellFormed(9)
+		f.Reopens = id
+		return f
+	}
+	for _, tc := range []struct {
+		name    string
+		round   int
+		finding reviewInput
+		says    []string // nil when accepted
+	}{
+		{"a contested finding repeated without reopens", 2, repeat(2, "", "new evidence"), []string{"repeats R1-F2", "reopens"}},
+		{"a contested finding reopened with the answered evidence", 2, repeat(2, "R1-F2", " evidence  2 "), []string{"R1-F2", "already answered"}},
+		{"a contested finding reopened with new evidence", 2, repeat(2, "R1-F2", "new: a.go shows it"), nil},
+		{"a declined finding repeated", 2, repeat(3, "", "new"), []string{"R1-F3", "declined", "cannot be raised again"}},
+		{"a declined finding repeated through reopens", 2, repeat(3, "R1-F3", "new"), []string{"R1-F3", "declined", "cannot be raised again"}},
+		{"an escalated finding repeated", 2, repeat(4, "", "new"), []string{"R1-F4", "escalated", "cannot be raised again"}},
+		{"reopening a fixed finding", 2, reopening("R1-F1"), []string{"reopens R1-F1", "fixed", "only a contested finding"}},
+		{"reopening an unanswered finding", 2, reopening("R1-F5"), []string{"reopens R1-F5", "unanswered", "only a contested finding"}},
+		{"reopening no earlier finding", 2, reopening("R1-F9"), []string{"reopens R1-F9", "no earlier"}},
+		{"reopening in round 1", 1, reopening("R1-F2"), []string{"reopens R1-F2", "round 1"}},
+		{"the flaw a fixed finding named, raised anew", 2, repeat(1, "", "the PRD still says it"), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sink reviewSink
+			earlier := settledRound()
+			if tc.round == 1 {
+				earlier = nil
+			}
+			r := submitReview(t, newReviewTool(&sink, tc.round, earlier), []reviewInput{tc.finding})
+			got, recorded := sink.get()
+			if tc.says == nil {
+				if !r.OK || !recorded || got[0].Reopens != tc.finding.Reopens {
+					t.Errorf("turned back or mis-recorded: %+v, %+v", r, got)
+				}
+				return
+			}
+			if r.OK || recorded {
+				t.Fatalf("accepted: %+v", r)
+			}
+			for _, w := range tc.says {
+				if !strings.Contains(r.Detail, w) {
+					t.Errorf("the error does not say %q: %s", w, r.Detail)
+				}
+			}
+		})
+	}
+}

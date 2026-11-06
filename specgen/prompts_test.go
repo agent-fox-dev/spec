@@ -176,3 +176,51 @@ func TestSteeringBlock_NamesTheVersion(t *testing.T) {
 		}
 	}
 }
+
+// A later round is shown every earlier finding with its rubric and the fields
+// its answer carries, and the reviewer is told what it may raise again.
+func TestEarlierRoundsBlock_ShowsEveryAnswer(t *testing.T) {
+	base := func(id, disposition string) Finding {
+		return Finding{ID: id, Severity: "major", Rubric: "steering", Section: "SECTION-" + id, Flaw: "FLAW-" + id,
+			Evidence: "EVIDENCE-" + id, Remedy: "REMEDY-" + id, Disposition: disposition}
+	}
+	contested := base("R1-F2", "contested")
+	contested.Reason, contested.CounterEvidence, contested.Reopens = "REASON-C", "COUNTER-C", "R0-F1"
+	escalated := base("R1-F3", "escalated")
+	escalated.Question, escalated.Options, escalated.Decision, escalated.Reason = "QUESTION-E", []string{"OPTION-1", "OPTION-2"}, "DECISION-E", "REASON-E"
+	declined := base("R1-F4", "declined")
+	declined.Reason = "REASON-D"
+	earlier := []Finding{base("R1-F1", "fixed"), contested, escalated, declined, base("R1-F5", "unanswered")}
+
+	reviewer := earlierRoundsBlock(earlier, true)
+	for _, f := range earlier {
+		for _, want := range []string{f.ID, f.Severity, f.Rubric, f.Section, f.Flaw, f.Evidence, f.Remedy, f.Disposition} {
+			if !strings.Contains(reviewer, want) {
+				t.Errorf("%s: the block lacks %q", f.ID, want)
+			}
+		}
+	}
+	for _, want := range []string{"R0-F1", "REASON-C", "COUNTER-C", "QUESTION-E", "OPTION-1", "OPTION-2", "DECISION-E", "REASON-E", "REASON-D"} {
+		if !strings.Contains(reviewer, want) {
+			t.Errorf("the block lacks %q", want)
+		}
+	}
+	unanswered := reviewer[strings.Index(reviewer, "**R1-F5**"):]
+	if i := strings.Index(unanswered[1:], "\n**"); i > 0 {
+		unanswered = unanswered[:i+1]
+	}
+	for _, label := range []string{"Reason", "Counter-evidence", "Question", "Option", "Decision"} {
+		if strings.Contains(unanswered, label) {
+			t.Errorf("the unanswered finding shows %q:\n%s", label, unanswered)
+		}
+	}
+	for _, want := range []string{"contested finding may be raised again only", "reopens", "evidence the contest did not answer",
+		"declined or escalated finding may not be raised again"} {
+		if !strings.Contains(reviewer, want) {
+			t.Errorf("the reviewer is not told %q", want)
+		}
+	}
+	if reviser := earlierRoundsBlock(earlier, false); !strings.Contains(reviser, "Do not undo what an earlier round settled") {
+		t.Errorf("the reviser is not told to keep what was settled:\n%s", reviser)
+	}
+}

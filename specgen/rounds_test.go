@@ -126,14 +126,14 @@ func TestRunRounds_SendLaterRoundsTheEarlierFindings(t *testing.T) {
 	}
 	review, revision := prdReviewUserPrompt(rv.reviewReqs[1]), prdRevisionUserPrompt(rv.reviseReqs[1])
 	for name, prompt := range map[string]string{"review": review, "revision": revision} {
-		for _, want := range []string{"R1-F1", "R1-F2", "fixed", "contested", "REASON-R1-F2"} {
+		for _, want := range []string{"R1-F1", "R1-F2", "fixed", "contested", "REASON-R1-F2", "COUNTER-R1-F2"} {
 			if !strings.Contains(prompt, want) {
 				t.Errorf("the round 2 %s prompt has no %q", name, want)
 			}
 		}
 	}
-	if !strings.Contains(review, "only with evidence the rejection did not answer") || !strings.Contains(review, "`reopens`") ||
-		!strings.Contains(revision, "Do not undo what an earlier round accepted") {
+	if !strings.Contains(review, "evidence the contest did not answer") || !strings.Contains(review, "`reopens`") ||
+		!strings.Contains(revision, "Do not undo what an earlier round settled") {
 		t.Error("round 2 is not told the rule on earlier findings")
 	}
 	if len(rv.reviewReqs[0].Earlier) != 0 || strings.Contains(prdReviewUserPrompt(rv.reviewReqs[0]), "Earlier rounds") ||

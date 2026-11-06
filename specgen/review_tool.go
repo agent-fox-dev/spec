@@ -167,7 +167,21 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		problems = append(problems, fmt.Sprintf("finding %d has rubric %q; it is prd or steering", pos, f.Rubric))
 	}
 
+	// A declined or escalated finding is settled: it may not be raised again,
+	// through reopens or otherwise.
+	settled := false
+	for _, was := range earlier {
+		if (was.Disposition == envelope.DispositionDeclined || was.Disposition == envelope.DispositionEscalated) &&
+			sameEvidence(was.Section, f.Section) && sameEvidence(was.Flaw, f.Flaw) {
+			problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was %s: such a finding "+
+				"cannot be raised again; withdraw it", pos, was.ID, was.Disposition))
+			settled = true
+			break
+		}
+	}
+
 	switch {
+	case settled:
 	case f.Reopens != "" && round == 1:
 		problems = append(problems, fmt.Sprintf("finding %d reopens %s, and round 1 has no earlier "+
 			"finding to reopen; leave reopens empty", pos, f.Reopens))
@@ -177,7 +191,11 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		case !ok:
 			problems = append(problems, fmt.Sprintf("finding %d reopens %s, which is no earlier "+
 				"finding of this PRD", pos, f.Reopens))
-		case was.Disposition == envelope.DispositionContested && sameEvidence(was.Evidence, f.Evidence):
+		case was.Disposition != envelope.DispositionContested:
+			problems = append(problems, fmt.Sprintf("finding %d reopens %s, which was %s: only a contested finding "+
+				"may be reopened; a flaw an earlier round fixed and the PRD still has is a new finding, with reopens empty",
+				pos, was.ID, was.Disposition))
+		case sameEvidence(was.Evidence, f.Evidence):
 			problems = append(problems, fmt.Sprintf("finding %d reopens %s with the evidence its "+
 				"contest already answered; reopen it only with evidence the contest did not "+
 				"answer, or withdraw it", pos, was.ID))

@@ -35,6 +35,9 @@ Severity decides whether the PRD is reviewed again, so do not inflate it: a `min
 - **At most 30 findings**, the most serious first. Past that you are listing preferences.
 - **One flaw per finding.** Two flaws in one finding cannot be answered separately.
 - **No style preferences.** A PRD that reads differently from how you would have written it is not flawed for that.
-- When the task lists earlier rounds, a finding that was **rejected** may be raised again only with evidence the rejection did not answer, and only by naming its id in `reopens`. Repeating it without new evidence will be turned back.
+- When the task lists earlier rounds:
+  - a **contested** finding may be raised again only by naming its id in `reopens`, with evidence the contest did not answer; repeating it without new evidence will be turned back;
+  - a **declined** or **escalated** finding may not be raised again at all, with or without `reopens`;
+  - a flaw an earlier round **fixed** that the PRD still has is raised as a new finding, with `reopens` empty and the evidence that the PRD still has it.
 
 When you have checked the PRD, call `submit_prd_review` exactly once with every finding.

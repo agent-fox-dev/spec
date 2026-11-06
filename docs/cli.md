@@ -154,11 +154,17 @@ A **round** is one review and, when the review raised anything, one revision:
   submission is turned back when it has more than 30 findings, a finding with an
   empty field, or a rubric other than the two, or when a finding:
   - reopens anything in round 1;
-  - reopens an id no earlier round raised;
+  - reopens an id no earlier round raised, or one that was not contested
+    (fixed, declined, escalated or unanswered);
   - reopens a contested finding with the evidence its contest answered,
     compared with whitespace collapsed;
   - repeats a contested finding's section and flaw without naming it in
-    `reopens`.
+    `reopens`;
+  - repeats a declined or escalated finding's section and flaw, with or without
+    `reopens`: such a finding cannot be raised again.
+
+  A flaw an earlier round fixed that the PRD still has is raised as a new
+  finding, with `reopens` empty.
 - **The revision** (phase `prd_revision`, tool `submit_prd_revision`) is
   another fresh conversation, sent the same as the review plus the round's
   findings by id, and the input. It answers every finding one of four ways and
@@ -198,7 +204,8 @@ A **round** is one review and, when the review raised anything, one revision:
 Another round follows only when the round's review raised a `critical` or
 `major` finding and fewer than `--adversarial-rounds` rounds have run. Each
 round reviews the PRD the last revision left, and every round after the first
-is shown the earlier findings with their dispositions and reasons.
+is shown the earlier findings with their rubrics, dispositions and the fields
+each answer carries.
 `result.review.stop_reason` says why the rounds stopped:
 
 - `no_findings`: the last review raised none.
