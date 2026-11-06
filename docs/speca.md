@@ -16,7 +16,7 @@ it is ready, the task to work on next, the lifecycle moves allowed from where
 it is, and the packages it depends on and that depend on it. It is built for an
 agent to call — from a prompt, or from a skill's instructions — and follows the
 same interface as `spec` and `specr`: **exactly one positional input**
-(none with `--list`), **exactly one JSON object** on stdout on every
+(none with `--list`, or with `--render` for every package), **exactly one JSON object** on stdout on every
 program-driven path, the help on stderr, and one exit-code table. The forms are
 flags, not subcommands.
 
@@ -66,7 +66,7 @@ the build set them, from the variables in `version.go`), and `-h`/`--help` or a
 bare invocation prints the help to stderr. `--help` exits 0 and writes nothing
 to stdout. A bare invocation exits 2; when stdout is not a terminal it also
 writes a usage envelope, so a program still gets one object to parse. An
-invocation that names flags but no input, and is not `--list`, is a bare
+invocation that names flags but no input, and is not `--list` or `--render`, is a bare
 invocation.
 
 ## The input
@@ -975,12 +975,12 @@ package and changes nothing else.
 
 `speca` is a fast call, so the parts of `spec`'s shell that serve a long model
 run are absent: there is no model, no `--preflight`, no `--detail`, no `--output`
-and no progress on stderr. (`--dry-run` here is that of the task and status forms, not `spec`'s.)
+and no progress on stderr. (`--dry-run` here is that of the task, status and render forms, not `spec`'s.)
 It changes nothing but the state of the tasks of a package, its lifecycle status
 (with the `intent_hash` an activation records and the banner a superseded package
 is given) and where it lives, the `supersedes` of a replacing package, and the
-`updated_at` of what it writes: not a package's content (requirements, tests, a task's title,
-steps or dependencies), and it creates and renders no package, which are `spec`'s
+`updated_at` of what it writes, and its `spec.md`, which every save writes and the render form writes alone: not a package's content (requirements, tests, a task's title,
+steps or dependencies), and it creates no package and renders none to stdout, which are `spec`'s
 and `specr`'s. It does not move a package back to `draft`, reopen a sealed one,
 or take one out of `archive/`; it does not re-hash a changed `## Intent`, edit
 `owner`, `tags` or `source`, or remove an entry from `supersedes`; it does not
