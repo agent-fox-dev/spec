@@ -245,13 +245,16 @@ make build          # installs spec, specr and speca into $GOBIN
 build time (the variables in [version.go](version.go)), which `--version`
 prints, e.g. `spec v1.4.1 (commit 94f3890, built 2026-10-14T06:33:13Z)`.
 
-`go install …/cmd/spec@version` (or `…/cmd/specr@version`, `…/cmd/speca@version`) does not work yet: the module carries a
-`replace` for agentkit-go until that module is tagged (see
-[ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md)).
+Or install a command without a checkout:
 
-`make build`, `make test` and the other targets that compile first move the
-agentkit-go pin in `go.mod` to the latest `main` ([ADR 06](docs/adr/06-build-against-the-latest-agentkit-go.md));
-`AGENTKIT_UPDATE=0 make build` skips that, e.g. offline.
+```bash
+go install github.com/agent-fox-dev/spec/cmd/spec@latest     # or cmd/specr, cmd/speca
+```
+
+`go.mod` pins a released agentkit-go (`v0.9.0`) and carries no `replace`, so
+every target builds the committed pin and no make target needs the network
+([ADR 13](docs/adr/13-pin-a-released-agentkit-go.md)). `make update-agentkit`
+moves the pin to agentkit-go's latest release when somebody wants it moved.
 
 ### Go library
 
@@ -276,7 +279,7 @@ and no API key: the command's tests run against a scripted model.
 | `make lint` | `golangci-lint` if installed (config in `.golangci.yml`) |
 | `make coverage` | Test coverage per function |
 | `make doc` | Write `go doc -all` for each package to `docs/generated/` (committed) |
-| `make update-agentkit` | Point `go.mod` at the latest agentkit-go `main` (the targets that compile run it first; `AGENTKIT_UPDATE=0` skips it) |
+| `make update-agentkit` | Move the agentkit-go pin to its latest release (explicit; no target runs it) |
 | `make tidy` | `go mod tidy` |
 | `make clean` | Remove `build/` and the coverage profile |
 | `make skills` | Render the skills under `skills/` for every agent into `build/skills` |
@@ -299,5 +302,5 @@ and no API key: the command's tests run against a scripted model.
 - [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
 - [Comparison with other spec kits](docs/spec-kit-comparison.md) — this kit against GitHub Spec Kit, OpenSpec and EGM: what each does, where this one is stronger or weaker, and what to borrow
 - [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
-- [ADR 06](docs/adr/06-build-against-the-latest-agentkit-go.md) — why every build moves to the latest agentkit-go
+- [ADR 13](docs/adr/13-pin-a-released-agentkit-go.md) — why `go.mod` pins a released agentkit-go and carries no `replace`
 - [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports

@@ -2,13 +2,10 @@
 
 DOC_DIR ?= docs/generated
 
-# agentkit-go has no tags, so go.mod pins a pseudo-version of its main branch.
-# Every target that compiles first moves that pin to the latest main, so the
-# repository always builds against the latest agentkit-go (see ADR 06).
-# AGENTKIT_UPDATE=0 skips the update: offline, or to build the pinned version.
-AGENTKIT        := github.com/agent-fox-dev/agentkit-go
-AGENTKIT_UPDATE ?= 1
-AGENTKIT_DEP    := $(if $(filter 1,$(AGENTKIT_UPDATE)),update-agentkit)
+# go.mod pins a released agentkit-go and carries no replace, so every target
+# builds the committed pin and none of them needs the network (see ADR 13).
+# `make update-agentkit` moves the pin, by hand, when somebody wants it moved.
+AGENTKIT := github.com/agent-fox-dev/agentkit-go
 
 VERSION    := $(shell git describe --tags 2>/dev/null || echo "0.1.0")
 COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
@@ -24,21 +21,21 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*##"}; {printf "  %-16s %s\n", $$1, $$2}'
 
 .PHONY: build
-build: $(AGENTKIT_DEP) ## Install the spec, specr and speca commands
+build: ## Install the spec, specr and speca commands
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/specr
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/speca
 
 .PHONY: test
-test: $(AGENTKIT_DEP) ## Run all Go tests
+test: ## Run all Go tests
 	go test ./... -count=1
 
 .PHONY: test-fast
-test-fast: $(AGENTKIT_DEP) ## Run the fast tests only
+test-fast: ## Run the fast tests only
 	go test ./... -short -count=1
 
 .PHONY: coverage
-coverage: $(AGENTKIT_DEP) ## Run all tests with a coverage report
+coverage: ## Run all tests with a coverage report
 	go test ./... -coverprofile=coverage.txt -covermode=atomic
 	go tool cover -func=coverage.txt
 
@@ -47,11 +44,11 @@ fmt: ## gofmt all source files in place
 	gofmt -l -w .
 
 .PHONY: vet
-vet: $(AGENTKIT_DEP) ## go vet ./...
+vet: ## go vet ./...
 	go vet ./...
 
 .PHONY: lint
-lint: $(AGENTKIT_DEP) ## Run golangci-lint if installed, otherwise skip
+lint: ## Run golangci-lint if installed, otherwise skip
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run ./...; \
 	else \
@@ -62,7 +59,7 @@ lint: $(AGENTKIT_DEP) ## Run golangci-lint if installed, otherwise skip
 check: fmt vet lint test skills-check ## Run fmt, vet, lint, test and skills-check - use before committing
 
 .PHONY: doc
-doc: $(AGENTKIT_DEP) ## Generate Go package reference (go doc -all) as text files under docs/generated
+doc: ## Generate Go package reference (go doc -all) as text files under docs/generated
 	@rm -rf $(DOC_DIR)
 	@mkdir -p $(DOC_DIR)
 	@mod=$$(go list -m); \
@@ -73,11 +70,13 @@ doc: $(AGENTKIT_DEP) ## Generate Go package reference (go doc -all) as text file
 	@echo "package docs written to $(DOC_DIR)"
 
 .PHONY: update-agentkit
-update-agentkit: ## Point go.mod at the latest agentkit-go main (needs network)
-	@rev=$$(go list -m -f '{{.Version}}' $(AGENTKIT)@main) || { \
-		echo "cannot resolve $(AGENTKIT)@main; offline? run make with AGENTKIT_UPDATE=0" >&2; exit 1; }; \
-	go mod edit -replace=$(AGENTKIT)@v0.0.0=$(AGENTKIT)@$$rev -require=$(AGENTKIT)/codesearch@$$rev && \
-	go mod tidy && echo "agentkit-go: $$rev"
+update-agentkit: ## Move the agentkit-go pin to its latest release (needs network)
+	@go get $(AGENTKIT)@latest || { \
+		echo "cannot resolve $(AGENTKIT)@latest; offline?" >&2; exit 1; }
+	@go mod tidy
+	@echo "agentkit-go: $$(go list -m -f '{{.Version}}' $(AGENTKIT))"
+	@echo "note: $(AGENTKIT)/codesearch has no tags; it stays on the pseudo-version"
+	@echo "      in go.mod and is moved by hand (see ADR 13)."
 
 .PHONY: tidy
 tidy: ## go mod tidy
@@ -110,7 +109,8 @@ json-gen: ## Regenerate the Go artifact types from the JSON Schemas
 
 # The render reads SKILLS_SRC and writes SKILLS_OUT. It imports only the
 # standard library and go-yaml, so none of these targets depends on
-# $(AGENTKIT_DEP): no render target reaches the network or reads a credential.
+# no target at all now: the render reaches no network and reads no credential,
+# and neither does any other target (ADR 13).
 SKILLS_SRC ?= skills
 SKILLS_OUT ?= build/skills
 SKILLGEN   := go run ./internal/skillgen --source $(SKILLS_SRC)
