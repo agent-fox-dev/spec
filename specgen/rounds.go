@@ -168,6 +168,31 @@ func answer(findings []Finding, answers []Disposition) {
 	}
 }
 
+// withEscalations is questions with every escalation of review added, as an
+// open question carrying its decision and why it is uncertain: in round
+// order, then in the order the reviser answered, skipping a question already
+// there, whitespace aside. It runs once the rounds have stopped, so a later
+// round's revision that replaced the open questions cannot drop an earlier
+// round's escalation.
+func withEscalations(questions []OpenQuestion, review *Review) []OpenQuestion {
+	if review == nil {
+		return questions
+	}
+	out := slices.Clone(questions)
+	for _, round := range review.Rounds {
+		for _, f := range round.Findings {
+			if f.Disposition != envelope.DispositionEscalated {
+				continue
+			}
+			if slices.ContainsFunc(out, func(q OpenQuestion) bool { return sameEvidence(q.Question, f.Question) }) {
+				continue
+			}
+			out = append(out, OpenQuestion{Question: f.Question, Decision: f.Decision, Why: f.Reason})
+		}
+	}
+	return out
+}
+
 // bySeverity is a review's findings counted by severity, most serious
 // first: "1 critical, 2 minor", or "no findings".
 func bySeverity(findings []Finding) string {

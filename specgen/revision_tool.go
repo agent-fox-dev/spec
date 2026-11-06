@@ -162,7 +162,7 @@ func newRevisionTool(sink *revisionSink, current PRD, findings []Finding, input 
 				d.Options = options
 				d.keep()
 			}
-			if bad, ok := checkDispositions(findings, payload.Dispositions, evidenceSources{current.Body, input, ws}); !ok {
+			if bad, ok := checkDispositions(findings, payload.Dispositions, evidenceSources{current.Body, input, ws}, payload.Body); !ok {
 				return bad
 			}
 			if bad, ok := checkPRDBody(payload.Body); !ok {
@@ -211,8 +211,9 @@ type evidenceSources struct {
 
 // checkDispositions turns back a revision that does not answer every finding
 // exactly once with one of the four dispositions, or whose answer lacks what
-// its disposition needs, naming every offending id in one error.
-func checkDispositions(findings []Finding, answers []Disposition, src evidenceSources) (core.ToolResult, bool) {
+// its disposition needs, naming every offending id in one error. body is the
+// revised body, which must hold every escalation's decision.
+func checkDispositions(findings []Finding, answers []Disposition, src evidenceSources, body string) (core.ToolResult, bool) {
 	count := map[string]int{}
 	for _, d := range answers {
 		count[d.ID]++
@@ -244,7 +245,9 @@ func checkDispositions(findings []Finding, answers []Disposition, src evidenceSo
 			unknown = append(unknown, d.ID)
 		}
 		switch d.Disposition {
-		case envelope.DispositionFixed, envelope.DispositionEscalated:
+		case envelope.DispositionFixed:
+		case envelope.DispositionEscalated:
+			problems = append(problems, checkEscalation(d, body)...)
 		case envelope.DispositionContested:
 			if d.Reason == "" {
 				noReason = append(noReason, d.ID)
@@ -288,6 +291,36 @@ func checkDispositions(findings []Finding, answers []Disposition, src evidenceSo
 			". Answer every finding of this round exactly once."), false
 	}
 	return core.ToolResult{}, true
+}
+
+// checkEscalation says what an escalated answer lacks: its question, two or
+// three options, its decision, the reason it is uncertain, and its decision
+// written into the revised body, whitespace aside, so the package stays
+// complete.
+func checkEscalation(d Disposition, body string) []string {
+	var lacks, problems []string
+	if d.Question == "" {
+		lacks = append(lacks, "question")
+	}
+	if n := len(d.Options); n < 2 || n > 3 {
+		lacks = append(lacks, fmt.Sprintf("options (it has %d)", n))
+	}
+	if d.Decision == "" {
+		lacks = append(lacks, "decision")
+	}
+	if d.Reason == "" {
+		lacks = append(lacks, "reason")
+	}
+	if len(lacks) > 0 {
+		problems = append(problems, fmt.Sprintf("%s is escalated without its %s: an escalation carries a question, "+
+			"two or three options each in one sentence, the decision taken and the reason it is uncertain",
+			d.ID, strings.Join(lacks, ", ")))
+	}
+	if d.Decision != "" && !strings.Contains(normaliseEvidence(body), normaliseEvidence(d.Decision)) {
+		problems = append(problems, fmt.Sprintf("%s's decision is not in the revised body: the decision belongs under "+
+			"the PRD's ## Design Decisions, opening with Provisional:", d.ID))
+	}
+	return problems
 }
 
 // counterEvidence checks a contest's counter-evidence and says what is

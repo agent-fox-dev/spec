@@ -443,7 +443,7 @@ func (s *scriptedReviewer) Review(_ context.Context, req reviewRequest) ([]Findi
 	}
 	findings := make([]Finding, len(out.severities))
 	for n, sev := range out.severities {
-		findings[n] = Finding{ID: fmt.Sprintf("R%d-F%d", req.Round, n+1), Severity: sev,
+		findings[n] = Finding{ID: fmt.Sprintf("R%d-F%d", req.Round, n+1), Severity: sev, Rubric: "prd",
 			Section: "Goals", Flaw: fmt.Sprintf("flaw %d.%d%s", req.Round, n+1, out.mark), Evidence: "e" + out.mark, Remedy: "r"}
 	}
 	return findings, res, nil

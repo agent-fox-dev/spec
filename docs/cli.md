@@ -170,7 +170,12 @@ A **round** is one review and, when the review raised anything, one revision:
     exists, with what it shows;
   - `escalated`: it holds, and remedying it takes a decision a person should
     own, with the `question`, two or three `options`, the `decision` taken
-    provisionally and the `reason` it is uncertain;
+    provisionally and the `reason` it is uncertain. The decision must appear
+    in the revised body, whitespace aside, under `## Design Decisions` opening
+    with "Provisional:", so the package stays complete; once the rounds have
+    stopped, the run adds every escalation to `result.open_questions` as
+    `question`, `decision` and `why_unsure`, in round order, skipping a
+    question already there;
   - `declined`: it holds and is not remedied in this package, with a `reason`
     saying it is out of scope or naming the later package that carries it.
   It has no field for a finding's severity or rubric, so it cannot change
@@ -180,7 +185,9 @@ A **round** is one review and, when the review raised anything, one revision:
     it. It has no field for the spec name, the title or the split, so they
     cannot change.
   - **What is turned back.** A finding with no answer or two; an id outside
-    the round; a disposition other than the four; a contest with no reason, or
+    the round; a disposition other than the four; an escalation missing its
+    question, its two or three options, its decision or its reason, or whose
+    decision is not in the revised body; a contest with no reason, or
     whose counter-evidence is neither a quote found in the PRD or the input nor
     a path that exists (a path outside the repository does not); a decline with
     no reason; a declined `critical` finding or `steering` finding; a fixed

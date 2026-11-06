@@ -351,3 +351,71 @@ func TestRevisionTool_CannotChangeASeverityOrARubric(t *testing.T) {
 		}
 	}
 }
+
+// An escalation carries its question, two or three options, the decision
+// taken and why it is uncertain; one that lacks any is turned back.
+func TestRevisionTool_AnEscalationNeedsItsQuestionOptionsDecisionAndReason(t *testing.T) {
+	prd := prdUnderRevision()
+	const decision = "Widgets are cached for one minute."
+	body := revisedIntentBody + "\n## Design Decisions\n\n1. Provisional: " + decision + "\n"
+	two, three := []string{"One minute.", "One hour."}, []string{"One minute.", "One hour.", "One day."}
+	for _, tc := range []struct {
+		name     string
+		question string
+		options  []string
+		decision string
+		reason   string
+		says     []string // nil when accepted
+	}{
+		{"two options", "How long?", two, decision, "the input is silent", nil},
+		{"three options", "How long?", three, decision, "the input is silent", nil},
+		{"one option", "How long?", two[:1], decision, "the input is silent", []string{"R1-F1", "two or three options"}},
+		{"four options", "How long?", append(three, "Forever."), decision, "the input is silent", []string{"R1-F1", "two or three options"}},
+		{"no options", "How long?", nil, decision, "the input is silent", []string{"R1-F1", "options"}},
+		{"no question", "", two, decision, "the input is silent", []string{"R1-F1", "question"}},
+		{"no decision", "How long?", two, "", "the input is silent", []string{"R1-F1", "decision"}},
+		{"no reason", "How long?", two, decision, "", []string{"R1-F1", "reason"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := tc.options
+			if options == nil {
+				options = []string{}
+			}
+			r, rec := revise(t, prd, roundFindings("R1-F1"), "", nil, body, escalate("R1-F1", tc.question, options, tc.decision, tc.reason))
+			if tc.says == nil {
+				if !r.OK || !rec {
+					t.Errorf("turned back: %+v", r)
+				}
+				return
+			}
+			mustRefuse(t, r, rec, tc.says...)
+		})
+	}
+}
+
+// An escalation's decision is written into the revised body, whitespace
+// aside.
+func TestRevisionTool_AnEscalationsDecisionMustBeInTheBody(t *testing.T) {
+	prd := prdUnderRevision()
+	const decision = "Widgets are cached for one minute."
+	answer := escalate("R1-F1", "How long?", []string{"One minute.", "One hour."}, decision, "the input is silent")
+	for _, tc := range []struct {
+		name, body string
+		ok         bool
+	}{
+		{"the decision as it is", revisedIntentBody + "\n## Design Decisions\n\n1. Provisional: " + decision + "\n", true},
+		{"the decision spaced differently", revisedIntentBody + "\n## Design Decisions\n\n1. Provisional: Widgets are\n   cached for one   minute.\n", true},
+		{"no decision", revisedIntentBody, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, rec := revise(t, prd, roundFindings("R1-F1"), "", nil, tc.body, answer)
+			if tc.ok {
+				if !r.OK || !rec {
+					t.Errorf("turned back: %+v", r)
+				}
+				return
+			}
+			mustRefuse(t, r, rec, "R1-F1", "## Design Decisions", "Provisional")
+		})
+	}
+}

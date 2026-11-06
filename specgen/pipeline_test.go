@@ -1368,3 +1368,54 @@ func TestRun_WarnsOnceAboutAMalformedSteeringRecord(t *testing.T) {
 		}
 	}
 }
+
+// Every escalation of every round reaches the package's open questions, in
+// round order and then in the reviser's, once each, whatever a later revision
+// did to the open questions.
+func TestRun_HandsEveryEscalationToTheCaller(t *testing.T) {
+	escalated := func(q string) Disposition {
+		return Disposition{Disposition: "escalated", Question: q, Options: []string{"A.", "B."}, Decision: "A for " + q, Reason: "unsure of " + q}
+	}
+	const existing = "Should the loader follow symlinks?" // the PRD phase's open question
+	for _, tc := range []struct {
+		name    string
+		replace bool
+		want    []string
+	}{
+		{"a later revision that keeps the open questions", false, []string{existing, "Q1?", "Q2?"}},
+		{"a later revision that replaces them", true, []string{"REPLACED?", "Q1?", "Q2?", existing}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			second := revisionOutcome{answers: map[int]Disposition{0: escalated("Should  the loader\nfollow symlinks?")}}
+			if tc.replace {
+				second.edit = func(p PRD) PRD {
+					p.Body += "\nrevised in round 2\n"
+					p.OpenQuestions = []OpenQuestion{{Question: "REPLACED?", Decision: "d", Why: "w"}}
+					return p
+				}
+				second.answers[0] = escalated(existing)
+			}
+			rv := &scriptedReviewer{t: t,
+				reviews:   []reviewOutcome{{severities: []string{"major", "major"}}, {severities: []string{"major"}}},
+				revisions: []revisionOutcome{{answers: map[int]Disposition{0: escalated("Q1?"), 1: escalated("Q2?")}}, second},
+			}
+			got, err := Run(context.Background(), adversarialOptions(t, newAuthor(t, "01", "test_feature"), rv, 2))
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			var questions []string
+			for _, q := range got.OpenQuestions {
+				questions = append(questions, q.Question)
+			}
+			if !slices.Equal(questions, tc.want) {
+				t.Fatalf("open questions %q; want %q", questions, tc.want)
+			}
+			if q := got.OpenQuestions[1]; q.Decision != "A for Q1?" || q.Why != "unsure of Q1?" {
+				t.Errorf("the escalation reached the caller as %+v; want its decision and its reason", q)
+			}
+			if want := fmt.Sprintf("%d open questions", len(tc.want)); !strings.Contains(got.Summary(), want) {
+				t.Errorf("summary %q does not count %s", got.Summary(), want)
+			}
+		})
+	}
+}

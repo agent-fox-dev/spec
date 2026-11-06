@@ -806,6 +806,9 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		}()
 	}
 
+	// The escalations' questions are the caller's to answer, and their
+	// provisional decisions are in the body already.
+	prd.OpenQuestions = withEscalations(prd.OpenQuestions, review)
 	pkg := &Package{
 		SpecDir:       relativeTo(e.root, specPath),
 		SpecID:        specID,
