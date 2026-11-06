@@ -47,7 +47,7 @@
         "docs/configuration.md",
         "docs/cli.md"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -111,7 +111,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -146,7 +146,7 @@
       "depends_on": [
         2
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -191,7 +191,7 @@
         2,
         3
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -239,7 +239,7 @@
       "depends_on": [
         4
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -272,7 +272,7 @@
       "depends_on": [
         4
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 7,
@@ -304,7 +304,7 @@
         4,
         5
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 8,
@@ -341,7 +341,7 @@
         4,
         5
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 9,
@@ -380,7 +380,7 @@
         "a run with neither review flag bills exactly the phases it bills before this change",
         "no prompt of a plan review or plan revision phase holds any part of the run's input body or context block"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

@@ -66,16 +66,19 @@ func TestResolvePlan_ATierChoosesAModelPerPhase(t *testing.T) {
 			PhasePRD: "claude-sonnet-5-5/medium", PhasePRDReview: "claude-sonnet-5-5/medium", PhasePRDRevision: "claude-sonnet-5-5/medium",
 			PhaseRequirements: "claude-sonnet-5-5/medium", PhaseTestSpec: "claude-sonnet-5-5/low",
 			PhaseTasks: "claude-sonnet-5-5/low", PhaseArchitecture: "claude-sonnet-5-5/low",
+			PhasePlanReview: "claude-sonnet-5-5/medium", PhasePlanRevision: "claude-sonnet-5-5/medium",
 		},
 		"STANDARD": {
 			PhasePRD: "claude-sonnet-5-5/high", PhasePRDReview: "claude-sonnet-5-5/high", PhasePRDRevision: "claude-sonnet-5-5/high",
 			PhaseRequirements: "claude-sonnet-5-5/high", PhaseTestSpec: "claude-sonnet-5-5/medium",
 			PhaseTasks: "claude-sonnet-5-5/medium", PhaseArchitecture: "claude-sonnet-5-5/medium",
+			PhasePlanReview: "claude-sonnet-5-5/high", PhasePlanRevision: "claude-sonnet-5-5/high",
 		},
 		"advanced": {
 			PhasePRD: "claude-opus-5-5/xhigh", PhasePRDReview: "claude-opus-5-5/xhigh", PhasePRDRevision: "claude-opus-5-5/xhigh",
 			PhaseRequirements: "claude-opus-5-5/high", PhaseTestSpec: "claude-sonnet-5-5/high",
 			PhaseTasks: "claude-sonnet-5-5/high", PhaseArchitecture: "claude-sonnet-5-5/high",
+			PhasePlanReview: "claude-opus-5-5/high", PhasePlanRevision: "claude-opus-5-5/high",
 		},
 	} {
 		t.Run(tier, func(t *testing.T) {
@@ -86,6 +89,12 @@ func TestResolvePlan_ATierChoosesAModelPerPhase(t *testing.T) {
 			for phase, w := range want {
 				if got := plan.For(phase).String(); got != w {
 					t.Errorf("%s = %s, want %s", phase, got, w)
+				}
+			}
+			// The plan's two phases run at the requirements phase's entry.
+			for _, phase := range []string{PhasePlanReview, PhasePlanRevision} {
+				if got, req := plan.For(phase).String(), plan.For(PhaseRequirements).String(); got != req {
+					t.Errorf("%s = %s, want the requirements entry %s", phase, got, req)
 				}
 			}
 			if plan.Default.String() != want[PhasePRD] {
@@ -194,6 +203,8 @@ func TestParsePhaseChoice(t *testing.T) {
 		{"prd=some:model", PhasePRD, "some:model", "", false}, // a colon that names no effort is part of the model
 		{"prd_review=claude-opus-5-5", PhasePRDReview, "claude-opus-5-5", "", false},
 		{"prd_revision=SIMPLE:low", PhasePRDRevision, "SIMPLE", core.EffortLow, true},
+		{"plan_review=claude-opus-5-5:high", PhasePlanReview, "claude-opus-5-5", core.EffortHigh, true},
+		{"plan_revision=STANDARD", PhasePlanRevision, "STANDARD", "", false},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			c := mustChoice(t, tc.raw)
@@ -205,7 +216,7 @@ func TestParsePhaseChoice(t *testing.T) {
 	// A phase that is not one is refused naming the phases, in the order a
 	// package is built: the review right after the PRD it reviews.
 	_, err := ParsePhaseChoice("review=ADVANCED")
-	if err == nil || !strings.Contains(err.Error(), "prd, prd_review, prd_revision, requirements, test_spec, tasks, architecture") {
+	if err == nil || !strings.Contains(err.Error(), "prd, prd_review, prd_revision, requirements, test_spec, tasks, plan_review, plan_revision, architecture") {
 		t.Errorf("an unknown phase: err = %v", err)
 	}
 	for _, bad := range []string{"tasks", "=claude-opus-5-5", "tasks=", "tasks=:high"} {

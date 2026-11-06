@@ -66,6 +66,9 @@ early is resumed by running spec on the same input again.
 agent looks for its flaws and another revises it to answer them, for up to
 --adversarial-rounds rounds (default 1). A review that cannot finish is a
 warning, not a failure: the package is generated from the last complete PRD.
+--adversarial-plan reviews every package's plan — its requirements, tests and
+tasks — after the tasks phase and before the package is written, against the
+Zero-Decision Rule and codebase grounding; the two reviews are independent.
 
 Everything the model does here is read-only. The only thing written is the
 spec package itself, by this program, after the run.
@@ -91,6 +94,7 @@ type specFlags struct {
 	comment      bool
 	maxParallel  int
 	adversarial  bool
+	plan         bool
 	rounds       roundsFlag
 }
 
@@ -140,8 +144,12 @@ func (f *specFlags) register(fs *flag.FlagSet) {
 		"how many packages of a split are generated at once, beside the next scope's PRD; 1 writes the scopes one after another")
 	fs.BoolVar(&f.adversarial, "adversarial", false,
 		"have a fresh agent look for flaws in every PRD, and another revise it to answer them, before the package is generated")
+	fs.BoolVar(&f.plan, "adversarial-plan", false,
+		"have a fresh agent look for the flaws in every plan the run generates — a design choice left to the coder, a path or "+
+			"symbol that is not there — and another revise it, after the tasks phase and before the package is written")
 	fs.Var(&f.rounds, "adversarial-rounds",
-		"the most review rounds a PRD gets with --adversarial, 1 to 5 (default 1); the rounds stop once a review finds nothing critical or major")
+		"the most rounds of each review, the PRD's (--adversarial) and the plan's (--adversarial-plan) counted separately, 1 to 5 "+
+			"(default 1); the rounds stop once two consecutive reviews find nothing critical or major")
 }
 
 // specOptions builds the specgen.Options for one run from the parsed flags
@@ -159,6 +167,7 @@ func (f *specFlags) specOptions(d cli.Deps) specgen.Options {
 		Comment:           f.comment,
 		MaxParallel:       f.maxParallel,
 		Adversarial:       f.adversarial,
+		AdversarialPlan:   f.plan,
 		AdversarialRounds: f.adversarialRounds(),
 		DryRun:            d.Common.DryRun,
 		TotalBudgetUSD:    d.Common.TotalBudgetUSD,
@@ -211,9 +220,9 @@ func newApp() cli.App {
 			if f.name != "" && !specgen.ValidSpecName(f.name) {
 				return cli.Usagef("--name %q must match [a-z][a-z0-9]*(_[a-z0-9]+)*", f.name)
 			}
-			if f.rounds.set && !f.adversarial {
-				return cli.Usagef("--adversarial-rounds %d was given without --adversarial; it sets the rounds of the review "+
-					"--adversarial turns on", f.rounds.n)
+			if f.rounds.set && !f.adversarial && !f.plan {
+				return cli.Usagef("--adversarial-rounds %d was given without --adversarial or --adversarial-plan; it sets the "+
+					"rounds of each review they turn on", f.rounds.n)
 			}
 			if f.rounds.set && (f.rounds.n < 1 || f.rounds.n > maxAdversarialRounds) {
 				return cli.Usagef("--adversarial-rounds must be 1 to %d, got %d", maxAdversarialRounds, f.rounds.n)

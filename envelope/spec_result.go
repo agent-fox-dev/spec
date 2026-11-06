@@ -80,6 +80,9 @@ type Package struct {
 	// generated from it. It is present exactly when the run had
 	// --adversarial on.
 	Review *Review `json:"review,omitempty"`
+	// PlanReview is how the plan was reviewed and revised before the package
+	// was written, with --adversarial-plan; absent without it.
+	PlanReview *Review `json:"plan_review,omitempty"`
 
 	// Detail records which view of this result was emitted: "summary" or
 	// "full". It is present on both.
@@ -271,6 +274,11 @@ const (
 	// RubricSteering is a contradiction of a directive of the project's
 	// steering.
 	RubricSteering = "steering"
+	// RubricZeroDecision is a design choice a plan leaves to its coder.
+	RubricZeroDecision = "zero_decision"
+	// RubricGrounding is a path, symbol or claim a plan names that is not
+	// there.
+	RubricGrounding = "grounding"
 )
 
 // Why the rounds of a review stopped.

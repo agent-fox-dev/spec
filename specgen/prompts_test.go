@@ -1,6 +1,7 @@
 package specgen
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -222,5 +223,138 @@ func TestEarlierRoundsBlock_ShowsEveryAnswer(t *testing.T) {
 	}
 	if reviser := earlierRoundsBlock(earlier, false); !strings.Contains(reviser, "Do not undo what an earlier round settled") {
 		t.Errorf("the reviser is not told to keep what was settled:\n%s", reviser)
+	}
+}
+
+// planReviewRequestWithMarks is a plan review request whose every part
+// carries a sentence of its own.
+func planReviewRequestWithMarks(t *testing.T, round int) planReviewRequest {
+	t.Helper()
+	plan := planUnderReview(t)
+	plan.Tasks.Tasks[0].Title = "PLAN-MARK " + plan.Tasks.Tasks[0].Title
+	req := planReviewRequest{
+		reviewRequest: reviewRequest{Root: "/r", SourceKind: "text", SourceOrigin: "argument",
+			Input: "INPUT-MARK: cache the widgets", Context: "CONTEXT-MARK", Steering: "STEER-MARK", SteeringVersion: "1.2.3",
+			RepoMap: "MAP-MARK", Round: round, Limit: 2,
+			PRD: PRD{SpecName: "test_feature", Title: "Test Feature", Body: "## Intent\n\nPRD-MARK\n", CodebaseNotes: "NOTES-MARK"}},
+		Plan:  plan,
+		Facts: []groundingFact{{"FACT-MARK/a.go", false}},
+	}
+	if round > 1 {
+		req.Earlier = []Finding{{ID: "R1-F1", Severity: "major", Rubric: "grounding", Section: "task 1", Flaw: "EARLIER-MARK",
+			Evidence: "e", Remedy: "r", Disposition: "fixed"}}
+	}
+	return req
+}
+
+// The plan reviewer is given the PRD, the plan, the facts, the notes as
+// claims and the earlier rounds, and not the input the PRD was written from.
+func TestPlanReviewUserPrompt_HoldsThePlanAndNotTheInput(t *testing.T) {
+	for _, round := range []int{1, 2} {
+		req := planReviewRequestWithMarks(t, round)
+		got := planReviewUserPrompt(req)
+		system := planReviewSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap)
+		for _, want := range []string{"PRD-MARK", "PLAN-MARK", "FACT-MARK/a.go", "NOTES-MARK", "the author's claims"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("round %d: the prompt lacks %q", round, want)
+			}
+		}
+		for _, want := range []string{"STEER-MARK", "Steering version 1.2.3", "MAP-MARK"} {
+			if !strings.Contains(system, want) {
+				t.Errorf("round %d: the run context lacks %q", round, want)
+			}
+		}
+		for _, not := range []string{"INPUT-MARK", "CONTEXT-MARK"} {
+			if strings.Contains(got, not) || strings.Contains(system, not) {
+				t.Errorf("round %d: the prompt carries %q", round, not)
+			}
+		}
+		if !strings.Contains(prdReviewUserPrompt(req.reviewRequest), "INPUT-MARK") {
+			t.Error("the PRD review prompt of the same request lacks the input")
+		}
+		if has := strings.Contains(got, "EARLIER-MARK"); has != (round == 2) {
+			t.Errorf("round %d: the earlier finding is there %v", round, has)
+		}
+	}
+}
+
+// The plan reviser is given the PRD, the plan, the round's findings, the
+// facts and the notes, and not the input.
+func TestPlanRevisionUserPrompt_HoldsTheFindingsAndNotTheInput(t *testing.T) {
+	req := planRevisionRequest{planReviewRequest: planReviewRequestWithMarks(t, 1)}
+	for i := range 3 {
+		req.Findings = append(req.Findings, Finding{ID: fmt.Sprintf("R1-F%d", i+1), Severity: "major", Rubric: "zero_decision",
+			Section: "task 1", Flaw: fmt.Sprintf("FLAW-%d", i), Evidence: fmt.Sprintf("EVIDENCE-%d", i), Remedy: fmt.Sprintf("REMEDY-%d", i)})
+	}
+	got := planRevisionUserPrompt(req)
+	for _, want := range []string{"PRD-MARK", "PLAN-MARK", "FACT-MARK/a.go", "NOTES-MARK", "zero_decision", "task 1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+	for _, f := range req.Findings {
+		for _, want := range []string{f.ID, f.Flaw, f.Evidence, f.Remedy} {
+			if !strings.Contains(got, want) {
+				t.Errorf("the prompt lacks %q of %s", want, f.ID)
+			}
+		}
+	}
+	if strings.Contains(got, "INPUT-MARK") || strings.Contains(got, "CONTEXT-MARK") {
+		t.Error("the revision prompt carries the input")
+	}
+}
+
+// The plan is rendered as the package's own render gives each artifact, in
+// the order requirements, tests, tasks.
+func TestRenderPlan_IsThePackagesRenderOfEachArtifact(t *testing.T) {
+	plan := planUnderReview(t)
+	empty := *plan
+	empty.TestSpec = &afspec.TestSpecV2Json{Tests: []afspec.Test{}}
+	for name, p := range map[string]*afspec.PartialSpec{"complete": plan, "with no tests": &empty} {
+		t.Run(name, func(t *testing.T) {
+			got := renderPlan(p)
+			parts := []string{p.Requirements.Render(), p.TestSpec.Render(), p.Tasks.Render()}
+			at := 0
+			for i, heading := range []string{"# Requirements", "# Test Specification", "# Tasks"} {
+				h := strings.Index(got[at:], heading)
+				if h < 0 {
+					t.Fatalf("no %q after %d", heading, at)
+				}
+				at += h
+				if !strings.Contains(got[at:], parts[i]) {
+					t.Errorf("the %s section is not the package's render of it", heading)
+				}
+			}
+		})
+	}
+	for _, task := range plan.Tasks.Tasks {
+		if !strings.Contains(renderPlan(plan), task.Title) {
+			t.Errorf("task %d is missing", task.Id)
+		}
+	}
+}
+
+// The plan reviewer is given both rubrics in full, as their questions, and
+// what each severity means for a plan.
+func TestPlanReviewSystemPrompt_CarriesBothRubricsInFull(t *testing.T) {
+	got := planReviewSystemPrompt()
+	for _, want := range []string{
+		"`zero_decision`", "`grounding`", "`steering`",
+		"Where does the code go?",
+		"name, signature, error, message, format and order",
+		"library, algorithm or data structure",
+		"leave the work open",
+		"two coders",
+		"Does each path in `touches` exist?",
+		"Does each symbol",
+		"claim the plan makes about the existing code",
+		"test command",
+		"`critical`: the plan builds the wrong thing",
+		"`major`: a choice is left to the coder",
+		"`minor`: a choice no test or task sees",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the plan review system prompt lacks %q", want)
+		}
 	}
 }

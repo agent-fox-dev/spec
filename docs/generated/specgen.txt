@@ -99,6 +99,12 @@ const ToolSubmitPRDReview = "submit_prd_review"
 const ToolSubmitPRDRevision = "submit_prd_revision"
     ToolSubmitPRDRevision is the terminating tool of the revision phase.
 
+const ToolSubmitPlanReview = "submit_plan_review"
+    ToolSubmitPlanReview is the terminating tool of the plan review phase.
+
+const ToolSubmitPlanRevision = "submit_plan_revision"
+    ToolSubmitPlanRevision is the terminating tool of the plan revision phase.
+
 
 FUNCTIONS
 
@@ -230,8 +236,13 @@ type Options struct {
 	// generated: a fresh agent looks for its flaws and another revises it to
 	// answer them, for up to AdversarialRounds rounds.
 	Adversarial bool
-	// AdversarialRounds is the round limit, 1 to 5. The command passes 1
-	// when --adversarial is given without --adversarial-rounds.
+	// AdversarialPlan reviews and revises the plan of every package the run
+	// generates, after the tasks phase and before the architecture phase and
+	// the write, independently of Adversarial.
+	AdversarialPlan bool
+	// AdversarialRounds is the round limit of each review, the PRD's and the
+	// plan's counted separately, 1 to 5. The command passes 1 when a review
+	// is asked for without --adversarial-rounds.
 	AdversarialRounds int
 
 	// MaxParallel is how many packages of a split are generated at once. The

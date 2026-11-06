@@ -53,6 +53,10 @@ type author interface {
 type reviewer interface {
 	Review(context.Context, reviewRequest) ([]Finding, agentrun.Result, error)
 	Revise(context.Context, revisionRequest) (PRD, []Disposition, agentrun.Result, error)
+	// ReviewPlan and RevisePlan review and revise a package's plan, as Review
+	// and Revise do its PRD.
+	ReviewPlan(context.Context, planReviewRequest) ([]Finding, agentrun.Result, error)
+	RevisePlan(context.Context, planRevisionRequest) (afspec.PartialSpec, []Disposition, agentrun.Result, error)
 }
 
 // agentAuthor runs the review phases too, against the same Runner.
@@ -220,6 +224,42 @@ func (a *agentAuthor) Review(ctx context.Context, req reviewRequest) ([]Finding,
 		return nil, res, agentrun.NoResultError(agentrun.PhasePRDReview, ToolSubmitPRDReview, res)
 	}
 	return findings, res, nil
+}
+
+// ReviewPlan runs one plan review phase: a fresh conversation that reads the
+// PRD, the rendered plan and its grounding facts, never the input, and
+// submits the plan's flaws, each under a rubric of the plan's.
+func (a *agentAuthor) ReviewPlan(ctx context.Context, req planReviewRequest) ([]Finding, agentrun.Result, error) {
+	var sink reviewSink
+	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePlanReview, planReviewSystemPrompt(),
+		planReviewUserPrompt(req), req.reviewRequest, ToolSubmitPlanReview,
+		newPlanReviewTool(&sink, req.Round, req.Earlier, req.Plan, req.Facts, req.Steering)))
+	if err != nil {
+		return nil, res, err
+	}
+	findings, ok := sink.get()
+	if !ok {
+		return nil, res, agentrun.NoResultError(agentrun.PhasePlanReview, ToolSubmitPlanReview, res)
+	}
+	return findings, res, nil
+}
+
+// RevisePlan runs one plan revision phase: another fresh conversation, which
+// answers every finding of the round and submits the three revised plan
+// artifacts.
+func (a *agentAuthor) RevisePlan(ctx context.Context, req planRevisionRequest) (afspec.PartialSpec, []Disposition, agentrun.Result, error) {
+	var sink planRevisionSink
+	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePlanRevision, planRevisionSystemPrompt(),
+		planRevisionUserPrompt(req), req.reviewRequest, ToolSubmitPlanRevision,
+		newPlanRevisionTool(&sink, req.PRD, req.Plan, req.Findings, a.ws)))
+	if err != nil {
+		return afspec.PartialSpec{}, nil, res, err
+	}
+	plan, dispositions, ok := sink.get()
+	if !ok {
+		return afspec.PartialSpec{}, nil, res, agentrun.NoResultError(agentrun.PhasePlanRevision, ToolSubmitPlanRevision, res)
+	}
+	return plan, dispositions, res, nil
 }
 
 // Revise runs one revision phase: another fresh conversation, which answers

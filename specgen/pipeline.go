@@ -65,8 +65,13 @@ type Options struct {
 	// generated: a fresh agent looks for its flaws and another revises it to
 	// answer them, for up to AdversarialRounds rounds.
 	Adversarial bool
-	// AdversarialRounds is the round limit, 1 to 5. The command passes 1
-	// when --adversarial is given without --adversarial-rounds.
+	// AdversarialPlan reviews and revises the plan of every package the run
+	// generates, after the tasks phase and before the architecture phase and
+	// the write, independently of Adversarial.
+	AdversarialPlan bool
+	// AdversarialRounds is the round limit of each review, the PRD's and the
+	// plan's counted separately, 1 to 5. The command passes 1 when a review
+	// is asked for without --adversarial-rounds.
 	AdversarialRounds int
 
 	// MaxParallel is how many packages of a split are generated at once. The
@@ -173,27 +178,44 @@ func (r Result) Summary() string {
 		}
 	}
 
-	if clause := reviewClause(append([]Package{r.Package}, r.FollowOnSpecs...)); clause != "" {
-		parts = append(parts, clause)
+	pkgs := append([]Package{r.Package}, r.FollowOnSpecs...)
+	for _, clause := range []string{reviewClause(pkgs), planReviewClause(pkgs)} {
+		if clause != "" {
+			parts = append(parts, clause)
+		}
 	}
 
 	return strings.Join(parts, "; ")
 }
 
-// reviewClause counts the reviews of every package of the run, or is empty
-// when none was reviewed.
+// reviewClause counts the PRD reviews of every package of the run, the
+// steering findings apart, or is empty when none was reviewed.
 func reviewClause(pkgs []Package) string {
+	return countReviews("review", pkgs, func(p Package) *Review { return p.Review }, true)
+}
+
+// planReviewClause counts the plan reviews of every package of the run, or is
+// empty when no plan was reviewed.
+func planReviewClause(pkgs []Package) string {
+	return countReviews("plan review", pkgs, func(p Package) *Review { return p.PlanReview }, false)
+}
+
+// countReviews is a summary clause over one review of every package: the
+// rounds run, the findings raised — the steering ones apart, when asked — and
+// the number fixed.
+func countReviews(label string, pkgs []Package, of func(Package) *Review, steeringApart bool) string {
 	reviewed := false
 	var rounds, findings, fixed, steering int
 	for _, p := range pkgs {
-		if p.Review == nil {
+		r := of(p)
+		if r == nil {
 			continue
 		}
 		reviewed = true
-		rounds += p.Review.RoundsRun
-		findings += p.Review.FindingsCount
-		fixed += p.Review.FixedCount
-		for _, round := range p.Review.Rounds {
+		rounds += r.RoundsRun
+		findings += r.FindingsCount
+		fixed += r.FixedCount
+		for _, round := range r.Rounds {
 			for _, f := range round.Findings {
 				if f.Rubric == envelope.RubricSteering {
 					steering++
@@ -204,8 +226,8 @@ func reviewClause(pkgs []Package) string {
 	if !reviewed {
 		return ""
 	}
-	clause := fmt.Sprintf("review: %s, %s", countOf(rounds, "round"), countOf(findings, "finding"))
-	if steering > 0 {
+	clause := fmt.Sprintf("%s: %s, %s", label, countOf(rounds, "round"), countOf(findings, "finding"))
+	if steeringApart && steering > 0 {
 		clause += fmt.Sprintf(" (%d steering)", steering)
 	}
 	if findings > 0 {
@@ -423,7 +445,7 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	}
 	add("code_search_index", true, indexDetail(o.Index, o.IndexUnavailable))
 	if o.Runner != nil {
-		add("phase_models", true, phaseModels(o.Runner, o.Architecture, o.Adversarial))
+		add("phase_models", true, phaseModels(o.Runner, o.Architecture, o.Adversarial, o.AdversarialPlan))
 	}
 	result.Preflight = list
 
@@ -435,9 +457,13 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	if o.Architecture {
 		phases++
 	}
-	// A review stops early once nothing serious is found, so every allowed
-	// round is counted: the figure is an upper bound for the review phases.
+	// A review stops early once two consecutive rounds are clean, so every
+	// allowed round of each review — the PRD's and the plan's, counted
+	// separately — is counted: the figure is an upper bound for their phases.
 	if o.Adversarial {
+		phases += 2 * o.AdversarialRounds
+	}
+	if o.AdversarialPlan {
 		phases += 2 * o.AdversarialRounds
 	}
 	phases *= packages
@@ -485,7 +511,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	specsDir := resolveSpecsDir(o, root)
 
 	env := &runEnv{o: o, root: root, specsDir: specsDir, author: o.author, reviewer: o.reviewer}
-	if env.author == nil || (env.reviewer == nil && o.Adversarial) {
+	if env.author == nil || (env.reviewer == nil && (o.Adversarial || o.AdversarialPlan)) {
 		phases := &agentAuthor{runner: o.Runner, ws: o.Workspace, codeSearch: o.Index != nil}
 		if env.author == nil {
 			env.author = phases
@@ -776,6 +802,26 @@ func prefixed(label string) string {
 	return label + ": "
 }
 
+// reviewPlan is the plan review of one package, after its tasks phase: the
+// plan as the review left it, and the record. A plan that does not validate
+// in memory is not reviewed — the review would pay to find what the validator
+// already found — and goes on, with a warning, to be written and validated as
+// it is, failing the run as it would without the review. Otherwise the
+// grounding facts are computed once and the rounds run.
+func (e *runEnv) reviewPlan(ctx context.Context, prd PRD, plan afspec.PartialSpec, label string) (afspec.PartialSpec, *Review, error) {
+	if v := afspec.ValidateGenerationStepComplete(afspec.StepTasks, plan); !v.Valid {
+		e.o.Run.Warn(cli.WarnPlanReviewSkipped, "high", "the plan of %s does not validate (%s), so it is not reviewed; "+
+			"the package is written and validated as it is", prd.SpecName, countOf(len(v.Errors), "error"))
+		return plan, nil, nil
+	}
+	facts := groundingFacts(e.o.Workspace, plan.Tasks)
+	reviewed, review, err := e.runPlanRounds(ctx, prd, plan, facts, label)
+	if err != nil {
+		return plan, nil, err
+	}
+	return reviewed, review, nil
+}
+
 // unwritten is pkg as a run that failed before writing it reports it: what
 // the PRD phase decided, and nothing that says a package exists. Nothing is
 // written until every phase has finished, and the reservation is removed, so
@@ -878,6 +924,13 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			sib.endRequirements(actorsOf(partial.Requirements))
 		}
 		pkg.Artifacts = append(pkg.Artifacts, afspec.ArtifactFileName(step))
+	}
+	if o.AdversarialPlan {
+		reviewed, planReview, err := e.reviewPlan(ctx, prd, partial, label)
+		if err != nil {
+			return unwritten(pkg), err
+		}
+		partial, pkg.PlanReview = reviewed, planReview
 	}
 	spec.Requirements = partial.Requirements
 	spec.TestSpec = partial.TestSpec
@@ -1218,13 +1271,16 @@ func recordPhase(run *cli.Run, res agentrun.Result, scope string) {
 // phaseModels is the detail of the informational phase_models preflight
 // check: the model and effort each phase the run will start runs on, in the
 // order a package is built.
-func phaseModels(r *agentrun.Runner, architecture, adversarial bool) string {
+func phaseModels(r *agentrun.Runner, architecture, adversarial, plan bool) string {
 	var parts []string
 	for _, phase := range agentrun.Phases {
 		if phase == agentrun.PhaseArchitecture && !architecture {
 			continue
 		}
 		if (phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision) && !adversarial {
+			continue
+		}
+		if (phase == agentrun.PhasePlanReview || phase == agentrun.PhasePlanRevision) && !plan {
 			continue
 		}
 		parts = append(parts, phase+" "+r.ModelFor(phase).String())

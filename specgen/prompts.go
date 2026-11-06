@@ -102,6 +102,67 @@ func prdReviewUserPrompt(req reviewRequest) string {
 	return fill(template("prd_review_user.md"), reviewVars(req, true))
 }
 
+// planRevisionSystemPrompt is the plan reviser's mandate: what it may change
+// and what not, and the four answers.
+func planRevisionSystemPrompt() string { return template("plan_revision_system.md") }
+
+// planReviewSystemPrompt is the plan reviewer's mandate: both rubrics in
+// full, the steering, and what each severity means for a plan.
+func planReviewSystemPrompt() string { return template("plan_review_system.md") }
+
+// planReviewUserPrompt is a plan review's task: the PRD the plan answers to,
+// the plan as a person reads it, the grounding facts, the author's notes as
+// claims, and the earlier rounds. It never carries the input or --context:
+// the plan answers to the PRD, not to the idea behind it.
+func planReviewUserPrompt(req planReviewRequest) string {
+	return fill(template("plan_review_user.md"), planVars(req, true))
+}
+
+// planRevisionUserPrompt is a plan revision's task: what the review was sent,
+// and the findings to answer.
+func planRevisionUserPrompt(req planRevisionRequest) string {
+	vars := planVars(req.planReviewRequest, false)
+	vars["findings_block"] = findingsBlock(req.Findings)
+	return fill(template("plan_revision_user.md"), vars)
+}
+
+// planVars fills what the plan's two prompts share.
+func planVars(req planReviewRequest, forReviewer bool) map[string]string {
+	return map[string]string{
+		"root":          req.Root,
+		"round":         fmt.Sprint(req.Round),
+		"limit":         fmt.Sprint(req.Limit),
+		"prd_block":     prdBlock("The PRD the plan answers to", req.PRD),
+		"plan":          strings.TrimSpace(renderPlan(req.Plan)),
+		"facts_block":   groundingBlock(req.Facts),
+		"notes_block":   authorClaimsBlock(req.PRD.CodebaseNotes),
+		"earlier_block": earlierRoundsOf("plan", req.Earlier, forReviewer),
+	}
+}
+
+// renderPlan is the plan as the package's own render gives it: the
+// requirements, the test specification and the tasks, in that order, each
+// through its artifact's renderer, with no scope and no budget.
+func renderPlan(p *afspec.PartialSpec) string {
+	if p == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Requirements\n\n")
+	if p.Requirements != nil {
+		b.WriteString(p.Requirements.Render())
+	}
+	b.WriteString("\n# Test Specification\n\n")
+	if p.TestSpec != nil {
+		b.WriteString(p.TestSpec.Render())
+	}
+	b.WriteString("\n# Tasks\n\n")
+	if p.Tasks != nil {
+		b.WriteString(p.Tasks.Render())
+	}
+	return b.String()
+}
+
 // prdRevisionUserPrompt is a revision phase's task: what the review was
 // sent, and the findings to answer.
 func prdRevisionUserPrompt(req revisionRequest) string {
@@ -130,9 +191,13 @@ func reviewVars(req reviewRequest, forReviewer bool) map[string]string {
 
 // prdUnderReviewBlock is the PRD as it stands: its name and title, its body,
 // and the open questions and relevant files that are part of it.
-func prdUnderReviewBlock(prd PRD) string {
+func prdUnderReviewBlock(prd PRD) string { return prdBlock("The PRD under review", prd) }
+
+// prdBlock is the PRD under a heading: its name, title and body, and the
+// decisions and files its author recorded.
+func prdBlock(heading string, prd PRD) string {
 	var b strings.Builder
-	b.WriteString("\n## The PRD under review\n\n")
+	b.WriteString("\n## " + heading + "\n\n")
 	fmt.Fprintf(&b, "- **Spec name:** `%s`\n- **Title:** %s\n\n", prd.SpecName, prd.Title)
 	b.WriteString("--- BEGIN PRD ---\n" + strings.TrimSpace(prd.Body) + "\n--- END PRD ---\n")
 	if len(prd.OpenQuestions) > 0 {
@@ -181,12 +246,18 @@ func findingsBlock(findings []Finding) string {
 // what became of each. It is empty in round 1. The reviewer is held to the
 // rules on repeats; the reviser is told what has been settled.
 func earlierRoundsBlock(earlier []Finding, forReviewer bool) string {
+	return earlierRoundsOf("PRD", earlier, forReviewer)
+}
+
+// earlierRoundsOf is earlierRoundsBlock for the review of what: the PRD or
+// the plan.
+func earlierRoundsOf(what string, earlier []Finding, forReviewer bool) string {
 	if len(earlier) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n## Earlier rounds of this review\n\n" +
-		"This PRD has been reviewed before. A fixed finding changed the PRD; a contested one carries the reviser's " +
+		"This " + what + " has been reviewed before. A fixed finding changed the PRD; a contested one carries the reviser's " +
 		"reason and counter-evidence that it does not hold; an escalated one a decision taken provisionally and the " +
 		"question handed to a person; a declined one the reason it is not remedied in this package; an unanswered " +
 		"one was never answered.\n")

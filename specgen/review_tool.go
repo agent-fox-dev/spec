@@ -47,28 +47,40 @@ func (s *reviewSink) get() ([]Finding, bool) {
 	return s.findings, s.done
 }
 
-// reviewSchema is the review phase's contract: one list of findings, every
-// field of a finding required. It has no optional property, so it adds no
-// union parameter to a strict request.
-func reviewSchema() *schema.Schema {
+// rubricDescriptions say what each rubric is, for a schema's enum.
+var rubricDescriptions = map[string]string{
+	envelope.RubricPRD: "prd: a flaw of the PRD itself.",
+	envelope.RubricSteering: "steering: it contradicts a directive of the project's steering; the evidence quotes " +
+		"the directive verbatim, and the severity is critical or major.",
+	envelope.RubricZeroDecision: "zero_decision: the plan leaves a design choice to its coder.",
+	envelope.RubricGrounding: "grounding: the plan names a path, symbol or claim that is not there; for a path, " +
+		"the evidence is the grounding fact.",
+}
+
+// reviewSchema is a review phase's contract: one list of findings, every
+// field of a finding required, with a rubric of the allowed ones. It has no
+// optional property, so it adds no union parameter to a strict request.
+func reviewSchema(allowed []string, section string) *schema.Schema {
 	limit := maxFindings
+	var described []string
+	for _, r := range allowed {
+		described = append(described, rubricDescriptions[r])
+	}
 	findings := schema.Array(schema.Object(
 		schema.Prop("severity", schema.Enum(
 			"critical: the package would specify the wrong thing. major: a requirement would be "+
 				"missing or untestable. minor: wording or clarity.", severities...)),
-		schema.Prop("rubric", schema.Enum(
-			"prd: a flaw of the PRD itself. steering: the PRD contradicts a directive of the project's steering; "+
-				"the evidence quotes the directive, and the severity is critical or major.", rubrics...)),
-		schema.Prop("section", schema.String("The PRD section the flaw is in, e.g. 'Goals' or 'Requirements > Rounds'")),
+		schema.Prop("rubric", schema.Enum(strings.Join(described, " "), allowed...)),
+		schema.Prop("section", schema.String(section)),
 		schema.Prop("flaw", schema.String("The flaw, in one or two sentences")),
 		schema.Prop("evidence", schema.String(
-			"What shows it: a quote from the PRD or the input, or a file path and what it shows. "+
+			"What shows it: a quote, or a file path and what it shows. "+
 				"A finding you cannot support is one to withdraw.")),
-		schema.Prop("remedy", schema.String("What the PRD should say instead")),
+		schema.Prop("remedy", schema.String("What should be said instead")),
 		schema.Prop("reopens", schema.String(
 			"The id of an earlier CONTESTED finding this one raises again with evidence the contest "+
 				"did not answer, e.g. R1-F2; an empty string otherwise. Always empty in round 1.")),
-	), "Every flaw you found, most serious first. An empty list says the PRD stands as it is.")
+	), "Every flaw you found, most serious first. An empty list says it stands as it is.")
 	findings.MaxItems = &limit
 	return schema.Object(schema.Prop("findings", findings))
 }
@@ -83,18 +95,44 @@ func reviewSchema() *schema.Schema {
 // offender, so the reviewer corrects them in one turn. A submission that
 // fails any check records nothing.
 func newReviewTool(sink *reviewSink, round int, earlier []Finding, steering string) core.Tool {
+	return findingsTool(findingsContract{
+		name: ToolSubmitPRDReview,
+		description: "Submit the flaws you found in the PRD and end this phase. Call this once, after you " +
+			"have checked the PRD against the input and the code.",
+		schema:   reviewSchema(rubrics, "The PRD section the flaw is in, e.g. 'Goals' or 'Requirements > Rounds'"),
+		rubrics:  rubrics,
+		steering: steering,
+	}, sink, round, earlier)
+}
+
+// findingsContract is what a review tool checks a submission against: its
+// name and schema, the rubrics a finding may carry, the steering a steering
+// finding quotes, and any check of the stage's own.
+type findingsContract struct {
+	name, description string
+	schema            *schema.Schema
+	rubrics           []string
+	steering          string
+	// extra says what else is wrong with the finding at position pos.
+	extra func(f *Finding, pos int) []string
+}
+
+// findingsTool is the terminator of a review round: the PRD's or the plan's.
+// Every check runs over the whole submission and one error names every
+// offender, so the reviewer corrects them in one turn. A submission that
+// fails any check records nothing.
+func findingsTool(c findingsContract, sink *reviewSink, round int, earlier []Finding) core.Tool {
 	byID := make(map[string]Finding, len(earlier))
 	for _, f := range earlier {
 		byID[f.ID] = f
 	}
 	return core.Tool{
-		Name: ToolSubmitPRDReview,
-		Description: "Submit the flaws you found in the PRD and end this phase. Call this once, after you " +
-			"have checked the PRD against the input and the code.",
-		InputSchema: reviewSchema(),
+		Name:        c.name,
+		Description: c.description,
+		InputSchema: c.schema,
 		Terminating: true,
 		PromptGuidelines: []string{
-			"Submit the review by calling " + ToolSubmitPRDReview + "; do not write it as prose.",
+			"Submit the review by calling " + c.name + "; do not write it as prose.",
 			"Every finding needs its evidence: a quote, or a file path and what it shows.",
 		},
 		Execute: func(_ context.Context, in json.RawMessage) core.ToolResult {
@@ -113,8 +151,11 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding, steering stri
 			var problems []string
 			unsupported := false
 			for i := range payload.Findings {
-				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID, steering)
+				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID, c.steering, c.rubrics)
 				problems = append(problems, p...)
+				if c.extra != nil {
+					problems = append(problems, c.extra(&payload.Findings[i], i+1)...)
+				}
 				unsupported = unsupported || empty
 			}
 			if len(problems) > 0 {
@@ -143,7 +184,7 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding, steering stri
 // checkFinding normalises the finding at position pos of round round's
 // review and says what is wrong with it, and whether a field is empty.
 // earlier are the earlier rounds' findings, byID the same by id.
-func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding, steering string) (problems []string, empty bool) {
+func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding, steering string, allowed []string) (problems []string, empty bool) {
 	for _, s := range []*string{&f.Severity, &f.Rubric, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
 		*s = strings.TrimSpace(*s)
 	}
@@ -162,12 +203,12 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 	if len(missing) > 0 {
 		problems = append(problems, fmt.Sprintf("finding %d has an empty %s", pos, strings.Join(missing, ", ")))
 	}
-	if f.Severity != "" && !slices.Contains(severities, f.Severity) {
+	if !slices.Contains(severities, f.Severity) {
 		problems = append(problems, fmt.Sprintf("finding %d has severity %q; it is one of %s",
 			pos, f.Severity, strings.Join(severities, ", ")))
 	}
-	if !slices.Contains(rubrics, f.Rubric) {
-		problems = append(problems, fmt.Sprintf("finding %d has rubric %q; it is prd or steering", pos, f.Rubric))
+	if !slices.Contains(allowed, f.Rubric) {
+		problems = append(problems, fmt.Sprintf("finding %d has rubric %q; it is %s", pos, f.Rubric, orList(allowed)))
 	}
 	if f.Rubric == envelope.RubricSteering {
 		if f.Severity == envelope.SeverityMinor {
@@ -226,6 +267,14 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		}
 	}
 	return problems, len(missing) > 0
+}
+
+// orList is "a or b", "a, b or c".
+func orList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
 }
 
 // quoted is the text a piece of evidence quotes: between double quotes,

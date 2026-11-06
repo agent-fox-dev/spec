@@ -258,6 +258,77 @@ by `the review raised 1 critical, 2 minor; the round is not clean` or
 `the revision answered: 2 fixed, 1 contested`. Each one is also a
 `prd_review` or `prd_revision` entry in `usage.phases[]`.
 
+### The plan review (`--adversarial-plan`)
+
+With `--adversarial-plan`, the plan of every package the run generates —
+`requirements.json`, `test_spec.json` and `tasks.json` — is reviewed after the
+tasks phase and before the architecture phase and the write, so
+`architecture.md` is written from the revised plan. It is independent of
+`--adversarial`: either, both or neither may be given, and a run with neither
+runs the phases it always ran. A dry run reviews the plan too and writes
+nothing.
+
+Before the first round the plan is validated in memory against the schemas
+and C1 to C11. A plan that does not validate is not reviewed: a `high`
+`plan_review_skipped` warning names the scope and the number of errors, no
+plan phase runs, and the package is written and validated as it would be
+without the flag, failing the run on the same errors. Otherwise the run
+computes the **grounding facts**: for every path in every task's `touches`,
+whether it exists in the repository as a file or a directory, resolved inside
+the repository and looked at on the file system, not judged by a model.
+
+The reviewer applies two written rubrics, carried in its prompt as their
+questions, plus the steering, and every finding names its `rubric` and its
+place in the plan by id in `section` (a task by its number, a test, criterion
+or execution path id; anything else is turned back):
+
+- `zero_decision` — a coder holding the package and the code would have to
+  make a design choice the plan does not make: where the code goes; a name,
+  signature, error, message, format or order a test asserts or another task
+  relies on; a library, algorithm or data structure left open where the
+  choice shows; a step that leaves the work open; two coders who could both
+  follow a task and disagree on a test;
+- `grounding` — the plan names what is not there: a path in `touches` that
+  does not exist and nothing creates (its evidence is the grounding fact, and
+  a finding naming a path the facts do not list is turned back), a symbol
+  that does not exist, a claim about the code that does not hold, or a test
+  command that does not run a test;
+- `steering` — a contradiction of a directive, quoting it verbatim and the
+  text of the plan, `critical` or `major`, never declined. With no steering
+  there is nothing to check.
+
+For a plan, `critical` is a plan that builds the wrong thing or whose tests
+contradict its criteria; `major` a choice left to the coder that a test or
+another task depends on, a path or symbol that does not exist and nothing
+creates, or a contradicted directive; `minor` a choice no test or task sees,
+or the wording.
+
+The reviser submits the three artifacts whole. It may not change the PRD, the
+spec id or name of any artifact, a task's `state`, or the actors of the
+execution paths (compared ignoring case), and its plan must pass the schemas
+and C1 to C11; a revision that breaks either is turned back with each change
+or broken rule named, until it passes.
+
+The rounds are the PRD review's, applied to the plan unchanged: the same
+`R<round>-F<n>` ids, the four dispositions and their checks, the repeat rules,
+convergence on two consecutive clean rounds, the six totals, and
+`--adversarial-rounds` as the limit — counted apart from the PRD's rounds.
+Each round is a `plan_review` phase (tool `submit_plan_review`) and, when it
+raised anything, a `plan_revision` phase (tool `submit_plan_revision`), each a
+fresh conversation with the whole of every per-phase ceiling, the read-only
+file tools and the code-search index. Neither is shown the input or
+`--context`: the plan answers to the PRD.
+
+A plan review or revision that does not finish — its budget, turns,
+`--phase-timeout`, a model or API error, or a `--total-budget` already spent
+before it starts — stops the rounds as `incomplete` with a `high`
+`plan_review_incomplete` warning naming the scope, the round, the phase and
+why. The findings of a revision that did not finish are `unanswered`, the
+package is written from the last complete plan, and the run's exit code does
+not change. An interrupt fails the run as aborted at `plan_review` or
+`plan_revision`. Progress names each phase:
+`scope 2 of 3 (widget_github): reviewing the plan (round 1 of 2)`.
+
 ### The project audit
 
 The project's language is detected from its manifest (`go.mod`, `Cargo.toml`,
@@ -323,7 +394,8 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--comment` | off | post the finished PRD back to the issue the input came from; needs an issue input and a forge token (`GITHUB_TOKEN`/`GH_TOKEN` or `GITLAB_TOKEN`). An invalid package's PRD is not posted |
 | `--max-parallel` | 3 | how many packages of a split are generated at once, beside the next scope's PRD phase; `1` writes the scopes one after another; less is a usage error |
 | `--adversarial` | off | review every PRD the run writes before its package is generated: a fresh agent looks for its flaws and another revises it to answer them (see [the adversarial review](#the-adversarial-review---adversarial)) |
-| `--adversarial-rounds` | 1 | the most review rounds a PRD gets, 1 to 5; the rounds stop once a review raises nothing `critical` or `major`. A value outside 1 to 5 (an explicit `0` included), or the flag without `--adversarial`, is a usage error; a non-integer is refused by the flag parser |
+| `--adversarial-plan` | off | review the plan of every package the run generates — its requirements, tests and tasks — after the tasks phase and before the architecture phase and the write: a fresh agent looks for its flaws against the Zero-Decision Rule and codebase grounding, and another revises it (see [the plan review](#the-plan-review---adversarial-plan)). Independent of `--adversarial` |
+| `--adversarial-rounds` | 1 | the most rounds of each review the run does, the PRD's and the plan's counted separately, 1 to 5; a review stops once two consecutive rounds raise nothing `critical` or `major`. With both reviews and `3`, a package may run up to twelve review and revision phases. A value outside 1 to 5 (an explicit `0` included), or the flag with neither `--adversarial` nor `--adversarial-plan`, is a usage error; a non-integer is refused by the flag parser |
 
 ### The model and the ceilings
 
@@ -332,7 +404,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--dir` | `.` | the repository to work in; the file tools cannot reach outside it |
 | `--model` | `$AF_MODEL`, else `$AGENTKIT_MODEL`, else `STANDARD` | a tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or a model id from AgentKit's catalog (an `anthropic/` prefix is accepted). An id the catalog does not list is refused, since it would have no price and no budget could stop it |
 | `--effort` | `$AF_MODEL_EFFORT`, else each phase's tier effort | `off`, `low`, `medium`, `high`, `xhigh`, `max`, for every phase. An effort a phase's model does not take is lowered to the highest it does, with an `effort_clamped` warning naming the phases |
-| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `test_spec`, `tasks` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
+| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `test_spec`, `tasks`, `plan_review`, `plan_revision` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
 | `--max-turns` | 60 | per-phase turn ceiling, also the repair budget |
 | `--max-tokens` | 65536 | the output token cap of one model response in every phase. The model's thinking is spent from the same cap as its reply, so a phase on a high effort can use it up before it calls its submit tool; that fails as `no_result`, and this is the flag to raise. The model's own output ceiling still applies, so a larger value than it allows is lowered to it. Not `specr --max-tokens`, which is a render budget |
 | `--budget` | 5.00 | per-phase spend ceiling, in dollars |
@@ -348,7 +420,7 @@ architecture turn them into structure the validator checks, and every turn of
 a phase pays for its effort, the turns that only read a file included. So the
 later phases run lower:
 
-| Tier | `prd` | `requirements` | `test_spec`, `tasks`, `architecture` |
+| Tier | `prd` | `requirements`, `plan_review`, `plan_revision` | `test_spec`, `tasks`, `architecture` |
 |---|---|---|---|
 | `SIMPLE` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `low` |
 | `STANDARD` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `medium` |
@@ -358,7 +430,9 @@ later phases run lower:
 the judgment writing one does. A `--phase-model prd=…` does not move them;
 `--phase-model prd_review=…` does. They are listed in `model.phases`, the
 `--phase-model` help and `effort_clamped` whether or not `--adversarial` is on,
-since those describe the resolved plan.
+since those describe the resolved plan. `plan_review` and `plan_revision`
+run on the `requirements` column, which each tier names for them explicitly:
+judging a plan takes the judgment writing its requirements does.
 
 A model id given to `--model` runs every phase, at `--effort` or none. To run
 everything at one effort, give `--effort`; to change one phase, give
@@ -410,13 +484,14 @@ model and effort each phase will run on, e.g.
 ```
 
 `phases` is the PRD phase plus one per generation step, plus one with
-`--architecture`, plus two per allowed round with `--adversarial`, for the next
-package; when a split is being resumed, that figure times the scopes still to
+`--architecture`, plus two per allowed round with `--adversarial` and two more
+per allowed round with `--adversarial-plan`, for the next package; when a split is being resumed, that figure times the scopes still to
 write. `spec --preflight --adversarial --adversarial-rounds 3` therefore
 reports 10. A split a not-yet-written PRD calls for is the model's decision, so
 the package count is a lower bound; the review rounds can stop early, so their
 count is an upper bound. With `--adversarial`, `phase_models` lists
-`prd_review` and `prd_revision` right after `prd`.
+`prd_review` and `prd_revision` right after `prd`; with `--adversarial-plan`,
+`plan_review` and `plan_revision` right after `tasks`.
 
 ## The output
 
@@ -454,6 +529,8 @@ also counts the reviews of every package, after the open questions:
 `spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings (1 steering), 7 fixed`
 (`review: 1 round, 0 findings` when nothing was found; the parenthesis counts
 the findings with the rubric `steering`, and is left out when there are none).
+With `--adversarial-plan` a clause counts the plan reviews the same way, after
+it: `plan review: 2 rounds, 5 findings, 4 fixed`.
 
 `usage.input_tokens` is net of the prompt cache; the cache figures are what
 make it agree with `cost_usd`. Each phase in `usage.phases[]` carries the same
@@ -570,6 +647,10 @@ the package's render, which every save writes beside them; a dry run lists no
   answer carries: `reason` and `counter_evidence` for a contest; `question`,
   `options`, `decision` and `reason` for an escalation; `reason` for a decline;
   none for `fixed` or `unanswered`. Absent without `--adversarial`
+- `plan_review` — with `--adversarial-plan`: the plan's review, in the same
+  shape as `review`, its findings' `rubric` being `zero_decision`,
+  `grounding` or `steering`. Absent without `--adversarial-plan`, and from a
+  package whose plan did not validate and so was not reviewed
 
 When the input was more than one spec's worth of work: `follow_on_specs` (the
 further packages, each with the same fields), `split` (every scope with its
@@ -611,6 +692,8 @@ Under `--detail summary` (the default) `result` keeps `spec_dir`, `spec_id`,
 | `comment_not_posted` | low | report |
 | `output_not_written` | low | emit |
 | `prd_review_incomplete` | high | prd_review |
+| `plan_review_skipped` | high | plan_review |
+| `plan_review_incomplete` | high | plan_review |
 
 `steering_malformed` is raised once, before the first model call, when the spec
 root's `steering.md` opens with frontmatter that breaks one of its rules

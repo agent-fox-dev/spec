@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T13:31:22Z
-- **Updated:** 2026-11-06T13:40:34Z
+- **Updated:** 2026-11-06T15:14:43Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691`
 
@@ -1486,7 +1486,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 
 ## Tasks
 
-### [ ] 1. Add the two phase names and give every tier their model and effort (implement, pending)
+### [x] 1. Add the two phase names and give every tier their model and effort (implement, done)
 
 **Criteria:** 18-REQ-9.4, 18-REQ-9.5
 
@@ -1513,7 +1513,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 2. Compute the grounding facts and add the plan review phase with its rubrics (implement, pending)
+### [x] 2. Compute the grounding facts and add the plan review phase with its rubrics (implement, done)
 
 **Criteria:** 18-REQ-2.3, 18-REQ-2.4, 18-REQ-3.1, 18-REQ-3.2, 18-REQ-3.3, 18-REQ-3.4, 18-REQ-4.1, 18-REQ-4.2, 18-REQ-4.3, 18-REQ-4.4, 18-REQ-4.5, 18-REQ-5.1, 18-REQ-5.2, 18-REQ-10.2, 18-REQ-10.3
 
@@ -1555,7 +1555,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 3. Add the plan revision phase and the checks on what it may change (implement, pending)
+### [x] 3. Add the plan revision phase and the checks on what it may change (implement, done)
 
 **Criteria:** 18-REQ-6.1, 18-REQ-6.2, 18-REQ-6.3, 18-REQ-10.4
 
@@ -1586,7 +1586,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 4. Wire the stage into the pipeline behind its flag, with the gate before the first round (implement, pending)
+### [x] 4. Wire the stage into the pipeline behind its flag, with the gate before the first round (implement, done)
 
 **Criteria:** 18-REQ-1.1, 18-REQ-1.2, 18-REQ-1.5, 18-REQ-1.6, 18-REQ-2.1, 18-REQ-2.2, 18-REQ-6.4
 
@@ -1621,7 +1621,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 5. Run the plan rounds on the PRD review's rules, and survive a phase that fails (implement, pending)
+### [x] 5. Run the plan rounds on the PRD review's rules, and survive a phase that fails (implement, done)
 
 **Criteria:** 18-REQ-5.3, 18-REQ-7.1, 18-REQ-7.2, 18-REQ-7.3, 18-REQ-7.4, 18-REQ-9.3, 18-REQ-9.6
 
@@ -1660,7 +1660,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 6. Make the rounds flag serve both reviews and price the stage in the preflight (implement, pending)
+### [x] 6. Make the rounds flag serve both reviews and price the stage in the preflight (implement, done)
 
 **Criteria:** 18-REQ-1.3, 18-REQ-1.4, 18-REQ-1.7
 
@@ -1691,7 +1691,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 7. Review each scope's plan in a split without holding up the next scope (implement, pending)
+### [x] 7. Review each scope's plan in a split without holding up the next scope (implement, done)
 
 **Criteria:** 18-REQ-8.1, 18-REQ-8.2, 18-REQ-8.3
 
@@ -1721,7 +1721,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 8. Report the plan review in the result, the summary and the steering rubric (implement, pending)
+### [x] 8. Report the plan review in the result, the summary and the steering rubric (implement, done)
 
 **Criteria:** 18-REQ-9.1, 18-REQ-9.2, 18-REQ-10.1, 18-REQ-10.5
 
@@ -1754,7 +1754,7 @@ end-to-end case in cmd/spec/main_test.go, beside TestPreflight_ReportsTheCheckli
 - `make test` passes
 - `make lint` passes
 
-### [ ] 9. Verify the four paths end to end and record the stage in an ADR (integration, pending)
+### [x] 9. Verify the four paths end to end and record the stage in an ADR (integration, done)
 
 **Tests:** TS-18-30, TS-18-31, TS-18-32, TS-18-33
 

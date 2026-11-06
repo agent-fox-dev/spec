@@ -6,13 +6,72 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/agentrun"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
 // runRounds reviews prd adversarially before its package is generated, and
-// returns the last complete PRD and the record of how it got there.
+// returns the last complete PRD and the record of how it got there, by the
+// rules of runStage.
+//
+// label names the scope in a split and is empty for an undivided input;
+// split is the scope's split context, nil for an undivided input.
+func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *splitContext) (PRD, *Review, error) {
+	return runStage(ctx, e, prd, label, stage[PRD]{
+		scope: prd.SpecName, noun: "the PRD",
+		reviewPhase: agentrun.PhasePRDReview, revisionPhase: agentrun.PhasePRDRevision,
+		review: func(ctx context.Context, doc PRD, round, limit int, earlier []Finding) ([]Finding, agentrun.Result, error) {
+			return e.reviewer.Review(ctx, e.reviewRequest(doc, split, round, limit, earlier))
+		},
+		revise: func(ctx context.Context, doc PRD, round, limit int, earlier, findings []Finding) (PRD, []Disposition, agentrun.Result, error) {
+			return e.reviewer.Revise(ctx, revisionRequest{reviewRequest: e.reviewRequest(doc, split, round, limit, earlier), Findings: findings})
+		},
+		incomplete: func(round int, phase, reason string) { e.warnIncomplete(prd, round, phase, reason) },
+	})
+}
+
+// runPlanRounds reviews plan, the plan generated from prd, adversarially
+// before its package is written, and returns the last complete plan and the
+// record of how it got there. facts are the plan's grounding facts, computed
+// once before the first round. The rounds are the PRD's: the same triage,
+// repeat rules, convergence and failure handling, on the plan's two phases.
+func (e *runEnv) runPlanRounds(ctx context.Context, prd PRD, plan afspec.PartialSpec, facts []groundingFact, label string) (afspec.PartialSpec, *Review, error) {
+	request := func(doc afspec.PartialSpec, round, limit int, earlier []Finding) planReviewRequest {
+		return planReviewRequest{reviewRequest: e.reviewRequest(prd, nil, round, limit, earlier), Plan: &doc, Facts: facts}
+	}
+	return runStage(ctx, e, plan, label, stage[afspec.PartialSpec]{
+		scope: prd.SpecName, noun: "the plan",
+		reviewPhase: agentrun.PhasePlanReview, revisionPhase: agentrun.PhasePlanRevision,
+		review: func(ctx context.Context, doc afspec.PartialSpec, round, limit int, earlier []Finding) ([]Finding, agentrun.Result, error) {
+			return e.reviewer.ReviewPlan(ctx, request(doc, round, limit, earlier))
+		},
+		revise: func(ctx context.Context, doc afspec.PartialSpec, round, limit int, earlier, findings []Finding) (afspec.PartialSpec, []Disposition, agentrun.Result, error) {
+			return e.reviewer.RevisePlan(ctx, planRevisionRequest{planReviewRequest: request(doc, round, limit, earlier), Findings: findings})
+		},
+		incomplete: func(round int, phase, reason string) {
+			e.o.Run.Warn(cli.WarnPlanReviewIncomplete, "high",
+				"the plan review of %s stopped in round %d: %s did not finish (%s); the package is written from "+
+					"the last complete plan", prd.SpecName, round, phase, reason)
+		},
+	})
+}
+
+// stage is one adversarial review — of the PRD or of the plan — as the round
+// loop drives it: what is reviewed (scope, noun), the two phases, a round's
+// review and revision of the document as it stands, and how a round that did
+// not finish is reported.
+type stage[T any] struct {
+	scope, noun                string
+	reviewPhase, revisionPhase string
+	review                     func(ctx context.Context, doc T, round, limit int, earlier []Finding) ([]Finding, agentrun.Result, error)
+	revise                     func(ctx context.Context, doc T, round, limit int, earlier, findings []Finding) (T, []Disposition, agentrun.Result, error)
+	incomplete                 func(round int, phase, reason string)
+}
+
+// runStage drives the rounds of one review, and returns the last complete
+// document and the record of how it got there.
 //
 // A round is one review and, when the review raised anything, one revision
 // of its findings: the minor findings of a clean round are revised too, and a
@@ -20,39 +79,37 @@ import (
 // raised nothing critical or major. The rounds stop as converged once two
 // consecutive rounds were clean — one clean review is a single sample — and
 // as exhausted at the limit, so a limit of one never converges (ADR 16). Each
-// round reviews the PRD the previous revision left, and every round after the
-// first is shown the earlier findings with what became of them.
+// round reviews the document the previous revision left, and every round
+// after the first is shown the earlier findings with what became of them.
 //
 // A review or revision that does not finish, or a --total-budget already
-// spent before one starts, stops the rounds with a warning: the PRD returned
-// is then the last complete one. An interrupt of the run is not that; it
-// fails the run as aborted, at the phase it stopped.
-//
-// label names the scope in a split and is empty for an undivided input;
-// split is the scope's split context, nil for an undivided input.
-func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *splitContext) (PRD, *Review, error) {
+// spent before one starts, stops the rounds as incomplete, which wins over
+// the other two reasons, with a warning: the document returned is then the
+// last complete one. An interrupt of the run is not that; it fails the run as
+// aborted, at the phase it stopped.
+func runStage[T any](ctx context.Context, e *runEnv, doc T, label string, s stage[T]) (T, *Review, error) {
 	o := e.o
 	limit := max(1, o.AdversarialRounds)
 	var rounds []ReviewRound
 	var earlier []Finding
 	stop := envelope.ReviewStopIncomplete
 	cleanBefore := false
+	var none T
 
 	for round := 1; round <= limit; round++ {
 		if reason, spent := e.overTotalBudget(); spent {
-			e.warnIncomplete(prd, round, agentrun.PhasePRDReview, reason)
+			s.incomplete(round, s.reviewPhase, reason)
 			break
 		}
-		req := e.reviewRequest(prd, split, round, limit, earlier)
-		done := o.Progress.Begin("%sreviewing the PRD (round %d of %d)", prefixed(label), round, limit)
-		findings, stats, err := e.reviewer.Review(ctx, req)
-		recordPhase(o.Run, stats, prd.SpecName)
+		done := o.Progress.Begin("%sreviewing %s (round %d of %d)", prefixed(label), s.noun, round, limit)
+		findings, stats, err := s.review(ctx, doc, round, limit, earlier)
+		recordPhase(o.Run, stats, s.scope)
 		done(cli.PhaseSummary(stats))
 		if err != nil {
 			if ctx.Err() != nil {
-				return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDReview, agentrun.CategoryAborted, err))
+				return none, nil, scopedIf(label, fail(s.reviewPhase, agentrun.CategoryAborted, err))
 			}
-			e.warnIncomplete(prd, round, agentrun.PhasePRDReview, failureReason(err))
+			s.incomplete(round, s.reviewPhase, failureReason(err))
 			break
 		}
 		if findings == nil {
@@ -64,28 +121,28 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 		if clean {
 			state = "clean"
 		}
-		o.Progress.Step(agentrun.PhasePRDReview, "%sthe review raised %s; the round is %s", prefixed(label), bySeverity(findings), state)
+		o.Progress.Step(s.reviewPhase, "%sthe review raised %s; the round is %s", prefixed(label), bySeverity(findings), state)
 
 		if len(findings) > 0 {
 			answer(findings, nil)
 			if reason, spent := e.overTotalBudget(); spent {
-				e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, reason)
+				s.incomplete(round, s.revisionPhase, reason)
 				break
 			}
-			done = o.Progress.Begin("%srevising the PRD (round %d of %d)", prefixed(label), round, limit)
-			revised, dispositions, stats, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
-			recordPhase(o.Run, stats, prd.SpecName)
+			done = o.Progress.Begin("%srevising %s (round %d of %d)", prefixed(label), s.noun, round, limit)
+			revised, dispositions, stats, err := s.revise(ctx, doc, round, limit, earlier, findings)
+			recordPhase(o.Run, stats, s.scope)
 			done(cli.PhaseSummary(stats))
 			if err != nil {
 				if ctx.Err() != nil {
-					return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDRevision, agentrun.CategoryAborted, err))
+					return none, nil, scopedIf(label, fail(s.revisionPhase, agentrun.CategoryAborted, err))
 				}
-				e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, failureReason(err))
+				s.incomplete(round, s.revisionPhase, failureReason(err))
 				break
 			}
 			answer(findings, dispositions)
-			o.Progress.Step(agentrun.PhasePRDRevision, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
-			prd = revised
+			o.Progress.Step(s.revisionPhase, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
+			doc = revised
 			earlier = append(earlier, findings...)
 		}
 
@@ -98,7 +155,7 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 			stop = envelope.ReviewStopRoundsExhausted
 		}
 	}
-	return prd, buildReview(rounds, limit, stop), nil
+	return doc, buildReview(rounds, limit, stop), nil
 }
 
 // warnIncomplete records why the rounds of prd stopped before they
