@@ -85,27 +85,7 @@ func revisionSchema() *schema.Schema {
 		schema.Prop("body", schema.String(
 			"The complete revised PRD in Markdown, WITHOUT YAML frontmatter, every section included, "+
 				"the ones you did not change too. It must keep a '## Intent' section.")),
-		schema.Prop("dispositions", schema.Array(schema.Object(
-			schema.Prop("id", schema.String("The finding's id, e.g. R1-F2")),
-			schema.Prop("disposition", schema.Enum(
-				"fixed: the body was changed to remedy it. contested: it does not hold, and counter_evidence "+
-					"shows it. escalated: it holds, and remedying it takes a decision a person should own; take one "+
-					"option provisionally. declined: it holds and is not remedied in this package; never for a "+
-					"critical or a steering finding.", dispositions...)),
-			schema.Prop("reason", schema.String(
-				"contested: why the finding does not hold. declined: that it is outside this package's scope, or "+
-					"the later package that carries it, by name. escalated: why you are unsure of the decision. "+
-					"An empty string for fixed.")),
-			schema.Prop("counter_evidence", schema.String(
-				"contested: a quote that appears verbatim in the PRD or the input, or a repository path that "+
-					"exists followed by what it shows. An empty string otherwise.")),
-			schema.Prop("question", schema.String("escalated: the question a person should answer. An empty string otherwise.")),
-			schema.Prop("options", schema.Array(schema.String("One option, in one sentence"),
-				"escalated: two or three options. An empty list otherwise.")),
-			schema.Prop("decision", schema.String(
-				"escalated: the option you took, written verbatim into the body under ## Design Decisions, "+
-					"opening with 'Provisional:'. An empty string otherwise.")),
-		), "Exactly one answer for every finding of this round.")),
+		schema.Prop("dispositions", dispositionsSchema()),
 		schema.Opt("open_questions", openQuestionsSchema().Describe(
 			"The open questions of the revised PRD, replacing the earlier ones; an empty list clears them. "+
 				"Omit to keep them as they are.")),
@@ -116,6 +96,33 @@ func revisionSchema() *schema.Schema {
 			"Replacement codebase notes, when a finding showed a note to be wrong; at most about 1500 words. "+
 				"Omit, or leave empty, to keep the earlier notes.")),
 	)
+}
+
+// dispositionsSchema is a reviser's answers: one per finding of the round,
+// with the fields each of the four dispositions needs. The PRD's revision and
+// the plan's take the same answers.
+func dispositionsSchema() *schema.Schema {
+	return schema.Array(schema.Object(
+		schema.Prop("id", schema.String("The finding's id, e.g. R1-F2")),
+		schema.Prop("disposition", schema.Enum(
+			"fixed: the body was changed to remedy it. contested: it does not hold, and counter_evidence "+
+				"shows it. escalated: it holds, and remedying it takes a decision a person should own; take one "+
+				"option provisionally. declined: it holds and is not remedied in this package; never for a "+
+				"critical or a steering finding.", dispositions...)),
+		schema.Prop("reason", schema.String(
+			"contested: why the finding does not hold. declined: that it is outside this package's scope, or "+
+				"the later package that carries it, by name. escalated: why you are unsure of the decision. "+
+				"An empty string for fixed.")),
+		schema.Prop("counter_evidence", schema.String(
+			"contested: a quote that appears verbatim in the PRD or the input, or a repository path that "+
+				"exists followed by what it shows. An empty string otherwise.")),
+		schema.Prop("question", schema.String("escalated: the question a person should answer. An empty string otherwise.")),
+		schema.Prop("options", schema.Array(schema.String("One option, in one sentence"),
+			"escalated: two or three options. An empty list otherwise.")),
+		schema.Prop("decision", schema.String(
+			"escalated: the option you took, written verbatim into the body under ## Design Decisions, "+
+				"opening with 'Provisional:'. An empty string otherwise.")),
+	), "Exactly one answer for every finding of this round.")
 }
 
 // newRevisionTool is the terminator of the revision of current, answering
@@ -148,20 +155,7 @@ func newRevisionTool(sink *revisionSink, current PRD, findings []Finding, input 
 			if err := json.Unmarshal(in, &payload); err != nil {
 				return core.ErrResult("invalid_arguments", err.Error())
 			}
-			for i := range payload.Dispositions {
-				d := &payload.Dispositions[i]
-				for _, s := range []*string{&d.ID, &d.Disposition, &d.Reason, &d.CounterEvidence, &d.Question, &d.Decision} {
-					*s = strings.TrimSpace(*s)
-				}
-				var options []string
-				for _, o := range d.Options {
-					if o = strings.TrimSpace(o); o != "" {
-						options = append(options, o)
-					}
-				}
-				d.Options = options
-				d.keep()
-			}
+			normalizeAnswers(payload.Dispositions)
 			if bad, ok := checkDispositions(findings, payload.Dispositions, evidenceSources{current.Body, input, ws}, payload.Body); !ok {
 				return bad
 			}
@@ -199,6 +193,25 @@ func newRevisionTool(sink *revisionSink, current PRD, findings []Finding, input 
 			res.Terminate = true
 			return res
 		},
+	}
+}
+
+// normalizeAnswers trims every field of the answers, drops empty options, and
+// clears the fields each answer's disposition does not carry.
+func normalizeAnswers(answers []Disposition) {
+	for i := range answers {
+		d := &answers[i]
+		for _, s := range []*string{&d.ID, &d.Disposition, &d.Reason, &d.CounterEvidence, &d.Question, &d.Decision} {
+			*s = strings.TrimSpace(*s)
+		}
+		var options []string
+		for _, o := range d.Options {
+			if o = strings.TrimSpace(o); o != "" {
+				options = append(options, o)
+			}
+		}
+		d.Options = options
+		d.keep()
 	}
 }
 

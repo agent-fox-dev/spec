@@ -404,6 +404,8 @@ type revisionOutcome struct {
 	// edit, when set, makes the revised PRD from the one under revision in
 	// place of appending a line to its body.
 	edit func(PRD) PRD
+	// editPlan, when set, makes the revised plan from the retitled one.
+	editPlan func(afspec.PartialSpec) afspec.PartialSpec
 }
 
 // fakeModel is the model a scripted review phase reports it ran on.
@@ -419,13 +421,65 @@ type scriptedReviewer struct {
 	onReview func(req reviewRequest)
 	onRevise func(req revisionRequest)
 
-	// planReviews script the plan reviews, one outcome per call.
-	planReviews []reviewOutcome
+	// planReviews and planRevisions script the plan's phases, one outcome
+	// per call. A plan revision retitles task 1 to "revised in round N",
+	// unless its edit says otherwise.
+	planReviews   []reviewOutcome
+	planRevisions []revisionOutcome
 
 	mu             sync.Mutex
 	reviewReqs     []reviewRequest
 	reviseReqs     []revisionRequest
 	planReviewReqs []planReviewRequest
+	planReviseReqs []planRevisionRequest
+}
+
+func (s *scriptedReviewer) RevisePlan(_ context.Context, req planRevisionRequest) (afspec.PartialSpec, []Disposition, agentrun.Result, error) {
+	s.mu.Lock()
+	i := len(s.planReviseReqs)
+	s.planReviseReqs = append(s.planReviseReqs, req)
+	s.mu.Unlock()
+	if i >= len(s.planRevisions) {
+		s.t.Fatalf("plan revision %d was not scripted", i+1)
+	}
+	out := s.planRevisions[i]
+	res := agentrun.Result{Name: agentrun.PhasePlanRevision, Turns: 3, Model: fakeModel}
+	res.Usage.CostUSD = out.cost
+	if out.err != nil {
+		return afspec.PartialSpec{}, nil, res, out.err
+	}
+	var ds []Disposition
+	for n, f := range req.Findings {
+		d := Disposition{ID: f.ID, Disposition: envelope.DispositionFixed}
+		if slices.Contains(out.contest, n) {
+			d = Disposition{ID: f.ID, Disposition: envelope.DispositionContested, Reason: "REASON-" + f.ID, CounterEvidence: "COUNTER-" + f.ID}
+		}
+		if a, ok := out.answers[n]; ok {
+			a.ID = f.ID
+			d = a
+		}
+		ds = append(ds, d)
+	}
+	revised := deepCopyPlan(s.t, *req.Plan)
+	revised.Tasks.Tasks[0].Title = fmt.Sprintf("revised in round %d", req.Round)
+	if out.editPlan != nil {
+		revised = out.editPlan(revised)
+	}
+	return revised, ds, res, nil
+}
+
+// deepCopyPlan is a copy of p that shares nothing with it.
+func deepCopyPlan(t *testing.T, p afspec.PartialSpec) afspec.PartialSpec {
+	t.Helper()
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out afspec.PartialSpec
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func (s *scriptedReviewer) ReviewPlan(_ context.Context, req planReviewRequest) ([]Finding, agentrun.Result, error) {
@@ -617,6 +671,11 @@ func (f failingReviewer) Revise(context.Context, revisionRequest) (PRD, []Dispos
 func (f failingReviewer) ReviewPlan(context.Context, planReviewRequest) ([]Finding, agentrun.Result, error) {
 	f.t.Fatal("a plan review ran")
 	return nil, agentrun.Result{}, nil
+}
+
+func (f failingReviewer) RevisePlan(context.Context, planRevisionRequest) (afspec.PartialSpec, []Disposition, agentrun.Result, error) {
+	f.t.Fatal("a plan revision ran")
+	return afspec.PartialSpec{}, nil, agentrun.Result{}, nil
 }
 
 // newWorkspace is an empty Go module.

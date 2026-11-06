@@ -102,6 +102,10 @@ func prdReviewUserPrompt(req reviewRequest) string {
 	return fill(template("prd_review_user.md"), reviewVars(req, true))
 }
 
+// planRevisionSystemPrompt is the plan reviser's mandate: what it may change
+// and what not, and the four answers.
+func planRevisionSystemPrompt() string { return template("plan_revision_system.md") }
+
 // planReviewSystemPrompt is the plan reviewer's mandate: both rubrics in
 // full, the steering, and what each severity means for a plan.
 func planReviewSystemPrompt() string { return template("plan_review_system.md") }
