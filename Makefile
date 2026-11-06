@@ -59,7 +59,7 @@ lint: $(AGENTKIT_DEP) ## Run golangci-lint if installed, otherwise skip
 	fi
 
 .PHONY: check
-check: fmt vet lint test ## Run fmt, vet, lint and test - use before committing
+check: fmt vet lint test skills-check ## Run fmt, vet, lint, test and skills-check - use before committing
 
 .PHONY: doc
 doc: $(AGENTKIT_DEP) ## Generate Go package reference (go doc -all) as text files under docs/generated
@@ -106,26 +106,34 @@ json-gen: ## Regenerate the Go artifact types from the JSON Schemas
 	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/tasks.v2.json         > $(CURDIR)/afspec/tasks.v2.go
 	go-jsonschema --only-models -p afspec $(SCHEMAS_DIR)/prd-frontmatter.v2.json > $(CURDIR)/afspec/prd-frontmatter.v2.go
 
-# manage skills
+# render and install the skills
 
-SKILLS_TEMPLATES_DIR := $(CURDIR)/skills
-CLAUDE_SKILLS_DIR := $(HOME)/.claude/skills
+# The render reads SKILLS_SRC and writes SKILLS_OUT. It imports only the
+# standard library and go-yaml, so none of these targets depends on
+# $(AGENTKIT_DEP): no render target reaches the network or reads a credential.
+SKILLS_SRC ?= skills
+SKILLS_OUT ?= build/skills
+SKILLGEN   := go run ./internal/skillgen --source $(SKILLS_SRC)
 
-.PHONY: install-skills uninstall-skills
-install-skills: ## Install the af-* skills under skills/ into ~/.claude/skills
-	@for skill in $(SKILLS_TEMPLATES_DIR)/af-*; do \
-		name=$$(basename "$$skill"); \
-		target="$(CLAUDE_SKILLS_DIR)/$$name"; \
-		mkdir -p "$$target"; \
-		cp "$$skill" "$$target/SKILL.md"; \
-		echo "installed: $$name -> $$target/SKILL.md"; \
-	done
+# AGENT is the agent to install for: claude, codex, cursor or copilot.
+# PROJECT installs into that repository instead of the user's directory, and
+# SKILLS_DIR overrides both. See docs/configuration.md.
+AGENT ?= claude
+SKILLS_FLAGS := --agent $(AGENT) \
+  $(if $(PROJECT),--project $(PROJECT)) $(if $(SKILLS_DIR),--skills-dir $(SKILLS_DIR))
 
-uninstall-skills: ## Remove the installed af-* skills from ~/.claude/skills
-	@for skill in $(SKILLS_TEMPLATES_DIR)/af-*; do \
-		name=$$(basename "$$skill"); \
-		if [ -d "$(CLAUDE_SKILLS_DIR)/$$name" ]; then \
-			rm -rf "$(CLAUDE_SKILLS_DIR)/$$name"; \
-			echo "removed: $$name"; \
-		fi; \
-	done
+.PHONY: skills
+skills: ## Render the skills under skills/ for every agent into build/skills
+	$(SKILLGEN) --out $(SKILLS_OUT)
+
+.PHONY: skills-check
+skills-check: ## Check the skills under skills/ against every render rule
+	$(SKILLGEN) --check
+
+.PHONY: install-skills
+install-skills: ## Install the skills for one agent (AGENT, PROJECT, SKILLS_DIR)
+	$(SKILLGEN) --install $(SKILLS_FLAGS)
+
+.PHONY: uninstall-skills
+uninstall-skills: ## Remove the installed skills of one agent (AGENT, PROJECT, SKILLS_DIR)
+	$(SKILLGEN) --uninstall $(SKILLS_FLAGS)

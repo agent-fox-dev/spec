@@ -37,7 +37,7 @@
         "internal/skillgen/source.go",
         "internal/skillgen/source_test.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -63,7 +63,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -99,7 +99,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -124,7 +124,7 @@
       "depends_on": [
         3
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -151,7 +151,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -184,7 +184,7 @@
         4,
         5
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 7,
@@ -214,7 +214,7 @@
       "depends_on": [
         6
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 8,
@@ -250,7 +250,7 @@
       "depends_on": [
         7
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 9,
@@ -292,7 +292,7 @@
         "every rendered body is at most 24,576 bytes for claude, codex, cursor and copilot",
         "every instruction of the three pre-change skills is in a body, in a reference file, or in the list of deliberate cuts written for the pull request description"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 10,
@@ -328,7 +328,7 @@
         8,
         9
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 11,
@@ -362,7 +362,7 @@
         "the six before-and-after runs are recorded in the pull request description, with any difference named",
         "the pull request description carries the list of deliberate cuts, each with its reason"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }
