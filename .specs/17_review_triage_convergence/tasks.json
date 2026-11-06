@@ -73,7 +73,7 @@
         "docs/api.md",
         "docs/generated/"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -109,7 +109,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -144,7 +144,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -183,7 +183,7 @@
       "depends_on": [
         1
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -225,7 +225,7 @@
         1,
         4
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -265,7 +265,7 @@
         "no file under specgen/, envelope/, cmd/, docs/ or specification/ names accepted, rejected, accepted_count, rejected_count, no_findings or no_serious_findings as a value of the review",
         "a run with the adversarial review and a round limit of 1 bills the same phases it bills before this change"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

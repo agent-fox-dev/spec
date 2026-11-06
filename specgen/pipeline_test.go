@@ -1161,10 +1161,23 @@ func TestRunPreflight_ReportsTheCodeSearchIndex(t *testing.T) {
 	}
 }
 
-func reviewOf(rounds, findings, accepted int) *Review {
-	return &Review{RoundsRun: rounds, RoundsAllowed: 5, StopReason: "no_findings", FindingsCount: findings,
-		AcceptedCount: accepted, RejectedCount: findings - accepted,
-		Rounds: []ReviewRound{{Round: 1, Findings: []Finding{}}}}
+func reviewOf(rounds, findings, fixed int) *Review {
+	return reviewWithSteering(rounds, findings, fixed, 0)
+}
+
+// reviewWithSteering is a review whose round holds findings findings, the
+// first steering of them with the steering rubric.
+func reviewWithSteering(rounds, findings, fixed, steering int) *Review {
+	round := ReviewRound{Round: 1, Findings: []Finding{}}
+	for i := range findings {
+		rubric := "prd"
+		if i < steering {
+			rubric = "steering"
+		}
+		round.Findings = append(round.Findings, Finding{ID: fmt.Sprintf("R1-F%d", i+1), Rubric: rubric})
+	}
+	return &Review{RoundsRun: rounds, RoundsAllowed: 5, StopReason: "converged", FindingsCount: findings,
+		FixedCount: fixed, ContestedCount: findings - fixed, Rounds: []ReviewRound{round}}
 }
 
 func TestResult_Summary(t *testing.T) {
@@ -1190,16 +1203,18 @@ func TestResult_Summary(t *testing.T) {
 			"spec: split 2 of 3 scopes; 1 open question"},
 		{"a preflight", Result{SpecResult: envelope.SpecResult{Stage: "preflight", Preflight: make([]cli.PreflightCheck, 3)}},
 			"spec: preflight passed (3 checks)"},
-		{"a review", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, OpenQuestions: two, Review: reviewOf(2, 9, 7)}}},
-			"spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted"},
+		{"a review", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, OpenQuestions: two, Review: reviewWithSteering(2, 9, 7, 1)}}},
+			"spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings (1 steering), 7 fixed"},
+		{"a review with no steering finding", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, Review: reviewOf(2, 9, 7)}}},
+			"spec: wrote .specs/07_widget_cache; review: 2 rounds, 9 findings, 7 fixed"},
 		{"one round with one finding", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, Review: reviewOf(1, 1, 1)}}},
-			"spec: wrote .specs/07_widget_cache; review: 1 round, 1 finding, 1 accepted"},
+			"spec: wrote .specs/07_widget_cache; review: 1 round, 1 finding, 1 fixed"},
 		{"a review that found nothing", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, Review: reviewOf(1, 0, 0)}}},
 			"spec: wrote .specs/07_widget_cache; review: 1 round, 0 findings"},
 		{"reviews totalled over the packages", Result{SpecResult: envelope.SpecResult{
-			Package:       Package{SpecDir: dir, Review: reviewOf(2, 3, 2)},
-			FollowOnSpecs: []Package{{SpecDir: ".specs/08_b", Review: reviewOf(1, 2, 1)}, {SpecDir: ".specs/09_c"}}}},
-			"spec: wrote .specs/07_widget_cache (+2 follow-on packages); review: 3 rounds, 5 findings, 3 accepted"},
+			Package:       Package{SpecDir: dir, Review: reviewWithSteering(2, 3, 2, 1)},
+			FollowOnSpecs: []Package{{SpecDir: ".specs/08_b", Review: reviewWithSteering(1, 2, 1, 2)}, {SpecDir: ".specs/09_c"}}}},
+			"spec: wrote .specs/07_widget_cache (+2 follow-on packages); review: 3 rounds, 5 findings (3 steering), 3 fixed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.r.Summary(); got != tc.want {
@@ -1217,7 +1232,7 @@ func TestResult_SummaryFitsTheEnvelope(t *testing.T) {
 
 	short := &Result{}
 	short.SpecDir, short.Review = ".specs/07_widget_cache", reviewOf(2, 9, 7)
-	if got := run.Envelope(cli.ExitOK, short, nil).Summary; !strings.Contains(got, "7 accepted; 1 high-severity warning") {
+	if got := run.Envelope(cli.ExitOK, short, nil).Summary; !strings.Contains(got, "7 fixed; 1 high-severity warning") {
 		t.Errorf("summary = %q", got)
 	}
 	long := &Result{}
@@ -1366,5 +1381,106 @@ func TestRun_WarnsOnceAboutAMalformedSteeringRecord(t *testing.T) {
 		if !strings.Contains(r.Steering, "Use make check.") {
 			t.Errorf("%s was not given the directives", r.Step)
 		}
+	}
+}
+
+// Every escalation of every round reaches the package's open questions, in
+// round order and then in the reviser's, once each, whatever a later revision
+// did to the open questions.
+func TestRun_HandsEveryEscalationToTheCaller(t *testing.T) {
+	escalated := func(q string) Disposition {
+		return Disposition{Disposition: "escalated", Question: q, Options: []string{"A.", "B."}, Decision: "A for " + q, Reason: "unsure of " + q}
+	}
+	const existing = "Should the loader follow symlinks?" // the PRD phase's open question
+	for _, tc := range []struct {
+		name    string
+		replace bool
+		want    []string
+	}{
+		{"a later revision that keeps the open questions", false, []string{existing, "Q1?", "Q2?"}},
+		{"a later revision that replaces them", true, []string{"REPLACED?", "Q1?", "Q2?", existing}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			second := revisionOutcome{answers: map[int]Disposition{0: escalated("Should  the loader\nfollow symlinks?")}}
+			if tc.replace {
+				second.edit = func(p PRD) PRD {
+					p.Body += "\nrevised in round 2\n"
+					p.OpenQuestions = []OpenQuestion{{Question: "REPLACED?", Decision: "d", Why: "w"}}
+					return p
+				}
+				second.answers[0] = escalated(existing)
+			}
+			rv := &scriptedReviewer{t: t,
+				reviews:   []reviewOutcome{{severities: []string{"major", "major"}}, {severities: []string{"major"}}},
+				revisions: []revisionOutcome{{answers: map[int]Disposition{0: escalated("Q1?"), 1: escalated("Q2?")}}, second},
+			}
+			got, err := Run(context.Background(), adversarialOptions(t, newAuthor(t, "01", "test_feature"), rv, 2))
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			var questions []string
+			for _, q := range got.OpenQuestions {
+				questions = append(questions, q.Question)
+			}
+			if !slices.Equal(questions, tc.want) {
+				t.Fatalf("open questions %q; want %q", questions, tc.want)
+			}
+			if q := got.OpenQuestions[1]; q.Decision != "A for Q1?" || q.Why != "unsure of Q1?" {
+				t.Errorf("the escalation reached the caller as %+v; want its decision and its reason", q)
+			}
+			if want := fmt.Sprintf("%d open questions", len(tc.want)); !strings.Contains(got.Summary(), want) {
+				t.Errorf("summary %q does not count %s", got.Summary(), want)
+			}
+		})
+	}
+}
+
+// Nothing checks alignment with the steering where the steering says nothing
+// or the PRD is not reviewed; where it says something, the review is given
+// the directives and told to check against them.
+func TestRun_ChecksTheSteeringOnlyWhenItSaysSomethingAndThePRDIsReviewed(t *testing.T) {
+	for _, tc := range []struct {
+		name, steering string
+		adversarial    bool
+		block          bool
+	}{
+		{"a steering that says something", "# Steering\n\nDIRECTIVE: use make check.\n", true, true},
+		{"no steering", "", true, false},
+		{"a bare heading", "# Steering\n", true, false},
+		{"no review", "# Steering\n\nDIRECTIVE: use make check.\n", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rv := &scriptedReviewer{t: t, reviews: []reviewOutcome{{}, {}}}
+			o := adversarialOptions(t, newAuthor(t, "01", "test_feature"), rv, 2)
+			o.Adversarial = tc.adversarial
+			if tc.steering != "" {
+				writeFiles(t, o.Workspace.Root(), map[string]string{".specs/steering.md": tc.steering})
+			}
+			got, err := Run(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if !tc.adversarial {
+				if reviews, _ := rv.counts(); got.Review != nil || reviews != 0 {
+					t.Errorf("review %+v after %d reviews; want none without --adversarial", got.Review, reviews)
+				}
+				return
+			}
+			for _, round := range got.Review.Rounds {
+				for _, f := range round.Findings {
+					if f.Rubric == "steering" {
+						t.Errorf("%s carries the steering rubric", f.ID)
+					}
+				}
+			}
+			req := rv.reviewReqs[0]
+			prompt := prdReviewSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap)
+			if has := strings.Contains(prompt, "--- BEGIN STEERING ---") && strings.Contains(prompt, "DIRECTIVE: use make check."); has != tc.block {
+				t.Errorf("the review prompt carries the steering block %v; want %v", has, tc.block)
+			}
+			if !strings.Contains(prompt, "rubric") || !strings.Contains(prompt, "every directive") {
+				t.Error("the review is not told to check the PRD against every directive")
+			}
+		})
 	}
 }

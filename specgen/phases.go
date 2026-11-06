@@ -211,7 +211,7 @@ func (a *agentAuthor) WritePRD(ctx context.Context, req prdRequest) (PRD, agentr
 func (a *agentAuthor) Review(ctx context.Context, req reviewRequest) ([]Finding, agentrun.Result, error) {
 	var sink reviewSink
 	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePRDReview, prdReviewSystemPrompt(),
-		prdReviewUserPrompt(req), req, ToolSubmitPRDReview, newReviewTool(&sink, req.Round, req.Earlier)))
+		prdReviewUserPrompt(req), req, ToolSubmitPRDReview, newReviewTool(&sink, req.Round, req.Earlier, req.Steering)))
 	if err != nil {
 		return nil, res, err
 	}
@@ -228,7 +228,7 @@ func (a *agentAuthor) Revise(ctx context.Context, req revisionRequest) (PRD, []D
 	var sink revisionSink
 	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePRDRevision, prdRevisionSystemPrompt(),
 		prdRevisionUserPrompt(req), req.reviewRequest, ToolSubmitPRDRevision,
-		newRevisionTool(&sink, req.PRD, req.Findings, a.ws)))
+		newRevisionTool(&sink, req.PRD, req.Findings, req.Input, a.ws)))
 	if err != nil {
 		return PRD{}, nil, res, err
 	}

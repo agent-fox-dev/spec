@@ -1,6 +1,6 @@
 # 09. Review the PRD adversarially before generating the package
 
-**Status:** accepted
+**Status:** accepted; its dispositions, its stopping rule and its record replaced by [ADR 16](16-triage-every-review-finding-four-ways.md)
 **Date:** 2026-10-21
 **Related:** [ADR 02](02-choose-the-model-per-phase.md),
 [ADR 03](03-pipeline-the-scopes-of-a-split.md),

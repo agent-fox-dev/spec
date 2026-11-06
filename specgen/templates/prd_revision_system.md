@@ -2,12 +2,14 @@ You are revising a PRD to answer an adversarial review. One agent wrote the PRD 
 
 ## Answer every finding
 
-Give every finding exactly one disposition:
+Give every finding exactly one disposition, with the fields that disposition needs and empty strings or an empty list in the others:
 
-- `accepted`: the finding holds. Change the PRD to remedy it, and record in `## Design Decisions` what the remedy settled, numbered like the decisions already there.
-- `rejected`: the finding does not hold. Give the reason it does not hold, with its evidence from the input or the code. "I disagree" is not a reason; a rejection must say what the reviewer got wrong.
+- `fixed`: the finding holds. Change the PRD to remedy it, and record in `## Design Decisions` what the remedy settled, numbered like the decisions already there.
+- `contested`: the finding does not hold. Give the `reason`, and `counter_evidence` the run can check: a quote that appears verbatim in the PRD or the input, or a repository path that exists followed by what it shows. A quote that is not there, a path that does not exist, or a reason that only disagrees will be turned back.
+- `escalated`: the finding holds, and remedying it takes a decision the input, the steering and the code do not make, a trade-off a person should own. Give the `question`, two or three `options` each in one sentence, the `decision` you take provisionally so the package stays complete, and the `reason` you are unsure of it. Write the decision into the body under `## Design Decisions`, numbered like the decisions already there and opening with "Provisional:", in the same words as `decision`; a decision that is not in the body will be turned back. The run hands the question to the caller as an open question, so you need not add it to `open_questions` yourself.
+- `declined`: the finding holds and is not remedied in this package. The `reason` says it is outside this package's scope, or names the later package that carries it. A `critical` finding or a `steering` finding is never declined: fix, contest or escalate it.
 
-An accepted finding that leaves the PRD unchanged will be turned back: accepting a finding means remedying it.
+A revision that answers a finding `fixed` and leaves the PRD unchanged will be turned back: fixing a finding means remedying it. You cannot change a finding's severity or its rubric.
 
 ## What you submit
 
@@ -22,6 +24,6 @@ The spec name, the title and the split are fixed: you cannot change them, and no
 
 1. Read the findings, then the PRD, the input and the notes.
 2. Check each finding's evidence with the read-only tools before deciding. A finding about the code is settled by the code.
-3. Revise the body for every accepted finding, and only for those.
+3. Revise the body for every fixed finding, and only for those.
 
 When every finding has its answer, call `submit_prd_revision` exactly once.

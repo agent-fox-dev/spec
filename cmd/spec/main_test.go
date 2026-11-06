@@ -473,13 +473,14 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	withIndex(t, nil)
 	body, artifacts := fixture(t)
 	revised := body + "\n\nREVISED: a missing spec package is reported by name.\n"
-	finding := map[string]any{"severity": "major", "section": "Requirements", "flaw": "No error path for a missing package.",
+	finding := map[string]any{"severity": "major", "rubric": "prd", "section": "Requirements", "flaw": "No error path for a missing package.",
 		"evidence": "the PRD says nothing about it", "remedy": "say what happens", "reopens": ""}
 	turns := []faux.Turn{
 		submit("p1", "submit_prd", map[string]any{"spec_name": "test_feature", "title": "Test Feature", "body": body}),
 		submit("r1", "submit_prd_review", map[string]any{"findings": []any{finding}}),
 		submit("v1", "submit_prd_revision", map[string]any{"body": revised,
-			"dispositions": []any{map[string]any{"id": "R1-F1", "disposition": "accepted", "reason": ""}}}),
+			"dispositions": []any{map[string]any{"id": "R1-F1", "disposition": "fixed", "reason": "", "counter_evidence": "",
+				"question": "", "options": []string{}, "decision": ""}}}),
 		submit("r2", "submit_prd_review", map[string]any{"findings": []any{}}),
 	}
 	turns = append(turns, generation(t, artifacts)...)
@@ -497,8 +498,8 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	}
 	r := env.Result
 	if r.Review == nil || r.Review.RoundsRun != 2 || r.Review.RoundsAllowed != 2 ||
-		r.Review.StopReason != envelope.ReviewStopNoFindings || r.Review.Rounds[0].Findings[0].ID != "R1-F1" ||
-		r.Review.Rounds[0].Findings[0].Disposition != envelope.DispositionAccepted {
+		r.Review.StopReason != envelope.ReviewStopRoundsExhausted || r.Review.Rounds[0].Findings[0].ID != "R1-F1" ||
+		r.Review.Rounds[0].Findings[0].Disposition != envelope.DispositionFixed {
 		t.Errorf("review = %+v", r.Review)
 	}
 	spec, err := afspec.LoadSpec(filepath.Join(dir, r.SpecDir))
@@ -508,7 +509,7 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	if v := spec.Validate(); !v.Valid || !strings.Contains(spec.PRDBody, "REVISED: a missing spec package") {
 		t.Errorf("on disk: valid %v (%+v), revised body %v", v.Valid, v.Errors, strings.Contains(spec.PRDBody, "REVISED"))
 	}
-	if !strings.Contains(env.Summary, "review: 2 rounds, 1 finding, 1 accepted") {
+	if !strings.Contains(env.Summary, "review: 2 rounds, 1 finding, 1 fixed") {
 		t.Errorf("summary = %q", env.Summary)
 	}
 }
@@ -666,5 +667,155 @@ func TestSpec_WarnsOnceAboutAMalformedSteeringAndWritesNoVersion(t *testing.T) {
 		if !strings.Contains(p, "DIRECTIVE: use make check.") || strings.Contains(p, "Steering version") {
 			t.Errorf("prompt %d: want the directive and no version line", i)
 		}
+	}
+}
+
+// reviewFinding is one finding as the reviewer submits it.
+func reviewFinding(severity, rubric, section, flaw, evidence string) map[string]any {
+	return map[string]any{"severity": severity, "rubric": rubric, "section": section, "flaw": flaw,
+		"evidence": evidence, "remedy": "say what happens", "reopens": ""}
+}
+
+// revisionAnswer is one answer as the reviser submits it.
+func revisionAnswer(id, disposition string, fields map[string]any) map[string]any {
+	a := map[string]any{"id": id, "disposition": disposition, "reason": "", "counter_evidence": "",
+		"question": "", "options": []string{}, "decision": ""}
+	for k, v := range fields {
+		a[k] = v
+	}
+	return a
+}
+
+// adversarialRun runs spec end to end on the scripted model with the review,
+// and returns the result and the model.
+func adversarialRun(t *testing.T, dir string, rounds string, review ...faux.Turn) (envelope.SpecEnvelope, *faux.Provider) {
+	t.Helper()
+	body, artifacts := fixture(t)
+	turns := append([]faux.Turn{submit("p1", "submit_prd", map[string]any{"spec_name": "test_feature", "title": "Test Feature", "body": body})}, review...)
+	model := faux.New(append(turns, generation(t, artifacts)...)...)
+	t.Cleanup(cli.SetProvider(model))
+	code, env, stderr := runSpec(t, "--dir", dir, "--repo-map-tokens", "0", "--detail", "full", "--adversarial", "--adversarial-rounds", rounds,
+		"build the test feature")
+	if code != cli.ExitOK || env.Result == nil || !env.Result.Validation.Valid {
+		t.Fatalf("code = %d: %+v\n%s", code, env.Error, stderr)
+	}
+	return env, model
+}
+
+// A major finding fixed, a minor one fixed, then nothing: the second and third
+// rounds are clean and the rounds converge, with no revision for the third.
+func TestAdversarial_TwoConsecutiveCleanRoundsConverge(t *testing.T) {
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, _ := fixture(t)
+	env, _ := adversarialRun(t, goRepo(t), "3",
+		submit("r1", "submit_prd_review", map[string]any{"findings": []any{
+			reviewFinding("major", "prd", "Requirements", "No error path for a missing package.", "the PRD says nothing about it")}}),
+		submit("v1", "submit_prd_revision", map[string]any{"body": body + "\nREVISED-1: a missing package is reported.\n",
+			"dispositions": []any{revisionAnswer("R1-F1", "fixed", nil)}}),
+		submit("r2", "submit_prd_review", map[string]any{"findings": []any{
+			reviewFinding("minor", "prd", "Goals", "A goal is worded loosely.", "the PRD says load quickly")}}),
+		submit("v2", "submit_prd_revision", map[string]any{"body": body + "\nREVISED-1: a missing package is reported.\nREVISED-2\n",
+			"dispositions": []any{revisionAnswer("R2-F1", "fixed", nil)}}),
+		submit("r3", "submit_prd_review", map[string]any{"findings": []any{}}),
+	)
+	r := env.Result.Review
+	if r == nil || r.StopReason != envelope.ReviewStopConverged || r.RoundsRun != 3 {
+		t.Fatalf("review = %+v", r)
+	}
+	if got := []bool{r.Rounds[0].Clean, r.Rounds[1].Clean, r.Rounds[2].Clean}; !slices.Equal(got, []bool{false, true, true}) {
+		t.Errorf("clean = %v; want false, true, true", got)
+	}
+	if got := strings.Join(phaseNames(env), ","); got !=
+		"prd,prd_review,prd_revision,prd_review,prd_revision,prd_review,generate:requirements,generate:test_spec,generate:tasks" {
+		t.Errorf("phases = %v; want no revision for the third round", got)
+	}
+	if !strings.Contains(env.Summary, "review: 3 rounds, 2 findings, 2 fixed") {
+		t.Errorf("summary = %q", env.Summary)
+	}
+}
+
+// An escalated finding is decided provisionally in the PRD, and its question
+// reaches the caller.
+func TestAdversarial_AnEscalationReachesTheCaller(t *testing.T) {
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, _ := fixture(t)
+	const decision = "A missing package is skipped with a warning."
+	revised := body + "\n## Design Decisions\n\n9. Provisional: " + decision + "\n"
+	dir := goRepo(t)
+	env, _ := adversarialRun(t, dir, "1",
+		submit("r1", "submit_prd_review", map[string]any{"findings": []any{
+			reviewFinding("major", "prd", "Requirements", "What a missing package does is undecided.", "the PRD says nothing about it")}}),
+		submit("v1", "submit_prd_revision", map[string]any{"body": revised, "dispositions": []any{revisionAnswer("R1-F1", "escalated", map[string]any{
+			"question": "Should a missing package fail the run?",
+			"options":  []string{"Fail the run.", "Skip it with a warning.", "Ask the caller."},
+			"decision": decision, "reason": "the input does not say which a caller wants"})}}),
+	)
+	f := env.Result.Review.Rounds[0].Findings[0]
+	if f.Disposition != envelope.DispositionEscalated || f.Question == "" || len(f.Options) != 3 || f.Decision != decision || f.Reason == "" {
+		t.Errorf("finding = %+v", f)
+	}
+	found := false
+	for _, q := range env.Result.OpenQuestions {
+		found = found || (q.Question == "Should a missing package fail the run?" && q.Decision == decision && q.Why != "")
+	}
+	if !found {
+		t.Errorf("open questions %+v lack the escalation", env.Result.OpenQuestions)
+	}
+	prd, err := os.ReadFile(filepath.Join(dir, env.Result.SpecDir, "prd.md"))
+	if err != nil || !strings.Contains(string(prd), "Provisional: "+decision) {
+		t.Errorf("the written prd.md lacks the provisional decision (%v)", err)
+	}
+}
+
+// A PRD that contradicts a steering directive gets a steering finding, which
+// the reviser may not decline: the refusal reaches the model as a tool error,
+// and the escalation it submits instead is recorded and handed on.
+func TestAdversarial_ASteeringFindingCannotBeDeclined(t *testing.T) {
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, _ := fixture(t)
+	const directive = "Every command writes exactly one JSON object to stdout."
+	dir := goRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".specs", "steering.md"), []byte("# Steering\n\n- "+directive+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const decision = "The loader writes its report as one JSON object."
+	env, model := adversarialRun(t, dir, "1",
+		submit("r1", "submit_prd_review", map[string]any{"findings": []any{reviewFinding("major", "steering", "Requirements",
+			"The PRD asks for a text report on stdout.", `"`+directive+`" against "print a table of the packages"`)}}),
+		submit("v1", "submit_prd_revision", map[string]any{"body": body, "dispositions": []any{
+			revisionAnswer("R1-F1", "declined", map[string]any{"reason": "out of scope"})}}),
+		submit("v2", "submit_prd_revision", map[string]any{"body": body + "\n## Design Decisions\n\n9. Provisional: " + decision + "\n",
+			"dispositions": []any{revisionAnswer("R1-F1", "escalated", map[string]any{
+				"question": "Should the loader print a table, which the steering forbids?",
+				"options":  []string{"Write JSON only.", "Amend the steering."},
+				"decision": decision, "reason": "the input asks for a table"})}}),
+	)
+	refused := false
+	for _, req := range model.Requests() {
+		b, _ := json.Marshal(req.Messages)
+		refused = refused || strings.Contains(string(b), "cannot be declined")
+	}
+	if !refused {
+		t.Error("the declined steering finding was not turned back to the model as a tool error")
+	}
+	f := env.Result.Review.Rounds[0].Findings[0]
+	if f.Rubric != envelope.RubricSteering || f.Disposition != envelope.DispositionEscalated {
+		t.Errorf("finding = %+v; want a steering finding, escalated", f)
+	}
+	if !strings.Contains(env.Summary, "review: 1 round, 1 finding (1 steering), 0 fixed") {
+		t.Errorf("summary = %q", env.Summary)
+	}
+	found := false
+	for _, q := range env.Result.OpenQuestions {
+		found = found || strings.Contains(q.Question, "which the steering forbids")
+	}
+	if !found {
+		t.Errorf("open questions %+v lack the escalation", env.Result.OpenQuestions)
 	}
 }

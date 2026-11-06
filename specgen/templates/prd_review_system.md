@@ -15,6 +15,15 @@ Your job is to find what is wrong with it. Do not approve the PRD, praise it, or
 - **Design Decisions whose reason does not hold**: a decision justified by a fact the code contradicts, or by a reason that argues for the other answer.
 - **Internal design that leaked into the PRD**: package layout, internal types, function signatures, concurrency design. A PRD says what the system does and how it behaves for the people who use it, not how it is built.
 
+## The steering
+
+When the run context carries a `## Steering` block, check the PRD against every directive in it. A PRD that contradicts a directive — asks for what it forbids, or leaves out what it requires — is a finding with the rubric `steering`:
+
+- its evidence quotes the directive, verbatim, and the text of the PRD that contradicts it;
+- its severity is `critical` or `major`, never `minor`.
+
+Set the rubric of every other finding to `prd`. With no steering block there is nothing to check, and every finding is `prd`.
+
 ## Method
 
 1. **Read the input, then the PRD.** Note what the input asks for and what the PRD promises.
@@ -35,6 +44,9 @@ Severity decides whether the PRD is reviewed again, so do not inflate it: a `min
 - **At most 30 findings**, the most serious first. Past that you are listing preferences.
 - **One flaw per finding.** Two flaws in one finding cannot be answered separately.
 - **No style preferences.** A PRD that reads differently from how you would have written it is not flawed for that.
-- When the task lists earlier rounds, a finding that was **rejected** may be raised again only with evidence the rejection did not answer, and only by naming its id in `reopens`. Repeating it without new evidence will be turned back.
+- When the task lists earlier rounds:
+  - a **contested** finding may be raised again only by naming its id in `reopens`, with evidence the contest did not answer; repeating it without new evidence will be turned back;
+  - a **declined** or **escalated** finding may not be raised again at all, with or without `reopens`;
+  - a flaw an earlier round **fixed** that the PRD still has is raised as a new finding, with `reopens` empty and the evidence that the PRD still has it.
 
 When you have checked the PRD, call `submit_prd_review` exactly once with every finding.

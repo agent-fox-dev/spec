@@ -179,42 +179,50 @@ func findingsBlock(findings []Finding) string {
 
 // earlierRoundsBlock lists the findings of the rounds before this one with
 // what became of each. It is empty in round 1. The reviewer is held to the
-// rule on rejected findings; the reviser is told what has been settled.
+// rules on repeats; the reviser is told what has been settled.
 func earlierRoundsBlock(earlier []Finding, forReviewer bool) string {
 	if len(earlier) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n## Earlier rounds of this review\n\n" +
-		"This PRD has been reviewed before. An accepted finding changed the PRD; a rejected one carries the " +
-		"reviser's reason it does not hold.\n")
+		"This PRD has been reviewed before. A fixed finding changed the PRD; a contested one carries the reviser's " +
+		"reason and counter-evidence that it does not hold; an escalated one a decision taken provisionally and the " +
+		"question handed to a person; a declined one the reason it is not remedied in this package; an unanswered " +
+		"one was never answered.\n")
 	for _, f := range earlier {
 		writeFinding(&b, f)
 	}
 	if forReviewer {
-		b.WriteString("\nA rejected finding may be raised again only with evidence the rejection did not answer, " +
-			"and only by naming its id in `reopens`. Do not raise an accepted finding again unless the PRD still " +
-			"has the flaw; then raise it as a new finding with the evidence that it does.\n")
+		b.WriteString("\nA contested finding may be raised again only by naming its id in `reopens`, with evidence " +
+			"the contest did not answer. A declined or escalated finding may not be raised again at all. A flaw an " +
+			"earlier round fixed that the PRD still has is a new finding, with `reopens` empty and the evidence that " +
+			"the PRD still has it.\n")
 	} else {
-		b.WriteString("\nDo not undo what an earlier round accepted unless a finding of this round shows it was wrong.\n")
+		b.WriteString("\nDo not undo what an earlier round settled unless a finding of this round shows it was wrong.\n")
 	}
 	return b.String()
 }
 
-// writeFinding renders one finding, with its disposition and reason once it
-// has them.
+// writeFinding renders one finding with its rubric, and its disposition and
+// the fields that answer carries once it has them.
 func writeFinding(b *strings.Builder, f Finding) {
-	fmt.Fprintf(b, "\n**%s** · %s · %s", f.ID, f.Severity, oneLine(f.Section))
+	fmt.Fprintf(b, "\n**%s** · %s · %s · %s", f.ID, f.Severity, f.Rubric, oneLine(f.Section))
 	if f.Disposition != "" {
 		fmt.Fprintf(b, " · %s", f.Disposition)
 	}
 	b.WriteString("\n\n")
 	fmt.Fprintf(b, "- Flaw: %s\n- Evidence: %s\n- Remedy: %s\n", f.Flaw, f.Evidence, f.Remedy)
-	if f.Reopens != "" {
-		fmt.Fprintf(b, "- Reopens: %s\n", f.Reopens)
+	for _, field := range []struct{ label, value string }{
+		{"Reopens", f.Reopens}, {"Reason", f.Reason}, {"Counter-evidence", f.CounterEvidence},
+		{"Question", f.Question}, {"Decision", f.Decision},
+	} {
+		if field.value != "" {
+			fmt.Fprintf(b, "- %s: %s\n", field.label, field.value)
+		}
 	}
-	if f.Reason != "" {
-		fmt.Fprintf(b, "- Reason rejected: %s\n", f.Reason)
+	for _, o := range f.Options {
+		fmt.Fprintf(b, "- Option: %s\n", o)
 	}
 }
 

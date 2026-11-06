@@ -175,14 +175,16 @@ type Review struct {
 	RoundsRun int `json:"rounds_run"`
 	// RoundsAllowed is the round limit, --adversarial-rounds or 1.
 	RoundsAllowed int `json:"rounds_allowed"`
-	// StopReason is the one reason the rounds stopped: one of the
+	// StopReason is the one reason the rounds stopped: one of the three
 	// ReviewStop constants.
 	StopReason string `json:"stop_reason"`
-	// The totals over every round. FindingsCount is the sum of the other
-	// three.
+	// The totals over every round, derived from the rounds. FindingsCount is
+	// the sum of the other five.
 	FindingsCount   int `json:"findings_count"`
-	AcceptedCount   int `json:"accepted_count"`
-	RejectedCount   int `json:"rejected_count"`
+	FixedCount      int `json:"fixed_count"`
+	ContestedCount  int `json:"contested_count"`
+	EscalatedCount  int `json:"escalated_count"`
+	DeclinedCount   int `json:"declined_count"`
 	UnansweredCount int `json:"unanswered_count"`
 	// Rounds are the rounds in order. The --detail summary view leaves them
 	// out and keeps the counts.
@@ -191,7 +193,10 @@ type Review struct {
 
 // ReviewRound is one review and the revision that answered it.
 type ReviewRound struct {
-	Round    int             `json:"round"`
+	Round int `json:"round"`
+	// Clean is true when the round's review raised no critical and no major
+	// finding.
+	Clean    bool            `json:"clean"`
 	Findings []ReviewFinding `json:"findings"`
 }
 
@@ -201,16 +206,33 @@ type ReviewFinding struct {
 	// submitted the findings.
 	ID       string `json:"id"`
 	Severity string `json:"severity"`
+	// Rubric is the standard the finding applies: one of the Rubric
+	// constants. The reviewer sets it and the reviser cannot change it.
+	Rubric   string `json:"rubric"`
 	Section  string `json:"section"`
 	Flaw     string `json:"flaw"`
 	Evidence string `json:"evidence"`
 	Remedy   string `json:"remedy"`
-	// Reopens is the id of an earlier rejected finding this one raises
-	// again with new evidence.
-	Reopens     string `json:"reopens,omitempty"`
+	// Reopens is the id of an earlier contested finding this one raises
+	// again with evidence the contest did not answer.
+	Reopens string `json:"reopens,omitempty"`
+	// Disposition is the reviser's answer: one of the Disposition constants.
+	// The fields below are the ones that answer carries, and absent for the
+	// others.
 	Disposition string `json:"disposition"`
-	// Reason is the reviser's reason for a rejection, and absent otherwise.
+	// Reason is why a contested finding does not hold, why a declined one is
+	// not remedied in this package, or why an escalation's decision is
+	// uncertain.
 	Reason string `json:"reason,omitempty"`
+	// CounterEvidence is a contest's: a quote found in the PRD or the input,
+	// or a repository path that exists, with what it shows.
+	CounterEvidence string `json:"counter_evidence,omitempty"`
+	// Question, Options and Decision are an escalation's: the question a
+	// person should answer, the two or three options, and the one the reviser
+	// took provisionally.
+	Question string   `json:"question,omitempty"`
+	Options  []string `json:"options,omitempty"`
+	Decision string   `json:"decision,omitempty"`
 }
 
 // A finding's severity.
@@ -223,25 +245,42 @@ const (
 	SeverityMinor = "minor"
 )
 
-// A finding's disposition.
+// A finding's disposition: the reviser's answer to it.
 const (
-	// DispositionAccepted means the PRD was changed to remedy the finding.
-	DispositionAccepted = "accepted"
-	// DispositionRejected means the reviser gave a reason it does not hold.
-	DispositionRejected = "rejected"
+	// DispositionFixed means the PRD was changed to remedy the finding.
+	DispositionFixed = "fixed"
+	// DispositionContested means the finding does not hold, shown by
+	// counter-evidence the run found.
+	DispositionContested = "contested"
+	// DispositionEscalated means the finding holds and its remedy takes a
+	// decision a person should own: the reviser took one provisionally and
+	// the question is handed to the caller.
+	DispositionEscalated = "escalated"
+	// DispositionDeclined means the finding holds and is not remedied in this
+	// package, for the reason given. A critical or a steering finding cannot
+	// be declined.
+	DispositionDeclined = "declined"
 	// DispositionUnanswered means no revision finished for its round.
 	DispositionUnanswered = "unanswered"
 )
 
+// A finding's rubric: the standard it applies.
+const (
+	// RubricPRD is a flaw of the PRD itself.
+	RubricPRD = "prd"
+	// RubricSteering is a contradiction of a directive of the project's
+	// steering.
+	RubricSteering = "steering"
+)
+
 // Why the rounds of a review stopped.
 const (
-	// ReviewStopNoFindings means the last review raised none.
-	ReviewStopNoFindings = "no_findings"
-	// ReviewStopNoSeriousFindings means the last review raised only minor
-	// findings, and its revision finished.
-	ReviewStopNoSeriousFindings = "no_serious_findings"
-	// ReviewStopRoundsExhausted means the last review raised a critical or
-	// major finding, its revision finished, and the round limit was reached.
+	// ReviewStopConverged means two consecutive rounds were clean: their
+	// reviews raised nothing critical or major.
+	ReviewStopConverged = "converged"
+	// ReviewStopRoundsExhausted means the round limit was reached without two
+	// consecutive clean rounds. A limit of one always stops so, or as
+	// incomplete.
 	ReviewStopRoundsExhausted = "rounds_exhausted"
 	// ReviewStopIncomplete means a review or revision did not finish, or the
 	// total budget stopped the rounds. It wins over every other reason.

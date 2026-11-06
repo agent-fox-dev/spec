@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,9 @@ const maxFindings = 30
 
 // severities are a finding's severities, most serious first.
 var severities = []string{envelope.SeverityCritical, envelope.SeverityMajor, envelope.SeverityMinor}
+
+// rubrics are the standards a finding of the PRD review applies.
+var rubrics = []string{envelope.RubricPRD, envelope.RubricSteering}
 
 // reviewSink is the guarded destination the review tool writes into.
 type reviewSink struct {
@@ -52,6 +56,9 @@ func reviewSchema() *schema.Schema {
 		schema.Prop("severity", schema.Enum(
 			"critical: the package would specify the wrong thing. major: a requirement would be "+
 				"missing or untestable. minor: wording or clarity.", severities...)),
+		schema.Prop("rubric", schema.Enum(
+			"prd: a flaw of the PRD itself. steering: the PRD contradicts a directive of the project's steering; "+
+				"the evidence quotes the directive, and the severity is critical or major.", rubrics...)),
 		schema.Prop("section", schema.String("The PRD section the flaw is in, e.g. 'Goals' or 'Requirements > Rounds'")),
 		schema.Prop("flaw", schema.String("The flaw, in one or two sentences")),
 		schema.Prop("evidence", schema.String(
@@ -59,7 +66,7 @@ func reviewSchema() *schema.Schema {
 				"A finding you cannot support is one to withdraw.")),
 		schema.Prop("remedy", schema.String("What the PRD should say instead")),
 		schema.Prop("reopens", schema.String(
-			"The id of an earlier REJECTED finding this one raises again with evidence its rejection "+
+			"The id of an earlier CONTESTED finding this one raises again with evidence the contest "+
 				"did not answer, e.g. R1-F2; an empty string otherwise. Always empty in round 1.")),
 	), "Every flaw you found, most serious first. An empty list says the PRD stands as it is.")
 	findings.MaxItems = &limit
@@ -68,12 +75,14 @@ func reviewSchema() *schema.Schema {
 
 // newReviewTool is the terminator of round round's review. earlier are the
 // findings of the rounds before it, with their dispositions, so a repeat of
-// a rejected finding can be told apart from a new one.
+// a settled finding can be told apart from a new one. steering is the body of
+// the project's steering, which a steering finding must quote; with none, no
+// finding can carry that rubric.
 //
 // Every check runs over the whole submission and one error names every
 // offender, so the reviewer corrects them in one turn. A submission that
 // fails any check records nothing.
-func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
+func newReviewTool(sink *reviewSink, round int, earlier []Finding, steering string) core.Tool {
 	byID := make(map[string]Finding, len(earlier))
 	for _, f := range earlier {
 		byID[f.ID] = f
@@ -104,7 +113,7 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 			var problems []string
 			unsupported := false
 			for i := range payload.Findings {
-				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID)
+				p, empty := checkFinding(&payload.Findings[i], i+1, round, earlier, byID, steering)
 				problems = append(problems, p...)
 				unsupported = unsupported || empty
 			}
@@ -134,11 +143,12 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 // checkFinding normalises the finding at position pos of round round's
 // review and says what is wrong with it, and whether a field is empty.
 // earlier are the earlier rounds' findings, byID the same by id.
-func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding) (problems []string, empty bool) {
-	for _, s := range []*string{&f.Severity, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
+func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding, steering string) (problems []string, empty bool) {
+	for _, s := range []*string{&f.Severity, &f.Rubric, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
 		*s = strings.TrimSpace(*s)
 	}
-	f.ID, f.Disposition, f.Reason = "", "", ""
+	// The fields of the answer are the reviser's, and the id is the run's.
+	f.ID, f.Disposition, f.Reason, f.CounterEvidence, f.Question, f.Options, f.Decision = "", "", "", "", "", nil, ""
 
 	var missing []string
 	for _, field := range []struct{ name, val string }{
@@ -156,8 +166,36 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		problems = append(problems, fmt.Sprintf("finding %d has severity %q; it is one of %s",
 			pos, f.Severity, strings.Join(severities, ", ")))
 	}
+	if !slices.Contains(rubrics, f.Rubric) {
+		problems = append(problems, fmt.Sprintf("finding %d has rubric %q; it is prd or steering", pos, f.Rubric))
+	}
+	if f.Rubric == envelope.RubricSteering {
+		if f.Severity == envelope.SeverityMinor {
+			problems = append(problems, fmt.Sprintf("finding %d has the rubric steering and the severity minor: "+
+				"a steering finding is critical or major", pos))
+		}
+		if f.Evidence != "" && !quotesSteering(f.Evidence, steering) {
+			problems = append(problems, fmt.Sprintf("finding %d has the rubric steering, and its evidence quotes no "+
+				"passage of the steering: the evidence of a steering finding must quote the directive it contradicts, "+
+				"verbatim", pos))
+		}
+	}
+
+	// A declined or escalated finding is settled: it may not be raised again,
+	// through reopens or otherwise.
+	settled := false
+	for _, was := range earlier {
+		if (was.Disposition == envelope.DispositionDeclined || was.Disposition == envelope.DispositionEscalated) &&
+			sameEvidence(was.Section, f.Section) && sameEvidence(was.Flaw, f.Flaw) {
+			problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was %s: such a finding "+
+				"cannot be raised again; withdraw it", pos, was.ID, was.Disposition))
+			settled = true
+			break
+		}
+	}
 
 	switch {
+	case settled:
 	case f.Reopens != "" && round == 1:
 		problems = append(problems, fmt.Sprintf("finding %d reopens %s, and round 1 has no earlier "+
 			"finding to reopen; leave reopens empty", pos, f.Reopens))
@@ -167,23 +205,59 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		case !ok:
 			problems = append(problems, fmt.Sprintf("finding %d reopens %s, which is no earlier "+
 				"finding of this PRD", pos, f.Reopens))
-		case was.Disposition == envelope.DispositionRejected && sameEvidence(was.Evidence, f.Evidence):
+		case was.Disposition != envelope.DispositionContested:
+			problems = append(problems, fmt.Sprintf("finding %d reopens %s, which was %s: only a contested finding "+
+				"may be reopened; a flaw an earlier round fixed and the PRD still has is a new finding, with reopens empty",
+				pos, was.ID, was.Disposition))
+		case sameEvidence(was.Evidence, f.Evidence):
 			problems = append(problems, fmt.Sprintf("finding %d reopens %s with the evidence its "+
-				"rejection already answered; reopen it only with evidence the rejection did not "+
+				"contest already answered; reopen it only with evidence the contest did not "+
 				"answer, or withdraw it", pos, was.ID))
 		}
 	default:
 		for _, was := range earlier {
-			if was.Disposition == envelope.DispositionRejected &&
+			if was.Disposition == envelope.DispositionContested &&
 				sameEvidence(was.Section, f.Section) && sameEvidence(was.Flaw, f.Flaw) {
-				problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was rejected; "+
-					"raise it again only by naming %s in reopens with evidence the rejection did not "+
+				problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was contested; "+
+					"raise it again only by naming %s in reopens with evidence the contest did not "+
 					"answer, or withdraw it", pos, was.ID, was.ID))
 				break
 			}
 		}
 	}
 	return problems, len(missing) > 0
+}
+
+// quoted is the text a piece of evidence quotes: between double quotes,
+// typographic quotes or backticks, or on a line opening with >.
+var quoted = regexp.MustCompile("\"([^\"]+)\"|“([^”]+)”|`([^`]+)`|(?m)^\\s*>\\s*(.+)$")
+
+// quotesSteering reports whether evidence quotes a passage of the steering
+// body, whitespace aside: one of its quotations, or, when it has none, the
+// whole of it. A passage under ten characters is not a quotation of a
+// directive. A steering that says nothing is quoted by nothing.
+func quotesSteering(evidence, steering string) bool {
+	body := normaliseEvidence(steering)
+	if body == "" {
+		return false
+	}
+	var passages []string
+	for _, m := range quoted.FindAllStringSubmatch(evidence, -1) {
+		for _, g := range m[1:] {
+			if g != "" {
+				passages = append(passages, g)
+			}
+		}
+	}
+	if len(passages) == 0 {
+		passages = []string{evidence}
+	}
+	for _, p := range passages {
+		if p = normaliseEvidence(p); len(p) >= 10 && strings.Contains(body, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // normaliseEvidence trims s and collapses every run of whitespace inside it

@@ -184,7 +184,7 @@ func (r Result) Summary() string {
 // when none was reviewed.
 func reviewClause(pkgs []Package) string {
 	reviewed := false
-	var rounds, findings, accepted int
+	var rounds, findings, fixed, steering int
 	for _, p := range pkgs {
 		if p.Review == nil {
 			continue
@@ -192,14 +192,24 @@ func reviewClause(pkgs []Package) string {
 		reviewed = true
 		rounds += p.Review.RoundsRun
 		findings += p.Review.FindingsCount
-		accepted += p.Review.AcceptedCount
+		fixed += p.Review.FixedCount
+		for _, round := range p.Review.Rounds {
+			for _, f := range round.Findings {
+				if f.Rubric == envelope.RubricSteering {
+					steering++
+				}
+			}
+		}
 	}
 	if !reviewed {
 		return ""
 	}
 	clause := fmt.Sprintf("review: %s, %s", countOf(rounds, "round"), countOf(findings, "finding"))
+	if steering > 0 {
+		clause += fmt.Sprintf(" (%d steering)", steering)
+	}
 	if findings > 0 {
-		clause += fmt.Sprintf(", %d accepted", accepted)
+		clause += fmt.Sprintf(", %d fixed", fixed)
 	}
 	return clause
 }
@@ -806,6 +816,9 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		}()
 	}
 
+	// The escalations' questions are the caller's to answer, and their
+	// provisional decisions are in the body already.
+	prd.OpenQuestions = withEscalations(prd.OpenQuestions, review)
 	pkg := &Package{
 		SpecDir:       relativeTo(e.root, specPath),
 		SpecID:        specID,

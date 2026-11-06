@@ -15,10 +15,12 @@ import (
 // returns the last complete PRD and the record of how it got there.
 //
 // A round is one review and, when the review raised anything, one revision
-// of its findings. Another round follows only when the round's review raised
-// a critical or major finding and the limit has not been reached: a review
-// with nothing serious does not justify paying for another. Each round
-// reviews the PRD the previous revision left, and every round after the
+// of its findings: the minor findings of a clean round are revised too, and a
+// review with nothing has nothing to answer. A round is clean when its review
+// raised nothing critical or major. The rounds stop as converged once two
+// consecutive rounds were clean — one clean review is a single sample — and
+// as exhausted at the limit, so a limit of one never converges (ADR 16). Each
+// round reviews the PRD the previous revision left, and every round after the
 // first is shown the earlier findings with what became of them.
 //
 // A review or revision that does not finish, or a --total-budget already
@@ -34,6 +36,7 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 	var rounds []ReviewRound
 	var earlier []Finding
 	stop := envelope.ReviewStopIncomplete
+	cleanBefore := false
 
 	for round := 1; round <= limit; round++ {
 		if reason, spent := e.overTotalBudget(); spent {
@@ -55,43 +58,45 @@ func (e *runEnv) runRounds(ctx context.Context, prd PRD, label string, split *sp
 		if findings == nil {
 			findings = []Finding{}
 		}
-		rounds = append(rounds, ReviewRound{Round: round, Findings: findings})
-		o.Progress.Step(agentrun.PhasePRDReview, "%sthe review raised %s", prefixed(label), bySeverity(findings))
-		if len(findings) == 0 {
-			stop = envelope.ReviewStopNoFindings
-			break
+		clean := !serious(findings)
+		rounds = append(rounds, ReviewRound{Round: round, Clean: clean, Findings: findings})
+		state := "not clean"
+		if clean {
+			state = "clean"
 		}
+		o.Progress.Step(agentrun.PhasePRDReview, "%sthe review raised %s; the round is %s", prefixed(label), bySeverity(findings), state)
 
-		answer(findings, nil)
-		if reason, spent := e.overTotalBudget(); spent {
-			e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, reason)
-			break
-		}
-		done = o.Progress.Begin("%srevising the PRD (round %d of %d)", prefixed(label), round, limit)
-		revised, dispositions, stats, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
-		recordPhase(o.Run, stats, prd.SpecName)
-		done(cli.PhaseSummary(stats))
-		if err != nil {
-			if ctx.Err() != nil {
-				return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDRevision, agentrun.CategoryAborted, err))
+		if len(findings) > 0 {
+			answer(findings, nil)
+			if reason, spent := e.overTotalBudget(); spent {
+				e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, reason)
+				break
 			}
-			e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, failureReason(err))
+			done = o.Progress.Begin("%srevising the PRD (round %d of %d)", prefixed(label), round, limit)
+			revised, dispositions, stats, err := e.reviewer.Revise(ctx, revisionRequest{reviewRequest: req, Findings: findings})
+			recordPhase(o.Run, stats, prd.SpecName)
+			done(cli.PhaseSummary(stats))
+			if err != nil {
+				if ctx.Err() != nil {
+					return PRD{}, nil, scopedIf(label, fail(agentrun.PhasePRDRevision, agentrun.CategoryAborted, err))
+				}
+				e.warnIncomplete(prd, round, agentrun.PhasePRDRevision, failureReason(err))
+				break
+			}
+			answer(findings, dispositions)
+			o.Progress.Step(agentrun.PhasePRDRevision, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
+			prd = revised
+			earlier = append(earlier, findings...)
+		}
+
+		if clean && cleanBefore {
+			stop = envelope.ReviewStopConverged
 			break
 		}
-		answer(findings, dispositions)
-		o.Progress.Step(agentrun.PhasePRDRevision, "%sthe revision answered: %s", prefixed(label), byDisposition(findings))
-		prd = revised
-		earlier = append(earlier, findings...)
-
-		switch {
-		case !serious(findings):
-			stop = envelope.ReviewStopNoSeriousFindings
-		case round == limit:
+		cleanBefore = clean
+		if round == limit {
 			stop = envelope.ReviewStopRoundsExhausted
-		default:
-			continue
 		}
-		break
 	}
 	return prd, buildReview(rounds, limit, stop), nil
 }
@@ -148,23 +153,49 @@ func (e *runEnv) reviewRequest(prd PRD, split *splitContext, round, limit int, e
 	}
 }
 
-// answer writes each finding's disposition, and its reason when rejected.
-// A finding with no disposition to take is unanswered: its round's revision
-// did not finish.
-func answer(findings []Finding, dispositions []Disposition) {
+// answer writes each finding's disposition and the fields that disposition
+// carries, and clears the others. A finding with no disposition to take is
+// unanswered: its round's revision did not finish. Its severity and rubric
+// are the reviewer's, and no answer touches them.
+func answer(findings []Finding, answers []Disposition) {
 	for i := range findings {
 		f := &findings[i]
-		f.Disposition, f.Reason = envelope.DispositionUnanswered, ""
-		for _, d := range dispositions {
+		f.Disposition, f.Reason, f.CounterEvidence, f.Question, f.Options, f.Decision =
+			envelope.DispositionUnanswered, "", "", "", nil, ""
+		for _, d := range answers {
 			if d.ID != f.ID {
 				continue
 			}
-			f.Disposition = d.Disposition
-			if d.Disposition == envelope.DispositionRejected {
-				f.Reason = d.Reason
-			}
+			d.keep()
+			f.Disposition, f.Reason, f.CounterEvidence = d.Disposition, d.Reason, d.CounterEvidence
+			f.Question, f.Options, f.Decision = d.Question, slices.Clone(d.Options), d.Decision
 		}
 	}
+}
+
+// withEscalations is questions with every escalation of review added, as an
+// open question carrying its decision and why it is uncertain: in round
+// order, then in the order the reviser answered, skipping a question already
+// there, whitespace aside. It runs once the rounds have stopped, so a later
+// round's revision that replaced the open questions cannot drop an earlier
+// round's escalation.
+func withEscalations(questions []OpenQuestion, review *Review) []OpenQuestion {
+	if review == nil {
+		return questions
+	}
+	out := slices.Clone(questions)
+	for _, round := range review.Rounds {
+		for _, f := range round.Findings {
+			if f.Disposition != envelope.DispositionEscalated {
+				continue
+			}
+			if slices.ContainsFunc(out, func(q OpenQuestion) bool { return sameEvidence(q.Question, f.Question) }) {
+				continue
+			}
+			out = append(out, OpenQuestion{Question: f.Question, Decision: f.Decision, Why: f.Reason})
+		}
+	}
+	return out
 }
 
 // bySeverity is a review's findings counted by severity, most serious
@@ -188,18 +219,25 @@ func bySeverity(findings []Finding) string {
 	return strings.Join(parts, ", ")
 }
 
-// byDisposition is a revision's answers counted: "2 accepted, 1 rejected".
+// byDisposition is a revision's answers counted, in the order of the four:
+// "2 fixed, 1 contested".
 func byDisposition(findings []Finding) string {
-	accepted, rejected := 0, 0
-	for _, f := range findings {
-		switch f.Disposition {
-		case envelope.DispositionAccepted:
-			accepted++
-		case envelope.DispositionRejected:
-			rejected++
+	var parts []string
+	for _, d := range dispositions {
+		n := 0
+		for _, f := range findings {
+			if f.Disposition == d {
+				n++
+			}
+		}
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, d))
 		}
 	}
-	return fmt.Sprintf("%d accepted, %d rejected", accepted, rejected)
+	if len(parts) == 0 {
+		return "nothing"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // serious reports whether any finding is critical or major.
@@ -209,18 +247,23 @@ func serious(findings []Finding) bool {
 	})
 }
 
-// buildReview is the record of a PRD's rounds. Every count is derived from
-// the rounds, so the totals cannot disagree with them.
+// buildReview is the record of a PRD's rounds. Whether a round was clean and
+// every count are derived from the rounds, so neither can disagree with them.
 func buildReview(rounds []ReviewRound, limit int, stop string) *Review {
 	r := &Review{RoundsRun: len(rounds), RoundsAllowed: limit, StopReason: stop, Rounds: rounds}
-	for _, round := range rounds {
-		for _, f := range round.Findings {
+	for i := range rounds {
+		rounds[i].Clean = !serious(rounds[i].Findings)
+		for _, f := range rounds[i].Findings {
 			r.FindingsCount++
 			switch f.Disposition {
-			case envelope.DispositionAccepted:
-				r.AcceptedCount++
-			case envelope.DispositionRejected:
-				r.RejectedCount++
+			case envelope.DispositionFixed:
+				r.FixedCount++
+			case envelope.DispositionContested:
+				r.ContestedCount++
+			case envelope.DispositionEscalated:
+				r.EscalatedCount++
+			case envelope.DispositionDeclined:
+				r.DeclinedCount++
 			default:
 				r.UnansweredCount++
 			}

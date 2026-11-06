@@ -743,7 +743,9 @@ func TestRun_AnInterruptedScopeReviewStopsTheSplit(t *testing.T) {
 // before its write reports no package, so it has none to carry one.
 func TestRun_EveryPackageOfASplitCarriesItsReview(t *testing.T) {
 	a := &concurrentAuthor{inner: splitAuthor(t), failGenerate: map[string]error{"widget_adopt": errors.New("no room")}}
-	rv := &scriptedReviewer{t: t, reviews: []reviewOutcome{{severities: []string{"minor"}}, {}, {}},
+	// Each scope converges on two clean rounds: the first scope's a minor one,
+	// revised, and an empty one; the others two empty ones.
+	rv := &scriptedReviewer{t: t, reviews: []reviewOutcome{{severities: []string{"minor"}}, {}, {}, {}, {}, {}},
 		revisions: []revisionOutcome{{}}}
 	o := fileOptions(newWorkspace(t), a)
 	o.Adversarial, o.AdversarialRounds, o.reviewer = true, 2, rv
@@ -751,12 +753,12 @@ func TestRun_EveryPackageOfASplitCarriesItsReview(t *testing.T) {
 	if err == nil {
 		t.Fatal("the third scope should fail")
 	}
-	if r := got.Review; r == nil || r.RoundsAllowed != 2 || r.StopReason != envelope.ReviewStopNoSeriousFindings ||
+	if r := got.Review; r == nil || r.RoundsAllowed != 2 || r.StopReason != envelope.ReviewStopConverged ||
 		r.FindingsCount != 1 || r.Rounds[0].Round != 1 || len(r.Rounds[0].Findings) != 1 {
 		t.Errorf("the first package's review = %+v", got.Review)
 	}
 	if len(got.FollowOnSpecs) != 1 || got.FollowOnSpecs[0].Review == nil ||
-		got.FollowOnSpecs[0].Review.StopReason != envelope.ReviewStopNoFindings {
+		got.FollowOnSpecs[0].Review.StopReason != envelope.ReviewStopConverged {
 		t.Errorf("follow-on packages = %+v", got.FollowOnSpecs)
 	}
 }

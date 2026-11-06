@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:57:04Z
-- **Updated:** 2026-11-06T13:05:58Z
+- **Updated:** 2026-11-06T14:48:18Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109`
 
@@ -1090,7 +1090,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 
 ## Tasks
 
-### [ ] 1. Answer every finding one of four ways, carry a rubric, and record the answer (implement, pending)
+### [x] 1. Answer every finding one of four ways, carry a rubric, and record the answer (implement, done)
 
 **Criteria:** 17-REQ-1.1, 17-REQ-1.2, 17-REQ-1.3, 17-REQ-1.4, 17-REQ-1.5, 17-REQ-1.6, 17-REQ-5.2, 17-REQ-5.3, 17-REQ-5.4, 17-REQ-5.5, 17-REQ-5.6, 17-REQ-6.5
 
@@ -1131,7 +1131,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 2. Escalate with a provisional decision and hand the question to the caller (implement, pending)
+### [x] 2. Escalate with a provisional decision and hand the question to the caller (implement, done)
 
 **Criteria:** 17-REQ-2.1, 17-REQ-2.2, 17-REQ-2.3
 
@@ -1164,7 +1164,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 3. Hold a later round to what the earlier rounds settled (implement, pending)
+### [x] 3. Hold a later round to what the earlier rounds settled (implement, done)
 
 **Criteria:** 17-REQ-3.1, 17-REQ-3.2, 17-REQ-3.3, 17-REQ-3.4
 
@@ -1196,7 +1196,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 4. Converge on two consecutive clean rounds (implement, pending)
+### [x] 4. Converge on two consecutive clean rounds (implement, done)
 
 **Criteria:** 17-REQ-1.7, 17-REQ-4.1, 17-REQ-4.2, 17-REQ-4.3, 17-REQ-4.4, 17-REQ-4.5, 17-REQ-4.6, 17-REQ-4.7, 17-REQ-5.1
 
@@ -1226,7 +1226,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 5. Check the PRD against the steering directives, and report the review in the summary (implement, pending)
+### [x] 5. Check the PRD against the steering directives, and report the review in the summary (implement, done)
 
 **Criteria:** 17-REQ-5.7, 17-REQ-6.1, 17-REQ-6.2, 17-REQ-6.3, 17-REQ-6.4
 
@@ -1261,7 +1261,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 - `make test` passes
 - `make lint` passes
 
-### [ ] 6. Verify the three paths end to end and record the break in an ADR (integration, pending)
+### [x] 6. Verify the three paths end to end and record the break in an ADR (integration, done)
 
 **Tests:** TS-17-20, TS-17-21, TS-17-22
 
