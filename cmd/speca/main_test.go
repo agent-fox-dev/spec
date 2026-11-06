@@ -224,6 +224,13 @@ func TestUsageErrors_AcceptEveryWellFormedTaskCall(t *testing.T) {
 			t.Errorf("%s: refused as a usage error: %s", name, env.Error.Message)
 		}
 	}
+	// The render form takes --dry-run, and --all without a package, which
+	// every other form refuses.
+	for _, flags := range [][]string{{"--render", "--dry-run"}, {"--render", "--all"}, {"--render", "--all", "--dry-run"}} {
+		if env, code, _ := run(t, append([]string{"--dir", root}, flags...)...); code != cli.ExitOK {
+			t.Errorf("%v: code %d: %+v", flags, code, env.Error)
+		}
+	}
 }
 
 // Every form writes exactly one envelope with tool speca and an exit code equal

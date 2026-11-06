@@ -151,13 +151,16 @@ func (r *Result) taskSummary() string {
 	return s
 }
 
-// renderSummary names what the render form did to the package's spec.md, and,
-// under --dry-run, that nothing was written.
+// renderSummary counts what the render form did to the packages' spec.md:
+// how many were written, how many were unchanged and how many failed, which add
+// up to the entries; and, under --dry-run, that nothing was written.
 func (r *Result) renderSummary() string {
-	s := tool + ":"
+	counts := map[string]int{}
 	for _, e := range r.Rendered {
-		s += fmt.Sprintf(" %s %s %s", filepath.Base(e.SpecDir), afspec.RenderedFileName, e.Rendered)
+		counts[e.Rendered]++
 	}
+	s := fmt.Sprintf("%s: %d %s, %d %s, %d %s", tool, counts[renderedWritten], renderedWritten,
+		counts[renderedUnchanged], renderedUnchanged, counts[renderedFailed], renderedFailed)
 	if r.DryRun {
 		s += " (dry run, nothing written)"
 	}

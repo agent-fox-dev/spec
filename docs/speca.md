@@ -6,6 +6,7 @@ speca --list [--all]                     every package under the spec root → o
 speca <spec> --task T --state S          change the state of tasks of a package
 speca <spec> --status S [--by <spec>]    change the lifecycle status of a package
 speca <spec> --render                    write the package's spec.md, its render
+speca --render [--all]                   write the spec.md of every package
 ```
 
 `speca` is the spec admin command. It reads a version 2 package through
@@ -55,6 +56,7 @@ speca 16 --status active                # activate a draft: the hash of its inte
 speca 16 --status sealed                # seal an active package whose tasks are all done
 speca 03 --status superseded --by 12    # 12 replaces 03; 03 goes under archive/
 speca 16 --render                       # write spec.md, 16's render, and nothing else
+speca --render --all --dry-run          # which packages' spec.md are not their render
 speca --schema                          # the interface, as JSON Schema
 ```
 
@@ -102,12 +104,16 @@ Every one of these messages begins with `speca`.
 | `--status S … --dry-run` | the same, for a change that was not made: `dry_run` is true |
 | `--render` | `rendered`: the package, and what the call did to its `spec.md` |
 | `--render --dry-run` | the same, for a write that was not made: `dry_run` is true |
+| `--render` with no input | the sweep: `rendered` holds every package under the spec root, in the order of their numbers |
+| `--render --all` with no input | the same, then the packages under `archive/` |
 
 A call names one operation. `--validate` with `--list`, the task form or the
 status form with either of them or with each other, `--render` with any of
-them, a positional input with `--list`, and `--all` without `--list` are usage
-errors. `--force` with `--render` is one too: the render form refuses nothing,
-so there is nothing to override.
+them, a positional input with `--list`, and `--all` without `--list` (or without
+`--render` and with no input) are usage errors. `--force` with `--render` is
+one too: the render form refuses nothing, so there is nothing to override; and
+so is `--all` with `--render` and an input, since `--all` adds `archive/` to
+the sweep and means nothing for one package.
 
 ## The report: `speca <spec>`
 
@@ -481,7 +487,7 @@ move), with `changes` in the order they were written:
   move-only call: it moves the package and changes nothing else. A move-only call
   whose move fails is reported the same way.
 
-## The render form: `speca <spec> --render`
+## The render form: `speca <spec> --render` and `speca --render [--all]`
 
 Every save of a package writes its render, `spec.md`, beside its artifacts
 (format v2 §3): a header line, a blank line, and what `specr <spec>` returns in
@@ -492,20 +498,29 @@ file it renames (`cli.WriteAtomic`), whatever the package's status — `spec.md`
 is derived, outside the package's contract, and touches no intent hash. It
 writes no other file, so `updated_at` is not touched.
 
-`result.rendered` holds one entry:
+`result.rendered` holds one entry for the package named, or, with no input,
+one for every package under the spec root in the order of their numbers, then
+with `--all` one for every package under `archive/` — the sweep, which goes
+through the directories as `--list` does. Each entry is:
 
 | Field | Meaning |
 |---|---|
 | `spec_dir`, `spec_id`, `spec_name`, `status` | the package, as in the report |
-| `rendered` | `written` when `spec.md` was absent or differed from the render, and was written; `unchanged` when it held the render already, and was left alone (its bytes and its modification time); `failed` with `reason` (in the sweep) |
+| `rendered` | `written` when `spec.md` was absent or differed from the render, and was written; `unchanged` when it held the render already, and was left alone (its bytes and its modification time); `failed` in the sweep, when the package could not be loaded or its `spec.md` could not be written |
 | `reason` | why the package failed; present exactly when `rendered` is `failed` |
 | `archived` | `true` for a package rendered from `archive/`; absent otherwise |
 
 With `--dry-run` the outcome is decided the same way, `dry_run` is `true`, and
-nothing is written. A package that cannot be loaded fails the call at stage
-`load`, naming its directory and the library's reason; a `spec.md` that cannot
-be written fails it at stage `write`, naming the path and why. Neither writes a
-file. The `summary` is `speca: <directory> spec.md <outcome>`, with
+nothing is written. When one package is named, a package that cannot be loaded
+fails the call at stage `load`, naming its directory and the library's reason,
+and a `spec.md` that cannot be written fails it at stage `write`, naming the
+path and why; neither writes a file. The sweep has every package to report, so
+a package it cannot load or write is an entry with `rendered` `failed` and its
+`reason`, the others are rendered all the same, and the call exits 0. A spec
+root that does not exist, is not a directory or cannot be read fails the sweep
+at stage `load` with `fix_hint.flag` `--specs-dir`, as it fails `--list`; one
+that holds no package is `"rendered": []`. The `summary` counts the outcomes,
+`speca: <n> written, <n> unchanged, <n> failed`, with
 ` (dry run, nothing written)` under `--dry-run`; `next` is empty.
 
 ## The output
@@ -738,7 +753,7 @@ One sentence per form, which the shell caps at 200 characters:
 | `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)`; `1 error` for one |
 | `--list` | `speca: <n> packages` (`1 package` for one), then, when there is anything to count, ` (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
 | status form | `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <path>`, `speca: superseded <name> by <spec_id>, moved to <path>`, and `speca: moved <name> to <path>` for a call that only moves the package; `<name>` is the package's directory name, `<path>` where it went, as `spec_dir` shows it. An archive or a supersede that needs no move has no `, moved to` clause. Under `--dry-run` the sentence ends ` (dry run; nothing written)` (the task form's has a comma). After a move under `archive/` that failed, it says the status was written and the move was not. A refusal has no result, so its `summary` is the refusal's message |
-| render form | `speca: <directory> spec.md <outcome>`, the outcome `written` or `unchanged`; ` (dry run, nothing written)` is added under `--dry-run` |
+| render form | `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep; ` (dry run, nothing written)` is added under `--dry-run` |
 | task form | `speca: <directory> task N <from> → <to>`, `speca: <directory> tasks N, M → <to>`, or `speca: <directory> no task changed`; ` (dry run, nothing written)` is added under `--dry-run`. A refusal has no sentence of its own: its `summary` is the refusal's message. The shell adds `; <n> high-severity warning(s)` to the sentence of any success that raised a high warning, so a call that used `--force` to set a state, or to write over keys, ends in `; 1 high-severity warning` |
 
 ### Reading it from Go
@@ -826,7 +841,7 @@ else.
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | reported — including a package that does not validate; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already |
-| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`) |
+| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`), or the spec root the sweep reads could not be read (stage `load`) |
 | `2` | `usage` | usage error — nothing was written |
 
 ### Warning codes
@@ -853,7 +868,7 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 |---|---|---|
 | `--validate` | off | give the format's full verdict on the package |
 | `--list` | off | list every package under the spec root; takes no input |
-| `--all` | off | with `--list`, also list the packages under `archive/`, marked archived |
+| `--all` | off | with `--list`, also list the packages under `archive/`, marked archived; with `--render` and no input, also render them |
 | `--task` | | the task form: the tasks to move, once or repeated, each value a comma-separated list of ids, `next` or `all` |
 | `--state` | | the task form: the state to move them to: `pending`, `in_progress`, `done` or `dropped` |
 | `--status` | | the status form: the lifecycle status to move the package to: `active`, `sealed`, `superseded` or `archived`. An archived or superseded package is moved under `archive/` |

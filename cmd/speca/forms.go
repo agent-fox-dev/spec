@@ -38,6 +38,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if o.list {
 		return list(c)
 	}
+	if o.render && ref == "" {
+		return renderAll(c)
+	}
 	dir, err := specpkg.Locate(tool, ref, root, c.specsDir)
 	if err != nil {
 		return nil, usageInfo(err, nil)

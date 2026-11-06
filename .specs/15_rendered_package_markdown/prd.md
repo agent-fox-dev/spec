@@ -4,7 +4,7 @@ spec_name: "rendered_package_markdown"
 title: "Commit the rendered package beside its JSON"
 status: "active"
 created_at: "2026-11-06T12:17:17Z"
-updated_at: "2026-11-06T14:00:06Z"
+updated_at: "2026-11-06T14:02:24Z"
 intent_hash: "940185862cce1a404a2ed345c4b0d24c4a8aa7bfb64715c2c53ea223aa361561"
 schema_version: 2
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"

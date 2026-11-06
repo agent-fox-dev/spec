@@ -37,6 +37,38 @@ func renderOne(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	return &Result{AdminResult: envelope.AdminResult{Rendered: []envelope.RenderedInfo{info}, DryRun: c.opts.dryRun}, renderForm: true}, nil
 }
 
+// renderAll is the form of speca --render with no package, the sweep: every
+// package of the spec root in number order, then with --all those under
+// archive/, each rendered as the one-package form renders it. A package that
+// cannot be loaded or written is an entry with its reason, not a failure of
+// the call, so that one broken package does not keep the others from being
+// rendered.
+func renderAll(c *call) (*Result, *cli.ErrorInfo) {
+	dirs, failure := c.packageDirs("rendered")
+	if failure != nil {
+		return nil, failure
+	}
+	rendered := []envelope.RenderedInfo{}
+	for _, d := range dirs {
+		rendered = append(rendered, c.renderEntry(d))
+	}
+	return &Result{AdminResult: envelope.AdminResult{Rendered: rendered, DryRun: c.opts.dryRun}, renderForm: true}, nil
+}
+
+// renderEntry renders the package in d and describes the outcome.
+func (c *call) renderEntry(d packageDir) envelope.RenderedInfo {
+	spec, err := afspec.LoadSpec(d.path)
+	if err != nil {
+		return envelope.RenderedInfo{SpecDir: specpkg.Display(d.path, c.root), Rendered: renderedFailed, Reason: err.Error(), Archived: d.archived}
+	}
+	info := renderedInfo(c, d.path, spec, d.archived)
+	info.Rendered, err = c.writeRender(d.path, spec)
+	if err != nil {
+		info.Rendered, info.Reason = renderedFailed, err.Error()
+	}
+	return info
+}
+
 // renderedInfo is the entry of the package in dir, without its outcome.
 func renderedInfo(c *call, dir string, spec *afspec.Spec, archived bool) envelope.RenderedInfo {
 	return envelope.RenderedInfo{SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName,

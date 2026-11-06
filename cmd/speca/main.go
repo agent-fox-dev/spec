@@ -7,6 +7,7 @@
 //	speca <spec> --task T --state S [--force] [--dry-run]
 //	speca <spec> --status S [--by <spec>] [--force] [--dry-run]
 //	speca <spec> --render [--dry-run]
+//	speca --render [--all] [--dry-run]
 //
 // It takes one input, a reference to a spec package, and writes exactly one
 // JSON object to stdout: the package's state, its verdict under --validate,
@@ -55,7 +56,7 @@ const description = "Reports the state of a specification package: its lifecycle
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
 	"inside it, or a directory name, spec number or spec name under the spec root " +
-	"(16_indexed_code_search, 16, indexed_code_search). None with --list."
+	"(16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render for every package."
 
 const usage = `speca — report the state of a specification package
 
@@ -67,6 +68,7 @@ Usage:
   speca <spec> --task T --state S [flags]
   speca <spec> --status S [--by <spec>] [flags]
   speca <spec> --render [--dry-run] [flags]
+  speca --render [--all] [--dry-run] [flags]
 
 The spec is one reference to a package, tried in this order:
   a path to the package directory, or to a file inside it
@@ -118,6 +120,11 @@ Forms:
                            is not touched). Each package is reported written,
                            unchanged (spec.md was its render already, and is
                            not written again) or failed
+  speca --render           the sweep: the render form for every package under
+                           the spec root, in number order; --all adds archive/.
+                           A package that cannot be loaded or written is
+                           reported failed with its reason, and the others are
+                           rendered all the same
     --dry-run              with the task, status or render form, run every
                            check and report what would change; write nothing
     --force                with the task form and done or pending, set a state
@@ -165,7 +172,8 @@ Exit codes:
      or validate), or the archive destination is taken (stage archive). If only the move under archive/ failed, the status is
      written, the result says so and the call is resumable. The render form
      fails when the package cannot be loaded (stage load) or its spec.md cannot
-     be written (stage write)
+     be written (stage write), and the sweep when the spec root cannot be read
+     (stage load); a package the sweep cannot render is an entry, not a failure
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have; --status
      draft, or a --by that names the package itself, no package or one with
@@ -183,6 +191,7 @@ Examples:
   speca 16 --status sealed --dry-run
   speca 03 --status superseded --by 12
   speca 16 --render
+  speca --render --all --dry-run
 
 Flags:
 `
@@ -216,7 +225,7 @@ func (o *options) statusForm() bool { return o.status.given || o.by.given }
 func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C11 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
 	fs.BoolVar(&o.list, "list", false, "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input")
-	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived")
+	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived; with --render and no input, also render them")
 	fs.Var(&o.tasks, "task", "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)")
 	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped")
 	fs.Var(&o.status, "status", "the status form: move the package to this lifecycle status: active (computes the intent hash), sealed, archived or superseded (which needs --by); archived and superseded packages are moved under archive/. A move the lifecycle does not allow is refused, with the moves that are allowed")
@@ -404,7 +413,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list {
+	if ref == "" && !o.list && !o.render {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage
@@ -477,7 +486,7 @@ func describe(fs *flag.FlagSet) selfDescription {
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
 			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, or what --render did to spec.md",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the spec root the sweep reads could not be read",
 			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written",
 		},
 	}
