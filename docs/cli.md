@@ -148,28 +148,45 @@ A **round** is one review and, when the review raised anything, one revision:
     scope's work is not a dropped ask.
 
   It has the read-only file tools. It submits at most 30 findings, each with a
-  `severity` (`critical`, `major` or `minor`), `section`, `flaw`, `evidence`,
-  `remedy` and `reopens`. The run numbers them `R<round>-F<n>`. A submission is
-  turned back when it has more than 30 findings or a finding with an empty
-  field, or when a finding:
+  `severity` (`critical`, `major` or `minor`), a `rubric` (`prd`, a flaw of the
+  PRD, or `steering`, a contradiction of a directive), `section`, `flaw`,
+  `evidence`, `remedy` and `reopens`. The run numbers them `R<round>-F<n>`. A
+  submission is turned back when it has more than 30 findings, a finding with an
+  empty field, or a rubric other than the two, or when a finding:
   - reopens anything in round 1;
   - reopens an id no earlier round raised;
-  - reopens a rejected finding with the evidence its rejection answered,
+  - reopens a contested finding with the evidence its contest answered,
     compared with whitespace collapsed;
-  - repeats a rejected finding's section and flaw without naming it in
+  - repeats a contested finding's section and flaw without naming it in
     `reopens`.
 - **The revision** (phase `prd_revision`, tool `submit_prd_revision`) is
   another fresh conversation, sent the same as the review plus the round's
-  findings by id. It answers every finding `accepted` (and changes the PRD) or
-  `rejected` with a reason, and submits the complete body.
+  findings by id, and the input. It answers every finding one of four ways and
+  submits the complete body:
+  - `fixed`: the PRD is changed to remedy it;
+  - `contested`: it does not hold, with a `reason` and `counter_evidence` the
+    run checks — a quote that appears in the PRD under review or the input,
+    whitespace aside, or a repository path (a file or a directory) that
+    exists, with what it shows;
+  - `escalated`: it holds, and remedying it takes a decision a person should
+    own, with the `question`, two or three `options`, the `decision` taken
+    provisionally and the `reason` it is uncertain;
+  - `declined`: it holds and is not remedied in this package, with a `reason`
+    saying it is out of scope or naming the later package that carries it.
+  It has no field for a finding's severity or rubric, so it cannot change
+  either.
   - **What it may replace.** Open questions, relevant files and notes are
     optional: an omitted one keeps the earlier value and an empty list clears
     it. It has no field for the spec name, the title or the split, so they
     cannot change.
   - **What is turned back.** A finding with no answer or two; an id outside
-    the round; a rejection with no reason; accepted findings that left the PRD
-    unchanged; and a body or relevant file the PRD phase's tool would refuse
-    (`missing_intent`, `frontmatter_in_body`, `invalid_relevant_files`).
+    the round; a disposition other than the four; a contest with no reason, or
+    whose counter-evidence is neither a quote found in the PRD or the input nor
+    a path that exists (a path outside the repository does not); a decline with
+    no reason; a declined `critical` finding or `steering` finding; a fixed
+    answer that left the PRD unchanged; and a body or relevant file the PRD
+    phase's tool would refuse (`missing_intent`, `frontmatter_in_body`,
+    `invalid_relevant_files`).
 
 Another round follows only when the round's review raised a `critical` or
 `major` finding and fewer than `--adversarial-rounds` rounds have run. Each
@@ -207,7 +224,7 @@ comment.
 Each review and revision is a phase in the progress lines
 (`scope 2 of 3 (issuex_github): reviewing the PRD (round 1 of 2)`), followed
 by `the review raised 1 critical, 2 minor` or
-`the revision answered: 2 accepted, 1 rejected`. Each one is also a
+`the revision answered: 2 fixed, 1 contested`. Each one is also a
 `prd_review` or `prd_revision` entry in `usage.phases[]`.
 
 ### The project audit
@@ -403,7 +420,7 @@ done, never beside a non-zero `exit_code` or an `error`. `status` is derived
 from the exit code. `summary` is one sentence of at most 200 characters, with a
 clause counting high-severity warnings on a success. With `--adversarial` it
 also counts the reviews of every package, after the open questions:
-`spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted`
+`spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 fixed`
 (`review: 1 round, 0 findings` when nothing was found).
 
 `usage.input_tokens` is net of the prompt cache; the cache figures are what
@@ -511,11 +528,16 @@ the package's render, which every save writes beside them; a dry run lists no
 - `relevant_files` — the files the PRD phase pointed the later phases at
 - `comment_url` — the PRD comment, under `--comment`
 - `review` — with `--adversarial`: `rounds_run`, `rounds_allowed`,
-  `stop_reason`, `findings_count`, `accepted_count`, `rejected_count`,
-  `unanswered_count`, and `rounds`, each `{round, findings}`. A finding has
-  `id`, `severity`, `section`, `flaw`, `evidence`, `remedy`, `reopens` (when it
-  has one), `disposition` (`accepted`, `rejected` or `unanswered`) and, when
-  rejected, `reason`. Absent without `--adversarial`
+  `stop_reason`, the six totals `findings_count`, `fixed_count`,
+  `contested_count`, `escalated_count`, `declined_count` and
+  `unanswered_count` (derived from the rounds, the first the sum of the other
+  five), and `rounds`, each `{round, clean, findings}`. A finding has `id`,
+  `severity`, `rubric` (`prd` or `steering`), `section`, `flaw`, `evidence`,
+  `remedy`, `reopens` (when it has one) and `disposition` — `fixed`,
+  `contested`, `escalated`, `declined` or `unanswered` — with the fields that
+  answer carries: `reason` and `counter_evidence` for a contest; `question`,
+  `options`, `decision` and `reason` for an escalation; `reason` for a decline;
+  none for `fixed` or `unanswered`. Absent without `--adversarial`
 
 When the input was more than one spec's worth of work: `follow_on_specs` (the
 further packages, each with the same fields), `split` (every scope with its

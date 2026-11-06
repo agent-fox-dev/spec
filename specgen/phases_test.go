@@ -280,7 +280,7 @@ func TestRevise_IsSentTheFindingsAndTheReviewsContext(t *testing.T) {
 	ws := newWorkspace(t)
 	runner, p := fauxRunner(t, ws, toolCall("v1", ToolSubmitPRDRevision, map[string]any{
 		"body":         "## Intent\n\nREVISED\n",
-		"dispositions": []any{accept("R1-F1"), reject("R1-F2", "it holds")},
+		"dispositions": []any{fixed("R1-F1"), contest("R1-F2", "it holds", "BODY-MARK")},
 	}))
 	a := &agentAuthor{runner: runner, ws: ws}
 	findings := roundFindings("R1-F1", "R1-F2")

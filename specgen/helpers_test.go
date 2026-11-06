@@ -394,9 +394,13 @@ type reviewOutcome struct {
 // revisionOutcome is what one scripted revision does: fail, or accept every
 // finding but the ones listed in reject.
 type revisionOutcome struct {
-	reject []int
-	err    error
-	cost   float64
+	// contest lists the findings, by position, answered contested; answers
+	// gives a finding, by position, the answer written there. Every other
+	// finding is answered fixed.
+	contest []int
+	answers map[int]Disposition
+	err     error
+	cost    float64
 	// edit, when set, makes the revised PRD from the one under revision in
 	// place of appending a line to its body.
 	edit func(PRD) PRD
@@ -464,9 +468,14 @@ func (s *scriptedReviewer) Revise(_ context.Context, req revisionRequest) (PRD, 
 	}
 	var ds []Disposition
 	for n, f := range req.Findings {
-		d := Disposition{ID: f.ID, Disposition: envelope.DispositionAccepted}
-		if slices.Contains(out.reject, n) {
-			d = Disposition{ID: f.ID, Disposition: envelope.DispositionRejected, Reason: "REASON-" + f.ID}
+		d := Disposition{ID: f.ID, Disposition: envelope.DispositionFixed}
+		if slices.Contains(out.contest, n) {
+			d = Disposition{ID: f.ID, Disposition: envelope.DispositionContested, Reason: "REASON-" + f.ID,
+				CounterEvidence: "COUNTER-" + f.ID}
+		}
+		if a, ok := out.answers[n]; ok {
+			a.ID = f.ID
+			d = a
 		}
 		ds = append(ds, d)
 	}
@@ -514,13 +523,32 @@ func roundFindings(ids ...string) []Finding {
 	return out
 }
 
-// accept and reject are dispositions as the reviser submits them.
-func accept(id string) map[string]string {
-	return map[string]string{"id": id, "disposition": "accepted", "reason": ""}
+// answerOf is an answer as the reviser submits it: every field of the
+// contract, the ones its disposition does not use left empty.
+func answerOf(id, disposition string) map[string]any {
+	return map[string]any{"id": id, "disposition": disposition, "reason": "", "counter_evidence": "",
+		"question": "", "options": []string{}, "decision": ""}
 }
 
-func reject(id, why string) map[string]string {
-	return map[string]string{"id": id, "disposition": "rejected", "reason": why}
+// fixed, contest, decline and escalate are the four answers.
+func fixed(id string) map[string]any { return answerOf(id, "fixed") }
+
+func contest(id, reason, counterEvidence string) map[string]any {
+	a := answerOf(id, "contested")
+	a["reason"], a["counter_evidence"] = reason, counterEvidence
+	return a
+}
+
+func decline(id, reason string) map[string]any {
+	a := answerOf(id, "declined")
+	a["reason"] = reason
+	return a
+}
+
+func escalate(id, question string, options []string, decision, reason string) map[string]any {
+	a := answerOf(id, "escalated")
+	a["question"], a["options"], a["decision"], a["reason"] = question, options, decision, reason
+	return a
 }
 
 // scopeTwoOfThree is a split context for the second of three scopes, the

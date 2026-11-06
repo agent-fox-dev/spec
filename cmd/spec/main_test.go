@@ -473,13 +473,14 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	withIndex(t, nil)
 	body, artifacts := fixture(t)
 	revised := body + "\n\nREVISED: a missing spec package is reported by name.\n"
-	finding := map[string]any{"severity": "major", "section": "Requirements", "flaw": "No error path for a missing package.",
+	finding := map[string]any{"severity": "major", "rubric": "prd", "section": "Requirements", "flaw": "No error path for a missing package.",
 		"evidence": "the PRD says nothing about it", "remedy": "say what happens", "reopens": ""}
 	turns := []faux.Turn{
 		submit("p1", "submit_prd", map[string]any{"spec_name": "test_feature", "title": "Test Feature", "body": body}),
 		submit("r1", "submit_prd_review", map[string]any{"findings": []any{finding}}),
 		submit("v1", "submit_prd_revision", map[string]any{"body": revised,
-			"dispositions": []any{map[string]any{"id": "R1-F1", "disposition": "accepted", "reason": ""}}}),
+			"dispositions": []any{map[string]any{"id": "R1-F1", "disposition": "fixed", "reason": "", "counter_evidence": "",
+				"question": "", "options": []string{}, "decision": ""}}}),
 		submit("r2", "submit_prd_review", map[string]any{"findings": []any{}}),
 	}
 	turns = append(turns, generation(t, artifacts)...)
@@ -498,7 +499,7 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	r := env.Result
 	if r.Review == nil || r.Review.RoundsRun != 2 || r.Review.RoundsAllowed != 2 ||
 		r.Review.StopReason != envelope.ReviewStopNoFindings || r.Review.Rounds[0].Findings[0].ID != "R1-F1" ||
-		r.Review.Rounds[0].Findings[0].Disposition != envelope.DispositionAccepted {
+		r.Review.Rounds[0].Findings[0].Disposition != envelope.DispositionFixed {
 		t.Errorf("review = %+v", r.Review)
 	}
 	spec, err := afspec.LoadSpec(filepath.Join(dir, r.SpecDir))
@@ -508,7 +509,7 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 	if v := spec.Validate(); !v.Valid || !strings.Contains(spec.PRDBody, "REVISED: a missing spec package") {
 		t.Errorf("on disk: valid %v (%+v), revised body %v", v.Valid, v.Errors, strings.Contains(spec.PRDBody, "REVISED"))
 	}
-	if !strings.Contains(env.Summary, "review: 2 rounds, 1 finding, 1 accepted") {
+	if !strings.Contains(env.Summary, "review: 2 rounds, 1 finding, 1 fixed") {
 		t.Errorf("summary = %q", env.Summary)
 	}
 }

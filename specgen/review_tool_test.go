@@ -14,6 +14,7 @@ import (
 // reviewInput is one finding as the reviewer submits it.
 type reviewInput struct {
 	Severity string `json:"severity"`
+	Rubric   string `json:"rubric"`
 	Section  string `json:"section"`
 	Flaw     string `json:"flaw"`
 	Evidence string `json:"evidence"`
@@ -22,7 +23,7 @@ type reviewInput struct {
 }
 
 func wellFormed(n int) reviewInput {
-	return reviewInput{Severity: "major", Section: fmt.Sprintf("Goals %d", n), Flaw: fmt.Sprintf("flaw %d", n),
+	return reviewInput{Severity: "major", Rubric: "prd", Section: fmt.Sprintf("Goals %d", n), Flaw: fmt.Sprintf("flaw %d", n),
 		Evidence: fmt.Sprintf("evidence %d", n), Remedy: "fix it"}
 }
 
@@ -43,13 +44,13 @@ func submitReview(t *testing.T, tool core.Tool, findings []reviewInput) core.Too
 }
 
 // earlierRound is round 1 as the round loop hands it to round 2: R1-F1
-// rejected, R1-F2 accepted.
+// contested, R1-F2 fixed.
 func earlierRound() []Finding {
 	return []Finding{
 		{ID: "R1-F1", Severity: "major", Section: "Goals", Flaw: "X is untestable", Evidence: "a  b\nc",
-			Remedy: "r", Disposition: "rejected", Reason: "it is tested by Y"},
+			Remedy: "r", Disposition: "contested", Reason: "it is tested by Y", CounterEvidence: "y_test.go: tests X"},
 		{ID: "R1-F2", Severity: "minor", Section: "Intent", Flaw: "wordy", Evidence: "e", Remedy: "r",
-			Disposition: "accepted"},
+			Disposition: "fixed"},
 	}
 }
 
@@ -68,9 +69,9 @@ func TestReviewTool_AcceptsAWellFormedReview(t *testing.T) {
 		{"no findings", 1, nil, nil, nil},
 		{"findings, numbered by round", 2, nil, many(3), []string{"R2-F1", "R2-F2", "R2-F3"}},
 		{"the most findings a review may raise", 1, nil, many(maxFindings), nil},
-		{"a rejected finding reopened with new evidence", 2, earlierRound(), []reviewInput{reopen}, []string{"R2-F1"}},
-		{"an accepted finding raised again", 2, earlierRound(),
-			[]reviewInput{{Severity: "minor", Section: "Intent", Flaw: "wordy", Evidence: "e", Remedy: "r"}}, []string{"R2-F1"}},
+		{"a contested finding reopened with new evidence", 2, earlierRound(), []reviewInput{reopen}, []string{"R2-F1"}},
+		{"a fixed finding raised again", 2, earlierRound(),
+			[]reviewInput{{Severity: "minor", Rubric: "prd", Section: "Intent", Flaw: "wordy", Evidence: "e", Remedy: "r"}}, []string{"R2-F1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var sink reviewSink
@@ -127,10 +128,10 @@ func TestReviewTool_TurnsBackAnInvalidReview(t *testing.T) {
 			[]string{"finding 1 reopens R1-F1", "round 1"}, nil},
 		{"reopening no earlier finding", 2, earlierRound(), []reviewInput{reopens("R1-F9", "x")}, "invalid_findings",
 			[]string{"finding 1 reopens R1-F9", "no earlier"}, nil},
-		{"reopening with the evidence the rejection answered", 2, earlierRound(), []reviewInput{reopens("R1-F1", " a b c ")},
+		{"reopening with the evidence the contest answered", 2, earlierRound(), []reviewInput{reopens("R1-F1", " a b c ")},
 			"invalid_findings", []string{"finding 1 reopens R1-F1", "already answered"}, nil},
-		{"repeating a rejected finding", 2, earlierRound(),
-			[]reviewInput{{Severity: "major", Section: "Goals", Flaw: "X  is untestable", Evidence: "other", Remedy: "r"}},
+		{"repeating a contested finding", 2, earlierRound(),
+			[]reviewInput{{Severity: "major", Rubric: "prd", Section: "Goals", Flaw: "X  is untestable", Evidence: "other", Remedy: "r"}},
 			"invalid_findings", []string{"finding 1 repeats R1-F1", "reopens"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

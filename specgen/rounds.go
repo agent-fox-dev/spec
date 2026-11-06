@@ -148,21 +148,22 @@ func (e *runEnv) reviewRequest(prd PRD, split *splitContext, round, limit int, e
 	}
 }
 
-// answer writes each finding's disposition, and its reason when rejected.
-// A finding with no disposition to take is unanswered: its round's revision
-// did not finish.
-func answer(findings []Finding, dispositions []Disposition) {
+// answer writes each finding's disposition and the fields that disposition
+// carries, and clears the others. A finding with no disposition to take is
+// unanswered: its round's revision did not finish. Its severity and rubric
+// are the reviewer's, and no answer touches them.
+func answer(findings []Finding, answers []Disposition) {
 	for i := range findings {
 		f := &findings[i]
-		f.Disposition, f.Reason = envelope.DispositionUnanswered, ""
-		for _, d := range dispositions {
+		f.Disposition, f.Reason, f.CounterEvidence, f.Question, f.Options, f.Decision =
+			envelope.DispositionUnanswered, "", "", "", nil, ""
+		for _, d := range answers {
 			if d.ID != f.ID {
 				continue
 			}
-			f.Disposition = d.Disposition
-			if d.Disposition == envelope.DispositionRejected {
-				f.Reason = d.Reason
-			}
+			d.keep()
+			f.Disposition, f.Reason, f.CounterEvidence = d.Disposition, d.Reason, d.CounterEvidence
+			f.Question, f.Options, f.Decision = d.Question, slices.Clone(d.Options), d.Decision
 		}
 	}
 }
@@ -188,18 +189,25 @@ func bySeverity(findings []Finding) string {
 	return strings.Join(parts, ", ")
 }
 
-// byDisposition is a revision's answers counted: "2 accepted, 1 rejected".
+// byDisposition is a revision's answers counted, in the order of the four:
+// "2 fixed, 1 contested".
 func byDisposition(findings []Finding) string {
-	accepted, rejected := 0, 0
-	for _, f := range findings {
-		switch f.Disposition {
-		case envelope.DispositionAccepted:
-			accepted++
-		case envelope.DispositionRejected:
-			rejected++
+	var parts []string
+	for _, d := range dispositions {
+		n := 0
+		for _, f := range findings {
+			if f.Disposition == d {
+				n++
+			}
+		}
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, d))
 		}
 	}
-	return fmt.Sprintf("%d accepted, %d rejected", accepted, rejected)
+	if len(parts) == 0 {
+		return "nothing"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // serious reports whether any finding is critical or major.
@@ -209,18 +217,23 @@ func serious(findings []Finding) bool {
 	})
 }
 
-// buildReview is the record of a PRD's rounds. Every count is derived from
-// the rounds, so the totals cannot disagree with them.
+// buildReview is the record of a PRD's rounds. Whether a round was clean and
+// every count are derived from the rounds, so neither can disagree with them.
 func buildReview(rounds []ReviewRound, limit int, stop string) *Review {
 	r := &Review{RoundsRun: len(rounds), RoundsAllowed: limit, StopReason: stop, Rounds: rounds}
-	for _, round := range rounds {
-		for _, f := range round.Findings {
+	for i := range rounds {
+		rounds[i].Clean = !serious(rounds[i].Findings)
+		for _, f := range rounds[i].Findings {
 			r.FindingsCount++
 			switch f.Disposition {
-			case envelope.DispositionAccepted:
-				r.AcceptedCount++
-			case envelope.DispositionRejected:
-				r.RejectedCount++
+			case envelope.DispositionFixed:
+				r.FixedCount++
+			case envelope.DispositionContested:
+				r.ContestedCount++
+			case envelope.DispositionEscalated:
+				r.EscalatedCount++
+			case envelope.DispositionDeclined:
+				r.DeclinedCount++
 			default:
 				r.UnansweredCount++
 			}

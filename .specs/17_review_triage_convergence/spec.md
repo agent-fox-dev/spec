@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:57:04Z
-- **Updated:** 2026-11-06T13:05:58Z
+- **Updated:** 2026-11-06T14:36:37Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109`
 
@@ -1090,7 +1090,7 @@ end-to-end case in cmd/spec/main_test.go: write the forbidding steering into the
 
 ## Tasks
 
-### [ ] 1. Answer every finding one of four ways, carry a rubric, and record the answer (implement, pending)
+### [x] 1. Answer every finding one of four ways, carry a rubric, and record the answer (implement, done)
 
 **Criteria:** 17-REQ-1.1, 17-REQ-1.2, 17-REQ-1.3, 17-REQ-1.4, 17-REQ-1.5, 17-REQ-1.6, 17-REQ-5.2, 17-REQ-5.3, 17-REQ-5.4, 17-REQ-5.5, 17-REQ-5.6, 17-REQ-6.5
 

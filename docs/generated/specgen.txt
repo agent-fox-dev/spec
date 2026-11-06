@@ -156,12 +156,19 @@ TYPES
 
 type Disposition struct {
 	ID string `json:"id"`
-	// Disposition is accepted or rejected.
+	// Disposition is fixed, contested, escalated or declined.
 	Disposition string `json:"disposition"`
-	// Reason says why a rejected finding does not hold; empty when accepted.
+	// Reason is a contest's, a decline's and an escalation's.
 	Reason string `json:"reason"`
+	// CounterEvidence is a contest's.
+	CounterEvidence string `json:"counter_evidence"`
+	// Question, Options and Decision are an escalation's.
+	Question string   `json:"question"`
+	Options  []string `json:"options"`
+	Decision string   `json:"decision"`
 }
-    Disposition is the reviser's answer to one finding.
+    Disposition is the reviser's answer to one finding. It has no field for the
+    finding's severity or rubric, so a reviser has nowhere to change either.
 
 type Failure struct {
 	Stage    string

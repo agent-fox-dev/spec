@@ -228,7 +228,7 @@ func (a *agentAuthor) Revise(ctx context.Context, req revisionRequest) (PRD, []D
 	var sink revisionSink
 	res, err := a.runner.Run(ctx, a.reviewPhase(agentrun.PhasePRDRevision, prdRevisionSystemPrompt(),
 		prdRevisionUserPrompt(req), req.reviewRequest, ToolSubmitPRDRevision,
-		newRevisionTool(&sink, req.PRD, req.Findings, a.ws)))
+		newRevisionTool(&sink, req.PRD, req.Findings, req.Input, a.ws)))
 	if err != nil {
 		return PRD{}, nil, res, err
 	}

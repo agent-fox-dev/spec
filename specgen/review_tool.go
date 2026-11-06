@@ -24,6 +24,9 @@ const maxFindings = 30
 // severities are a finding's severities, most serious first.
 var severities = []string{envelope.SeverityCritical, envelope.SeverityMajor, envelope.SeverityMinor}
 
+// rubrics are the standards a finding of the PRD review applies.
+var rubrics = []string{envelope.RubricPRD, envelope.RubricSteering}
+
 // reviewSink is the guarded destination the review tool writes into.
 type reviewSink struct {
 	mu       sync.Mutex
@@ -52,6 +55,9 @@ func reviewSchema() *schema.Schema {
 		schema.Prop("severity", schema.Enum(
 			"critical: the package would specify the wrong thing. major: a requirement would be "+
 				"missing or untestable. minor: wording or clarity.", severities...)),
+		schema.Prop("rubric", schema.Enum(
+			"prd: a flaw of the PRD itself. steering: the PRD contradicts a directive of the project's steering; "+
+				"the evidence quotes the directive, and the severity is critical or major.", rubrics...)),
 		schema.Prop("section", schema.String("The PRD section the flaw is in, e.g. 'Goals' or 'Requirements > Rounds'")),
 		schema.Prop("flaw", schema.String("The flaw, in one or two sentences")),
 		schema.Prop("evidence", schema.String(
@@ -59,7 +65,7 @@ func reviewSchema() *schema.Schema {
 				"A finding you cannot support is one to withdraw.")),
 		schema.Prop("remedy", schema.String("What the PRD should say instead")),
 		schema.Prop("reopens", schema.String(
-			"The id of an earlier REJECTED finding this one raises again with evidence its rejection "+
+			"The id of an earlier CONTESTED finding this one raises again with evidence the contest "+
 				"did not answer, e.g. R1-F2; an empty string otherwise. Always empty in round 1.")),
 	), "Every flaw you found, most serious first. An empty list says the PRD stands as it is.")
 	findings.MaxItems = &limit
@@ -68,7 +74,7 @@ func reviewSchema() *schema.Schema {
 
 // newReviewTool is the terminator of round round's review. earlier are the
 // findings of the rounds before it, with their dispositions, so a repeat of
-// a rejected finding can be told apart from a new one.
+// a settled finding can be told apart from a new one.
 //
 // Every check runs over the whole submission and one error names every
 // offender, so the reviewer corrects them in one turn. A submission that
@@ -135,10 +141,11 @@ func newReviewTool(sink *reviewSink, round int, earlier []Finding) core.Tool {
 // review and says what is wrong with it, and whether a field is empty.
 // earlier are the earlier rounds' findings, byID the same by id.
 func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string]Finding) (problems []string, empty bool) {
-	for _, s := range []*string{&f.Severity, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
+	for _, s := range []*string{&f.Severity, &f.Rubric, &f.Section, &f.Flaw, &f.Evidence, &f.Remedy, &f.Reopens} {
 		*s = strings.TrimSpace(*s)
 	}
-	f.ID, f.Disposition, f.Reason = "", "", ""
+	// The fields of the answer are the reviser's, and the id is the run's.
+	f.ID, f.Disposition, f.Reason, f.CounterEvidence, f.Question, f.Options, f.Decision = "", "", "", "", "", nil, ""
 
 	var missing []string
 	for _, field := range []struct{ name, val string }{
@@ -156,6 +163,9 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		problems = append(problems, fmt.Sprintf("finding %d has severity %q; it is one of %s",
 			pos, f.Severity, strings.Join(severities, ", ")))
 	}
+	if !slices.Contains(rubrics, f.Rubric) {
+		problems = append(problems, fmt.Sprintf("finding %d has rubric %q; it is prd or steering", pos, f.Rubric))
+	}
 
 	switch {
 	case f.Reopens != "" && round == 1:
@@ -167,17 +177,17 @@ func checkFinding(f *Finding, pos, round int, earlier []Finding, byID map[string
 		case !ok:
 			problems = append(problems, fmt.Sprintf("finding %d reopens %s, which is no earlier "+
 				"finding of this PRD", pos, f.Reopens))
-		case was.Disposition == envelope.DispositionRejected && sameEvidence(was.Evidence, f.Evidence):
+		case was.Disposition == envelope.DispositionContested && sameEvidence(was.Evidence, f.Evidence):
 			problems = append(problems, fmt.Sprintf("finding %d reopens %s with the evidence its "+
-				"rejection already answered; reopen it only with evidence the rejection did not "+
+				"contest already answered; reopen it only with evidence the contest did not "+
 				"answer, or withdraw it", pos, was.ID))
 		}
 	default:
 		for _, was := range earlier {
-			if was.Disposition == envelope.DispositionRejected &&
+			if was.Disposition == envelope.DispositionContested &&
 				sameEvidence(was.Section, f.Section) && sameEvidence(was.Flaw, f.Flaw) {
-				problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was rejected; "+
-					"raise it again only by naming %s in reopens with evidence the rejection did not "+
+				problems = append(problems, fmt.Sprintf("finding %d repeats %s, which was contested; "+
+					"raise it again only by naming %s in reopens with evidence the contest did not "+
 					"answer, or withdraw it", pos, was.ID, was.ID))
 				break
 			}

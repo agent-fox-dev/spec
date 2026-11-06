@@ -43,8 +43,8 @@ func TestSummaryView_KeepsWhatACallerActsOn(t *testing.T) {
 			PathsCovered: 3, PathsUncovered: []string{"P-2"}, TestsUnowned: []string{"TS-1"}},
 		OpenQuestions: []OpenQuestion{{Question: "what about x?", Decision: "assume x", Why: "no reply"}},
 		CommentURL:    "https://github.com/o/r/issues/1#comment",
-		Review: &Review{RoundsRun: 2, RoundsAllowed: 3, StopReason: "no_findings", FindingsCount: 4,
-			AcceptedCount: 2, RejectedCount: 1, UnansweredCount: 1,
+		Review: &Review{RoundsRun: 2, RoundsAllowed: 3, StopReason: "converged", FindingsCount: 4,
+			FixedCount: 1, ContestedCount: 1, DeclinedCount: 1, UnansweredCount: 1,
 			Rounds: []ReviewRound{{Round: 1, Findings: []Finding{{ID: "R1-F1"}}}, {Round: 2, Findings: []Finding{}}}},
 	}
 	r.FollowOnSpecs = []Package{{SpecDir: ".specs/13_other"}}

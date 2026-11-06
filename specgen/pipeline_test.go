@@ -1161,9 +1161,9 @@ func TestRunPreflight_ReportsTheCodeSearchIndex(t *testing.T) {
 	}
 }
 
-func reviewOf(rounds, findings, accepted int) *Review {
-	return &Review{RoundsRun: rounds, RoundsAllowed: 5, StopReason: "no_findings", FindingsCount: findings,
-		AcceptedCount: accepted, RejectedCount: findings - accepted,
+func reviewOf(rounds, findings, fixed int) *Review {
+	return &Review{RoundsRun: rounds, RoundsAllowed: 5, StopReason: "converged", FindingsCount: findings,
+		FixedCount: fixed, ContestedCount: findings - fixed,
 		Rounds: []ReviewRound{{Round: 1, Findings: []Finding{}}}}
 }
 
@@ -1191,15 +1191,15 @@ func TestResult_Summary(t *testing.T) {
 		{"a preflight", Result{SpecResult: envelope.SpecResult{Stage: "preflight", Preflight: make([]cli.PreflightCheck, 3)}},
 			"spec: preflight passed (3 checks)"},
 		{"a review", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, OpenQuestions: two, Review: reviewOf(2, 9, 7)}}},
-			"spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 accepted"},
+			"spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings, 7 fixed"},
 		{"one round with one finding", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, Review: reviewOf(1, 1, 1)}}},
-			"spec: wrote .specs/07_widget_cache; review: 1 round, 1 finding, 1 accepted"},
+			"spec: wrote .specs/07_widget_cache; review: 1 round, 1 finding, 1 fixed"},
 		{"a review that found nothing", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, Review: reviewOf(1, 0, 0)}}},
 			"spec: wrote .specs/07_widget_cache; review: 1 round, 0 findings"},
 		{"reviews totalled over the packages", Result{SpecResult: envelope.SpecResult{
 			Package:       Package{SpecDir: dir, Review: reviewOf(2, 3, 2)},
 			FollowOnSpecs: []Package{{SpecDir: ".specs/08_b", Review: reviewOf(1, 2, 1)}, {SpecDir: ".specs/09_c"}}}},
-			"spec: wrote .specs/07_widget_cache (+2 follow-on packages); review: 3 rounds, 5 findings, 3 accepted"},
+			"spec: wrote .specs/07_widget_cache (+2 follow-on packages); review: 3 rounds, 5 findings, 3 fixed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.r.Summary(); got != tc.want {
@@ -1217,7 +1217,7 @@ func TestResult_SummaryFitsTheEnvelope(t *testing.T) {
 
 	short := &Result{}
 	short.SpecDir, short.Review = ".specs/07_widget_cache", reviewOf(2, 9, 7)
-	if got := run.Envelope(cli.ExitOK, short, nil).Summary; !strings.Contains(got, "7 accepted; 1 high-severity warning") {
+	if got := run.Envelope(cli.ExitOK, short, nil).Summary; !strings.Contains(got, "7 fixed; 1 high-severity warning") {
 		t.Errorf("summary = %q", got)
 	}
 	long := &Result{}
