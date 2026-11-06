@@ -3,6 +3,8 @@
 // directory.
 //
 //	go run ./internal/skillgen [--source DIR] [--out DIR] [--check]
+//	go run ./internal/skillgen --install   [--agent A] [--project DIR] [--skills-dir DIR]
+//	go run ./internal/skillgen --uninstall [--agent A] [--project DIR] [--skills-dir DIR]
 //
 // It is not installed: make runs it, so the repository's public surface does
 // not grow. It makes no model call, no network call and reads no credential,
@@ -38,6 +40,12 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	source := flags.String("source", defaultSource, "the skills tree to read")
 	out := flags.String("out", defaultOut, "where to write the rendered skills")
 	check := flags.Bool("check", false, "run the checks and write nothing")
+	doInstall := flags.Bool("install", false, "install the skills for one agent")
+	doUninstall := flags.Bool("uninstall", false, "remove the installed skills of one agent")
+	opts := options{}
+	flags.StringVar(&opts.agent, "agent", defaultAgent, "the agent to install for")
+	flags.StringVar(&opts.project, "project", "", "install into this repository instead of the user's directory")
+	flags.StringVar(&opts.skillsDir, "skills-dir", "", "install into this directory, whatever the agent")
 	if err := flags.Parse(argv); err != nil {
 		return exitUsage
 	}
@@ -53,6 +61,34 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
+	if *doInstall && *doUninstall {
+		fmt.Fprintln(stderr, "skillgen: --install and --uninstall are two runs, not one")
+		return exitUsage
+	}
+	var target string
+	var chosen agent
+	if *doInstall || *doUninstall {
+		var err error
+		if chosen, target, err = resolveInstall(opts); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitUsage
+		}
+	}
+	// An uninstall removes directories and renders nothing, so it does not read
+	// a SKILL.md and works even when one of them no longer parses.
+	if *doUninstall {
+		names, err := skillDirs(os.DirFS(*source))
+		if err != nil {
+			fmt.Fprintln(stderr, "skillgen: "+err.Error())
+			return exitProblem
+		}
+		if err := uninstall(names, target, stdout); err != nil {
+			fmt.Fprintln(stderr, "skillgen: "+err.Error())
+			return exitProblem
+		}
+		return exitOK
+	}
+
 	src, problems := readSource(os.DirFS(*source), *source)
 	for _, p := range problems {
 		fmt.Fprintln(stderr, p)
@@ -66,6 +102,13 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return exitProblem
 	}
 	if *check {
+		return exitOK
+	}
+	if *doInstall {
+		if err := src.install(chosen, target, opts, stdout, stderr); err != nil {
+			fmt.Fprintln(stderr, "skillgen: "+err.Error())
+			return exitProblem
+		}
 		return exitOK
 	}
 	if err := src.write(*out); err != nil {

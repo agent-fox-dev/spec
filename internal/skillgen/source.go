@@ -245,6 +245,22 @@ func (s *source) include(sk *skill) []problem {
 	return problems
 }
 
+// skillDirs lists a source tree's skill directory names without reading any
+// SKILL.md, so that an uninstall works even when a skill no longer parses.
+func skillDirs(fsys fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return nil, err
+	}
+	var found []string
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), "_") {
+			found = append(found, entry.Name())
+		}
+	}
+	return found, nil
+}
+
 // names is the set of skill names an invocation may name.
 func (s *source) names() map[string]bool {
 	names := make(map[string]bool, len(s.skills))
