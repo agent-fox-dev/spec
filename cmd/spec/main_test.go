@@ -557,3 +557,114 @@ func TestAdversarial_AReviewStoppedByTheBudgetKeepsThePackage(t *testing.T) {
 		t.Errorf("the package is not the PRD phase's (%v)", err)
 	}
 }
+
+// promptText is everything a request sent the model: its system prompt and
+// the text of its messages.
+func promptText(req core.Request) string {
+	var b strings.Builder
+	add := func(blocks []core.ContentBlock) {
+		for _, block := range blocks {
+			if t, ok := block.(core.TextBlock); ok {
+				b.WriteString(t.Text)
+			}
+		}
+	}
+	add(req.System)
+	for _, m := range req.Messages {
+		if um, ok := m.(core.UserMessage); ok {
+			add(um.Content)
+		}
+	}
+	return b.String()
+}
+
+// runAgainstSteering runs spec end to end on the scripted model, in a
+// repository whose spec root holds the steering file, and returns the result,
+// the written prd.md and every prompt the model was sent.
+func runAgainstSteering(t *testing.T, steering string) (envelope.SpecEnvelope, string, []string) {
+	t.Helper()
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, artifacts := fixture(t)
+	turns := append([]faux.Turn{submit("p1", "submit_prd", map[string]any{
+		"spec_name": "test_feature", "title": "Test Feature", "body": body})}, generation(t, artifacts)...)
+	model := faux.New(turns...)
+	t.Cleanup(cli.SetProvider(model))
+
+	dir := goRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".specs", "steering.md"), []byte(steering), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, env, stderr := runSpec(t, "--dir", dir, "--repo-map-tokens", "0", "--detail", "full", "build the test feature")
+	if code != cli.ExitOK || env.Result == nil || !env.Result.Validation.Valid {
+		t.Fatalf("code %d: %+v\n%s", code, env.Error, stderr)
+	}
+	prd, err := os.ReadFile(filepath.Join(dir, env.Result.SpecDir, "prd.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompts []string
+	for _, req := range model.Requests() {
+		prompts = append(prompts, promptText(req))
+	}
+	return env, string(prd), prompts
+}
+
+// A run against a versioned steering records the version in the package it
+// writes, names it in every prompt, and sends none of the record.
+func TestSpec_RecordsTheSteeringVersionItWasGeneratedAgainst(t *testing.T) {
+	const steering = "---\nversion: 1.1.0\namendments:\n" +
+		"  - version: 1.1.0\n    date: 2031-07-19\n    change: AMENDMENT-ONE added a directive.\n" +
+		"  - version: 1.0.0\n    date: 2030-02-03\n    change: AMENDMENT-TWO was the baseline.\n" +
+		"---\n# Steering\n\nDIRECTIVE: use make check.\n"
+	env, prd, prompts := runAgainstSteering(t, steering)
+	if !strings.Contains(prd, `steering_version: "1.1.0"`) {
+		t.Errorf("prd.md does not record the steering version:\n%s", prd)
+	}
+	for _, w := range env.Result.Validation.Warnings {
+		if w.Check == "steering_version" {
+			t.Errorf("the run's verdict carries %+v; the versions are equal", w)
+		}
+	}
+	for i, p := range prompts {
+		if !strings.Contains(p, "Steering version 1.1.0") || !strings.Contains(p, "DIRECTIVE: use make check.") {
+			t.Errorf("prompt %d lacks the version line or the directive", i)
+		}
+		for _, s := range []string{"2031-07-19", "2030-02-03", "AMENDMENT-ONE", "AMENDMENT-TWO"} {
+			if strings.Contains(p, s) {
+				t.Errorf("prompt %d carries the record: %q", i, s)
+			}
+		}
+	}
+}
+
+// A run against a malformed record warns once, gives every phase the
+// directives with no version, and writes no version.
+func TestSpec_WarnsOnceAboutAMalformedSteeringAndWritesNoVersion(t *testing.T) {
+	const steering = "---\nversion: 2.0.0\namendments:\n" +
+		"  - version: 2.0.0\n    date: 2026-10-25\n    change: B.\n" +
+		"  - version: 2.1.0\n    date: 2026-10-15\n    change: A mistyped version.\n" +
+		"---\n# Steering\n\nDIRECTIVE: use make check.\n"
+	env, prd, prompts := runAgainstSteering(t, steering)
+	var malformed []envelope.Warning
+	for _, w := range env.Warnings {
+		if w.Code == envelope.WarnSteeringMalformed {
+			malformed = append(malformed, w)
+		}
+	}
+	if len(malformed) != 1 || malformed[0].Severity != "high" || malformed[0].Stage != "preflight" ||
+		!strings.Contains(malformed[0].Message, "strictly decrease") {
+		t.Errorf("warnings %+v; want one high steering_malformed at preflight naming the broken rule", env.Warnings)
+	}
+	if strings.Contains(prd, "steering_version") {
+		t.Errorf("prd.md records a steering version:\n%s", prd)
+	}
+	for i, p := range prompts {
+		if !strings.Contains(p, "DIRECTIVE: use make check.") || strings.Contains(p, "Steering version") {
+			t.Errorf("prompt %d: want the directive and no version line", i)
+		}
+	}
+}

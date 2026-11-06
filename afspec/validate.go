@@ -214,18 +214,19 @@ const (
 // spurious additionalProperties errors. The optional four are omitted when
 // empty, matching what renderPRD writes.
 type prdFrontmatterForSchema struct {
-	SpecID        string   `json:"spec_id"`
-	SpecName      string   `json:"spec_name"`
-	Title         string   `json:"title"`
-	Status        string   `json:"status"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
-	IntentHash    *string  `json:"intent_hash"`
-	SchemaVersion int      `json:"schema_version"`
-	Owner         string   `json:"owner,omitempty"`
-	Source        string   `json:"source,omitempty"`
-	Supersedes    []string `json:"supersedes,omitempty"`
-	Tags          []string `json:"tags,omitempty"`
+	SpecID          string   `json:"spec_id"`
+	SpecName        string   `json:"spec_name"`
+	Title           string   `json:"title"`
+	Status          string   `json:"status"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
+	IntentHash      *string  `json:"intent_hash"`
+	SchemaVersion   int      `json:"schema_version"`
+	SteeringVersion string   `json:"steering_version,omitempty"`
+	Owner           string   `json:"owner,omitempty"`
+	Source          string   `json:"source,omitempty"`
+	Supersedes      []string `json:"supersedes,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
 }
 
 // legacyVersionEntry describes a spec still written in an older format
@@ -268,18 +269,19 @@ func (s *Spec) ValidateSchema() ValidationResult {
 	var errors []ValidationEntry
 
 	fm := prdFrontmatterForSchema{
-		SpecID:        s.SpecID,
-		SpecName:      s.SpecName,
-		Title:         s.Title,
-		Status:        s.Status,
-		CreatedAt:     s.CreatedAt,
-		UpdatedAt:     s.UpdatedAt,
-		IntentHash:    s.IntentHash,
-		SchemaVersion: s.SchemaVersion,
-		Owner:         s.Owner,
-		Source:        s.Source,
-		Supersedes:    s.Supersedes,
-		Tags:          s.Tags,
+		SpecID:          s.SpecID,
+		SpecName:        s.SpecName,
+		Title:           s.Title,
+		Status:          s.Status,
+		CreatedAt:       s.CreatedAt,
+		UpdatedAt:       s.UpdatedAt,
+		IntentHash:      s.IntentHash,
+		SchemaVersion:   s.SchemaVersion,
+		SteeringVersion: s.SteeringVersion,
+		Owner:           s.Owner,
+		Source:          s.Source,
+		Supersedes:      s.Supersedes,
+		Tags:            s.Tags,
 	}
 	errors = append(errors, ValidateArtifactSchema(fm, PRDFrontmatterSchemaName, "prd.md")...)
 

@@ -1,6 +1,8 @@
 package afspec
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,5 +51,77 @@ func TestParsePRD_RefusesMalformedFrontmatter(t *testing.T) {
 				t.Errorf("the error does not name %q: %v", tc.wantInError, err)
 			}
 		})
+	}
+}
+
+// withFrontmatterLine adds a line to the frontmatter of the prd.md in dir, right
+// after schema_version, where renderPRD writes steering_version.
+func withFrontmatterLine(t *testing.T, dir, line string) {
+	t.Helper()
+	path := filepath.Join(dir, "prd.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const after = "schema_version: 2\n"
+	if !strings.Contains(string(data), after) {
+		t.Fatalf("%s has no %q", path, after)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), after, after+line+"\n", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// steering_version is optional: it round-trips where it is set, after
+// schema_version and before owner, and is never written where it is not.
+func TestSteeringVersion_RoundTripsInItsPlace(t *testing.T) {
+	for _, tc := range []struct {
+		name, line, want string
+	}{
+		{"set", `steering_version: "2.0.1"`, "2.0.1"},
+		{"absent", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := copyFixture(t, fixtureValidSpec)
+			if tc.line != "" {
+				withFrontmatterLine(t, dir, tc.line)
+			}
+			want, err := os.ReadFile(filepath.Join(dir, "prd.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec := loadFixture(t, dir)
+			if spec.SteeringVersion != tc.want {
+				t.Errorf("SteeringVersion = %q; want %q", spec.SteeringVersion, tc.want)
+			}
+			if v := spec.Validate(); !v.Valid {
+				t.Errorf("the package does not validate: %v", v.Errors)
+			}
+
+			out := t.TempDir()
+			if err := spec.Save(out); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(out, "prd.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(want) {
+				t.Errorf("prd.md is not byte-identical after a round trip:\n%s", firstDifference(string(want), string(got)))
+			}
+			if tc.want == "" && strings.Contains(string(got), "steering_version") {
+				t.Errorf("an absent steering_version was written:\n%s", got)
+			}
+			if again := loadFixture(t, out); again.SteeringVersion != tc.want {
+				t.Errorf("reloaded SteeringVersion = %q; want %q", again.SteeringVersion, tc.want)
+			}
+		})
+	}
+
+	set := string(renderPRD(&Spec{SpecID: "05", SpecName: "f", Title: "F", Status: "draft", SchemaVersion: SchemaVersion,
+		SteeringVersion: "1.2.3", Owner: "someone", PRDBody: "# F\n"}))
+	sv, schema, owner := strings.Index(set, "steering_version:"), strings.Index(set, "schema_version:"), strings.Index(set, "owner:")
+	if !(schema < sv && sv < owner) {
+		t.Errorf("steering_version is not between schema_version and owner:\n%s", set)
 	}
 }

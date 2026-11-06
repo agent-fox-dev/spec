@@ -1,3 +1,19 @@
+---
+version: 2.0.1
+amendments:
+  - version: 2.0.1
+    date: 2026-11-06
+    change: The file carries a version and this record.
+  - version: 2.0.0
+    date: 2026-10-25
+    change: Tests are organised by behaviour, with no per-spec, smoke, property, phase or group test files.
+  - version: 1.1.0
+    date: 2026-10-15
+    change: Generated Docs was added.
+  - version: 1.0.0
+    date: 2026-10-15
+    change: The file was standardised across the agent-fox repositories.
+---
 # Steering Directives
 
 This file is kept the same across the agent-fox repositories. Anything that is

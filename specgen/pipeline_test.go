@@ -744,7 +744,7 @@ func TestRun_ZeroMapBudgetLeavesThePromptsWithoutAMap(t *testing.T) {
 			}
 		}
 	}
-	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root()).LanguageBlock(), "", "")
+	wantSystem := prdSystemPrompt() + runContextBlock(project.DetectProfile(ws.Root()).LanguageBlock(), "", "", "")
 	if got := blocksText(reqs[0].System); !strings.HasPrefix(got, wantSystem) {
 		t.Errorf("the PRD system prompt is not the one without a map:\n%q", got)
 	}
@@ -1267,5 +1267,104 @@ func TestResult_SplitReportCarriesEachPackagesState(t *testing.T) {
 	}
 	if c.Valid != nil {
 		t.Errorf("an unwritten scope has no state: %+v", c)
+	}
+}
+
+// steeringAt is a steering file at version, with one directive.
+func steeringAt(version string) string {
+	return "---\nversion: " + version + "\namendments:\n  - version: " + version +
+		"\n    date: 2026-11-01\n    change: The baseline.\n---\n# Steering\n\nUse make check.\n"
+}
+
+// A run records the steering's version in every package it writes when the
+// steering is versioned, and leaves the field out otherwise.
+func TestRun_RecordsTheSteeringVersionInEveryPackage(t *testing.T) {
+	for _, tc := range []struct {
+		name, steering, want string
+	}{
+		{"versioned", steeringAt("1.2.0"), "1.2.0"},
+		{"unversioned", "# Steering\n\nUse make check.\n", ""},
+		{"malformed", strings.Replace(steeringAt("1.2.0"), "version: 1.2.0\namendments", "version: 01.2.0\namendments", 1), ""},
+		{"nothing to say", "---\nversion: 1.2.0\namendments:\n  - version: 1.2.0\n    date: 2026-11-01\n    change: x\n---\n# Steering\n", ""},
+	} {
+		for _, split := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/split %v", tc.name, split), func(t *testing.T) {
+				ws := newWorkspace(t)
+				writeFiles(t, ws.Root(), map[string]string{".specs/steering.md": tc.steering})
+				a := newAuthor(t, "01", "test_feature")
+				if split {
+					a = splitAuthor(t)
+					a.prd.RecommendedSplit = threeScopes()[:2]
+				}
+				if _, err := Run(context.Background(), fileOptions(ws, a)); err != nil {
+					t.Fatalf("Run: %v", err)
+				}
+				dirs := strings.Split(specDirs(t, ws), ",")
+				dirs = slices.DeleteFunc(dirs, func(d string) bool { return d == "steering.md" })
+				if want := map[bool]int{false: 1, true: 2}[split]; len(dirs) != want {
+					t.Fatalf("packages %v; want %d", dirs, want)
+				}
+				for _, d := range dirs {
+					dir := filepath.Join(ws.Root(), ".specs", d)
+					prd, err := os.ReadFile(filepath.Join(dir, "prd.md"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					has := strings.Contains(string(prd), "steering_version:")
+					if tc.want == "" && has || tc.want != "" && !strings.Contains(string(prd), `steering_version: "`+tc.want+`"`) {
+						t.Errorf("%s: prd.md frontmatter does not record %q:\n%s", d, tc.want, prd[:300])
+					}
+					if loaded, err := afspec.LoadSpec(dir); err != nil || !loaded.Validate().Valid {
+						t.Errorf("%s does not validate: %v", d, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A malformed record is one high warning at preflight, before any phase, and
+// the run goes on with the directives.
+func TestRun_WarnsOnceAboutAMalformedSteeringRecord(t *testing.T) {
+	ws := newWorkspace(t)
+	// Two rules broken: a key that is not allowed, and a date not in YYYY-MM-DD.
+	writeFiles(t, ws.Root(), map[string]string{".specs/steering.md": strings.Replace(
+		strings.Replace(steeringAt("1.2.0"), "date: 2026-11-01", "date: 1 Nov 2026", 1), "version: 1.2.0\n", "version: 1.2.0\nowner: me\n", 1)})
+	a := newAuthor(t, "01", "test_feature")
+	o := newOptions(ws, a)
+	var atFirstPhase []string
+	a.onWritePRD = func() {
+		for _, w := range o.Run.Envelope(cli.ExitOK, nil, nil).Warnings {
+			atFirstPhase = append(atFirstPhase, string(w.Code))
+		}
+	}
+
+	got, err := Run(context.Background(), o)
+	if err != nil || !got.Validation.Valid {
+		t.Fatalf("Run: %v; valid %v — the run must go on as it would under an unversioned steering", err, got != nil && got.Validation.Valid)
+	}
+	var malformed []cli.Warning
+	for _, w := range o.Run.Envelope(cli.ExitOK, got, nil).Warnings {
+		if w.Code == cli.WarnSteeringMalformed {
+			malformed = append(malformed, w)
+		}
+	}
+	if len(malformed) != 1 || malformed[0].Severity != "high" || malformed[0].Stage != "preflight" {
+		t.Fatalf("steering_malformed warnings %+v; want one, high, at preflight", malformed)
+	}
+	if m := malformed[0].Message; !strings.Contains(m, "only version and amendments") || !strings.Contains(m, "YYYY-MM-DD") {
+		t.Errorf("message %q does not name both broken rules", m)
+	}
+	if !slices.Contains(atFirstPhase, string(cli.WarnSteeringMalformed)) {
+		t.Errorf("warnings at the first phase %v; want steering_malformed raised before it", atFirstPhase)
+	}
+	if !strings.Contains(a.prdRequests[0].Steering, "Use make check.") || a.prdRequests[0].SteeringVersion != "" {
+		t.Errorf("the PRD phase got steering %q, version %q; want the directives and no version",
+			a.prdRequests[0].Steering, a.prdRequests[0].SteeringVersion)
+	}
+	for _, r := range a.artifactReqs {
+		if !strings.Contains(r.Steering, "Use make check.") {
+			t.Errorf("%s was not given the directives", r.Step)
+		}
 	}
 }

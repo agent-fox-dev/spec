@@ -540,6 +540,7 @@ Under `--detail summary` (the default) `result` keeps `spec_dir`, `spec_id`,
 | `code_search_unavailable` | low | preflight |
 | `specs_dir_unreadable` | low | preflight |
 | `project_language_unknown` | low | preflight |
+| `steering_malformed` | high | preflight |
 | `name_flag_ignored` | low | usage |
 | `repo_map_build_failed` | low | repo_map |
 | `scope_renamed` | low | prd |
@@ -556,6 +557,13 @@ Under `--detail summary` (the default) `result` keeps `spec_dir`, `spec_id`,
 | `comment_not_posted` | low | report |
 | `output_not_written` | low | emit |
 | `prd_review_incomplete` | high | prd_review |
+
+`steering_malformed` is raised once, before the first model call, when the spec
+root's `steering.md` opens with frontmatter that breaks one of its rules
+([configuration.md](configuration.md#the-steering)); the message names every
+rule broken. The run goes on: every phase is given the directives, no version
+is named, and the packages it writes record no `steering_version`. It changes
+no exit code.
 
 ## What changed from agent-fox's `spec`
 

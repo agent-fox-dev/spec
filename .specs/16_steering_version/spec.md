@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:39:19Z
-- **Updated:** 2026-11-06T12:47:39Z
+- **Updated:** 2026-11-06T14:25:28Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `ba0d73c0321f7fea64059d3368983dd14dfc7f389d101ca901e80d0c6accfe91`
 
@@ -961,7 +961,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 
 ## Tasks
 
-### [ ] 1. Carry an optional steering_version in the PRD frontmatter (implement, pending)
+### [x] 1. Carry an optional steering_version in the PRD frontmatter (implement, done)
 
 **Criteria:** 16-REQ-4.1, 16-REQ-4.4, 16-REQ-4.5
 
@@ -999,7 +999,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 - `make test` passes
 - `make lint` passes
 
-### [ ] 2. Read the steering's version, its amendment record and the rules it must meet (implement, pending)
+### [x] 2. Read the steering's version, its amendment record and the rules it must meet (implement, done)
 
 **Criteria:** 16-REQ-1, 16-REQ-2.1, 16-REQ-2.2
 
@@ -1027,7 +1027,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 - `make test` passes
 - `make lint` passes
 
-### [ ] 3. Give every phase the body and name the version in its steering block (implement, pending)
+### [x] 3. Give every phase the body and name the version in its steering block (implement, done)
 
 **Criteria:** 16-REQ-3
 
@@ -1058,7 +1058,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 - `make test` passes
 - `make lint` passes
 
-### [ ] 4. Record the version in the package a run writes, and warn about a malformed record (implement, pending)
+### [x] 4. Record the version in the package a run writes, and warn about a malformed record (implement, done)
 
 **Criteria:** 16-REQ-2.3, 16-REQ-2.4, 16-REQ-4.2, 16-REQ-4.3
 
@@ -1093,7 +1093,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 - `make test` passes
 - `make lint` passes
 
-### [ ] 5. Report in the verdict the amendments a package was not written under (implement, pending)
+### [x] 5. Report in the verdict the amendments a package was not written under (implement, done)
 
 **Criteria:** 16-REQ-5
 
@@ -1126,7 +1126,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 - `make test` passes
 - `make lint` passes
 
-### [ ] 6. Verify the three paths end to end, and version this repository's own steering (integration, pending)
+### [x] 6. Verify the three paths end to end, and version this repository's own steering (integration, done)
 
 **Tests:** TS-16-17, TS-16-18, TS-16-19
 

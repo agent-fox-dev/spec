@@ -104,6 +104,7 @@ created_at: "2026-05-18T12:00:00Z"
 updated_at: "2026-05-18T12:00:00Z"
 intent_hash: null               # set at draft → active
 schema_version: 2
+steering_version: "2.0.1"       # optional
 owner: "author-name"            # optional
 source: "docs/prds/feature.md"  # optional
 supersedes: []                  # optional
@@ -121,6 +122,7 @@ tags: []                        # optional
 | `updated_at` | ISO 8601 | yes | Updated on every save. |
 | `intent_hash` | string or null | yes | SHA-256 of the `## Intent` body. Null while `draft`. |
 | `schema_version` | integer | yes | `2`. |
+| `steering_version` | string | no | The version of the spec root's `steering.md` the package was written under, `MAJOR.MINOR.PATCH` (three non-negative integers, no leading zeros). `spec` writes it when the steering is versioned. It is outside the hashed `## Intent`, so it may change after activation; an empty value is the field being absent. |
 | `owner`, `source`, `supersedes`, `tags` | | no | As in v1.3. Omitted means empty. |
 
 ### 4.2 Body
@@ -625,6 +627,21 @@ spec has at least one path step whose actor also appears in an upstream
 path (error, unchanged from v1). An actor matches by name, ignoring case.
 `speca <spec> --validate` applies them to a package, and `spec` applies them to
 every package it writes, so a package they reject is left in `draft`.
+
+### 10.5 Steering version
+
+Rule `steering_version` reads the spec root's `steering.md`, so it runs beside
+the cross-spec rules and not in a package's own validation. It is a warning,
+never an error, on `prd.md`, and applies to a `draft` or `active` package whose
+frontmatter records `steering_version` (§4.1), when the steering is versioned:
+it opens with well-formed frontmatter holding a `version` and a newest-first
+record of `amendments`, each with a version, a date and a change. Equal
+versions raise nothing. A package written under an older version is told both
+versions and every amendment since, newest first, and, when one of them raised
+the MAJOR number, that a directive it was written under has been removed or
+changed. A package version newer than the steering's, or one no amendment
+holds, is told so. The rule never refuses a package: a person who has checked
+it clears the warning by changing the field.
 
 ---
 

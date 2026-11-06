@@ -28,6 +28,9 @@ type PrdFrontmatterV2Json struct {
 	// Status corresponds to the JSON schema field "status".
 	Status PrdFrontmatterV2JsonStatus `json:"status" yaml:"status" mapstructure:"status"`
 
+	// SteeringVersion corresponds to the JSON schema field "steering_version".
+	SteeringVersion *string `json:"steering_version,omitempty,omitzero" yaml:"steering_version,omitempty" mapstructure:"steering_version,omitempty"`
+
 	// Supersedes corresponds to the JSON schema field "supersedes".
 	Supersedes []string `json:"supersedes,omitempty,omitzero" yaml:"supersedes,omitempty" mapstructure:"supersedes,omitempty"`
 

@@ -55,8 +55,8 @@ func prdSystemPrompt() string { return template("prd_system.md") }
 // same step on the same model then read it from the cache instead of paying
 // for it again, which for a 6000-token map is most of what the phase sends
 // before its own task.
-func runContextBlock(languageBlock, steering, repoMap string) string {
-	body := languageBlock + steeringBlock(steering) + repoMapBlock(repoMap)
+func runContextBlock(languageBlock, steering, steeringVersion, repoMap string) string {
+	body := languageBlock + steeringBlock(steering, steeringVersion) + repoMapBlock(repoMap)
 	if strings.TrimSpace(body) == "" {
 		return ""
 	}
@@ -360,12 +360,19 @@ func relevantFilesBlock(files []RelevantFile) string {
 // the project's own directives to every agent working on it, and a phase that
 // is not given it reads it only if it happens to look: in one five-scope run
 // one scope did. It is fenced like the other project text a prompt quotes.
-func steeringBlock(steering string) string {
+// steering is the file's body, never its frontmatter; a versioned steering's
+// version is named on a line of its own before the directives, and its
+// amendment record is not sent at all (ADR 15).
+func steeringBlock(steering, version string) string {
 	if strings.TrimSpace(steering) == "" {
 		return ""
 	}
+	named := ""
+	if version != "" {
+		named = "Steering version " + version + "\n\n"
+	}
 	return "\n## Steering\n\nThe project's own directives to every agent working on it. " +
-		"Follow them where they apply to this spec.\n\n--- BEGIN STEERING ---\n" +
+		"Follow them where they apply to this spec.\n\n" + named + "--- BEGIN STEERING ---\n" +
 		strings.TrimSpace(steering) + "\n--- END STEERING ---\n"
 }
 

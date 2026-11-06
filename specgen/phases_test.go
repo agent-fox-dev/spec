@@ -268,7 +268,7 @@ func TestReview_IsSentEverythingTheAuthorSaw(t *testing.T) {
 	}
 	// agentkit appends its tool guidelines after the phase's own system
 	// prompt, so the run context is in it rather than at its end.
-	if sys := blocksText(first.System); !strings.Contains(sys, runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap)) {
+	if sys := blocksText(first.System); !strings.Contains(sys, runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap)) {
 		t.Errorf("the system prompt does not carry the run context:\n%s", sys)
 	}
 }
@@ -302,7 +302,74 @@ func TestRevise_IsSentTheFindingsAndTheReviewsContext(t *testing.T) {
 			t.Errorf("the revision prompt has no %q", want)
 		}
 	}
-	if sys := blocksText(first.System); !strings.Contains(sys, runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.RepoMap)) {
+	if sys := blocksText(first.System); !strings.Contains(sys, runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap)) {
 		t.Error("the revision does not carry the run context")
 	}
+}
+
+// Every phase that is handed the steering is given its body and its version,
+// and none of its amendment record.
+func TestPhases_AreGivenTheSteeringWithoutItsRecord(t *testing.T) {
+	ws := newWorkspace(t)
+	specsDir := t.TempDir()
+	const directive = "DIRECTIVE-MARK: use make check."
+	amendments := []project.Amendment{
+		{Version: "1.1.0", Date: "2031-07-19", Change: "CHANGE-MARK-ONE added the directive."},
+		{Version: "1.0.0", Date: "2030-02-03", Change: "CHANGE-MARK-TWO was the baseline."},
+	}
+	front := "---\nversion: 1.1.0\namendments:\n"
+	for _, a := range amendments {
+		front += "  - version: " + a.Version + "\n    date: " + a.Date + "\n    change: " + a.Change + "\n"
+	}
+	writeFiles(t, specsDir, map[string]string{"steering.md": front + "---\n# Steering\n\n" + directive + "\n"})
+	steer := project.ReadSteering(specsDir)
+	if steer.Version != "1.1.0" {
+		t.Fatalf("the steering is not versioned: %+v", steer)
+	}
+
+	artifacts, _ := loadFixture(t, "01", "test_feature")
+	review := reviewRequest{Root: ws.Root(), Round: 1, Limit: 1, Steering: steer.Body, SteeringVersion: steer.Version}
+	for name, run := range map[string]func(*agentAuthor) error{
+		"prd": func(a *agentAuthor) error {
+			_, _, err := a.WritePRD(context.Background(), prdRequest{Root: ws.Root(), Steering: steer.Body, SteeringVersion: steer.Version})
+			return err
+		},
+		"architecture": func(a *agentAuthor) error {
+			_, _, err := a.WriteArchitecture(context.Background(), architectureRequest{Root: ws.Root(), Partial: &afspec.PartialSpec{},
+				Steering: steer.Body, SteeringVersion: steer.Version})
+			return err
+		},
+		"prd_review": func(a *agentAuthor) error { _, _, err := a.Review(context.Background(), review); return err },
+		"requirements": func(a *agentAuthor) error {
+			return generate(a, ws, afspec.StepRequirements, &afspec.PartialSpec{}, steer)
+		},
+		"test_spec": func(a *agentAuthor) error {
+			return generate(a, ws, afspec.StepTestSpec, acceptedArtifacts(t, artifacts, afspec.StepRequirements), steer)
+		},
+		"tasks": func(a *agentAuthor) error {
+			return generate(a, ws, afspec.StepTasks, acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec), steer)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner, p := fauxRunner(t, ws, faux.Text("done"))
+			_ = run(&agentAuthor{runner: runner, ws: ws})
+			first := firstRequest(t, p)
+			prompt := blocksText(first.System) + requestUserText(first)
+			if !strings.Contains(prompt, directive) || !strings.Contains(prompt, "Steering version 1.1.0") {
+				t.Errorf("the prompt lacks the directive or the version line")
+			}
+			for _, a := range amendments {
+				if strings.Contains(prompt, a.Date) || strings.Contains(prompt, a.Change) {
+					t.Errorf("the prompt carries the amendment of %s", a.Version)
+				}
+			}
+		})
+	}
+}
+
+// generate runs one generation step with the steering's body and version.
+func generate(a *agentAuthor, ws *workspace.Workspace, step afspec.GenerationStep, partial *afspec.PartialSpec, steer project.SteeringFile) error {
+	_, _, err := a.GenerateArtifact(context.Background(), artifactRequest{Step: step, Root: ws.Root(), Partial: partial,
+		Steering: steer.Body, SteeringVersion: steer.Version})
+	return err
 }

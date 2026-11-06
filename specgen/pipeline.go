@@ -489,6 +489,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		o.Run.Warn(cli.WarnSpecsDirUnreadable, "low", "could not read the existing specs in %s: %v", specsDir, err)
 	}
 	env.landscape = landscape
+	env.steering = project.ReadSteering(specsDir)
+	if msg := env.steering.Malformed(specsDir); msg != "" {
+		o.Run.Warn(cli.WarnSteeringMalformed, "high", "%s", msg)
+	}
 	env.profile = project.DetectProfile(root)
 	if env.profile.Known() {
 		o.Progress.Detail("project: %s (from %s), tests %q, linter %q",
@@ -618,6 +622,9 @@ type runEnv struct {
 	author   author
 	reviewer reviewer
 	profile  project.Profile
+	// steering is the spec root's steering.md, read once for the run: every
+	// phase is handed its body and its version, never its amendment record.
+	steering project.SteeringFile
 	// repoMap is the run's repository map, or "" when it is disabled or could
 	// not be built.
 	repoMap string
@@ -659,17 +666,18 @@ func (e *runEnv) writePRD(ctx context.Context, split *splitContext, label string
 	o := e.o
 	done := o.Progress.Begin("%swriting the PRD from %s", prefixed(label), o.Input.Origin)
 	prd, stats, err := e.author.WritePRD(ctx, prdRequest{
-		Root:         e.root,
-		SourceKind:   o.Input.Kind.String(),
-		SourceOrigin: o.Input.Origin,
-		Input:        o.Input.Body,
-		Context:      o.Input.Context,
-		Profile:      e.profile,
-		Landscape:    e.landscapeNow(),
-		SpecRoot:     relativeTo(e.root, e.specsDir),
-		Steering:     project.Steering(e.specsDir),
-		Split:        split,
-		RepoMap:      e.repoMap,
+		Root:            e.root,
+		SourceKind:      o.Input.Kind.String(),
+		SourceOrigin:    o.Input.Origin,
+		Input:           o.Input.Body,
+		Context:         o.Input.Context,
+		Profile:         e.profile,
+		Landscape:       e.landscapeNow(),
+		SpecRoot:        relativeTo(e.root, e.specsDir),
+		Steering:        e.steering.Body,
+		SteeringVersion: e.steering.Version,
+		Split:           split,
+		RepoMap:         e.repoMap,
 	})
 	scope := prd.SpecName
 	if split != nil {
@@ -816,24 +824,28 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 	spec.CreatedAt, spec.UpdatedAt = now, now
 	spec.Title = prd.Title
 	spec.Source = pkg.Source
+	// The version of the steering the package was written under; empty, and so
+	// left out, when the steering is unversioned, malformed or says nothing.
+	spec.SteeringVersion = e.steering.Version
 	spec.PRDBody = normalizeBody(prd.Body)
 
 	partial := afspec.PartialSpec{SpecID: specID, SpecName: prd.SpecName}
 	for _, step := range afspec.GenerationSteps {
 		req := artifactRequest{
-			Step:          step,
-			SpecID:        specID,
-			SpecName:      prd.SpecName,
-			Root:          e.root,
-			PRD:           spec.PRDBody,
-			Profile:       e.profile,
-			Landscape:     e.landscapeNow(),
-			SpecRoot:      relativeTo(e.root, e.specsDir),
-			Steering:      project.Steering(e.specsDir),
-			Partial:       &partial,
-			RelevantFiles: prd.RelevantFiles,
-			RepoMap:       e.repoMap,
-			CodebaseNotes: prd.CodebaseNotes,
+			Step:            step,
+			SpecID:          specID,
+			SpecName:        prd.SpecName,
+			Root:            e.root,
+			PRD:             spec.PRDBody,
+			Profile:         e.profile,
+			Landscape:       e.landscapeNow(),
+			SpecRoot:        relativeTo(e.root, e.specsDir),
+			Steering:        e.steering.Body,
+			SteeringVersion: e.steering.Version,
+			Partial:         &partial,
+			RelevantFiles:   prd.RelevantFiles,
+			RepoMap:         e.repoMap,
+			CodebaseNotes:   prd.CodebaseNotes,
 		}
 		if step == afspec.StepRequirements {
 			// The paths are checked against the specs this one depends on, by
@@ -863,7 +875,7 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 		doc, stats, err := e.author.WriteArchitecture(ctx, architectureRequest{
 			SpecID: specID, SpecName: prd.SpecName, Root: e.root, PRD: spec.PRDBody, Partial: &partial,
 			RelevantFiles: prd.RelevantFiles, RepoMap: e.repoMap, CodebaseNotes: prd.CodebaseNotes,
-			Profile: e.profile, Steering: project.Steering(e.specsDir),
+			Profile: e.profile, Steering: e.steering.Body, SteeringVersion: e.steering.Version,
 		})
 		recordPhase(o.Run, stats, prd.SpecName)
 		done(cli.PhaseSummary(stats))

@@ -57,7 +57,7 @@
         "docs/api.md",
         "docs/generated/"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
@@ -89,7 +89,7 @@
         "internal/project/steering.go",
         "internal/project/steering_test.go"
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
@@ -120,7 +120,7 @@
       "depends_on": [
         2
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
@@ -161,7 +161,7 @@
         2,
         3
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 5,
@@ -196,7 +196,7 @@
         1,
         2
       ],
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 6,
@@ -236,7 +236,7 @@
         "`speca <package> --validate` reports no steering_version finding for any package under .specs/",
         "the body of .specs/steering.md is byte-identical to what it was before the change, the frontmatter being the only addition"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

@@ -266,6 +266,7 @@ which describe a flag set and a Go type by reflection, reading each field's
 ```
 cmd/speca ──> afspec
     ├───────> envelope        (its result: AdminResult)
+    ├───────> internal/project (the steering, for steering_malformed)
     ├───────> internal/specpkg
     └───────> internal/cli    (the Run, SplitArgs, the --schema generator)
 

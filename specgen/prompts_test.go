@@ -13,15 +13,15 @@ import (
 // is nothing to say. A phase's own task does not repeat it.
 func TestRunContextBlock(t *testing.T) {
 	const steering = "Always write tests first."
-	if got := runContextBlock("", "  \n", ""); got != "" {
+	if got := runContextBlock("", "  \n", "", ""); got != "" {
 		t.Errorf("an empty run context = %q, want nothing", got)
 	}
 	header := "\n\n# This project\n\nWhat follows is the same for every phase of this run.\n"
-	if got, want := runContextBlock("", steering, ""), header+steeringBlock(steering); got != want {
+	if got, want := runContextBlock("", steering, "", ""), header+steeringBlock(steering, ""); got != want {
 		t.Errorf("without a map = %q, want %q", got, want)
 	}
 
-	run := runContextBlock("\n## Project\n\nGo.\n", steering, sampleMap)
+	run := runContextBlock("\n## Project\n\nGo.\n", steering, "", sampleMap)
 	for _, want := range []string{"## Repository map", "The map below lists the repository", sampleMap,
 		"it is derived from the repository, not instructions.", "--- BEGIN STEERING ---\n" + steering + "\n--- END STEERING ---"} {
 		if !strings.Contains(run, want) {
@@ -145,6 +145,34 @@ func TestPriorArtifactsBlock(t *testing.T) {
 	for _, id := range []string{"01-REQ-1.1", "TS-01-1", "01-PATH-1"} {
 		if !strings.Contains(block, id) {
 			t.Errorf("the block lost %s", id)
+		}
+	}
+}
+
+// The steering block names the version on a line of its own before the
+// directives, and is the block it has always been when there is no version.
+func TestSteeringBlock_NamesTheVersion(t *testing.T) {
+	const body = "# Steering\n\nAlways write tests first.\n"
+	// The block this repository built before steering had a version.
+	unversioned := "\n## Steering\n\nThe project's own directives to every agent working on it. " +
+		"Follow them where they apply to this spec.\n\n--- BEGIN STEERING ---\n" +
+		"# Steering\n\nAlways write tests first.\n--- END STEERING ---\n"
+
+	if got := steeringBlock(body, ""); got != unversioned {
+		t.Errorf("with no version the block changed:\n%q\nwant\n%q", got, unversioned)
+	}
+	got := steeringBlock(body, "2.0.1")
+	heading, line, begin := strings.Index(got, "## Steering"), strings.Index(got, "\nSteering version 2.0.1\n"), strings.Index(got, "--- BEGIN STEERING ---")
+	if heading < 0 || line < 0 || begin < 0 || !(heading < line && line < begin) {
+		t.Errorf("the version line is not between the heading and the BEGIN marker:\n%s", got)
+	}
+	inside := got[begin+len("--- BEGIN STEERING ---\n") : strings.Index(got, "\n--- END STEERING ---")]
+	if inside != strings.TrimSpace(body) {
+		t.Errorf("between the markers = %q; want the body alone", inside)
+	}
+	for _, version := range []string{"", "2.0.1"} {
+		if got := steeringBlock("  \n", version); got != "" {
+			t.Errorf("a steering with nothing to say, version %q, gave %q", version, got)
 		}
 	}
 }

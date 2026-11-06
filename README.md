@@ -313,3 +313,4 @@ and no API key: the command's tests run against a scripted model.
 - [ADR 13](docs/adr/13-pin-a-released-agentkit-go.md) — why `go.mod` pins a released agentkit-go and carries no `replace`
 - [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports
 - [ADR 14](docs/adr/14-commit-the-rendered-package-beside-its-json.md) — why every package carries its render, `spec.md`, and when a stale one blocks
+- [ADR 15](docs/adr/15-version-the-steering.md) — why the steering carries a version and a record of its amendments, and what a package records of it

@@ -17,6 +17,7 @@ const (
 	WarnCodeSearchUnavailable    = envelope.WarnCodeSearchUnavailable
 	WarnSpecsDirUnreadable       = envelope.WarnSpecsDirUnreadable
 	WarnProjectLanguageUnknown   = envelope.WarnProjectLanguageUnknown
+	WarnSteeringMalformed        = envelope.WarnSteeringMalformed
 	WarnNameFlagIgnored          = envelope.WarnNameFlagIgnored
 	WarnRepoMapBuildFailed       = envelope.WarnRepoMapBuildFailed
 	WarnScopeRenamed             = envelope.WarnScopeRenamed
@@ -52,6 +53,7 @@ var warnStages = map[WarnCode]string{
 	WarnCodeSearchUnavailable:    "preflight",
 	WarnSpecsDirUnreadable:       "preflight",
 	WarnProjectLanguageUnknown:   "preflight",
+	WarnSteeringMalformed:        "preflight",
 	WarnNameFlagIgnored:          "usage",
 	WarnRepoMapBuildFailed:       "repo_map",
 	WarnScopeRenamed:             "prd",

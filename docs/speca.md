@@ -189,6 +189,27 @@ A package under the root that fails to load is left out of the run. A spec root
 that cannot be read skips the cross-spec rules, with a `specs_dir_unreadable`
 warning, and the verdict is the package's own.
 
+After the cross-spec rules comes the rule `steering_version` (format v2
+§10.5), which reads the spec root's `steering.md` and is always a warning on
+`prd.md`, never an error. It applies to a draft or active package whose PRD
+frontmatter records `steering_version`, under a steering that is versioned
+([configuration.md](configuration.md#the-steering)):
+
+| The package's `steering_version` | Finding |
+|---|---|
+| the steering's version | nothing |
+| older | one warning naming both versions and every amendment since, newest first, each with its version, date and change; when one of them raised the MAJOR number, it adds that a directive the package was written under has been removed or changed |
+| newer than the steering's | one warning naming both versions and saying the package's is newer |
+| in no amendment of the record | one warning naming both versions and saying so |
+
+A sealed, superseded or archived package, one with no `steering_version`, and
+any package under an unversioned or malformed steering get nothing. A person
+who has checked the package against the amendments clears the warning by
+setting `steering_version` to the steering's version, and then runs
+`speca <spec> --render`, since a hand edit of `prd.md` leaves `spec.md` behind
+it; the field is outside the hashed `## Intent`, so an active package takes the
+change.
+
 The package's own validation includes the rule `rendered` (format v2 §10.2),
 which compares the package's `spec.md` with its render, in `artifact`
 `spec.md`:
@@ -849,6 +870,7 @@ else.
 | Code | Severity | Stage | When |
 |---|---|---|---|
 | `specs_dir_unreadable` | low | preflight | the spec root (or, for `--list --all`, `archive/`) could not be read. The report goes without `dependents`, the verdict without the cross-spec rules, the list without the archived packages |
+| `steering_malformed` | high | preflight | `--validate` only: the spec root's `steering.md` opens with frontmatter that breaks one of its rules ([configuration.md](configuration.md#the-steering)), each named in the message. The verdict is the one an unversioned steering gives |
 | `spec_invalid` | high | validate | the package is in a format version other than 2: its tests and tasks are not read. For the task form: `--force` writes over keys the schema does not allow, which the warning names |
 | `spec_invalid` | low | validate | the task form went ahead on a package that does not validate, which the warning names by rule. A call raises at most one `spec_invalid` |
 | `spec_invalid` | high | validate | the status form: `--force` activated a package that does not validate (naming the rules, and the keys the write drops), or wrote a package that holds keys the schema does not allow (naming them) |

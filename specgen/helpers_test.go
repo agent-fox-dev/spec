@@ -137,6 +137,8 @@ type scriptedAuthor struct {
 	// onGenerate, when set, is called at the start of every generation
 	// phase, to observe what the pipeline has done before it.
 	onGenerate func(req artifactRequest)
+	// onWritePRD, when set, is called at the start of every PRD phase.
+	onWritePRD func()
 
 	steps        []afspec.GenerationStep
 	prdRequests  []prdRequest
@@ -146,6 +148,9 @@ type scriptedAuthor struct {
 
 func (a *scriptedAuthor) WritePRD(_ context.Context, req prdRequest) (PRD, agentrun.Result, error) {
 	a.prdRequests = append(a.prdRequests, req)
+	if a.onWritePRD != nil {
+		a.onWritePRD()
+	}
 	res := agentrun.Result{Name: "prd", Turns: 3, ToolCalls: map[string]int{"read_file": 2, ToolSubmitPRD: 1}}
 	res.Usage.CostUSD = a.prdCost
 	if req.Split == nil {

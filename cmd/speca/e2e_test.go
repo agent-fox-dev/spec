@@ -186,3 +186,62 @@ func TestAMaintainerBringsEveryRenderUpToDate(t *testing.T) {
 		}
 	}
 }
+
+// A maintainer amends the steering, is told which amendment an active package
+// was written before, checks the package, and clears the warning by moving the
+// package's steering_version.
+func TestAMaintainerAmendsTheSteeringAndClearsWhatAPackageMissed(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setDependencies(t, dir) // the example depends on a spec 08 the root does not hold
+	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 2\n", "schema_version: 2\nsteering_version: \"1.0.0\"\n")
+	activate(t, dir)
+	steering := filepath.Join(root, ".specs", "steering.md")
+	const baseline = "  - version: 1.0.0\n    date: 2026-10-15\n    change: The baseline.\n"
+	writeFile(t, steering, "---\nversion: 1.0.0\namendments:\n"+baseline+"---\n# Steering\n\nUse make check.\n")
+
+	// The amendment: a directive, and a record of it at 1.1.0.
+	writeFile(t, steering, "---\nversion: 1.1.0\namendments:\n"+
+		"  - version: 1.1.0\n    date: 2026-11-06\n    change: Every command writes one JSON object.\n"+baseline+
+		"---\n# Steering\n\nUse make check.\n\nEvery command writes one JSON object.\n")
+	before := withoutPRD(treeBytes(t, dir))
+
+	_, v := succeeds(t, root, "09", "--validate")
+	var found []envelope.ValidationItem
+	for _, w := range v.Validation.Warnings {
+		if w.Check == "steering_version" {
+			found = append(found, w)
+		}
+	}
+	if !*v.Valid || len(found) != 1 {
+		t.Fatalf("valid %v, steering_version findings %+v; want valid and one warning", *v.Valid, found)
+	}
+	for _, s := range []string{"1.0.0", "1.1.0", "2026-11-06", "Every command writes one JSON object."} {
+		if !strings.Contains(found[0].Message, s) {
+			t.Errorf("message %q lacks %q", found[0].Message, s)
+		}
+	}
+
+	// A hand edit of prd.md leaves spec.md behind it, so the edit is rendered.
+	editFile(t, filepath.Join(dir, "prd.md"), `steering_version: "1.0.0"`, `steering_version: "1.1.0"`)
+	succeeds(t, root, "09", "--render")
+	_, v = succeeds(t, root, "09", "--validate")
+	if !*v.Valid {
+		t.Errorf("the package does not validate: %+v", v.Validation.Errors)
+	}
+	for _, w := range append(v.Validation.Errors, v.Validation.Warnings...) {
+		if w.Check == "steering_version" {
+			t.Errorf("a finding is left: %+v", w)
+		}
+	}
+	if !maps.Equal(before, withoutPRD(treeBytes(t, dir))) {
+		t.Error("a file of the package other than prd.md and its render changed")
+	}
+}
+
+// withoutPRD is the files of a tree, prd.md and its render left out.
+func withoutPRD(tree map[string]string) map[string]string {
+	out := withoutRender(tree)
+	delete(out, "prd.md")
+	return out
+}
