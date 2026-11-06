@@ -53,6 +53,7 @@ type skill struct {
 	path        string // display path of its SKILL.md
 	frontmatter string // the raw text between the two delimiters, without them
 	body        string // everything after the line that closes the frontmatter
+	meta        meta   // the frontmatter keys the render reads
 
 	own  map[string]*ref // the files in this skill's own references/
 	refs map[string]*ref // the files it includes, its own and shared together
@@ -96,6 +97,7 @@ func readSource(fsys fs.FS, root string) (*source, []problem) {
 		src.skills = append(src.skills, sk)
 	}
 	for _, sk := range src.skills {
+		problems = append(problems, checkMeta(sk)...)
 		problems = append(problems, src.shadowed(sk)...)
 		problems = append(problems, src.include(sk)...)
 	}
@@ -130,7 +132,7 @@ func readSkill(fsys fs.FS, name, root string) (*skill, outcome) {
 	if !split {
 		return nil, outcome{problem: problem{file, "has no frontmatter"}}
 	}
-	var parsed any
+	var parsed meta
 	if err := yaml.Unmarshal([]byte(frontmatter), &parsed); err != nil {
 		return nil, outcome{problem: problem{file, "frontmatter is not YAML: " + err.Error()}}
 	}
@@ -140,6 +142,7 @@ func readSkill(fsys fs.FS, name, root string) (*skill, outcome) {
 		path:        file,
 		frontmatter: frontmatter,
 		body:        body,
+		meta:        parsed,
 		own:         readRefs(fsys, name, root),
 	}, outcome{ok: true}
 }
