@@ -236,14 +236,16 @@ type AdminResult struct {
 	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task and status forms only"`
 
 	Packages []PackageInfo `json:"packages,omitzero" description:"one entry for every package under the spec root in number order, then with --all those under archive/; [] when there are none; --list only"`
+
+	Rendered []RenderedInfo `json:"rendered,omitzero" description:"what --render did to each package's spec.md: the one package named, or with no reference every package under the spec root in number order, then with --all those under archive/; [] when the spec root holds none; with --dry-run, what it would have done; --render only"`
 }
     AdminResult is speca's result, for every form of the command: the report
     on one package, the verdict on one package (--validate), the list of every
-    package (--list) and the task and status forms, which are the report on the
-    package after a change, with the changes they made. A form fills the fields
-    it produces and the rest are absent: Valid is a pointer so that false is
-    written, and the slices that must show as [] in their own form are omitted
-    when nil rather than empty.
+    package (--list), the render form (--render) and the task and status forms,
+    which are the report on the package after a change, with the changes they
+    made. A form fills the fields it produces and the rest are absent: Valid is
+    a pointer so that false is written, and the slices that must show as [] in
+    their own form are omitted when nil rather than empty.
 
 type Artifact struct {
 	Kind ArtifactKind
@@ -554,6 +556,19 @@ type RenderResult struct {
 }
     RenderResult is specr's result: what was rendered, the plan's tasks, and the
     Markdown itself, last, so a reader meets what it is before what it says.
+
+type RenderedInfo struct {
+	SpecDir  string `json:"spec_dir" description:"the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca"`
+	SpecID   string `json:"spec_id,omitempty" description:"the spec id, from the PRD frontmatter; absent when the package did not load"`
+	SpecName string `json:"spec_name,omitempty" description:"the spec name, from the PRD frontmatter; absent when the package did not load"`
+	Status   string `json:"status,omitempty" description:"the package's lifecycle status; absent when the package did not load"`
+	Rendered string `json:"rendered" description:"written (spec.md was absent or differed from the render, and was written), unchanged (it was the render already, and was left alone) or failed (the package could not be loaded, or spec.md could not be written: reason says why); under --dry-run, what would have happened"`
+	Reason   string `json:"reason,omitempty" description:"why the package failed, in the library's or the file system's words; present exactly when rendered is failed"`
+	Archived bool   `json:"archived,omitempty" description:"true for a package rendered from archive/ with --all; absent otherwise"`
+}
+    RenderedInfo is one entry of AdminResult.Rendered: a package, and what the
+    --render form did to its spec.md, the render every save writes beside the
+    package's artifacts.
 
 type Review struct {
 	// RoundsRun counts the rounds started, a review with no findings

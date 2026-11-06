@@ -22,8 +22,8 @@ type call struct {
 }
 
 // execute resolves where the call works, then runs the form the flags name:
-// the list, the status form, the task form, the verdict on one package, or the
-// report on it. A form returns a result or a failure, never both, except where
+// the list, the render form, the status form, the task form, the verdict on one
+// package, or the report on it. A form returns a result or a failure, never both, except where
 // a form says otherwise.
 func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	root, err := filepath.Abs(o.dir)
@@ -41,6 +41,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	dir, err := specpkg.Locate(tool, ref, root, c.specsDir)
 	if err != nil {
 		return nil, usageInfo(err, nil)
+	}
+	if o.render {
+		return renderOne(c, dir)
 	}
 	if o.statusForm() {
 		return executeStatus(c, dir)
