@@ -1054,6 +1054,18 @@ func TestRunPreflight_EstimatesThePhases(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, 8},
+		{"--adversarial-plan with three rounds", func(_ *testing.T, o *Options) { o.AdversarialPlan, o.AdversarialRounds = true, 3 }, 10},
+		{"both reviews with three rounds", func(_ *testing.T, o *Options) {
+			o.Adversarial, o.AdversarialPlan, o.AdversarialRounds = true, true, 3
+		}, 16},
+		{"the plan review over two scopes to write", func(t *testing.T, o *Options) {
+			o.AdversarialPlan, o.AdversarialRounds = true, 3
+			plan := newSplitPlan(o.Input, []SplitScope{{Name: "first", Scope: "a"}, {Name: "second", Scope: "b"}, {Name: "third", Scope: "c"}})
+			plan.Scopes[0].Dir, plan.Scopes[0].SpecID = "01_first", "01"
+			if err := plan.save(resolveSpecsDir(*o, o.Workspace.Root())); err != nil {
+				t.Fatal(err)
+			}
+		}, 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o := preflightOptions(t)
@@ -1088,6 +1100,8 @@ func TestRunPreflight_NamesEachPhasesModel(t *testing.T) {
 			"prd claude-opus-5-5/xhigh; " + gen + "; architecture claude-sonnet-5-5/high"},
 		{"--adversarial", func(o *Options) { o.Adversarial, o.AdversarialRounds = true, 1 },
 			"prd claude-opus-5-5/xhigh; prd_review claude-opus-5-5/xhigh; prd_revision claude-opus-5-5/xhigh; " + gen},
+		{"--adversarial-plan", func(o *Options) { o.AdversarialPlan, o.AdversarialRounds = true, 1 },
+			"prd claude-opus-5-5/xhigh; " + gen + "; plan_review claude-opus-5-5/high; plan_revision claude-opus-5-5/high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o := preflightOptions(t)

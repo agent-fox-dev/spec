@@ -428,7 +428,7 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	}
 	add("code_search_index", true, indexDetail(o.Index, o.IndexUnavailable))
 	if o.Runner != nil {
-		add("phase_models", true, phaseModels(o.Runner, o.Architecture, o.Adversarial))
+		add("phase_models", true, phaseModels(o.Runner, o.Architecture, o.Adversarial, o.AdversarialPlan))
 	}
 	result.Preflight = list
 
@@ -440,9 +440,13 @@ func RunPreflight(ctx context.Context, o Options) (*Result, error) {
 	if o.Architecture {
 		phases++
 	}
-	// A review stops early once nothing serious is found, so every allowed
-	// round is counted: the figure is an upper bound for the review phases.
+	// A review stops early once two consecutive rounds are clean, so every
+	// allowed round of each review — the PRD's and the plan's, counted
+	// separately — is counted: the figure is an upper bound for their phases.
 	if o.Adversarial {
+		phases += 2 * o.AdversarialRounds
+	}
+	if o.AdversarialPlan {
 		phases += 2 * o.AdversarialRounds
 	}
 	phases *= packages
@@ -1250,7 +1254,7 @@ func recordPhase(run *cli.Run, res agentrun.Result, scope string) {
 // phaseModels is the detail of the informational phase_models preflight
 // check: the model and effort each phase the run will start runs on, in the
 // order a package is built.
-func phaseModels(r *agentrun.Runner, architecture, adversarial bool) string {
+func phaseModels(r *agentrun.Runner, architecture, adversarial, plan bool) string {
 	var parts []string
 	for _, phase := range agentrun.Phases {
 		if phase == agentrun.PhaseArchitecture && !architecture {
@@ -1259,8 +1263,8 @@ func phaseModels(r *agentrun.Runner, architecture, adversarial bool) string {
 		if (phase == agentrun.PhasePRDReview || phase == agentrun.PhasePRDRevision) && !adversarial {
 			continue
 		}
-		if phase == agentrun.PhasePlanReview || phase == agentrun.PhasePlanRevision {
-			continue // no run reviews the plan yet
+		if (phase == agentrun.PhasePlanReview || phase == agentrun.PhasePlanRevision) && !plan {
+			continue
 		}
 		parts = append(parts, phase+" "+r.ModelFor(phase).String())
 	}

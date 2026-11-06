@@ -148,7 +148,8 @@ func (f *specFlags) register(fs *flag.FlagSet) {
 		"have a fresh agent look for the flaws in every plan the run generates — a design choice left to the coder, a path or "+
 			"symbol that is not there — and another revise it, after the tasks phase and before the package is written")
 	fs.Var(&f.rounds, "adversarial-rounds",
-		"the most review rounds a PRD gets with --adversarial, 1 to 5 (default 1); the rounds stop once a review finds nothing critical or major")
+		"the most rounds of each review, the PRD's (--adversarial) and the plan's (--adversarial-plan) counted separately, 1 to 5 "+
+			"(default 1); the rounds stop once two consecutive reviews find nothing critical or major")
 }
 
 // specOptions builds the specgen.Options for one run from the parsed flags
@@ -219,9 +220,9 @@ func newApp() cli.App {
 			if f.name != "" && !specgen.ValidSpecName(f.name) {
 				return cli.Usagef("--name %q must match [a-z][a-z0-9]*(_[a-z0-9]+)*", f.name)
 			}
-			if f.rounds.set && !f.adversarial {
-				return cli.Usagef("--adversarial-rounds %d was given without --adversarial; it sets the rounds of the review "+
-					"--adversarial turns on", f.rounds.n)
+			if f.rounds.set && !f.adversarial && !f.plan {
+				return cli.Usagef("--adversarial-rounds %d was given without --adversarial or --adversarial-plan; it sets the "+
+					"rounds of each review they turn on", f.rounds.n)
 			}
 			if f.rounds.set && (f.rounds.n < 1 || f.rounds.n > maxAdversarialRounds) {
 				return cli.Usagef("--adversarial-rounds must be 1 to %d, got %d", maxAdversarialRounds, f.rounds.n)

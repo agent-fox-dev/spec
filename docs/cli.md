@@ -363,7 +363,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--max-parallel` | 3 | how many packages of a split are generated at once, beside the next scope's PRD phase; `1` writes the scopes one after another; less is a usage error |
 | `--adversarial` | off | review every PRD the run writes before its package is generated: a fresh agent looks for its flaws and another revises it to answer them (see [the adversarial review](#the-adversarial-review---adversarial)) |
 | `--adversarial-plan` | off | review the plan of every package the run generates — its requirements, tests and tasks — after the tasks phase and before the architecture phase and the write: a fresh agent looks for its flaws against the Zero-Decision Rule and codebase grounding, and another revises it (see [the plan review](#the-plan-review---adversarial-plan)). Independent of `--adversarial` |
-| `--adversarial-rounds` | 1 | the most review rounds a PRD gets, 1 to 5; the rounds stop once a review raises nothing `critical` or `major`. A value outside 1 to 5 (an explicit `0` included), or the flag without `--adversarial`, is a usage error; a non-integer is refused by the flag parser |
+| `--adversarial-rounds` | 1 | the most rounds of each review the run does, the PRD's and the plan's counted separately, 1 to 5; a review stops once two consecutive rounds raise nothing `critical` or `major`. With both reviews and `3`, a package may run up to twelve review and revision phases. A value outside 1 to 5 (an explicit `0` included), or the flag with neither `--adversarial` nor `--adversarial-plan`, is a usage error; a non-integer is refused by the flag parser |
 
 ### The model and the ceilings
 
@@ -452,13 +452,14 @@ model and effort each phase will run on, e.g.
 ```
 
 `phases` is the PRD phase plus one per generation step, plus one with
-`--architecture`, plus two per allowed round with `--adversarial`, for the next
-package; when a split is being resumed, that figure times the scopes still to
+`--architecture`, plus two per allowed round with `--adversarial` and two more
+per allowed round with `--adversarial-plan`, for the next package; when a split is being resumed, that figure times the scopes still to
 write. `spec --preflight --adversarial --adversarial-rounds 3` therefore
 reports 10. A split a not-yet-written PRD calls for is the model's decision, so
 the package count is a lower bound; the review rounds can stop early, so their
 count is an upper bound. With `--adversarial`, `phase_models` lists
-`prd_review` and `prd_revision` right after `prd`.
+`prd_review` and `prd_revision` right after `prd`; with `--adversarial-plan`,
+`plan_review` and `plan_revision` right after `tasks`.
 
 ## The output
 
