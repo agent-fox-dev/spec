@@ -205,8 +205,10 @@ frontmatter records `steering_version`, under a steering that is versioned
 A sealed, superseded or archived package, one with no `steering_version`, and
 any package under an unversioned or malformed steering get nothing. A person
 who has checked the package against the amendments clears the warning by
-setting `steering_version` to the steering's version; the field is outside the
-hashed `## Intent`, so an active package takes the change.
+setting `steering_version` to the steering's version, and then runs
+`speca <spec> --render`, since a hand edit of `prd.md` leaves `spec.md` behind
+it; the field is outside the hashed `## Intent`, so an active package takes the
+change.
 
 The package's own validation includes the rule `rendered` (format v2 §10.2),
 which compares the package's `spec.md` with its render, in `artifact`

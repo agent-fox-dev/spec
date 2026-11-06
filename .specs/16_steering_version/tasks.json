@@ -236,7 +236,7 @@
         "`speca <package> --validate` reports no steering_version finding for any package under .specs/",
         "the body of .specs/steering.md is byte-identical to what it was before the change, the frontmatter being the only addition"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }
