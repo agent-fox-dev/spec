@@ -4,7 +4,7 @@ spec_name: "adversarial_plan_review"
 title: "Review the plan adversarially before the package is written"
 status: "active"
 created_at: "2026-11-06T13:31:22Z"
-updated_at: "2026-11-06T15:10:30Z"
+updated_at: "2026-11-06T15:14:43Z"
 intent_hash: "b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691"
 schema_version: 2
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"

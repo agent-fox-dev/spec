@@ -380,7 +380,7 @@
         "a run with neither review flag bills exactly the phases it bills before this change",
         "no prompt of a plan review or plan revision phase holds any part of the run's input body or context block"
       ],
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

@@ -2,19 +2,24 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/agent-fox-dev/agentkit-go/core"
 	"github.com/agent-fox-dev/agentkit-go/provider/faux"
@@ -824,5 +829,226 @@ func TestAdversarial_ASteeringFindingCannotBeDeclined(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("open questions %+v lack the escalation", env.Result.OpenQuestions)
+	}
+}
+
+// planArtifacts are the fixture's three artifacts as a plan reviser submits
+// them, each a JSON object.
+func planArtifacts(t *testing.T, artifacts map[afspec.GenerationStep]string) map[string]map[string]any {
+	t.Helper()
+	out := map[string]map[string]any{}
+	for _, step := range afspec.GenerationSteps {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(artifacts[step]), &m); err != nil {
+			t.Fatal(err)
+		}
+		out[string(step)] = m
+	}
+	return out
+}
+
+// A run reviews the plan, the reviewer finds a touches path that is not
+// there, and the reviser grounds it on one that is.
+func TestAdversarialPlan_GroundsAPathThatIsNotThere(t *testing.T) {
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, artifacts := fixture(t)
+	revised := planArtifacts(t, artifacts)
+	task3 := revised["tasks"]["tasks"].([]any)[2].(map[string]any)
+	task3["touches"] = []any{"go.mod"}
+	turns := []faux.Turn{submit("p1", "submit_prd", map[string]any{"spec_name": "test_feature", "title": "Test Feature", "body": body})}
+	turns = append(turns, generation(t, artifacts)...)
+	turns = append(turns,
+		submit("r1", "submit_plan_review", map[string]any{"findings": []any{map[string]any{
+			"severity": "major", "rubric": "grounding", "section": "task 3",
+			"flaw":     "The path `afspec/smoke_test.go` does not exist and no step of task 3 creates it.",
+			"evidence": "grounding fact: `afspec/smoke_test.go` does not exist", "remedy": "touch a file that exists", "reopens": ""}}}),
+		submit("v1", "submit_plan_revision", map[string]any{"requirements": revised["requirements"], "test_spec": revised["test_spec"],
+			"tasks": revised["tasks"], "dispositions": []any{revisionAnswer("R1-F1", "fixed", nil)}}),
+	)
+	model := faux.New(turns...)
+	t.Cleanup(cli.SetProvider(model))
+
+	dir := goRepo(t)
+	code, env, stderr := runSpec(t, "--dir", dir, "--repo-map-tokens", "0", "--detail", "full", "--adversarial-plan", "build the test feature")
+	if code != cli.ExitOK || env.Result == nil || !env.Result.Validation.Valid {
+		t.Fatalf("code = %d: %+v\n%s", code, env.Error, stderr)
+	}
+	pr := env.Result.PlanReview
+	if pr == nil || len(pr.Rounds) != 1 || pr.Rounds[0].Findings[0].Rubric != envelope.RubricGrounding ||
+		pr.Rounds[0].Findings[0].Disposition != envelope.DispositionFixed {
+		t.Fatalf("plan review = %+v", pr)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, env.Result.SpecDir, "tasks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"go.mod"`) || strings.Contains(string(written), "afspec/smoke_test.go") {
+		t.Errorf("the written tasks.json does not name the grounded path:\n%s", written)
+	}
+	if !strings.Contains(env.Summary, "plan review: 1 round, 1 finding, 1 fixed") {
+		t.Errorf("summary = %q", env.Summary)
+	}
+	// The plan's phases are not shown the input.
+	for _, req := range model.Requests() {
+		if p := promptText(req); strings.Contains(p, "submit_plan") && strings.Contains(p, "build the test feature") {
+			t.Error("a plan phase was shown the input")
+		}
+	}
+}
+
+// routedModel answers each phase from a script of its own, so phases that a
+// pipelined split runs at once each get their own turns: the PRD phases from
+// one queue, since the coordinator writes them one after another, and every
+// other phase by its terminating tool and the spec it is for.
+type routedModel struct {
+	mu     sync.Mutex
+	routes map[string]*faux.Provider
+	// before, when set, runs before a request is answered, with its key.
+	before func(key string)
+}
+
+var (
+	generationSpec = regexp.MustCompile(`for spec "\d+" \((\w+)\)`)
+	planSpec       = regexp.MustCompile("\\*\\*Spec name:\\*\\* `(\\w+)`")
+)
+
+func (m *routedModel) key(req core.Request) string {
+	tool := ""
+	for _, w := range req.Tools {
+		if strings.HasPrefix(w.Name, "submit_") {
+			tool = w.Name
+			break
+		}
+	}
+	if tool == "submit_prd" {
+		return tool
+	}
+	text := promptText(req)
+	for _, re := range []*regexp.Regexp{generationSpec, planSpec} {
+		if s := re.FindStringSubmatch(text); s != nil {
+			return tool + "|" + s[1]
+		}
+	}
+	return tool
+}
+
+func (m *routedModel) Stream(ctx context.Context, req core.Request) (<-chan core.StreamEvent, error) {
+	key := m.key(req)
+	if m.before != nil {
+		m.before(key)
+	}
+	m.mu.Lock()
+	p, ok := m.routes[key]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("no script for %q", key)
+	}
+	return p.Stream(ctx, req)
+}
+
+// relabelled is a fixture artifact carrying spec id's ids.
+func relabelled(artifact, id string) map[string]any {
+	text := strings.ReplaceAll(artifact, `"01-`, `"`+id+`-`)
+	text = strings.ReplaceAll(text, `TS-01-`, `TS-`+id+`-`)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(text), &m); err != nil {
+		panic(err)
+	}
+	delete(m, "spec_id")
+	delete(m, "spec_name")
+	return m
+}
+
+// A split reviews each scope's plan inside that scope's build, so the next
+// scope's PRD phase starts while an earlier scope's plan is under review.
+func TestAdversarialPlan_ASplitReviewsEachScopesPlan(t *testing.T) {
+	cleanEnv(t)
+	withIndex(t, nil)
+	body, artifacts := fixture(t)
+	scopes := []string{"widget_core", "widget_github", "widget_adopt"}
+	split := []map[string]string{}
+	for _, s := range scopes {
+		split = append(split, map[string]string{"name": s, "scope": "the " + s + " part of the work"})
+	}
+	prds := []faux.Turn{submit("p1", "submit_prd", map[string]any{"spec_name": scopes[0], "title": "Widget core", "body": body,
+		"recommended_split": split})}
+	for i, s := range scopes[1:] {
+		prds = append(prds, submit(fmt.Sprintf("p%d", i+2), "submit_prd", map[string]any{"spec_name": s, "title": s, "body": body}))
+	}
+	m := &routedModel{routes: map[string]*faux.Provider{"submit_prd": faux.New(prds...)}}
+	for i, s := range scopes {
+		id := fmt.Sprintf("%02d", i+1)
+		for _, step := range afspec.GenerationSteps {
+			m.routes["submit_"+string(step)+"|"+s] = faux.New(submit("g"+id+string(step), "submit_"+string(step), relabelled(artifacts[step], id)))
+		}
+		m.routes["submit_plan_review|"+s] = faux.New(submit("r"+id, "submit_plan_review", map[string]any{"findings": []any{}}))
+	}
+	var prdCalls atomic.Int32
+	secondPRD := make(chan struct{})
+	m.before = func(key string) {
+		switch key {
+		case "submit_prd":
+			if prdCalls.Add(1) == 2 {
+				close(secondPRD)
+			}
+		case "submit_plan_review|widget_core":
+			select {
+			case <-secondPRD: // the second scope's PRD started while this plan was still under review
+			case <-time.After(10 * time.Second):
+				t.Error("the first scope's plan review held up the second scope's PRD")
+			}
+		}
+	}
+	t.Cleanup(cli.SetProvider(m))
+
+	dir := goRepo(t)
+	code, env, stderr := runSpec(t, "--dir", dir, "--repo-map-tokens", "0", "--detail", "full", "--adversarial-plan", "build the widgets")
+	if code != cli.ExitOK || env.Result == nil {
+		t.Fatalf("code = %d: %+v\n%s", code, env.Error, stderr)
+	}
+	pkgs := append([]envelope.Package{env.Result.Package}, env.Result.FollowOnSpecs...)
+	if len(pkgs) != 3 {
+		t.Fatalf("%d packages; want 3", len(pkgs))
+	}
+	for _, p := range pkgs {
+		if p.PlanReview == nil || !p.Validation.Valid {
+			t.Errorf("%s: plan review %+v, valid %v", p.SpecDir, p.PlanReview, p.Validation.Valid)
+		}
+		if _, err := afspec.LoadSpec(filepath.Join(dir, p.SpecDir)); err != nil {
+			t.Errorf("%s is not on disk: %v", p.SpecDir, err)
+		}
+	}
+}
+
+// A preflight prices the plan review — two phases per allowed round — and
+// names its phases' models, without a model call.
+func TestPreflight_PricesThePlanReview(t *testing.T) {
+	cleanEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	model := faux.New()
+	t.Cleanup(cli.SetProvider(model))
+	dir := goRepo(t)
+	code, env := runSpecRaw(t, "--preflight", "--dir", dir, "--adversarial-plan", "--adversarial-rounds", "3", idea)
+	if code != cli.ExitOK {
+		t.Fatalf("code = %d: %v", code, env)
+	}
+	res, _ := env["result"].(map[string]any)
+	if est, ok := res["estimate"].(map[string]any); !ok || est["phases"] != float64(4+6) {
+		t.Errorf("estimate = %v; want the four generating phases and six for the plan review", res["estimate"])
+	}
+	detail := ""
+	for _, c := range res["preflight"].([]any) {
+		if check := c.(map[string]any); check["check"] == "phase_models" {
+			detail, _ = check["detail"].(string)
+		}
+	}
+	for _, want := range []string{"requirements claude-sonnet-5-5/high", "plan_review claude-sonnet-5-5/high", "plan_revision claude-sonnet-5-5/high"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("phase_models %q lacks %q", detail, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".specs")); model.Calls() != 0 || err == nil {
+		t.Errorf("%d model calls; the spec root was created: %v", model.Calls(), err == nil)
 	}
 }

@@ -77,12 +77,37 @@ func planRevisionSchema() *schema.Schema {
 // handed — or whose plan breaks the format's own rules, so the phase asks
 // again until it passes. The answers are checked as a PRD revision's are.
 func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.PartialSpec, findings []Finding, ws *workspace.Workspace) core.Tool {
+	// identity holds the changes to a spec id or name that PrepareArguments
+	// took out of a submission so its schema check could pass; Execute turns
+	// the submission back for them. A phase submits one call at a time.
+	var identity []string
 	return core.Tool{
 		Name: ToolSubmitPlanRevision,
 		Description: "Submit the revised plan — requirements, test specification and tasks, each whole — and your " +
 			"answer to every finding, and end this phase. Call this once, after you have weighed every finding.",
 		InputSchema: planRevisionSchema(),
 		Terminating: true,
+		// The artifacts reach the reviser with their $schema, version and
+		// identity in them, which the artifact schemas do not declare, so it
+		// may copy them: they are taken out before the schema check, as the
+		// artifact tool takes them out, and a changed id or name is kept to
+		// refuse.
+		PrepareArguments: func(args map[string]any) map[string]any {
+			identity = nil
+			for _, a := range planArtifacts {
+				m, ok := args[a.arg].(map[string]any)
+				if !ok {
+					continue
+				}
+				identity = append(identity, identityChanges(m, a.step, current)...)
+				delete(m, schemaProperty)
+				for _, name := range programFields {
+					delete(m, name)
+				}
+				dictionariesAsSubmitted(m)
+			}
+			return args
+		},
 		PromptGuidelines: []string{
 			"Submit the revision by calling " + ToolSubmitPlanRevision + "; do not write it as prose.",
 			"Answer every finding exactly once, fixed, contested, escalated or declined, with the fields that answer needs.",
@@ -92,7 +117,8 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 			if err := json.Unmarshal(in, &raw); err != nil {
 				return core.ErrResult("invalid_arguments", err.Error())
 			}
-			var problems []string
+			problems := slices.Clone(identity)
+			identity = nil
 			for key := range raw {
 				if key == "dispositions" || slices.ContainsFunc(planArtifacts, func(a struct {
 					arg  string
@@ -115,13 +141,8 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 					continue
 				}
 				entriesAsDictionaries(content)
-				file := afspec.ArtifactFileName(a.step)
-				for _, id := range []struct{ key, want string }{{"spec_id", current.SpecID}, {"spec_name", current.SpecName}} {
-					if v, ok := content[id.key]; ok && v != id.want {
-						problems = append(problems, fmt.Sprintf("it changes %s in %s from %q to %v", id.key, file, id.want, v))
-					}
-					content[id.key] = id.want
-				}
+				problems = append(problems, identityChanges(content, a.step, current)...)
+				content["spec_id"], content["spec_name"] = current.SpecID, current.SpecName
 				if uri := artifactSchemaURI(a.step); uri != "" {
 					content[schemaProperty] = uri
 				}
@@ -185,6 +206,18 @@ func ruleLines(entries []afspec.ValidationEntry) string {
 		fmt.Fprintf(&b, ": %s\n", e.Message)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// identityChanges names a spec id or name an artifact carries that is not
+// the plan's own.
+func identityChanges(content map[string]any, step afspec.GenerationStep, current *afspec.PartialSpec) []string {
+	var out []string
+	for _, id := range []struct{ key, want string }{{"spec_id", current.SpecID}, {"spec_name", current.SpecName}} {
+		if v, ok := content[id.key]; ok && v != id.want {
+			out = append(out, fmt.Sprintf("it changes %s in %s from %q to %v", id.key, afspec.ArtifactFileName(step), id.want, v))
+		}
+	}
+	return out
 }
 
 // refusePlan turns a plan revision back with every problem it has.
