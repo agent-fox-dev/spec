@@ -7,7 +7,7 @@
 - **Status:** active
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:39:19Z
-- **Updated:** 2026-11-06T14:11:51Z
+- **Updated:** 2026-11-06T14:14:43Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `ba0d73c0321f7fea64059d3368983dd14dfc7f389d101ca901e80d0c6accfe91`
 
@@ -999,7 +999,7 @@ end-to-end case in cmd/spec/main_test.go: write the malformed steering; code = M
 - `make test` passes
 - `make lint` passes
 
-### [ ] 2. Read the steering's version, its amendment record and the rules it must meet (implement, pending)
+### [x] 2. Read the steering's version, its amendment record and the rules it must meet (implement, done)
 
 **Criteria:** 16-REQ-1, 16-REQ-2.1, 16-REQ-2.2
 

@@ -4,7 +4,7 @@ spec_name: "steering_version"
 title: "Version the steering and record which version a package was written under"
 status: "active"
 created_at: "2026-11-06T12:39:19Z"
-updated_at: "2026-11-06T14:11:51Z"
+updated_at: "2026-11-06T14:14:43Z"
 intent_hash: "ba0d73c0321f7fea64059d3368983dd14dfc7f389d101ca901e80d0c6accfe91"
 schema_version: 2
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"
