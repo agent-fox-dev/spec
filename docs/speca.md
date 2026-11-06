@@ -849,6 +849,7 @@ else.
 | Code | Severity | Stage | When |
 |---|---|---|---|
 | `specs_dir_unreadable` | low | preflight | the spec root (or, for `--list --all`, `archive/`) could not be read. The report goes without `dependents`, the verdict without the cross-spec rules, the list without the archived packages |
+| `steering_malformed` | high | preflight | `--validate` only: the spec root's `steering.md` opens with frontmatter that breaks one of its rules ([configuration.md](configuration.md#the-steering)), each named in the message. The verdict is the one an unversioned steering gives |
 | `spec_invalid` | high | validate | the package is in a format version other than 2: its tests and tasks are not read. For the task form: `--force` writes over keys the schema does not allow, which the warning names |
 | `spec_invalid` | low | validate | the task form went ahead on a package that does not validate, which the warning names by rule. A call raises at most one `spec_invalid` |
 | `spec_invalid` | high | validate | the status form: `--force` activated a package that does not validate (naming the rules, and the keys the write drops), or wrote a package that holds keys the schema does not allow (naming them) |

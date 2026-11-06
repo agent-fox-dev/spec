@@ -52,6 +52,17 @@ type SteeringFile struct {
 // Versioned reports whether the file has a version a package can record.
 func (f SteeringFile) Versioned() bool { return f.Version != "" }
 
+// Malformed is the message of the steering_malformed warning for the file in
+// specsDir: every rule its frontmatter breaks, and what follows from it. It is
+// "" when the frontmatter breaks none.
+func (f SteeringFile) Malformed(specsDir string) string {
+	if len(f.Problems) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the frontmatter of %s breaks %d rule(s), so its version is treated as absent and its directives are used as they are: %s",
+		filepath.Join(specsDir, "steering.md"), len(f.Problems), strings.Join(f.Problems, "; "))
+}
+
 // steeringFrontmatter is the two keys a steering frontmatter may hold.
 type steeringFrontmatter struct {
 	Version    string      `yaml:"version"`

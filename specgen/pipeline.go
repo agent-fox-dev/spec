@@ -490,6 +490,9 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 	env.landscape = landscape
 	env.steering = project.ReadSteering(specsDir)
+	if msg := env.steering.Malformed(specsDir); msg != "" {
+		o.Run.Warn(cli.WarnSteeringMalformed, "high", "%s", msg)
+	}
 	env.profile = project.DetectProfile(root)
 	if env.profile.Known() {
 		o.Progress.Detail("project: %s (from %s), tests %q, linter %q",
@@ -821,6 +824,9 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 	spec.CreatedAt, spec.UpdatedAt = now, now
 	spec.Title = prd.Title
 	spec.Source = pkg.Source
+	// The version of the steering the package was written under; empty, and so
+	// left out, when the steering is unversioned, malformed or says nothing.
+	spec.SteeringVersion = e.steering.Version
 	spec.PRDBody = normalizeBody(prd.Body)
 
 	partial := afspec.PartialSpec{SpecID: specID, SpecName: prd.SpecName}

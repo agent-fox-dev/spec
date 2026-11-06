@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -216,5 +217,42 @@ func TestVerdict_IntentDrift(t *testing.T) {
 		if _, raw := rawRun(t, "--dir", root, ref, "--validate"); raw["intent_drift"] != nil {
 			t.Errorf("%s: intent_drift = %s; want it absent", ref, raw["intent_drift"])
 		}
+	}
+}
+
+// A steering whose frontmatter breaks a rule is one high warning on the
+// verdict, which is the verdict it would have been without the frontmatter;
+// the report does not raise it.
+func TestVerdict_WarnsOnceAboutAMalformedSteeringRecord(t *testing.T) {
+	root := newRepo(t)
+	const body = "# Steering\n\nUse make check.\n"
+	steering := filepath.Join(root, ".specs", "steering.md")
+	writeFile(t, steering, "---\nversion: 1.0.0\namendments:\n  - version: 1.0.0\n    date: 2026-11-01\n    change: \"\"\n---\n"+body)
+
+	env, code, _ := run(t, "--dir", root, "09", "--validate")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %+v", code, env.Error)
+	}
+	var malformed []envelope.Warning
+	for _, w := range env.Warnings {
+		if w.Code == cli.WarnSteeringMalformed {
+			malformed = append(malformed, w)
+		}
+	}
+	if len(malformed) != 1 || malformed[0].Severity != "high" || malformed[0].Stage != "preflight" ||
+		!strings.Contains(malformed[0].Message, "must have a change") {
+		t.Errorf("warnings %+v; want one high steering_malformed at preflight naming the rule", env.Warnings)
+	}
+
+	writeFile(t, steering, body)
+	plain, _, _ := run(t, "--dir", root, "09", "--validate")
+	if !reflect.DeepEqual(result(t, env).Valid, result(t, plain).Valid) || !reflect.DeepEqual(result(t, env).Validation, result(t, plain).Validation) {
+		t.Errorf("the verdict changed with the frontmatter:\n%+v\n%+v", result(t, env).Validation, result(t, plain).Validation)
+	}
+
+	writeFile(t, steering, "---\nversion: x\n---\n"+body)
+	report, _, _ := run(t, "--dir", root, "09")
+	if slices.Contains(warningCodes(report), string(cli.WarnSteeringMalformed)) {
+		t.Errorf("the report raised steering_malformed: %v", warningCodes(report))
 	}
 }

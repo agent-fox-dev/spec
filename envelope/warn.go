@@ -14,6 +14,7 @@ const (
 	WarnCodeSearchUnavailable    WarnCode = "code_search_unavailable"
 	WarnSpecsDirUnreadable       WarnCode = "specs_dir_unreadable"
 	WarnProjectLanguageUnknown   WarnCode = "project_language_unknown"
+	WarnSteeringMalformed        WarnCode = "steering_malformed"
 	WarnNameFlagIgnored          WarnCode = "name_flag_ignored"
 	WarnRepoMapBuildFailed       WarnCode = "repo_map_build_failed"
 	WarnScopeRenamed             WarnCode = "scope_renamed"

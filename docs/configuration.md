@@ -70,6 +70,56 @@ host it does not belong to.
 The spec root's `steering.md`, when it exists and says something, is given to
 every phase as the project's directives.
 
+### The steering
+
+`steering.md` may open with YAML frontmatter that gives it a version and a
+dated record of its amendments, newest first:
+
+```yaml
+---
+version: 2.0.1
+amendments:
+  - version: 2.0.1
+    date: 2026-11-06
+    change: The file carries a version and this record.
+  - version: 2.0.0
+    date: 2026-10-25
+    change: Tests are organised by behaviour.
+---
+```
+
+The frontmatter is well formed when:
+
+- it holds only the keys `version` and `amendments`;
+- `version` is `MAJOR.MINOR.PATCH`: three non-negative integers with no leading
+  zeros, compared as numbers (`2.10.0` is newer than `2.9.0`);
+- `amendments` lists at least one amendment, each with a `version` in that
+  form, a `date` in `YYYY-MM-DD` and a non-empty `change`;
+- the amendments' versions strictly decrease and their dates do not increase;
+- the first amendment's version is `version`.
+
+A file that meets them all, and whose body says something, is **versioned**:
+every phase is given the body (never the frontmatter), with the line
+`Steering version <version>` before it, and every package `spec` writes records
+the version in its PRD frontmatter as `steering_version`. The amendment record
+is never sent to a model; `speca --validate` reads it, and names the amendments
+a draft or active package was written before ([speca.md](speca.md)). A file
+with no frontmatter is unversioned and behaves as it always has. A frontmatter
+that breaks a rule, or never closes, raises one high `steering_malformed`
+warning on `spec` and on `speca --validate`; the body is used all the same and
+the version is treated as absent. The size bound, the placeholder and the bare
+`# Steering` heading are checked on the body alone, and a body that says
+nothing makes the file nothing, whatever its frontmatter holds.
+
+The numbers say what an amendment did, for the person who writes it; no machine
+checks that the right one was bumped:
+
+| Bump | When |
+|---|---|
+| MAJOR | a directive was removed, or changed so that a package or code that followed it may now break it |
+| MINOR | a directive was added |
+| PATCH | a wording that changes no directive |
+
 ## The build
 
 The build reads no configuration. `go.mod` pins a released agentkit-go and

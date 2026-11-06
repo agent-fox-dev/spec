@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/agent-fox-dev/spec/internal/cli"
+	"github.com/agent-fox-dev/spec/internal/project"
 	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
 
@@ -17,6 +18,12 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		return nil, failure
 	}
 	r := &Result{AdminResult: c.identityOf(dir, spec)}
+
+	// The verdict is the form that reads the steering's version, so it is the
+	// one that says the steering's record is malformed.
+	if msg := project.ReadSteering(c.specsDir).Malformed(c.specsDir); msg != "" {
+		c.run.Warn(cli.WarnSteeringMalformed, "high", "%s", msg)
+	}
 
 	// A spec root that cannot be read leaves the verdict the package's own, with
 	// a warning.
