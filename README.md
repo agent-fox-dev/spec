@@ -1,346 +1,156 @@
-# Spec Format
+# spec
 
-## Why a spec format?
+A specification format for work done by coding agents, in which a spec is a
+contract that a validator can prove complete, and the tooling that writes,
+renders and administers packages of it.
 
-Natural-language requirements are ambiguous, untestable, and drift from
-implementation. The spec format solves this by defining a structured,
-machine-readable package that turns design intent into verifiable contracts.
-Every criterion carries its check and is owned by a task — nothing is
-specified without verification and nothing is built without a requirement.
+## Why this exists
 
-## Overview
+Coding agents are good at building what they are told and bad at noticing
+what they were not told. A feature described in prose has gaps the agent
+fills on its own, tests the agent treats as optional, and a plan nobody can
+check for holes. The first version of this format was written to fix that,
+and it did not go far enough: every archived version 1 spec had edge-case and
+property tests that no task owned, so no coder ever implemented them. The
+spec said they existed; nothing proved that anybody would build them.
 
-A specification package ("spec") is the durable artifact that captures design
-intent, acceptance criteria with their checks, and the implementation plan
-for one cohesive feature. Every spec lives in a numbered directory
-(`{NN}_{snake_case_name}/`) and contains three contract artifacts, a progress
-file the tools write, one optional artifact, and the render generated from
-them:
+That failure is the reason for everything in this repository. A spec is not
+useful because it is written down. It is useful when something other than a
+model can say whether it is complete, whether it was followed, and what is
+left to do.
 
-| Artifact | Format | Purpose |
-| --- | --- | --- |
-| `prd.md` | Markdown + YAML frontmatter | Narrative intent — the "why" and "what." Human-authored. Contains a hashed `## Intent` section that is protected after approval. |
-| `requirements.json` | JSON (schema-validated) | What the system must do, and how it is verified: EARS acceptance criteria, each with its check (unit, integration or property, or the same as another's), and execution paths, each with its smoke check. |
-| `tasks.json` | JSON (schema-validated) | What work to do, in what order: one flat list of implement tasks owning criteria, with steps, test commands and cross-spec dependencies. The integration task is derived from the package, not stored. |
-| `progress.json` | JSON (schema-validated) | The state of every task, the integration task included, and when it last changed. Written by the tools, never by hand, and never rendered: a task move changes this file alone. |
-| `architecture.md` | Markdown (free-form) | Optional. Architectural context — modules, interfaces, data models, technology choices. No schema, not cross-validated. |
-| `spec.md` | Markdown (generated) | The whole package rendered as one document, what `specr <package>` returns, for a reviewer to read in a diff. Written by every save of the package, never read as data, and not part of its contract; `speca <package> --render` writes it again. |
+## What is different
 
-**Key properties:**
+Most spec-driven kits for agents are a set of prompt templates and Markdown
+files: the method lives in the prompts, and the artifacts are whatever the
+model wrote. This one is a **machine-validated contract format**, and that
+changes what the tools can promise.
 
-- **EARS patterns.** Requirements use the Easy Approach to Requirements Syntax — five
-  structured patterns (`ubiquitous`, `event_driven`, `state_driven`,
-  `unwanted`, `optional`) that produce testable, unambiguous acceptance
-  criteria from decomposed fields.
-- **Two-layer validation.** Schema validation (per-file, sub-millisecond; a
-  criterion without a check or a path without a smoke check fails it) plus
-  cross-file integrity checks (referential integrity of IDs, every shared
-  check resolving, every criterion owned by a task, the profile, the
-  progress) run on every mutation.
-- **Lifecycle.** A spec progresses through `draft → active → sealed`, with
-  optional `superseded` and `archived` terminal states. The `## Intent` section
-  is hashed at the `draft → active` transition and protected thereafter.
-- **Traceability.** Every criterion carries its check and is owned by a task,
-  and every path's smoke check is run by the derived integration task, so
-  nothing is specified without verification and nothing is built without a
-  requirement. Coverage and the traceability matrix are computed, never
-  stored.
-- **Profiles.** A package is `full`, with at least one execution path and an
-  integration task, or `lite`: at most three requirements, no path and no
-  integration task, for a small change.
+- **A plan is proven complete, or it is invalid.** Every acceptance criterion
+  carries the check that verifies it. Every end-to-end path carries a smoke
+  check that names the real components it may not mock. Every criterion is
+  owned by a task. The schemas and eight cross-file rules make those facts
+  properties the validator proves, not conventions the model is asked to
+  follow. A package that breaks one is invalid, not warned about.
 
-The full specification — field-level schemas, EARS pattern definitions, ID
-formats, validation rules, task state machine, and rendering — is at
-**[spec-format-v3.md](specification/spec-format-v3.md)**. Version 2 is kept
-for reference at [spec-format-v2.md](specification/spec-format-v2.md), and
-version 1.3 at [spec-format.md](specification/spec-format.md); §13 of the v3
-reference maps every version 2 construct to its version 3 form, and
-`speca <package> --migrate` performs the conversion.
+- **Tests are the contract, not an option.** Because the check is part of the
+  criterion, there is no test to skip and no "add tests later". The
+  integration task that runs every path's smoke check is derived from the
+  package, so it cannot be forgotten or written differently each time, and the
+  implementation skill refuses to build a task whose checks it has not seen
+  fail first.
 
-JSON Schemas for all artifacts are available in `specification/schemas/`
-(`prd-frontmatter.v3.json`, `requirements.v3.json`, `tasks.v3.json`,
-`progress.v3.json`, plus the v1 and v2 sets). These schemas can be used for
-external validation or code generation.
+- **State is a state machine, not a checkbox.** A task is claimed through a
+  compare-and-set, so two agents cannot both take it. Readiness follows the
+  dependencies. Activation hashes the spec's intent, and every later write is
+  refused while the intent differs. Progress lives in its own small file, so
+  recording work never rewrites the contract.
 
-## Implementations
+- **Context is engineered for the coder.** An agent implementing task 3 is
+  given task 3 in full, with its criteria, checks and the paths they name, and
+  everything else by id, cut to a token budget if asked. It is not handed the
+  whole package and told to find its part.
 
-This repository holds the format, its reference library, the command that
-writes packages of it, the command that renders them and the command that
-reports their state:
+- **It runs without a person.** From an issue URL or a sentence to a
+  validated, activated package in one unattended run, with a cost estimate
+  before any model call, budgets, per-phase models, an adversarial review of
+  the PRD and of the plan, and a split into several packages when the idea is
+  too big for one. The result is one JSON object with the next call to make.
+
+- **Specs relate to each other.** A package names the packages it depends
+  on; the validator checks that they exist, that there is no cycle, and that
+  the two share an actor in their execution paths. The packages of a split are
+  generated as a pipeline so each one sees the ones before it.
+
+- **A spec describes a change, not the system.** Once implemented, a package
+  is sealed and archived; the code, its tests and the architecture decisions
+  are the record. The format keeps no living description of the system, on
+  purpose: that description goes stale, and the kit would rather have a
+  contract that was true when it was built than one that claims to be true
+  now.
+
+## What it costs
+
+The same choices have a price, and it is worth knowing before adopting it.
+
+- The generator runs on Claude only, and the commands need a Go toolchain.
+  The skills render for Claude Code, Codex, Cursor and Copilot, but the
+  unattended run is one vendor's.
+- Three of a package's files are JSON. A rendered `spec.md` is committed
+  beside them so a reviewer can read the diff, but the contract itself is
+  data, not prose.
+- A package is heavier than a Markdown spec of the same feature. Version 3
+  of the format made it about a third smaller, and a `lite` profile fits a
+  small change, but a validated contract is more than a page of bullets.
+- Drift between sealed packages and the code is not detected after the fact.
+  The implementation skill checks conformance once, at pull-request time.
+- The method is not customisable: one format, one set of prompts, no hooks.
+
+A longer and more critical comparison with GitHub Spec Kit, OpenSpec and
+Google's Elephant-Goldfish Model, including what this kit has borrowed from
+each, is in [docs/spec-kit-comparison.md](docs/spec-kit-comparison.md).
+
+## How it is used
+
+Three steps, and a command or skill for each.
+
+1. **Write the PRD.** Prose with a hashed `## Intent`, goals, non-goals and
+   the decisions already taken. The `af-prd` skill writes it with a person;
+   the `spec` command writes it itself from an idea, an issue or a file,
+   records every open question it had to settle, and decides whether the
+   change fits a `lite` package.
+2. **Generate the package.** `spec` turns the PRD into `requirements.json`,
+   where every criterion carries its check and every path its smoke check,
+   and `tasks.json`, the flat list of tasks that own the criteria. Each file
+   is validated before it is written, and the package is activated only on a
+   clean verdict. The `af-spec` skill does the same inside a session.
+3. **Implement it, task by task.** The `af-impl` skill claims a task with
+   `speca`, reads it with `specr --task N`, writes the task's checks as
+   failing tests, makes them pass, records the task done, and opens a pull
+   request when the derived integration task has run every path end to end.
+
+```bash
+spec https://github.com/org/repo/issues/42    # idea → validated package under .specs/
+specr 16 --task 3                             # task 3 in full, the rest by id
+speca 16 --task 3 --state in_progress         # claim it; refused if another agent has it
+speca 16 --task 3 --state done                # record it; progress.json is the only file that changes
+speca 16 --validate                           # the format's full verdict, rule by rule
+```
+
+Every command writes one JSON object to stdout, with a `next` field naming
+the call to make after it, so an agent or a program can drive the whole
+loop without parsing prose.
+
+## What is in this repository
 
 | Path | What it is |
 | --- | --- |
-| `specification/` | The format: the reference documents and the canonical JSON Schemas |
-| [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save, render and migrate spec packages. It embeds a copy of the v3 schemas in `afspec/schemas/` |
-| [`envelope/`](docs/api.md#envelope) | The JSON `spec`, `specr` and `speca` write to stdout, as Go types for a program to decode it into; standard library only |
-| `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline, built on `afspec` and [agentkit-go](https://github.com/agent-fox-dev/agentkit-go) |
-| `cmd/specr/` | The `specr` command: a package rendered as Markdown, whole or scoped to one task |
-| `cmd/speca/` | The `speca` command: a package's state, the format's verdict on it, the list of every package, and the migration of a version 2 package |
+| [`specification/`](specification/spec-format-v3.md) | The format: the reference document and the canonical JSON Schemas |
+| [`afspec/`](afspec/README.md) | The Go library: load, validate, mutate, save, render and migrate a package |
+| [`envelope/`](docs/api.md#envelope) | The commands' JSON output as Go types, for a program that calls them |
+| `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline |
+| `cmd/specr/`, `cmd/speca/` | The `specr` render and the `speca` admin commands |
+| `skills/` | The `af-prd`, `af-spec` and `af-impl` skills, one source rendered for four agents |
+| [`examples/`](examples/README.md) | Programs that create, validate and work through a package with the library |
+| `docs/` | The reference docs, the decisions (ADRs), the errata and this kit's comparison with others |
 
-See [docs/architecture.md](docs/architecture.md) for how the pieces fit
-together.
-
-## Generating a Spec Package
-
-The `spec` CLI turns a product idea into a complete, validated package in one
-unattended run — there is no session state and no interactive refinement
-loop. It takes exactly one positional input:
-
-```bash
-spec path/to/prd.md                                   # a file's contents are the idea
-spec https://github.com/org/repo/issues/42             # the issue and its comments are the idea
-spec "add dark mode to the settings screen"            # any other text is the idea
-spec -                                                  # read the idea from stdin
-```
-
-Nobody is waiting to answer questions, so the run resolves every open
-question itself, records each in a `## Design Decisions` section of the PRD,
-reports the ones it is least sure of as `open_questions` in the result, and
-chooses the package's profile (`lite` for a change of at most three
-requirements with no end-to-end flow, else `full`). It then generates
-`requirements.json`, with a check on every criterion and a smoke check on
-every path, and `tasks.json`, in that order — each validated against the
-format's schema and its cross-file rules before it is written — writes the
-package under `.specs/{NN}_{name}/` with its `progress.json` and `spec.md`,
-validates it against the other specs of the spec root (an unknown dependency, a
-cycle, a dependency with no actor in common), and activates it if it validates.
-A package that fails either is still written to disk, in `draft`, with the
-broken rules named in the result. It is the verdict `speca <spec> --validate` gives.
-
-Output is one JSON object on stdout — spec id, artifacts written, requirement
-and task counts, the validation report, derived traceability coverage, and
-any `open_questions` — with progress on stderr. Exit codes: `0` a valid
-package was written, `1` the run failed (the stage is named in the JSON),
-`2` a usage error.
-
-| Flag | Effect |
-| --- | --- |
-| `--specs-dir` | Where `NN_name` packages live (default `.specs/`, or `$AF_SPEC_DIR`) |
-| `--name` | Override the spec name the model chooses |
-| `--architecture` | Also write the optional `architecture.md` |
-| `--no-activate` | Leave a valid package in `draft` instead of activating it |
-| `--comment` | Post the finished PRD back to the source issue |
-| `--dry-run` | Write nothing to disk or to the forge; report what would be written |
-| `--model`, `--effort` | A tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or Claude model id, and its reasoning effort |
-| `--phase-model` | Run one phase on another model and effort, e.g. `tasks=claude-haiku-4-5:medium`; a tier already runs the later phases lower |
-| `--budget`, `--max-turns`, `--total-budget` | Per-phase and whole-run ceilings |
-| `--max-tokens` | The output token cap of one model response, thinking included (default 65536) |
-| `--preflight` | Run every check that would refuse the run, then stop before any model call |
-| `--max-parallel` | How many packages of a split are generated at once (default 3) |
-| `--adversarial-plan` | Have a fresh agent review every package's plan — its requirements with their checks, and its tasks — against the Zero-Decision Rule and codebase grounding, and another revise it, before the package is written |
-| `--adversarial`, `--adversarial-rounds` | Have a fresh agent look for flaws in every PRD, the steering's directives among them, and another answer each one fixed, contested, escalated or declined, before the package is generated; up to 1–5 rounds (default 1), stopping once two consecutive rounds raise nothing serious (`3` gives a PRD room to converge) |
-
-The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
-Bedrock. Every flag, the envelope, the error categories and the warning codes
-are in [docs/cli.md](docs/cli.md); the environment variables in
-[docs/configuration.md](docs/configuration.md).
-
-A Go program that calls one of the commands decodes its output with the
-[`envelope`](docs/api.md#envelope) package (`envelope.DecodeSpec`,
-`envelope.DecodeSpecr`, `envelope.DecodeSpeca`) instead of writing structs of its own.
-
-Rendering a package, reading its state, moving its tasks from one state to
-another and changing its lifecycle status — activating, sealing, archiving or
-superseding it — have a command each, below. The lifecycle moves are also library
-API in [`afspec`](afspec/README.md) for an embedder to call.
-
-## Rendering a Spec Package
-
-The `specr` CLI renders an existing package as Markdown with `afspec`'s render
-functions, for an agent to read — called from a prompt, or from a skill's
-instructions such as agent-fox's `af-impl`. It takes one reference to a
-package (its directory, a file in it, or its number or name under the spec
-root) and changes nothing:
-
-```bash
-specr .specs/16_indexed_code_search    # the whole package
-specr 16 --task 3                      # scoped to task 3: what it owns in full, the rest by id
-specr 16 --section tasks               # only the named sections
-specr 16 --max-tokens 8000             # drop detail until it fits
-specr --schema                         # the flags and the output, as JSON Schema
-```
-
-Like `spec`, it writes one JSON object to stdout: the Markdown is
-`result.markdown`, beside the spec's identity, the sections rendered, what a
-budget dropped, and the plan's tasks with their states; `next` names the next
-task not done and, where the package can take the change, the `speca` call that
-claims the task to work on or records the task rendered as done. `--markdown-file` also writes the Markdown to a file. Exit
-codes: `0` rendered, `1` the package could not be read, `2` a usage error.
-Everything is in [docs/specr.md](docs/specr.md); the decision is
-[ADR 05](docs/adr/05-render-a-package-with-its-own-command.md).
-
-## Reporting a Spec Package's State
-
-The `speca` CLI is the spec admin command. It reports a package's state, gives
-the format's full verdict on it, lists every package under the spec root,
-moves the state of a package's tasks, moves a package through its lifecycle,
-and converts a version 2 package to version 3. It takes one reference to a
-package (none with `--list`, or with a sweep) and writes one JSON object to
-stdout, as `spec` and `specr` do:
-
-```bash
-speca 16                  # status, validity, every task with its state and readiness, the next task,
-                          # the lifecycle moves allowed, the packages it depends on and that depend on it
-speca 16 --validate       # schema errors, the cross-file rules C1–C8 and the cross-spec rules, by rule
-speca --list              # every package under the spec root, in number order
-speca --list --all        # and those under archive/
-speca 16 --task next --state in_progress   # claim the task to work on now
-speca 16 --task 4 --state done             # finish task 4 (--task 1,2 or all, --dry-run, --force)
-speca 16 --status active                   # activate a draft; also sealed, archived, or superseded --by 12
-speca 16 --migrate                         # convert a version 2 package to version 3 in place
-speca --migrate --all --dry-run            # which packages of the spec root and archive/ are still version 2
-speca --schema            # the flags and the output, as JSON Schema
-```
-
-`result.next_task` is the task to work on — the one in progress, else the first
-whose dependencies are done — and `next` names the `specr` call that renders
-it, after the claim of the task where it can be claimed. A package that does not
-validate is reported with exit 0, in `valid`; exit codes `0`, `1` and `2` are
-those of the other two commands. The task form moves tasks through the library's
-task state machine, every one or none, so a second claim of a task that is taken
-is refused with the states it may move to, and it writes `progress.json`
-through the library's `Spec.SaveProgress`, and no other file; the integration
-task of a `full` package, which the library derives as task `N+1`, is moved
-like any other. The status form
-moves a package through its lifecycle with the library's `Transition` and
-`Supersede`, refuses a move the lifecycle does not allow with the way to get
-there, moves an archived or superseded package under `archive/`, and, when that
-move fails after the status was written, says so and is resumable: the same call
-moves the package and changes nothing else. The render form, `speca <spec>
---render` (or `speca --render [--all]` for every package), writes the package's
-`spec.md` and no other file. The migrate form, `speca <spec> --migrate` (or
-`speca --migrate [--all]` for every package of the spec root, and its
-`archive/`), converts a version 2 package to version 3 in place, whatever its
-status, with the library's `MigrateV2`: `requirements.json` takes the checks
-of `test_spec.json`, which is removed, `progress.json` takes the task states,
-and `spec.md` is rendered again. The other forms write no file. `speca`
-makes no model or network call and reads no credential. Everything is in
-[docs/speca.md](docs/speca.md); the decision is
-[ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
-
-## Agent Skills
-
-`skills/` holds three skills that put the three commands to work in a person's
-own session, one for each step around `spec`:
-
-| Skill | Step | What it does |
-| --- | --- | --- |
-| `af-prd` | before `spec` | writes a PRD with the user, in the shape `spec`'s own PRD phase writes, checked against what the format demands, and saves it where `spec <prd>` takes it |
-| `af-spec` | instead of `spec` | writes the package itself, in the session: the three artifacts in the pipeline's own order, `speca --validate` after each one, and activation only on a clean verdict |
-| `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request, with an issue for each item it leaves open (through aflib's `issue` command) |
-
-### One source, four agents
-
-Each skill is a directory holding a `SKILL.md` — the frontmatter and the body —
-with the reference files it links in `references/` beside it, and the files more
-than one skill links in `skills/_shared/references/`. The body carries the order
-of the run, its gates and its refusals; a reference file is read at the step
-that links it, so a step loads only what it needs. No rendered body is over
-24,576 bytes, which `make check` enforces.
-
-`make skills` renders every skill for every agent into `build/skills/<agent>/`.
-`make install-skills` installs them, keeping only the frontmatter keys that
-agent reads and writing an invocation of another skill in that agent's syntax:
-
-```bash
-make install-skills                      # Claude Code, into ~/.claude/skills
-make install-skills AGENT=codex          # Codex, into $CODEX_HOME/skills
-make install-skills AGENT=cursor         # Cursor, into ~/.cursor/skills
-make install-skills AGENT=copilot        # Copilot, into ~/.copilot/skills
-```
-
-`PROJECT=<path>` installs into that repository instead, so a team can commit
-the skills for an agent that reads only repository skills, such as Copilot's
-cloud agent; `SKILLS_DIR=<dir>` overrides both. `make uninstall-skills` takes
-the same variables and removes what it installed. All of it is documented in
-[docs/configuration.md](docs/configuration.md), and the directory of each agent
-is recorded, with the date it was confirmed, in
-[ADR 12](docs/adr/12-render-the-skills-for-every-agent-from-one-source.md).
-
-A Claude Code install already reaches Copilot, which reads `~/.claude/skills`
-too, so installing for Copilot as well makes it load each skill twice; the
-install says so and goes ahead.
-
-## Installation
-
-Build the `spec`, `specr` and `speca` commands from a checkout:
+## Getting started
 
 ```bash
 git clone https://github.com/agent-fox-dev/spec && cd spec
-make build          # installs spec, specr and speca into $GOBIN
+make build              # spec, specr and speca into $GOBIN
+make install-skills     # the three skills into ~/.claude/skills (AGENT=codex|cursor|copilot for the others)
 ```
 
-`make build` stamps all three commands with `git describe`, the commit and the
-build time (the variables in [version.go](version.go)), which `--version`
-prints, e.g. `spec v1.5.0 (commit fa6b562, built 2026-11-06T10:52:11Z)`.
+`spec` reaches Claude through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
+Bedrock; `specr` and `speca` make no model call at all. Building without a
+checkout, the library, the make targets and the rules a coding session
+follows are in [docs/development.md](docs/development.md).
 
-Or install a command without a checkout, from the latest release:
+## Read more
 
-```bash
-go install github.com/agent-fox-dev/spec/cmd/spec@latest     # or cmd/specr, cmd/speca
-```
-
-`@v1.5.0` pins the release explicitly, and `@main` installs the current `main`.
-Every form works because `go.mod` names released versions and carries no
-`replace`, which `go install` would ignore
-([ADR 13](docs/adr/13-pin-a-released-agentkit-go.md)).
-
-`go.mod` pins a released agentkit-go (`v0.9.0`) and carries no `replace`, so
-every target builds the committed pin and no make target needs the network
-([ADR 13](docs/adr/13-pin-a-released-agentkit-go.md)). `make update-agentkit`
-moves the pin to agentkit-go's latest release when somebody wants it moved.
-
-### Go library
-
-```bash
-go get github.com/agent-fox-dev/spec/afspec
-```
-
-## Development
-
-The library and the command need Go 1.27 or later. The tests need no network
-and no API key: the command's tests run against a scripted model.
-
-| Command | What it does |
-| --- | --- |
-| `make help` | List all targets |
-| `make check` | `make fmt`, `vet`, `lint`, `test` and `skills-check` |
-| `make build` | Install the `spec`, `specr` and `speca` commands, stamped with the version |
-| `make test` | `go test ./... -count=1` |
-| `make test-fast` | The tests with `-short` |
-| `make fmt` | `gofmt -l -w .` |
-| `make vet` | `go vet ./...` |
-| `make lint` | `golangci-lint` if installed (config in `.golangci.yml`) |
-| `make coverage` | Test coverage per function |
-| `make doc` | Write `go doc -all` for each package to `docs/generated/` (committed) |
-| `make update-agentkit` | Move the agentkit-go pin to its latest release (explicit; no target runs it) |
-| `make tidy` | `go mod tidy` |
-| `make clean` | Remove `build/` and the coverage profile |
-| `make skills` | Render the skills under `skills/` for every agent into `build/skills` |
-| `make skills-check` | Check the skills against every render rule (part of `make check`) |
-| `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
-| `make install-skills`, `make uninstall-skills` | Install the skills for one agent, or remove them (`AGENT`, `PROJECT`, `SKILLS_DIR`) |
-
-## Documentation
-
-- [Spec Format Reference v3](specification/spec-format-v3.md) — field-level schemas, EARS patterns, checks, validation rules, rendering, and the migration from v2
-- [Spec Format Reference v2](specification/spec-format-v2.md) and [v1.3](specification/spec-format.md) — the superseded formats
-- [afspec](afspec/README.md) — the Go library's API
-- [Examples](examples/README.md) — programs that create, validate and work through a spec with `afspec`
-- [Public Go API](docs/api.md) — the packages and where their reference lives
-- [Architecture](docs/architecture.md) and [configuration](docs/configuration.md)
-- [The spec command](docs/cli.md) — input, flags, the output envelope, errors and warnings
-- [The specr command](docs/specr.md) — the forms of a render, the reference it takes, the output and `--schema`
-- [The speca command](docs/speca.md) — the report, the verdict and the list, the reference it takes, the output and `--schema`
-- [Configuration](docs/configuration.md) — environment variables and limits
-- [Architecture](docs/architecture.md) — repository layout, the schema copies, the command's packages and a run
-- [Comparison with other spec kits](docs/spec-kit-comparison.md) — this kit against GitHub Spec Kit, OpenSpec and EGM: what each does, where this one is stronger or weaker, and what to borrow
-- [ADR 01](docs/adr/01-run-the-spec-command-on-the-agentkit-driver.md) — why the command is built here, on the AgentKit driver
-- [ADR 13](docs/adr/13-pin-a-released-agentkit-go.md) — why `go.mod` pins a released agentkit-go and carries no `replace`
-- [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md) — why a package's state has a command of its own, and what it reports
-- [ADR 14](docs/adr/14-commit-the-rendered-package-beside-its-json.md) — why every package carries its render, `spec.md`, and when a stale one blocks
-- [ADR 15](docs/adr/15-version-the-steering.md) — why the steering carries a version and a record of its amendments, and what a package records of it
-- [ADR 16](docs/adr/16-triage-every-review-finding-four-ways.md) — why a review finding is fixed, contested, escalated or declined, and the review converges on two clean rounds
-- [ADR 17](docs/adr/17-review-the-plan-adversarially.md) — why the plan gets a review of its own, against the Zero-Decision Rule and computed grounding facts
-- [ADR 18](docs/adr/18-allow-extension-keys-and-move-word-checks-out-of-the-validator.md) — why every object accepts `x-` keys that every save keeps, and why vague wording is the generator's and the reviewers' to catch, not the validator's
-- [ADR 19](docs/adr/19-migrate-the-format-to-version-3.md) — why a criterion carries its check, progress lives in its own file, the integration task is derived, and a version 2 package is converted once with `speca --migrate`
+- [The format](specification/spec-format-v3.md) — every field, the EARS patterns, the checks, the validation rules, rendering and the migration from version 2
+- [The `spec` command](docs/cli.md), [the `specr` command](docs/specr.md) and [the `speca` command](docs/speca.md) — input, flags, the output envelope, errors and warnings
+- [Architecture](docs/architecture.md), [configuration](docs/configuration.md) and [the public Go API](docs/api.md)
+- [Comparison with other spec kits](docs/spec-kit-comparison.md) — where this kit is stronger, where it is weaker, and what it borrowed
+- [Decisions](docs/adr/) — one ADR per choice, from running the generator on the AgentKit driver to migrating the format to version 3
