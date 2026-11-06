@@ -30,6 +30,7 @@
     }
   },
   "required": ["$schema", "spec_id", "spec_name", "schema_version", "introduction", "requirements", "execution_paths"],
+  "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
   "additionalProperties": false,
   "$defs": {
     "criterion": {
@@ -48,6 +49,7 @@
         "contract": { "type": "string", "minLength": 1, "description": "What the caller observes. Required for unwanted." }
       },
       "required": ["id", "pattern", "action"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false,
       "allOf": [
         {
@@ -81,6 +83,7 @@
         }
       },
       "required": ["id", "title", "criteria"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },
     "path_step": {
@@ -90,6 +93,7 @@
         "action": { "type": "string", "minLength": 1 }
       },
       "required": ["actor", "action"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },
     "execution_path": {
@@ -104,6 +108,7 @@
         }
       },
       "required": ["id", "title", "steps"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },
     "external_api_symbol": {
@@ -115,6 +120,7 @@
         "notes": { "type": "string" }
       },
       "required": ["name", "import_path", "signature"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },
     "external_api": {
@@ -130,6 +136,7 @@
         }
       },
       "required": ["package", "version", "verified", "symbols"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     }
   }

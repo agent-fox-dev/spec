@@ -150,7 +150,8 @@ The cross-file rules, all errors:
 | `IsSpecDirName(name) bool` / `ParseSpecDirName(name)` | The `{NN}_{snake_case_name}` pattern |
 | `IsSpecName(name) bool` | The name part of that pattern, `[a-z][a-z0-9]*(_[a-z0-9]+)*`: a name it accepts always makes a valid directory |
 | `LoadSpecLandscape(root, includeArchive, currentSpecID)` | Metadata for landscape views |
-| `UnknownFields(raw, target) []string` | The keys in a decoded JSON value that the target's type has no field for, as JSON pointers. `DecodeArtifact` refuses an artifact that has any; `LoadSpec` keeps them aside and `ValidateSchema` reports each as an `unknown_field` error, so the schemas' `additionalProperties: false` holds although the decode would drop the key |
+| `UnknownFields(raw, target) []string` | The keys in a decoded JSON value that the target's type has no field for, as JSON pointers. `DecodeArtifact` refuses an artifact that has any; `LoadSpec` keeps them aside and `ValidateSchema` reports each as an `unknown_field` error, so the schemas' `additionalProperties: false` holds although the decode would drop the key. An extension key (`x-…`) is not listed |
+| `IsExtensionKey(key) bool`, `ExtensionPrefix` | A key that begins with `x-` is an extension key, a team's own metadata, which every schema allows on every object. `LoadSpec` keeps the extension keys of the three JSON artifacts and the PRD frontmatter, and every save writes each back on the object it came from, found by its `id` or its position; `DecodeArtifact` refuses one in a model's artifact |
 
 ### Rendering
 
@@ -158,7 +159,7 @@ The cross-file rules, all errors:
 |----------|-------------|
 | `(*Spec).RenderCombined(opts…) string` | One concatenated Markdown document |
 | `(*Spec).RenderIndividual(opts…) map[string]string` | Per-artifact Markdown |
-| `(*Spec).RenderIndividualScoped(taskID, opts…)` | Scoped to one task; what a coder receives |
+| `(*Spec).RenderIndividualScoped(taskID, opts…)` | Scoped to one task; what a coder receives. The PRD is there without its `## Background` and `## Requirements`, which the task's criteria restate, and one line names what was left out |
 | `(*Spec).RenderedBytes() []byte` | What `spec.md` holds: `RenderedHeader`, a blank line and the whole `RenderCombined()`; every save writes it |
 | `RenderedFileName`, `RenderedHeader` | `spec.md`, the file every save writes beside the artifacts, and its first line |
 | `WithMaxTokens(n) RenderOption` | Cap the estimated size, truncating progressively |

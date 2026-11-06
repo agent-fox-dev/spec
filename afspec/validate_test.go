@@ -170,6 +170,21 @@ func TestValidateCrossFile_OwnershipErrorsCarryARemedy(t *testing.T) {
 	}
 }
 
+// The validator matches no words (§0, rule 3): a criterion worded vaguely is
+// for the generator's hint and the review rubrics, not a warning of the
+// package's verdict.
+func TestValidateCrossFile_DoesNotMatchVagueWords(t *testing.T) {
+	result := mutateFixture(t, func(s *Spec) {
+		s.Requirements.Requirements[0].Criteria[0].Action =
+			"handle the request appropriately and return a reasonable result, etc"
+	}).ValidateCrossFile()
+	for _, w := range result.Warnings {
+		if w.Check == "vague_language" || strings.Contains(w.Message, "vague") {
+			t.Errorf("the validator warned on wording: %+v", w)
+		}
+	}
+}
+
 // Warnings never block, and each names the check that raised it, so a
 // consumer printing "check: message" never renders a leading ": ".
 func TestValidateCrossFile_WarnsWithoutFailing(t *testing.T) {
@@ -177,10 +192,6 @@ func TestValidateCrossFile_WarnsWithoutFailing(t *testing.T) {
 		name, warning string
 		mutate        func(*Spec)
 	}{
-		{"vague language", "vague term", func(s *Spec) {
-			s.Requirements.Requirements[0].Criteria[0].Action =
-				"handle the request appropriately and return a reasonable result"
-		}},
 		{"a task over the step limit", "steps (limit 12)", func(s *Spec) {
 			s.Tasks.Tasks[0].Steps = make([]string, maxStepsPerTask+1)
 			for i := range s.Tasks.Tasks[0].Steps {

@@ -20,5 +20,6 @@
     "tags": { "type": "array", "items": { "type": "string" } }
   },
   "required": ["spec_id", "spec_name", "title", "status", "created_at", "updated_at", "intent_hash", "schema_version"],
+  "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
   "additionalProperties": false
 }

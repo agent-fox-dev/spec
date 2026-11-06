@@ -265,6 +265,77 @@ func TestRenderIndividualScoped_MissesNothingFromThePackage(t *testing.T) {
 	}
 }
 
+// A task's render leaves out the PRD's Background and Requirements, which its
+// criteria restate, names what it left out, and keeps every other section;
+// the unscoped render keeps them all.
+func TestRenderIndividualScoped_LeavesOutThePRDsProseRequirements(t *testing.T) {
+	spec := loadFixture(t, fixtureValidSpec)
+	spec.PRDBody = "# Feature\n\n## Intent\n\nWhy it exists.\n\n## Background\n\nThe code before.\n\n" +
+		"## Requirements\n\n### 1. Area\n\nThe prose requirement.\n\n```md\n## Not a heading\n```\n\n" +
+		"## Design Decisions\n\n1. A decision.\n"
+
+	prd := spec.RenderIndividualScoped(2)["prd"]
+	for _, gone := range []string{"## Background", "The code before.", "## Requirements", "The prose requirement.", "## Not a heading"} {
+		if strings.Contains(prd, gone) {
+			t.Errorf("the task's render still holds %q:\n%s", gone, prd)
+		}
+	}
+	for _, kept := range []string{"## Intent", "Why it exists.", "## Design Decisions", "1. A decision.", "**Status:**",
+		"_The PRD's Background and Requirements are not in a task's render: the criteria this task owns are below. " +
+			"Read them in prd.md or spec.md._"} {
+		if !strings.Contains(prd, kept) {
+			t.Errorf("the task's render lost %q:\n%s", kept, prd)
+		}
+	}
+	if strings.Index(prd, "_The PRD's") > strings.Index(prd, "## Design Decisions") {
+		t.Error("the note is not where the first section was")
+	}
+
+	full := spec.RenderCombined()
+	for _, kept := range []string{"## Background", "The prose requirement.", "## Not a heading"} {
+		if !strings.Contains(full, kept) {
+			t.Errorf("the unscoped render lost %q", kept)
+		}
+	}
+	if strings.Contains(full, "_The PRD's") {
+		t.Error("the unscoped render carries the scoped note")
+	}
+}
+
+// A body with one of the two sections is named alone; a body with neither is
+// rendered as it was, with no note; a heading inside a fence starts nothing.
+func TestRenderIndividualScoped_NamesOnlyTheSectionsItLeftOut(t *testing.T) {
+	cases := []struct {
+		name, body, want, wantGone string
+	}{
+		{"background only", "## Intent\n\nx\n\n## Background\n\nold\n\n## Goals\n\ng\n",
+			"_The PRD's Background is not in a task's render: the criteria this task owns are below. Read it in prd.md or spec.md._",
+			"old"},
+		{"requirements last", "## Intent\n\nx\n\n## Requirements\n\nprose\n",
+			"_The PRD's Requirements is not in a task's render", "prose"},
+		{"neither", "## Intent\n\nx\n\n## Goals\n\ng\n", "## Goals\n\ng\n", "_The PRD's"},
+		{"fenced heading", "## Intent\n\n```\n## Requirements\n```\n\nafter\n", "## Requirements\n```\n\nafter", "_The PRD's"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := loadFixture(t, fixtureValidSpec)
+			spec.PRDBody = tc.body
+			prd := spec.RenderIndividualScoped(1)["prd"]
+			if !strings.Contains(prd, tc.want) {
+				t.Errorf("the render lacks %q:\n%s", tc.want, prd)
+			}
+			if strings.Contains(prd, tc.wantGone) {
+				t.Errorf("the render holds %q:\n%s", tc.wantGone, prd)
+			}
+		})
+	}
+	spec := loadFixture(t, fixtureValidSpec)
+	spec.PRDBody = "## Intent\n\nx\n\n## Goals\n\ng\n"
+	if got, want := spec.RenderIndividualScoped(1)["prd"], spec.RenderIndividual()["prd"]; got != want {
+		t.Errorf("a PRD with neither section renders differently in a task's render:\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestRenderIndividualScoped_FallsBackForAnUnknownTask(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	if spec.RenderIndividualScoped(99)["requirements"] != spec.RenderIndividual()["requirements"] {

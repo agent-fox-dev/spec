@@ -16,6 +16,7 @@
     }
   },
   "required": ["$schema", "spec_id", "spec_name", "schema_version", "tests"],
+  "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
   "additionalProperties": false,
   "$defs": {
     "test": {
@@ -37,6 +38,7 @@
         "real_components": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
       },
       "required": ["id", "kind", "verifies", "title", "given", "when", "then"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false,
       "allOf": [
         {

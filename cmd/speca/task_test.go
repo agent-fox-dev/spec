@@ -408,6 +408,38 @@ func TestTask_UnknownKeys(t *testing.T) {
 	}
 }
 
+// An extension key is the format's own allowance for a team's metadata: a
+// write keeps it, so a task move on a package that holds one, in tasks.json or
+// in the frontmatter, is neither refused nor warned about, and the key is
+// still there after it.
+func TestTask_KeepsExtensionKeys(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	editJSON(t, filepath.Join(dir, "tasks.json"), func(m map[string]any) {
+		m["x-board"] = "core"
+		m["tasks"].([]any)[0].(map[string]any)["x-estimate"] = 3.0
+	})
+	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 2", "schema_version: 2\nx-jira: \"ABC-1\"")
+
+	env, _ := succeeds(t, root, "09", "--task", "1", "--state", "in_progress")
+	if len(env.Warnings) != 0 {
+		t.Errorf("warnings %v; want none", warningCodes(env))
+	}
+	if onDisk(t, dir)[1] != "in_progress" {
+		t.Errorf("on disk %v; want task 1 in progress", onDisk(t, dir))
+	}
+	tasks, _ := os.ReadFile(filepath.Join(dir, "tasks.json"))
+	prd, _ := os.ReadFile(filepath.Join(dir, "prd.md"))
+	for _, want := range []string{`"x-board": "core"`, `"x-estimate": 3`} {
+		if !strings.Contains(string(tasks), want) {
+			t.Errorf("tasks.json lost %s:\n%s", want, tasks)
+		}
+	}
+	if !strings.Contains(string(prd), `x-jira: "ABC-1"`) {
+		t.Errorf("prd.md lost its extension key:\n%s", prd)
+	}
+}
+
 // The report a forced write returns is of the package as it was written: it
 // validates as a fresh report of the package does, and the rules that the
 // unknown keys had hidden (the library checks the cross-file rules only after

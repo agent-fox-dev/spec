@@ -31,7 +31,7 @@ type ValidationEntry struct {
 	Artifact string // the artifact file the issue was found in
 	Path     string // JSON path (InstanceLocation) for schema errors
 	Keyword  string // KeywordLocation for schema errors
-	Check    string // rule name: "json_schema", "completeness", "C1".."C11", "scope_limit", "vague_language", …
+	Check    string // rule name: "json_schema", "completeness", "C1".."C11", "scope_limit", "missing_contract", …
 	EntityID string // the entity the entry is about
 	Value    string // optional value context
 }
@@ -325,9 +325,6 @@ var (
 	testPrefixRe = regexp.MustCompile(`^TS-([A-Za-z0-9_]+)-\d+$`)
 	// criterionParentRe captures the requirement id a criterion belongs to.
 	criterionParentRe = regexp.MustCompile(`^(.+)\.\d+$`)
-
-	// vagueLanguageRe matches the words §6.5.4 asks criteria to avoid.
-	vagueLanguageRe = regexp.MustCompile(`(?i)\b(appropriate|properly|correctly|reasonable|relevant|adequate|suitable|as needed|if necessary|etc)\b`)
 
 	// errorKeywordRe spots an action that describes an error outcome; §10.2
 	// warns when such a criterion carries no contract.
@@ -932,8 +929,8 @@ func (s *Spec) checkC11() []ValidationEntry {
 }
 
 // crossFileWarnings collects the never-blocking warnings of §10.2: scope
-// limits, vague language, glossary hints, and criteria that describe an error
-// outcome without a contract.
+// limits, glossary hints, and criteria that describe an error outcome without
+// a contract.
 func (s *Spec) crossFileWarnings(idx specIndex) []ValidationEntry {
 	var warnings []ValidationEntry
 	warn := func(check, artifact, entity, msg string) {
@@ -954,28 +951,11 @@ func (s *Spec) crossFileWarnings(idx specIndex) []ValidationEntry {
 		}
 	}
 
-	// §6.5.4 — vague language, and the contract hint of §10.2.
+	// The contract hint of §10.2. Vague wording is not the validator's: no
+	// rule matches words (§0, rule 3); the generator and the review rubrics
+	// look for it (§6.5.4).
 	for _, r := range requirementsOf(s) {
 		for _, c := range r.Criteria {
-			fields := map[string]string{"action": c.Action}
-			if c.Condition != nil {
-				fields["condition"] = *c.Condition
-			}
-			if c.Guard != nil {
-				fields["guard"] = *c.Guard
-			}
-			names := make([]string, 0, len(fields))
-			for name := range fields {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			for _, name := range names {
-				for _, match := range vagueLanguageRe.FindAllString(fields[name], -1) {
-					warn("vague_language", "requirements.json", c.Id,
-						fmt.Sprintf("vague term %q in field %s of criterion %s", strings.ToLower(match), name, c.Id))
-				}
-			}
-
 			if c.Pattern != CriterionPatternUnwanted && c.ContractText() == "" && errorKeywordRe.MatchString(c.Action) {
 				warn("missing_contract", "requirements.json", c.Id,
 					fmt.Sprintf("criterion %s describes an error outcome but has no contract", c.Id))

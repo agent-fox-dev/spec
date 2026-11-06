@@ -93,11 +93,20 @@ corrects the failing fields with `patch_<artifact>`, JSON-pointer `add`,
 instead of writing the whole artifact again; the patched artifact is checked
 exactly like a submission.
 
-An artifact that passes every rule but has warnings on its own file (vague
-wording such as "properly" or "as needed", an error outcome without a
-`contract`, a scope past the format's limits) is sent back once with them. The
-model fixes what it agrees with, or keeps the artifact with a patch of no
-operations; the next submission is accepted with whatever warnings remain.
+An artifact that passes every rule but has warnings on its own file is sent
+back once with them: from the validator, an error outcome without a `contract`
+(`missing_contract`) or a scope past the format's limits (`scope_limit`); from
+the generator's own checks, vague wording such as "properly" or "as needed" in
+a criterion (`vague_language`) and a step or `touches` entry that names a line
+of a file, such as `store.go:88` (`line_reference`). The generator's checks are
+not the format's rules: `speca --validate` reports neither. The model fixes what
+it agrees with, or keeps the artifact with a patch of no operations; the next
+submission is accepted with whatever warnings remain.
+
+A tasks artifact, from the tasks phase or a plan revision, loses every
+`depends_on` that names only the task before it in the array, which is what an
+absent `depends_on` already means. Any other `depends_on`, an empty one among
+them, is kept.
 
 The PRD phase hands on what it learned reading the code as `codebase_notes`
 (at most 12000 bytes): the files, the real signatures, the conventions. Every

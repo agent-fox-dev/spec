@@ -34,7 +34,7 @@ requirements and the complete test list.
         "Confirm the identifier Insert returns is consumed by the handler in production code, not only in tests",
         "Grep catalog/ and http/ for TODO and panic(\"not implemented\") and remove any that remain"
       ],
-      "touches": ["http/server_test.go"], "depends_on": [1],
+      "touches": ["http/server_test.go"],
       "done_when": ["`go test ./... -count=1` passes against a real database"],
       "state": "pending" }
   ]
@@ -47,10 +47,13 @@ imperative and specific. `criteria` holds requirement or criterion ids —
 non-empty for `implement`, where a requirement id means all its criteria; it
 may be empty for `integration`. `tests` is non-empty. `steps` is non-empty,
 in order, and concrete enough that a coder who sees only this task, its
-criteria and its tests needs nothing else. `touches` is optional: the files,
+criteria and its tests needs nothing else. A step says a behaviour or a
+decision, not an edit: no line of a file (`store.go:88`) and no quoted block of
+code, which are wrong after one commit. `touches` is optional: the files,
 packages and modules the task creates or changes, the test files it extends
-among them. `depends_on` is optional, references lower ids, and absent means
-"the previous task" — use it to let independent tasks run in parallel.
+among them, each named once. `depends_on` is optional, references lower ids,
+and absent means "the previous task": leave it out when it would name only the
+task before, and use it to let independent tasks run in parallel.
 `done_when` is optional, for checks beyond the implicit ones. `state` is
 `pending` for every task of a new plan. `optional` defaults to false.
 

@@ -2,6 +2,7 @@ package afspec
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -123,7 +124,8 @@ func (s *Spec) RenderIndividual(opts ...RenderOption) map[string]string {
 }
 
 // RenderIndividualScoped renders the spec scoped to one task (§11.1): the PRD
-// body and architecture unfiltered; the requirements that own the task's
+// body without its Background and Requirements sections, which the criteria
+// below restate, and the architecture unfiltered; the requirements that own the task's
 // criteria in full and all others as one line each; the task's tests in full;
 // the paths those tests verify; the task in full and all others as one line.
 //
@@ -174,7 +176,7 @@ func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[stri
 		}
 	}
 
-	result := map[string]string{"prd": s.prdSection()}
+	result := map[string]string{"prd": s.scopedPRDSection()}
 	if s.Architecture != "" {
 		result["architecture"] = s.Architecture
 	}
@@ -221,6 +223,89 @@ func (s *Spec) prdSection() string {
 		return s.PRDBody
 	}
 	return meta + "\n" + s.PRDBody
+}
+
+// scopedPRDSection is the PRD as a task's render shows it: prdSection without
+// the body's Background and Requirements, which a coder on one task reads as
+// the criteria it owns.
+func (s *Spec) scopedPRDSection() string {
+	meta := s.renderMetadata()
+	body := withoutProseSections(s.PRDBody)
+	if meta == "" {
+		return body
+	}
+	return meta + "\n" + body
+}
+
+// scopedOutSections are the PRD sections a task's render leaves out, by their
+// exact headings, in the order the note names them.
+var scopedOutSections = []string{"Background", "Requirements"}
+
+// withoutProseSections removes body's level-two sections named in
+// scopedOutSections: each from its heading line to the next level-two heading
+// or the end. A "## " line inside a fenced code block is not a heading. The
+// first section removed is replaced by one line that names what was left out
+// and where it is; a body with none of them is returned unchanged.
+func withoutProseSections(body string) string {
+	lines := strings.SplitAfter(body, "\n")
+	var out []string
+	var removed []string
+	notePos := -1
+	skipping, fence := false, ""
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\r\n")
+		if fence == "" {
+			if heading, ok := strings.CutPrefix(trimmed, "## "); ok {
+				name := strings.TrimSpace(heading)
+				skipping = slices.Contains(scopedOutSections, name)
+				if skipping {
+					removed = append(removed, name)
+					if notePos < 0 {
+						notePos = len(out)
+					}
+				}
+			}
+		}
+		if marker := fenceMarker(trimmed); marker != "" {
+			switch {
+			case fence == "":
+				fence = marker
+			case strings.HasPrefix(strings.TrimSpace(trimmed), fence):
+				fence = ""
+			}
+		}
+		if !skipping {
+			out = append(out, line)
+		}
+	}
+	if notePos < 0 {
+		return body
+	}
+	var named []string
+	for _, name := range scopedOutSections {
+		if slices.Contains(removed, name) {
+			named = append(named, name)
+		}
+	}
+	verb, pronoun := "are", "them"
+	if len(named) == 1 {
+		verb, pronoun = "is", "it"
+	}
+	note := fmt.Sprintf("_The PRD's %s %s not in a task's render: the criteria this task owns are below. "+
+		"Read %s in prd.md or spec.md._\n\n", strings.Join(named, " and "), verb, pronoun)
+	return strings.Join(out[:notePos], "") + note + strings.Join(out[notePos:], "")
+}
+
+// fenceMarker is the fence a Markdown line opens or closes, "```" or "~~~",
+// or "" when it is not a fence line.
+func fenceMarker(line string) string {
+	t := strings.TrimSpace(line)
+	for _, m := range []string{"```", "~~~"} {
+		if strings.HasPrefix(t, m) {
+			return m
+		}
+	}
+	return ""
 }
 
 // renderMetadata renders the PRD frontmatter as a list, one field per line.

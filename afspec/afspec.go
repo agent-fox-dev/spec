@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 )
 
 // immutableSnapshot captures the values of fields that must not change once a
@@ -60,6 +61,11 @@ type Spec struct {
 	// are recorded here for ValidateSchema to report.
 	unknown map[string][]string
 
+	// extensions holds, per file ("prd.md" for the frontmatter), the
+	// extension keys LoadSpec read, by the address of their object, for every
+	// save to write back (extensions.go).
+	extensions map[string]extensionSet
+
 	// fromDisk is true for a package LoadSpec read, and for the copies a
 	// lifecycle move makes of one. Only such a package is held to the
 	// RenderedFileName in its directory: a generation run's dry run sets Dir
@@ -114,21 +120,25 @@ func LoadSpec(dir string) (*Spec, error) {
 	// Validate. That is what lets an empty scaffold load and be reported as
 	// incomplete rather than failing to decode.
 	unknown := map[string][]string{}
+	extensions := map[string]extensionSet{}
+	if len(fm.Extensions) > 0 {
+		extensions["prd.md"] = extensionSet{"": fm.Extensions}
+	}
 	reqPath := filepath.Join(dir, "requirements.json")
 	var req RequirementsV2Json
-	if err := loadJSONArtifact(reqPath, &req, unknown); err != nil {
+	if err := loadJSONArtifact(reqPath, &req, unknown, extensions); err != nil {
 		return nil, err
 	}
 
 	tsPath := filepath.Join(dir, "test_spec.json")
 	var ts TestSpecV2Json
-	if err := loadJSONArtifact(tsPath, &ts, unknown); err != nil {
+	if err := loadJSONArtifact(tsPath, &ts, unknown, extensions); err != nil {
 		return nil, err
 	}
 
 	tasksPath := filepath.Join(dir, "tasks.json")
 	var tasks TasksV2Json
-	if err := loadJSONArtifact(tasksPath, &tasks, unknown); err != nil {
+	if err := loadJSONArtifact(tasksPath, &tasks, unknown, extensions); err != nil {
 		return nil, err
 	}
 
@@ -162,6 +172,7 @@ func LoadSpec(dir string) (*Spec, error) {
 		Architecture:    architecture,
 		Dir:             dir,
 		unknown:         unknown,
+		extensions:      extensions,
 		fromDisk:        true,
 	}
 
@@ -178,9 +189,10 @@ func LoadSpec(dir string) (*Spec, error) {
 	return spec, nil
 }
 
-// loadJSONArtifact reads and unmarshals a JSON artifact file.
-// Returns a LoadError wrapping SpecError on failure.
-func loadJSONArtifact(path string, target interface{}, unknown map[string][]string) error {
+// loadJSONArtifact reads and unmarshals a JSON artifact file, and records in
+// unknown the keys its schema does not allow and in extensions its extension
+// keys. Returns a LoadError wrapping SpecError on failure.
+func loadJSONArtifact(path string, target interface{}, unknown map[string][]string, extensions map[string]extensionSet) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return &LoadError{
@@ -205,6 +217,11 @@ func loadJSONArtifact(path string, target interface{}, unknown map[string][]stri
 	if json.Unmarshal(data, &raw) == nil {
 		if keys := UnknownFields(raw, target); len(keys) > 0 {
 			unknown[filepath.Base(path)] = keys
+		}
+		set := extensionSet{}
+		collectExtensions(raw, reflect.TypeOf(target), "", set)
+		if len(set) > 0 {
+			extensions[filepath.Base(path)] = set
 		}
 	}
 	return nil
@@ -303,7 +320,7 @@ func (s *Spec) saveToDisk(dir string) error {
 	prdContent := renderPRD(s)
 
 	// Marshal JSON artifacts
-	reqData, err := MarshalJSON(s.Requirements)
+	reqData, err := marshalArtifact(s.Requirements, s.extensions["requirements.json"])
 	if err != nil {
 		return &SaveError{
 			Msg: fmt.Sprintf("cannot marshal requirements.json: %s", err),
@@ -311,7 +328,7 @@ func (s *Spec) saveToDisk(dir string) error {
 		}
 	}
 
-	tsData, err := MarshalJSON(s.TestSpec)
+	tsData, err := marshalArtifact(s.TestSpec, s.extensions["test_spec.json"])
 	if err != nil {
 		return &SaveError{
 			Msg: fmt.Sprintf("cannot marshal test_spec.json: %s", err),
@@ -319,7 +336,7 @@ func (s *Spec) saveToDisk(dir string) error {
 		}
 	}
 
-	tasksData, err := MarshalJSON(s.Tasks)
+	tasksData, err := marshalArtifact(s.Tasks, s.extensions["tasks.json"])
 	if err != nil {
 		return &SaveError{
 			Msg: fmt.Sprintf("cannot marshal tasks.json: %s", err),

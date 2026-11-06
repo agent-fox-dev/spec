@@ -274,7 +274,8 @@ index before it hands over: `specr` has none of those. `cmd/specr` parses its
 own flags with `cli.SplitArgs`, resolves the reference (`specpkg.Locate`), loads
 the package with `afspec.LoadSpec`, validates it for a warning, renders it with
 `RenderCombined`, `RenderIndividual` or `RenderIndividualScoped`
-(`render.go`), and emits a `cli.Envelope`. `--schema` is built by
+(`render.go`; the scoped render leaves the PRD's `## Background` and
+`## Requirements` out), and emits a `cli.Envelope`. `--schema` is built by
 `cli.FlagsDocument` and `cli.EnvelopeDocument` (`internal/cli/schemadoc.go`),
 which describe a flag set and a Go type by reflection, reading each field's
 `description` tag.

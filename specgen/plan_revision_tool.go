@@ -141,6 +141,9 @@ func newPlanRevisionTool(sink *planRevisionSink, prd PRD, current *afspec.Partia
 					continue
 				}
 				entriesAsDictionaries(content)
+				if a.step == afspec.StepTasks {
+					omitDefaultDependencies(content)
+				}
 				problems = append(problems, identityChanges(content, a.step, current)...)
 				content["spec_id"], content["spec_name"] = current.SpecID, current.SpecName
 				if uri := artifactSchemaURI(a.step); uri != "" {

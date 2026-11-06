@@ -9,8 +9,9 @@ The plan fails if a coder who holds the package and the code would have to make 
 1. Where does the code go? The file, package or type is named in the steps or in `touches`, or there is only one place it can go.
 2. Is every name, signature, error, message, format and order that a test asserts, or that another task relies on, stated?
 3. Is a library, algorithm or data structure left open where the choice shows in a test or to a caller?
-4. Does a step leave the work open, with words like "as appropriate", "if needed", "decide" or "for example"? The finding is the open choice, not the word.
+4. Does a step or a criterion leave the work open, with words like "as appropriate", "if needed", "decide" or "for example", or one of the vague words *appropriate*, *properly*, *correctly*, *reasonable*, *relevant*, *adequate*, *suitable*, *as needed*, *if necessary* or *etc*? The finding is the open choice, not the word: a vague word is a finding when two coders would build different things from it.
 5. Could two coders who both follow the task write code that one of the package's tests passes for one and fails for the other?
+6. Does a step pin the work to a line of a file (`store.go:88`, "line 88") or quote a block of code? That is not a decision the plan made: it is wrong after the first commit that moves the line. Raise it as `minor`, unless a test depends on what the line or the code says.
 
 ## `grounding`: the plan names only what is there
 

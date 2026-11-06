@@ -200,6 +200,21 @@ func MarshalJSON(v interface{}) ([]byte, error) {
 type jsonWriter struct {
 	buf   bytes.Buffer
 	depth int
+	// ext holds the extension keys to write back, by the address of their
+	// object, and address is the address of the value being written
+	// (extensions.go). Both are empty for MarshalJSON.
+	ext     extensionSet
+	address string
+}
+
+// at writes v as the value at the address under the current one, segment
+// appended, and restores the current address after.
+func (w *jsonWriter) at(segment string, v reflect.Value) error {
+	parent := w.address
+	w.address = parent + "/" + segment
+	err := w.writeValue(v)
+	w.address = parent
+	return err
 }
 
 func (w *jsonWriter) indent() {
@@ -307,7 +322,8 @@ func (w *jsonWriter) writeStruct(v reflect.Value) error {
 		entries = append(entries, fieldEntry{fi, fv})
 	}
 
-	if len(entries) == 0 {
+	extensions := w.extensionsAt(w.address)
+	if len(entries) == 0 && len(extensions) == 0 {
 		w.buf.WriteString("{}")
 		return nil
 	}
@@ -322,7 +338,20 @@ func (w *jsonWriter) writeStruct(v reflect.Value) error {
 		w.indent()
 		w.writeString(entry.info.JsonKey)
 		w.buf.WriteString(": ")
-		if err := w.writeValue(entry.value); err != nil {
+		if err := w.at(entry.info.JsonKey, entry.value); err != nil {
+			return err
+		}
+	}
+	// The object's extension keys follow its own fields, in key order.
+	for i, key := range extensions {
+		if i > 0 || len(entries) > 0 {
+			w.buf.WriteByte(',')
+		}
+		w.buf.WriteByte('\n')
+		w.indent()
+		w.writeString(key)
+		w.buf.WriteString(": ")
+		if err := w.at(key, reflect.ValueOf(w.ext[w.address][key])); err != nil {
 			return err
 		}
 	}
@@ -362,7 +391,7 @@ func (w *jsonWriter) writeMap(v reflect.Value) error {
 		w.indent()
 		w.writeString(key)
 		w.buf.WriteString(": ")
-		if err := w.writeValue(v.MapIndex(reflect.ValueOf(key))); err != nil {
+		if err := w.at(key, v.MapIndex(reflect.ValueOf(key))); err != nil {
 			return err
 		}
 	}
@@ -392,7 +421,7 @@ func (w *jsonWriter) writeSlice(v reflect.Value) error {
 		}
 		w.buf.WriteByte('\n')
 		w.indent()
-		if err := w.writeValue(v.Index(i)); err != nil {
+		if err := w.at(valueSegment(v.Index(i), i), v.Index(i)); err != nil {
 			return err
 		}
 	}

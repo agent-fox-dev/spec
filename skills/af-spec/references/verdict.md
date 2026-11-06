@@ -42,11 +42,13 @@ missing one is a warning, one that differs is an error naming the first line
 that differs. `speca <NN> --render` fixes either.
 
 Fix, ask again, and do not go on until `valid` is true. Then read the
-warnings: they never block, and three of them are worth acting on anyway.
-`vague_language` names the criterion and the word it cannot be tested
-through. `missing_contract` names a criterion that describes an error outcome
-and has no contract; give it one. `scope_limit` means the work wanted a split
-(§4). Say in the report which warnings you left, and why.
+warnings: they never block, and two of them are worth acting on anyway.
+`missing_contract` names a criterion that describes an error outcome and has
+no contract; give it one. `scope_limit` means the work wanted a split (§4).
+Say in the report which warnings you left, and why. The verdict matches no
+words: read your criteria for the vague words of
+[prd-shape.md](../../_shared/references/prd-shape.md) yourself, and your steps
+for a line of a file (`store.go:88`), which belongs nowhere in a plan.
 
 Then read the package back as a coder will receive it:
 

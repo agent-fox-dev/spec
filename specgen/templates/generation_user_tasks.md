@@ -9,9 +9,9 @@ The complete requirements artifact and the full table of tests are above. Use th
 - `title` — imperative and specific.
 - `criteria` — requirement or criterion IDs this task satisfies. Non-empty for `implement`; a requirement ID means all of its criteria. May be empty for `integration`.
 - `tests` — non-empty. The test IDs this task must make pass.
-- `steps` — non-empty, in order, concrete enough that a coder who sees only this task, its criteria and its tests needs nothing else.
-- `touches` — optional. The files, packages or modules the task creates or modifies, the test files it extends among them.
-- `depends_on` — optional. Task IDs that must be done first; must reference lower IDs. Absent means "the previous task". Use it to let independent tasks run in parallel.
+- `steps` — non-empty, in order, concrete enough that a coder who sees only this task, its criteria and its tests needs nothing else. A step says a behaviour to add or a decision already taken, not an edit: it names no line of a file (`store.go:88`, "line 88") and quotes no block of code, because both are wrong after the first commit that moves them, and a line number is not a decision.
+- `touches` — optional. The files, packages or modules the task creates or modifies, the test files it extends among them. This is where the files are named, each once, without a line number.
+- `depends_on` — optional. Task IDs that must be done first; must reference lower IDs. Absent means "the previous task": **omit it** when it would name only the task before, and write it only to let independent tasks run in parallel or to name more than one task.
 - `done_when` — optional. Extra completion checks beyond the implicit ones.
 - `state` — `pending` for a freshly generated plan.
 - `optional` — optional boolean, default false.
@@ -92,7 +92,6 @@ The example is a Go project's. In this project, use this project's own commands,
         "Grep catalog/ and http/ for TODO and panic(\"not implemented\") and remove any that remain"
       ],
       "touches": ["http/server_test.go"],
-      "depends_on": [1],
       "done_when": ["`go test ./... -count=1` passes against a real database"],
       "state": "pending"
     }

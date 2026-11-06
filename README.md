@@ -317,3 +317,4 @@ and no API key: the command's tests run against a scripted model.
 - [ADR 15](docs/adr/15-version-the-steering.md) — why the steering carries a version and a record of its amendments, and what a package records of it
 - [ADR 16](docs/adr/16-triage-every-review-finding-four-ways.md) — why a review finding is fixed, contested, escalated or declined, and the review converges on two clean rounds
 - [ADR 17](docs/adr/17-review-the-plan-adversarially.md) — why the plan gets a review of its own, against the Zero-Decision Rule and computed grounding facts
+- [ADR 18](docs/adr/18-allow-extension-keys-and-move-word-checks-out-of-the-validator.md) — why every object accepts `x-` keys that every save keeps, and why vague wording is the generator's and the reviewers' to catch, not the validator's
