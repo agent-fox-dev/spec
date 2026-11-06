@@ -8,7 +8,7 @@ Its companions `specr`, which renders an existing package as Markdown, and `spec
 which reports a package's state and changes it, share this interface and are
 documented in [specr.md](specr.md) and [speca.md](speca.md). `spec --help` says so.
 
-`spec` turns a product idea into a complete, validated version 2 package under
+`spec` turns a product idea into a complete, validated version 3 package under
 `.specs/NN_name/`. It takes **exactly one positional input** and writes
 **exactly one JSON object** to stdout on every program-driven path. Progress
 goes to stderr, so a caller can pipe stdout straight into a parser.
@@ -64,14 +64,25 @@ thing written is the package, by this program, after the phases.
 The run is unattended, and the design follows from that. Nobody is waiting to
 answer questions, so the **PRD phase** resolves every open question itself,
 records each in a `## Design Decisions` section, and reports the ones it is
-least sure of as `result.open_questions`.
+least sure of as `result.open_questions`. It also chooses the package's
+profile: `lite` when the work is at most three requirements and no flow
+crosses components end to end (such a package has no execution path and no
+integration task), else `full`; the frontmatter records `profile: lite` and
+nothing for a full package.
 
-Then three **generation phases**, in the order the format fixes, each a fresh
+Then two **generation phases**, in the order the format fixes, each a fresh
 conversation that sees the PRD and the artifacts before it:
 
-1. `requirements.json` — EARS criteria and end-to-end execution paths
-2. `test_spec.json` — one flat list of tests
-3. `tasks.json` — one flat list of tasks
+1. `requirements.json` — EARS criteria, each with its check, and end-to-end
+   execution paths, each with its smoke check. The phase is told the profile:
+   a `lite` package writes no path and at most three requirements, a `full`
+   one at least one path. It writes one check per behaviour (variants as a
+   table on the owner, `same_as` on the others), a `property` check only for a
+   real invariant, a smoke check that asserts the end of its path, no check of
+   an artefact, and names the repository's existing tests in `pseudocode`
+2. `tasks.json` — one flat list of implement tasks, each owning criteria,
+   with no tests, kind or state; the integration task is derived from the
+   package, not generated
 
 The requirements phase is also told what the rules across specs (below) will ask
 of its execution paths: for each spec the package depends on, at least one step
@@ -113,23 +124,21 @@ The PRD phase hands on what it learned reading the code as `codebase_notes`
 later phase of the package is shown them, and so is each later scope's PRD
 phase in a split, so the same code is not read again phase after phase.
 
-The glossary of `requirements.json` is submitted as a list of
-`{term, definition}` entries, because a strict tool schema cannot declare an
-object keyed by its data, and is stored as the object the format defines. With `--architecture` a fifth phase writes
-`architecture.md`; a failure there is a `architecture_not_written` warning,
-not a failed run.
+With `--architecture` a fourth phase writes `architecture.md`; a failure
+there is a `architecture_not_written` warning, not a failed run.
 
-The package is then written, read back from disk, validated, and activated
-(`draft → active`, computing the intent hash) if it validates.
+The package is then written — the artifacts, `progress.json` with every task
+`pending`, and `spec.md`, the render — read back from disk, validated, and
+activated (`draft → active`, computing the intent hash) if it validates.
 
 Validated means the format's whole verdict, the one `speca <spec> --validate`
-gives: the package's own rules (the schemas and `C1`…`C11`), then the rules
-across specs (format v2 §10.4) that concern it, applied to the spec root as it
+gives: the package's own rules (the schemas and `C1`…`C8`), then the rules
+across specs (format v3 §10.3) that concern it, applied to the spec root as it
 is once the package is written. They are an unknown dependency, a dependency
-cycle, a spec it depends on whose execution paths share no actor with its own,
-and, as a warning, a glossary term two specs define differently. A package that
-breaks one is on disk, in `draft`, and reported as `invalid_spec` with the rule
-named in `result.validation`. The actor rule is applied only here: the phase that
+cycle, and a spec it depends on whose execution paths share no actor with its
+own (where both packages have paths; a `lite` package is held to nothing
+there). A package that breaks one is on disk, in `draft`, and reported as
+`invalid_spec` with the rule named in `result.validation`. The actor rule is applied only here: the phase that
 writes the dependencies comes after the requirements, so it could not repair it.
 A spec root that cannot be read for the check fails the run at stage
 `validate`, category `disk`.
@@ -270,15 +279,15 @@ by `the review raised 1 critical, 2 minor; the round is not clean` or
 ### The plan review (`--adversarial-plan`)
 
 With `--adversarial-plan`, the plan of every package the run generates —
-`requirements.json`, `test_spec.json` and `tasks.json` — is reviewed after the
-tasks phase and before the architecture phase and the write, so
+`requirements.json` and `tasks.json` — is reviewed after the tasks phase and
+before the architecture phase and the write, so
 `architecture.md` is written from the revised plan. It is independent of
 `--adversarial`: either, both or neither may be given, and a run with neither
 runs the phases it always ran. A dry run reviews the plan too and writes
 nothing.
 
 Before the first round the plan is validated in memory against the schemas
-and C1 to C11. A plan that does not validate is not reviewed: a `high`
+and C1 to C7. A plan that does not validate is not reviewed: a `high`
 `plan_review_skipped` warning names the scope and the number of errors, no
 plan phase runs, and the package is written and validated as it would be
 without the flag, failing the run on the same errors. Otherwise the run
@@ -288,15 +297,15 @@ the repository and looked at on the file system, not judged by a model.
 
 The reviewer applies two written rubrics, carried in its prompt as their
 questions, plus the steering, and every finding names its `rubric` and its
-place in the plan by id in `section` (a task by its number, a test, criterion
-or execution path id; anything else is turned back):
+place in the plan by id in `section` (a task by its number, a criterion or
+execution path id; anything else is turned back):
 
 - `zero_decision` — a coder holding the package and the code would have to
   make a design choice the plan does not make: where the code goes; a name,
-  signature, error, message, format or order a test asserts or another task
+  signature, error, message, format or order a check asserts or another task
   relies on; a library, algorithm or data structure left open where the
   choice shows; a step that leaves the work open; two coders who could both
-  follow a task and disagree on a test;
+  follow a task and disagree on a check;
 - `grounding` — the plan names what is not there: a path in `touches` that
   does not exist and nothing creates (its evidence is the grounding fact, and
   a finding naming a path the facts do not list is turned back), a symbol
@@ -306,17 +315,17 @@ or execution path id; anything else is turned back):
   text of the plan, `critical` or `major`, never declined. With no steering
   there is nothing to check.
 
-For a plan, `critical` is a plan that builds the wrong thing or whose tests
-contradict its criteria; `major` a choice left to the coder that a test or
+For a plan, `critical` is a plan that builds the wrong thing or whose checks
+contradict its criteria; `major` a choice left to the coder that a check or
 another task depends on, a path or symbol that does not exist and nothing
 creates, or a contradicted directive; `minor` a choice no test or task sees,
 or the wording.
 
-The reviser submits the three artifacts whole. It may not change the PRD, the
-spec id or name of any artifact, a task's `state`, or the actors of the
-execution paths (compared ignoring case), and its plan must pass the schemas
-and C1 to C11; a revision that breaks either is turned back with each change
-or broken rule named, until it passes.
+The reviser submits the two artifacts whole. It may not change the PRD, the
+spec id or name of either artifact, or the actors of the execution paths
+(compared ignoring case), and its plan must pass the schemas and C1 to C7; a
+revision that breaks either is turned back with each change or broken rule
+named, until it passes.
 
 The rounds are the PRD review's, applied to the plan unchanged: the same
 `R<round>-F<n>` ids, the four dispositions and their checks, the repeat rules,
@@ -403,7 +412,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--comment` | off | post the finished PRD back to the issue the input came from; needs an issue input and a forge token (`GITHUB_TOKEN`/`GH_TOKEN` or `GITLAB_TOKEN`). An invalid package's PRD is not posted |
 | `--max-parallel` | 3 | how many packages of a split are generated at once, beside the next scope's PRD phase; `1` writes the scopes one after another; less is a usage error |
 | `--adversarial` | off | review every PRD the run writes before its package is generated: a fresh agent looks for its flaws and another revises it to answer them (see [the adversarial review](#the-adversarial-review---adversarial)) |
-| `--adversarial-plan` | off | review the plan of every package the run generates — its requirements, tests and tasks — after the tasks phase and before the architecture phase and the write: a fresh agent looks for its flaws against the Zero-Decision Rule and codebase grounding, and another revises it (see [the plan review](#the-plan-review---adversarial-plan)). Independent of `--adversarial` |
+| `--adversarial-plan` | off | review the plan of every package the run generates — its requirements with their checks, and its tasks — after the tasks phase and before the architecture phase and the write: a fresh agent looks for its flaws against the Zero-Decision Rule and codebase grounding, and another revises it (see [the plan review](#the-plan-review---adversarial-plan)). Independent of `--adversarial` |
 | `--adversarial-rounds` | 1 | the most rounds of each review the run does, the PRD's and the plan's counted separately, 1 to 5; a review stops once two consecutive rounds raise nothing `critical` or `major`. With both reviews and `3`, a package may run up to twelve review and revision phases. A value outside 1 to 5 (an explicit `0` included), or the flag with neither `--adversarial` nor `--adversarial-plan`, is a usage error; a non-integer is refused by the flag parser |
 
 ### The model and the ceilings
@@ -413,7 +422,7 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--dir` | `.` | the repository to work in; the file tools cannot reach outside it |
 | `--model` | `$AF_MODEL`, else `$AGENTKIT_MODEL`, else `STANDARD` | a tier (`SIMPLE`, `STANDARD`, `ADVANCED`) or a model id from AgentKit's catalog (an `anthropic/` prefix is accepted). An id the catalog does not list is refused, since it would have no price and no budget could stop it |
 | `--effort` | `$AF_MODEL_EFFORT`, else each phase's tier effort | `off`, `low`, `medium`, `high`, `xhigh`, `max`, for every phase. An effort a phase's model does not take is lowered to the highest it does, with an `effort_clamped` warning naming the phases |
-| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `test_spec`, `tasks`, `plan_review`, `plan_revision` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
+| `--phase-model` | none | `PHASE=MODEL[:EFFORT]`, repeatable: run one phase — `prd`, `prd_review`, `prd_revision`, `requirements`, `tasks`, `plan_review`, `plan_revision` or `architecture` — on another model (a tier or a catalog id) and, when given, effort. Without an effort the phase takes `--effort`, else the tier's effort for that phase, else none. A later value for the same phase wins. A phase or effort that does not exist is a usage error; an unknown model is a `model` failure |
 | `--max-turns` | 60 | per-phase turn ceiling, also the repair budget |
 | `--max-tokens` | 65536 | the output token cap of one model response in every phase. The model's thinking is spent from the same cap as its reply, so a phase on a high effort can use it up before it calls its submit tool; that fails as `no_result`, and this is the flag to raise. The model's own output ceiling still applies, so a larger value than it allows is lowered to it. Not `specr --max-tokens`, which is a render budget |
 | `--budget` | 5.00 | per-phase spend ceiling, in dollars |
@@ -424,12 +433,12 @@ the phases that have finished, so packages in flight can take a run past it.
 | `--context` | none | additional context, repeatable; each value is one paragraph of a labelled block shown beside the input |
 
 A tier chooses a model and an effort per phase. The PRD and the requirements
-are where a spec's judgment is made; the test spec, the tasks and the
-architecture turn them into structure the validator checks, and every turn of
-a phase pays for its effort, the turns that only read a file included. So the
-later phases run lower:
+are where a spec's judgment is made, what each criterion demands and how it
+is checked; the tasks and the architecture turn them into structure the
+validator checks, and every turn of a phase pays for its effort, the turns
+that only read a file included. So the later phases run lower:
 
-| Tier | `prd` | `requirements`, `plan_review`, `plan_revision` | `test_spec`, `tasks`, `architecture` |
+| Tier | `prd` | `requirements`, `plan_review`, `plan_revision` | `tasks`, `architecture` |
 |---|---|---|---|
 | `SIMPLE` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `medium` | `claude-sonnet-5-5` `low` |
 | `STANDARD` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `high` | `claude-sonnet-5-5` `medium` |
@@ -485,10 +494,10 @@ model and effort each phase will run on, e.g.
 
 ```json
 "estimate": {
-  "phases": 4,
+  "phases": 3,
   "max_turns_per_phase": 60,
   "max_budget_per_phase_usd": 5,
-  "max_total_usd": 20
+  "max_total_usd": 15
 }
 ```
 
@@ -496,7 +505,7 @@ model and effort each phase will run on, e.g.
 `--architecture`, plus two per allowed round with `--adversarial` and two more
 per allowed round with `--adversarial-plan`, for the next package; when a split is being resumed, that figure times the scopes still to
 write. `spec --preflight --adversarial --adversarial-rounds 3` therefore
-reports 10. A split a not-yet-written PRD calls for is the model's decision, so
+reports 9. A split a not-yet-written PRD calls for is the model's decision, so
 the package count is a lower bound; the review rounds can stop early, so their
 count is an upper bound. With `--adversarial`, `phase_models` lists
 `prd_review` and `prd_revision` right after `prd`; with `--adversarial-plan`,
@@ -590,14 +599,14 @@ Present exactly when `ok` is false:
 ```
 
 `stage` names the step: `usage`, `input`, `preflight`, `prd`, `prd_review`,
-`prd_revision` (an interrupt during the review), `plan`, `requirements`, `test_spec`, `tasks`, `scaffold`, `write`, `validate`,
+`prd_revision` (an interrupt during the review), `plan`, `requirements`, `tasks`, `scaffold`, `write`, `validate`,
 `budget`. `resumable` is true while an unfinished split plan exists (never at
 stage `preflight`). `fix_hint` names a mechanical remedy where one is known: the
 flag to raise for a ceiling, the environment variables for a missing
 credential, the tiers for an unknown model.
 
-A run that fails while it generates a package (stage `requirements`,
-`test_spec` or `tasks`) has written nothing: the package directory is removed.
+A run that fails while it generates a package (stage `requirements` or
+`tasks`) has written nothing: the package directory is removed.
 Its `result` keeps what the PRD phase decided (`spec_id`, `spec_name`, `title`,
 `open_questions`) and claims no package: `spec_dir` and `status` are empty,
 `artifacts` is `[]`, there is no `spec_package` entry in the envelope's
@@ -630,18 +639,18 @@ written, such as `invalid_spec`, still names the package on disk.
 ### `result`
 
 `result` describes the first package this run wrote: `spec_dir`, `spec_id`,
-`spec_name`, `title`, `status`, `source`, the `artifacts` written (`prd.md`, the
-three JSON artifacts, `architecture.md` with `--architecture`, and `spec.md`,
-the package's render, which every save writes beside them; a dry run lists no
-`spec.md`), the counts
-(`requirements`, `criteria`, `execution_paths`, `tests`, `tasks`), and:
+`spec_name`, `title`, `status`, `source`, the `artifacts` written (`prd.md`,
+`requirements.json`, `tasks.json`, `architecture.md` with `--architecture`,
+and `progress.json` and `spec.md`, the progress and the render, which every
+save writes beside them; a dry run lists neither of the last two), the counts
+(`requirements`, `criteria`, `execution_paths`, `tasks`; the integration task,
+which is derived, is not counted), and:
 
-- `validation` — the format's verdict, every error naming its rule (`C1`…`C11`,
+- `validation` — the format's verdict, every error naming its rule (`C1`…`C8`,
   `json_schema`, `completeness`, and across specs `cross_spec_unknown_dependency`,
-  `cross_spec_cycle`, `cross_spec_actor`; a glossary conflict is the warning
-  `cross_spec_glossary`)
+  `cross_spec_cycle`, `cross_spec_actor`)
 - `traceability` — derived, never stored: `criteria_covered`,
-  `criteria_uncovered`, `paths_covered`, `paths_uncovered`, `tests_unowned`
+  `criteria_uncovered`, `paths_covered`, `paths_uncovered`, `criteria_unowned`
 - `open_questions` — the decisions made under uncertainty
 - `relevant_files` — the files the PRD phase pointed the later phases at
 - `comment_url` — the PRD comment, under `--comment`

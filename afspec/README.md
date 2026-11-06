@@ -1,10 +1,10 @@
 # afspec
 
-Go library for the agent-fox specification format, version 2. Load, validate,
-mutate, save and render specs with byte-for-byte round-trip fidelity.
+Go library for the agent-fox specification format, version 3. Load, validate,
+mutate, save, render and migrate specs with byte-for-byte round-trip fidelity.
 
 The format itself is specified in
-[`specification/spec-format-v2.md`](../specification/spec-format-v2.md). The
+[`specification/spec-format-v3.md`](../specification/spec-format-v3.md). The
 JSON Schemas this library compiles and embeds, in `schemas/`, are copies of the
 canonical ones in [`specification/schemas/`](../specification/schemas/):
 `//go:embed` cannot reach outside the package directory. Change a schema in
@@ -36,7 +36,7 @@ func main() {
 
     fmt.Println(spec.Title, spec.Status)
 
-    // Schema validation plus the cross-file rules C1 to C11.
+    // Schema validation plus the cross-file rules C1 to C8.
     result := spec.Validate()
     if !result.Valid {
         for _, e := range result.Errors {
@@ -51,33 +51,42 @@ func main() {
 Runnable programs that create a spec, validate one and work through its
 tasks are in [`examples/`](../examples/README.md).
 
-## What version 2 changes
+## What version 3 changes
 
-| Area | Version 1.3 | Version 2 |
+| Area | Version 2 | Version 3 |
 |---|---|---|
-| Criteria | `acceptance_criteria` + `edge_cases`, five pattern-specific fields | one `criteria` list; `pattern`, `condition`, `guard`, `action`, `contract` |
-| Properties, error handling | separate sections with their own IDs | folded into criteria (`ubiquitous` + a `property` test; `unwanted` + a `contract`) |
-| Tests | four arrays, four ID families, a stored `coverage` object | one `tests` list with `kind` and `verifies`; coverage computed |
-| Tasks | groups → subtasks → verification, a stored `traceability` array | a flat `tasks` list; traceability computed |
-| Completeness | references must resolve | every test owned by a task, every criterion owned by an implement task, the final integration task owns every smoke test |
-| ID formats | thirteen | five |
+| Tests | a fourth artifact, `test_spec.json`, one `tests` list with `kind` and `verifies` | gone; every criterion carries its `check` (`kind`, `setup`, `pseudocode`, or `same_as` another's) and every path its `smoke` check, required by the schema |
+| Criteria | six patterns, `guard` on `complex_event`; `system` on every criterion | five patterns (a second condition is written into `condition`); `system` optional on the criterion, with the requirement's as the default |
+| Progress | `state` on every task of `tasks.json`; `updated_at` in the PRD frontmatter | `progress.json`, written by the tools, holding every task's state and `updated_at`; a task move writes that file alone |
+| The integration task | authored, last in the plan, owning every smoke test | derived from the package as task `N+1`; not stored |
+| Tasks | `kind`, `tests`, `state`, `optional` | `id`, `title`, `criteria`, `steps`, `touches`, `depends_on`, `done_when` |
+| IDs | `{spec_id}-REQ-N`, `{spec_id}-REQ-N.C`, `{spec_id}-PATH-N`, `TS-NN-N`, task ids | `REQ-N`, `REQ-N.C`, `PATH-N`, task ids |
+| Profiles | — | `full` (at least one path, an integration task) or `lite` (at most three requirements, no path) |
+| Dropped fields | | `introduction`, `glossary` (a `## Glossary` section of the PRD), `owner`, `tags` |
+| Cross-file rules | C1 to C11 | C1 to C8 |
 
 ## Key types
 
 | Type | Description |
 |------|-------------|
-| `Spec` | PRD frontmatter fields, PRD body and the three JSON artifacts |
-| `RequirementsV2Json` | Requirements artifact (generated from the JSON Schema) |
-| `TestSpecV2Json` | Test specification artifact (generated from the JSON Schema) |
-| `TasksV2Json` | Tasks artifact (generated from the JSON Schema) |
+| `Spec` | PRD frontmatter fields (`Profile` among them), PRD body, the two JSON contract artifacts, the progress (`Progress`, nil for a package without `progress.json`) and `UpdatedAt`, from the progress |
+| `RequirementsV3Json` | Requirements artifact (generated from the JSON Schema); `Check` and `Smoke` are its check types |
+| `TasksV3Json` | Tasks artifact (generated from the JSON Schema) |
+| `ProgressV3Json`, `TaskProgress` | Progress artifact (generated from the JSON Schema): one `{Id, State}` per task |
+| `PlannedTask` | One task of the plan: a `Task` with its `Kind` (`TaskKindImplement` or `TaskKindIntegration`) and its `State` |
+| `TaskState` | `TaskStatePending`, `TaskStateInProgress`, `TaskStateDone`, `TaskStateDropped` |
 | `ValidationResult` | `Valid`, `Errors`, `Warnings` |
 | `ValidationEntry` | One error or warning: category, check, artifact, message, entity |
 | `SpecMeta` | Lightweight metadata for discovery |
 | `DependencyGraph`, `DependencyEdge` | Inter-spec dependency graph from `tasks.json` |
 | `CoverageReport` | Derived coverage: `Covered` and `Uncovered` ID lists |
-| `TraceabilityMatrix`, `TraceLink` | Derived criterion → tests → tasks matrix |
-| `PartialSpec` | The artifacts a generation run has produced so far |
+| `TraceabilityMatrix`, `TraceLink` | Derived criterion → check → tasks matrix |
+| `PartialSpec` | The artifacts a generation run has produced so far, and the profile |
 | `BootstrapSpec` | Incremental builder with deferred validation via `Finalize()` |
+
+The constants `SchemaVersion` (`3`), `ProfileFull`, `ProfileLite`,
+`RequirementsFileName`, `TasksFileName`, `ProgressFileName`,
+`RenderedFileName` and `IntegrationTaskTitle` name what the format fixes.
 
 ## API overview
 
@@ -85,9 +94,11 @@ tasks are in [`examples/`](../examples/README.md).
 
 | Function | Description |
 |----------|-------------|
-| `LoadSpec(dir) (*Spec, error)` | Load all artifacts from a spec directory |
-| `(*Spec).Save(dir) error` | Atomic save with lifecycle guards |
-| `(*Spec).IsScaffold() bool` | Report whether the spec has no requirements, tests or tasks yet |
+| `LoadSpec(dir) (*Spec, error)` | Load all artifacts from a spec directory; `progress.json` may be absent, and every task is then `pending` |
+| `(*Spec).Save(dir) error` | Atomic save of every artifact, `progress.json` and `spec.md`, with lifecycle guards |
+| `(*Spec).SaveProgress(dir) error` | Write `progress.json` alone, atomically, with the same guards: what a task move writes |
+| `(*Spec).IsScaffold() bool` | Report whether the spec has no requirements or tasks yet |
+| `(*Spec).IsLite() bool` | Whether the package's profile is `lite` |
 | `CreateSpec(specID, specName) *Spec` | Create a draft scaffold |
 | `MarshalJSON(v) ([]byte, error)` | Deterministic serialization in schema field order |
 
@@ -96,9 +107,9 @@ tasks are in [`examples/`](../examples/README.md).
 | Function | Description |
 |----------|-------------|
 | `(*Spec).Validate() ValidationResult` | Schema validation, then the cross-file rules |
-| `(*Spec).ValidateSchema() ValidationResult` | The four bundled JSON Schemas |
-| `(*Spec).ValidateCrossFile() ValidationResult` | Rules C1 to C11 plus the never-blocking warnings |
-| `ValidateCrossSpec(specs, graph) ValidationResult` | Dependencies exist, the graph is acyclic, actors are shared, glossaries agree (warning) |
+| `(*Spec).ValidateSchema() ValidationResult` | The bundled JSON Schemas: the PRD frontmatter, the two contract artifacts and, when present, the progress |
+| `(*Spec).ValidateCrossFile() ValidationResult` | Rules C1 to C8 plus the never-blocking warnings |
+| `ValidateCrossSpec(specs, graph) ValidationResult` | Dependencies exist, the graph is acyclic, actors are shared where both packages have paths |
 | `(*Spec).ValidateStructured() map[string]any` | Structured output for CLI consumption |
 | `ValidateArtifactSchema(artifact, schema, name)` | Validate one decoded artifact |
 
@@ -106,25 +117,26 @@ The cross-file rules, all errors:
 
 | Rule | What it requires |
 |---|---|
-| C1 | `spec_id` and `spec_name` agree across the PRD, the three artifacts and the folder name |
-| C2 | Every ID matches its format, carries this spec's prefix, and is unique |
-| C3 | Every `test.verifies` entry resolves to a criterion or a path |
-| C4 | Every criterion is verified by at least one test |
-| C5 | Every path is verified by a smoke test, and every smoke test verifies a path |
-| C6 | Every `task.criteria`, `task.tests` and `depends_on` entry resolves; `depends_on` forms a DAG over lower IDs |
-| C7 | Every test is owned by at least one task |
-| C8 | Every criterion is owned by at least one `implement` task |
-| C9 | Exactly one `integration` task, last, owning every smoke test |
-| C10 | Every `unwanted` criterion has a contract |
-| C11 | `real_components` is present exactly when `kind` is `smoke` |
+| C1 | `spec_id` and `spec_name` agree across the PRD, the two contract artifacts, `progress.json` when present, and the folder name |
+| C2 | Every ID matches its format (`REQ-N`, `REQ-N.C` under `REQ-N`, `PATH-N`, a positive task id) and is unique in its family |
+| C3 | Every `check.same_as` names a criterion of this spec whose check is its own, and not the criterion itself, or a path of this spec |
+| C4 | Every `task.criteria` entry resolves to a requirement or a criterion; every `depends_on` entry resolves to a lower task id |
+| C5 | Every criterion is owned by at least one task, directly or through its requirement |
+| C6 | Every `unwanted` criterion has a non-empty contract |
+| C7 | A `full` package has at least one execution path; a `lite` package has none and at most three requirements |
+| C8 | Every entry of `progress.json` names a task of the plan or the integration task, each at most once |
+
+A criterion without a check and a path without a smoke check are schema
+errors, not rules. A package that declares another `schema_version` gets one
+`schema_version` error that names `speca <package> --migrate`.
 
 ### Generation
 
 | Function | Description |
 |----------|-------------|
-| `GenerationSteps` | The mandatory order: requirements, test_spec, tasks |
+| `GenerationSteps` | The mandatory order: requirements, tasks |
 | `DecodeArtifact(step, content)` | Decode a model's tool input into the typed artifact |
-| `ValidateGenerationStep(step, partial)` | The artifact's schema plus every rule decidable at that step |
+| `ValidateGenerationStep(step, partial)` | The artifact's schema plus every rule decidable at that step: after requirements C1, C2, C3, C6 and C7; after tasks C4 and C5 as well |
 | `ValidateGenerationStepComplete(step, partial)` | The same, without stopping at a schema failure: every rule runs, so a repair loop hears of every problem at once |
 | `FormatValidationEntries(entries) string` | Render violations as repair feedback |
 
@@ -141,6 +153,19 @@ The cross-file rules, all errors:
 | `ComputeIntentHash(body) (string, error)` | SHA-256 of the `## Intent` section |
 | `HasIntent(body) bool` | Whether `ComputeIntentHash` can hash the body: `## Intent`, spelled exactly so, on a line of its own |
 
+### Migration
+
+| Function | Description |
+|----------|-------------|
+| `LoadV2(dir) (*Spec, error)` | Read a version 2 package and return the version 3 package it converts to, in memory, by format v3 §13; nothing is written |
+| `MigrateV2(dir) error` | Write that package in place, whatever its status, through the temporary files and renames a save uses, and remove `test_spec.json` |
+
+Both refuse a package whose `schema_version` is not 2, one that does not
+load, and one with a criterion no test verifies or a path no smoke test
+verifies, naming the gap. The conversion is deterministic and changes no
+`## Intent`, no `intent_hash` and no status; `speca <package> --migrate` runs
+it, and `speca --migrate --all` over a spec root and its archive.
+
 ### Discovery
 
 | Function | Description |
@@ -151,43 +176,50 @@ The cross-file rules, all errors:
 | `IsSpecName(name) bool` | The name part of that pattern, `[a-z][a-z0-9]*(_[a-z0-9]+)*`: a name it accepts always makes a valid directory |
 | `LoadSpecLandscape(root, includeArchive, currentSpecID)` | Metadata for landscape views |
 | `UnknownFields(raw, target) []string` | The keys in a decoded JSON value that the target's type has no field for, as JSON pointers. `DecodeArtifact` refuses an artifact that has any; `LoadSpec` keeps them aside and `ValidateSchema` reports each as an `unknown_field` error, so the schemas' `additionalProperties: false` holds although the decode would drop the key. An extension key (`x-…`) is not listed |
-| `IsExtensionKey(key) bool`, `ExtensionPrefix` | A key that begins with `x-` is an extension key, a team's own metadata, which every schema allows on every object. `LoadSpec` keeps the extension keys of the three JSON artifacts and the PRD frontmatter, and every save writes each back on the object it came from, found by its `id` or its position; `DecodeArtifact` refuses one in a model's artifact |
+| `IsExtensionKey(key) bool`, `ExtensionPrefix` | A key that begins with `x-` is an extension key, a team's own metadata, which every schema allows on every object. `LoadSpec` keeps the extension keys of the JSON artifacts and the PRD frontmatter, and every save writes each back on the object it came from, found by its `id` or its position; `DecodeArtifact` refuses one in a model's artifact |
 
 ### Rendering
 
 | Function | Description |
 |----------|-------------|
-| `(*Spec).RenderCombined(opts…) string` | One concatenated Markdown document |
-| `(*Spec).RenderIndividual(opts…) map[string]string` | Per-artifact Markdown |
-| `(*Spec).RenderIndividualScoped(taskID, opts…)` | Scoped to one task; what a coder receives. The PRD is there without its `## Background` and `## Requirements`, which the task's criteria restate, and one line names what was left out |
+| `(*Spec).RenderCombined(opts…) string` | One concatenated Markdown document: the PRD, the architecture, the requirements, the tasks |
+| `(*Spec).RenderIndividual(opts…) map[string]string` | Per-section Markdown, keyed `prd`, `architecture`, `requirements`, `tasks` |
+| `(*Spec).RenderIndividualScoped(taskID, opts…)` | Scoped to one task; what a coder receives. The PRD is there without its `## Background` and `## Requirements`, which the task's criteria restate, and one line names what was left out. Scoped to the integration task, every path is in full and the criteria with a contract are listed under `## Contracts` |
+| `(*Spec).RenderTasks() string` | The plan as Markdown: the test commands, the dependencies, every stored task, then the integration task |
+| `(*TasksV3Json).Render()`, `(*RequirementsV3Json).Render()` | One artifact as Markdown; the tasks render holds the stored tasks only |
 | `(*Spec).RenderedBytes() []byte` | What `spec.md` holds: `RenderedHeader`, a blank line and the whole `RenderCombined()`; every save writes it |
-| `RenderedFileName`, `RenderedHeader` | `spec.md`, the file every save writes beside the artifacts, and its first line |
+| `RenderedFileName`, `RenderedHeader` | `spec.md`, the file every save writes beside the artifacts, and its first line, which names `prd.md`, `requirements.json`, `tasks.json` and `architecture.md` |
 | `WithMaxTokens(n) RenderOption` | Cap the estimated size, truncating progressively |
 | `(Criterion).RenderEARSSentence() string` | The EARS sentence |
 | `(Criterion).RenderEARS() string` | The sentence plus `→ contract` when there is one |
 
-Without a budget, a render drops nothing from the package. The `prd` part
-opens with the frontmatter, one field per line. Every artifact field follows,
-and the tasks render begins with the test commands (`spec_tests` included) and
-the cross-spec dependencies. Two things are left out because they add nothing
+Without a budget, a render drops nothing from the contract. The `prd` part
+opens with the frontmatter, one field per line. Every artifact field follows:
+each criterion renders as its sentence, its contract and its check, each path
+with its steps and its smoke check, and the tasks render begins with the test
+commands (`spec_tests` included) and the cross-spec dependencies and ends
+with the integration task. Two things are left out because they add nothing
 to the metadata: the artifacts' `$schema` URIs and their own copies of the
-spec's identity. A criterion's `pattern` is carried by its EARS sentence.
+spec's identity. A criterion's `pattern` is carried by its EARS sentence. The
+progress is not the contract and is never rendered, so a task move leaves
+`spec.md` byte for byte as it was.
 
-A scoped render shows the frontmatter, the introduction, the glossary, every
-external API, the test commands and the dependencies, since all of them
-belong to the whole spec. Requirements, execution paths, tests and tasks that
-the task does not own are listed one line each, by id and title.
+A scoped render shows the frontmatter, every external API, the test commands
+and the dependencies, since all of them belong to the whole spec. The
+requirements that own the task's criteria, and the paths a `same_as` of those
+criteria names, are in full; every other requirement, path and task, the
+integration task included, is listed one line each, by id and title.
 `WithMaxTokens` is the one way to drop detail: it removes the architecture
-first, then slims the tests.
+first, then the `setup` and `pseudocode` of every check and smoke check.
 
 ### Derivation
 
 | Function | Description |
 |----------|-------------|
-| `(*TestSpecV2Json).ComputeCoverage(req) CoverageReport` | Which criteria and paths are verified |
-| `(*Spec).ComputeTraceability() TraceabilityMatrix` | criterion → tests → tasks |
+| `(*RequirementsV3Json).ComputeCoverage() CoverageReport` | Which criteria carry a check that resolves, and which paths a smoke check |
+| `(*Spec).ComputeTraceability() TraceabilityMatrix` | criterion → check → tasks, and path → smoke check → the integration task; each `TraceLink` has `Kind`, `ID`, `Check`, `Tasks`, `Covered` and `Owned` |
 
-Neither is stored: format v2 §7.1 and §8.5 make both derived.
+Neither is stored: format v3 §8.5 makes both derived.
 
 ### Criterion builders
 
@@ -195,10 +227,21 @@ Neither is stored: format v2 §7.1 and §8.5 make both derived.
 |----------|----------|
 | `UbiquitousCriterion(id, system, action)` | THE system SHALL action |
 | `EventDrivenCriterion(id, condition, system, action)` | WHEN condition, THE system SHALL action |
-| `ComplexEventCriterion(id, condition, guard, system, action)` | WHEN condition AND guard, THE system SHALL action |
 | `StateDrivenCriterion(id, condition, system, action)` | WHILE condition, THE system SHALL action |
 | `UnwantedCriterion(id, condition, system, action, contract)` | IF condition, THEN THE system SHALL action |
 | `OptionalCriterion(id, condition, system, action)` | WHERE condition, THE system SHALL action |
+
+An empty `system` leaves the field unset, so the requirement's `system`, then
+`"system"`, is rendered. Every criterion needs a check:
+
+| Function | Description |
+|----------|-------------|
+| `(Criterion).WithContract(contract)` | A copy carrying the contract |
+| `(Criterion).WithCheck(kind, setup, pseudocode)` | A copy carrying its own check; `kind` is `CheckKindUnit`, `CheckKindIntegration` or `CheckKindProperty` |
+| `(Criterion).WithSameCheckAs(id)` | A copy whose check is the same as the named criterion's, or as a path's smoke check |
+| `OwnCheck(kind, setup, pseudocode) Check`, `SameAs(id) Check` | The two forms of a check, for a `Criterion` built by hand |
+| `(Check).IsShared()`, `KindText()`, `PseudocodeText()` | Read a check |
+| `(Requirement).Resolve(c) Criterion` | A copy of `c` with the requirement's `system` filled in when `c` names none |
 
 ### Mutation
 
@@ -211,22 +254,28 @@ appends unconditionally.
 |----------|-------------|
 | `AddRequirement` / `GetRequirement` / `RemoveRequirement` | Requirements in `requirements.json` |
 | `AddCriterion` / `GetCriterion` | Criteria within one requirement |
-| `SetGlossaryEntry` / `RemoveGlossaryEntry` | Glossary terms |
-| `AddExecutionPath`, `AddExternalAPI` | Execution paths and external API contracts |
-| `AddTest` / `GetTest`, `(*TestSpecV2Json).TestsOfKind(kind)` | Tests in `test_spec.json` |
+| `AddExecutionPath`, `AddExternalAPI` | Execution paths (each with its `Smoke`) and external API contracts |
 | `AddTask`, `AddDependency` | Tasks and cross-spec dependencies in `tasks.json` |
-| `NextRequirementID`, `NextCriterionID`, `NextExecutionPathID`, `NextTestID`, `NextTaskID` | The next free ID of each of the five formats |
+| `NextRequirementID`, `NextCriterionID`, `NextExecutionPathID`, `NextTaskID` | The next free ID of each of the four formats |
 | `LoadDependentInterfaces(specID, root)` | The upstream specs' interfaces; specs that fail to load are skipped |
 
 ### Tasks
 
+A task's state lives in `progress.json`, so the plan and its moves are
+methods of `Spec`. None of them changes the receiver: a move returns the
+progress to write, which the caller assigns to `spec.Progress` and persists
+with `SaveProgress`.
+
 | Function | Description |
 |----------|-------------|
-| `(*TasksV2Json).TransitionTask(id, target) (*TasksV2Json, error)` | Move one task through the state machine of §8.3.1 |
-| `(*TasksV2Json).CompleteTaskStates(ids)` / `ResetTaskStates(ids)` | Set states directly, bypassing the machine |
-| `(*TasksV2Json).GetTask(id) (*Task, bool)` | A copy of one task |
-| `(*TasksV2Json).IsReady(id) bool` | Whether the task exists, is `pending`, and has every dependency `done`. A task's dependencies are its `depends_on` when present (an empty list means none), otherwise the task before it in plan order (§8.3); a dependency the plan lacks, or a `dropped` one, is not done |
-| `(*TasksV2Json).NextTask() (*Task, bool)` | A copy of the task to work on: the first `in_progress` task in plan order, else the first ready one; `nil, false` when there is none |
+| `(*Spec).Plan() []PlannedTask` | Every task in id order: the stored tasks, kind `implement`, then the integration task of a `full` package, kind `integration`, each with its state |
+| `(*Spec).IntegrationTaskID() (int, bool)` / `IntegrationTask() (PlannedTask, bool)` | The derived integration task, task `N+1`: it depends on every stored task, touches what they touch, and its steps run every smoke check and confirm every contract is consumed (format v3 §8.4). False for a `lite` package and a package with no task |
+| `(*Spec).GetTask(id) (*PlannedTask, bool)` | A copy of one task of the plan |
+| `(*Spec).TaskState(id) TaskState` | The task's state from the progress, `pending` when it has no entry |
+| `(*Spec).IsReady(id) bool` | Whether the task is in the plan, is `pending`, and has every dependency `done`. A task's dependencies are its `depends_on` when present (an empty list means none), otherwise the task before it in plan order (§8.2); the integration task is ready when every stored task is `done` or `dropped`. A dependency the plan lacks, or a `dropped` one, is not done |
+| `(*Spec).NextTask() (*PlannedTask, bool)` | A copy of the task to work on: the first `in_progress` task in plan order, else the first ready one; `nil, false` when there is none |
+| `(*Spec).TransitionTask(id, target) (*ProgressV3Json, error)` | Move one task through the state machine of §8.1 and return the progress to write |
+| `(*Spec).CompleteTaskStates(ids)` / `ResetTaskStates(ids)` | The progress with the named tasks `done` or `pending`, bypassing the machine |
 | `ValidTaskTransition(current, target) bool` | Whether a task transition is allowed |
 
 ### Lint
@@ -237,20 +286,22 @@ appends unconditionally.
 | `DiscoverLintSpecs(specsDir, filterSpec)` | The specs a lint run would look at |
 | `SortFindings(findings)` / `ComputeExitCode(findings)` | Order findings by severity, and the exit status they imply |
 
-### Version 1.3 specs
+### Older versions
 
-The library reads version 2 only. A spec that declares an older
+The library reads version 3 only. A spec that declares an older
 `schema_version` fails validation with a single `schema_version` error rather
-than one schema error per difference. Section 13 of the
-[format reference](../specification/spec-format-v2.md) maps each version 1.3
-construct to its version 2 form.
+than one schema error per difference; for a version 2 package the error names
+`speca <package> --migrate`, which converts it in place with `MigrateV2`
+([Migration](#migration)). Section 13 of the
+[format reference](../specification/spec-format-v3.md) maps each version 2
+construct to its version 3 form. A version 1.3 package has no conversion.
 
 ### Error types
 
 | Type | When returned |
 |------|---------------|
 | `SpecError` | Base error; every afspec error unwraps to it via `errors.As` |
-| `LoadError` | Missing or malformed spec files (carries `File`) |
+| `LoadError` | Missing or malformed spec files (carries `File`); also a package the migration refuses |
 | `SaveError` | Disk write failures |
 | `LifecycleError` | Invalid spec or task state transitions |
 | `IntentError` | Missing `## Intent` section, or intent drift on an active spec |
@@ -264,8 +315,8 @@ goroutine.
 
 ## Code generation
 
-`RequirementsV2Json`, `TestSpecV2Json`, `TasksV2Json` and
-`PrdFrontmatterV2Json` are generated from the schemas in `schemas/` with
+`RequirementsV3Json`, `TasksV3Json`, `ProgressV3Json` and
+`PrdFrontmatterV3Json` are generated from the schemas in `schemas/` with
 [go-jsonschema](https://github.com/atombender/go-jsonschema), run from the
 repository root:
 

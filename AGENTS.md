@@ -28,7 +28,7 @@ Do not implement anything before completing these steps.
 ```
 specification/          # The format reference and the canonical JSON Schemas
 afspec/                 # The library (tests alongside as *_test.go)
-afspec/schemas/         # Embedded copies of specification/schemas/*.v2.json
+afspec/schemas/         # Embedded copies of specification/schemas/*.v3.json
 afspec/testdata/        # Test fixtures
 cmd/spec/               # The spec command
 specgen/                # The generation pipeline behind it
@@ -55,9 +55,9 @@ This project uses spec-driven development. Specifications live in
 `.specs/NN_name/` (numbered by creation order) and contain:
 
 - `prd.md` — product requirements, goals, tech stack, high-level design
-- `requirements.json` — EARS-syntax acceptance criteria, execution paths, external API contracts, glossary
-- `test_spec.json` — language-agnostic test contracts
-- `tasks.json` — implementation plan with subtask states and test commands
+- `requirements.json` — EARS-syntax acceptance criteria, each with its check, execution paths, each with its smoke check, external API contracts
+- `tasks.json` — implementation plan: implement tasks owning criteria, with steps, test commands and cross-spec dependencies; the integration task is derived from it
+- `progress.json` — the state of every task, the integration task included; written by the tools (`speca`), never by hand
 - `architecture.md` — (optional) detailed architecture
 
 `.specs/archive/` holds old specs. Ignore them for coding tasks, except for

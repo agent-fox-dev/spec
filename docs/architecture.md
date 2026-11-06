@@ -10,11 +10,12 @@ package's state. It is one Go module, `github.com/agent-fox-dev/spec`.
 
 ```
 specification/              # The format (no code)
-  spec-format-v2.md         #   The current format reference
+  spec-format-v3.md         #   The current format reference
+  spec-format-v2.md         #   Version 2, superseded, kept for reference
   spec-format.md            #   Version 1.3, kept for reference
-  schemas/                  #   Canonical JSON Schemas, v1 and v2
+  schemas/                  #   Canonical JSON Schemas, v1, v2 and v3
 afspec/                     # The reference library, package afspec
-  schemas/                  #   Embedded copies of the v2 schemas
+  schemas/                  #   Embedded copies of the v3 schemas
   testdata/                 #   Spec package fixtures for the tests
 envelope/                   # The commands' JSON output as Go types (stdlib only)
 cmd/spec/                   # The spec command: flags, help, the entry point
@@ -52,24 +53,28 @@ format lands in both in the same change.
 
 `afspec` embeds its schemas with `//go:embed schemas/*.json`, and an embed
 pattern cannot reach outside the package directory, so `afspec/schemas/` holds
-copies of the four v2 files in `specification/schemas/`. The two sets must be
+copies of the four v3 files in `specification/schemas/` (the PRD frontmatter,
+`requirements.json`, `tasks.json` and `progress.json`). The two sets must be
 byte-identical. To change a schema:
 
 1. Edit it in `specification/schemas/` and update the format reference.
 2. Copy it over the file of the same name in `afspec/schemas/`.
-3. Run `make json-gen` to regenerate `requirements.v2.go`, `test_spec.v2.go`,
-   `tasks.v2.go` and `prd-frontmatter.v2.go`.
+3. Run `make json-gen` to regenerate `requirements.v3.go`, `tasks.v3.go`,
+   `progress.v3.go` and `prd-frontmatter.v3.go`.
 
-The v1 schemas have no copy in `afspec/`: the library reads version 2 only.
+The v1 and v2 schemas have no copy in `afspec/`: the library reads version 3
+only. `migrate.go` reads a version 2 package with types of its own, loosely,
+to convert it ([ADR 19](adr/19-migrate-the-format-to-version-3.md)).
 
 ### What the library does
 
 | Area | Files |
 | --- | --- |
-| Load and save, atomically and round-trip exact; every save writes the render, `spec.md`, beside the artifacts | `afspec.go`, `prd.go`, `marshal.go`, `create.go`, `render.go` |
-| Schema validation and the cross-file rules C1–C11 | `validate.go`, `schemas.go`, `unknown.go` |
+| Load and save, atomically and round-trip exact; every save writes `progress.json` and the render, `spec.md`, beside the artifacts, and `SaveProgress` writes `progress.json` alone | `afspec.go`, `prd.go`, `marshal.go`, `create.go`, `render.go`, `extensions.go` |
+| Schema validation and the cross-file rules C1–C8 | `validate.go`, `schemas.go`, `unknown.go` |
 | Lifecycle (`draft → active → sealed`, superseded, archived) and the intent hash | `lifecycle.go`, `intent.go` |
-| Task state machine, readiness (`IsReady`) and the next task (`NextTask`) | `task.go` |
+| The plan (`Plan`: the stored tasks and the derived integration task, with their states from `progress.json`), the task state machine, readiness (`IsReady`) and the next task (`NextTask`) | `task.go` |
+| The migration from version 2 (`LoadV2`, `MigrateV2`) | `migrate.go` |
 | Mutation and ID allocation | `mutate.go`, `nextid.go`, `bootstrap.go` |
 | Discovery, the cross-spec dependency graph, lint | `discover.go`, `dirname.go`, `specsdir.go`, `graph.go`, `lint.go` |
 | Derived coverage and traceability | `coverage.go` |
@@ -132,7 +137,9 @@ combinators (`schema`) and the indexed search (`codesearch`).
    detects the project's language (`internal/project`), lists the existing
    specs, and builds the repository map once (`internal/repomap`).
 3. The **PRD phase** runs, unless a plan is being resumed. It may report a
-   split, which is recorded as `<first_scope>.split.json` in the spec root.
+   split, which is recorded as `<first_scope>.split.json` in the spec root,
+   and it chooses the package's profile: `lite` for at most three
+   requirements with no flow that crosses components, else `full`.
    With `--adversarial`, the PRD then goes through its **review rounds**
    (`specgen/rounds.go`, [ADR 09](adr/09-review-the-prd-adversarially.md),
    [ADR 16](adr/16-triage-every-review-finding-four-ways.md)): a
@@ -155,15 +162,19 @@ combinators (`schema`) and the indexed search (`codesearch`).
    waits for the packages before it, and a resumed split reviews only the
    plans of the packages it writes.
 4. For each package: a spec number is reserved by creating its directory; the
-   **requirements**, **test spec** and **tasks** phases run in that order, each
-   a fresh agent that sees the PRD and the artifacts before it; with
+   **requirements** and **tasks** phases run in that order, each a fresh agent
+   that sees the PRD and the artifacts before it (the requirements phase is
+   told the profile and writes a check on every criterion and a smoke check
+   on every path; the tasks phase writes implement tasks only, since the
+   integration task is derived); with
    `--adversarial-plan` the plan then goes through its **plan review rounds**
    (`specgen/rounds.go` `runPlanRounds`, on the same loop as the PRD's):
    a plan that does not validate in memory is not reviewed, otherwise the
    grounding facts are computed once and a `plan_review` and a
    `plan_revision` phase run each round, and the package carries on with the
    last complete plan; the optional **architecture** phase runs, from that
-   plan; the package is saved with `afspec`, read back,
+   plan; the package is saved with `afspec`, which writes its `progress.json`
+   and `spec.md` beside the artifacts, read back,
    validated, activated, and its PRD posted under `--comment`. Validated is
    `specpkg.Verdict`, the verdict `speca --validate` gives: the package's own
    rules and the rules across specs that concern it, run over the spec root as
@@ -218,7 +229,7 @@ combinators (`schema`) and the indexed search (`codesearch`).
   the run on the first failed turn.
 
 Each phase declares its kind (`prd`, `prd_review`, `prd_revision`,
-`requirements`, `test_spec`, `tasks`, `architecture`), and the runner builds its agent on that kind's model and
+`requirements`, `tasks`, `plan_review`, `plan_revision`, `architecture`), and the runner builds its agent on that kind's model and
 effort from the run's `agentrun.Plan`: the tier's choice for the phase, or a
 `--phase-model` override. A submit tool's rejection runs
 `afspec.ValidateGenerationStepComplete` and the project audit together, so it
@@ -250,8 +261,9 @@ not ([ADR 07](adr/07-keep-the-builtin-tools-out-of-strict-mode.md)).
 agentkit-go declares strict the tools it is not told to leave out, in the
 order they are sent, while they fit the API's counted limits (20 tools, 16
 union parameters). The artifact schemas are kept strict-expressible: the identity fields the handler
-writes are not declared, and a dictionary such as the glossary is asked for as
-a list of entries.
+writes are not declared, and a dictionary property, which strict mode cannot
+declare, would be asked for as a list of entries (version 3 declares none; the
+v2 glossary is a PRD section now).
 
 The driver's event stream feeds the progress lines and the per-phase counts
 (`tool_calls`, `tool_errors`); its `RunResult` is the phase's usage and stop
@@ -310,7 +322,7 @@ afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 breaks (`Rules`). It is a package of its own because `envelope` must stay
 standard-library only and `internal/cli` does not import `afspec`.
 
-`cmd/speca` has six forms, each in a file of its own (the status form in three),
+`cmd/speca` has seven forms, each in a file of its own (the status form in three),
 chosen by the flags in `forms.go`:
 
 | Form | File | Reads | Writes |
@@ -318,20 +330,24 @@ chosen by the flags in `forms.go`:
 | the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` | nothing |
 | the verdict, `speca <spec> --validate` | `verdict.go`, through `specpkg.Verdict` | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
-| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | every artifact of the package, through `Spec.Save`; the content that changes is the task states and the `updated_at` of `prd.md` |
-| the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package, through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |
-| the render form, `speca <spec> --render`, and the sweep, `speca --render [--all]` | `render.go`; the sweep goes through the spec root with `list.go`'s `packageDirs` | the package, or every package of the spec root (and `archive/` with `--all`) | `spec.md` alone, through `cli.WriteAtomic`, when it is not the render already; never an artifact, so `updated_at` is untouched ([ADR 14](adr/14-commit-the-rendered-package-beside-its-json.md)) |
+| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | `progress.json` alone, through `Spec.SaveProgress`; the content that changes is the task states and its `updated_at` |
+| the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package (`progress.json` and `spec.md` included), through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |
+| the render form, `speca <spec> --render`, and the sweep, `speca --render [--all]` | `render.go`; the sweep goes through the spec root with `list.go`'s `packageDirs` | the package, or every package of the spec root (and `archive/` with `--all`) | `spec.md` alone, through `cli.WriteAtomic`, when it is not the render already; never an artifact ([ADR 14](adr/14-commit-the-rendered-package-beside-its-json.md)) |
+| the migrate form, `speca <spec> --migrate`, and the sweep, `speca --migrate [--all]` | `migrate.go`; the sweep goes through the spec root as the render sweep does | the package, or every package of the spec root (and `archive/` with `--all`) | every artifact of a version 2 package, written as version 3 through the library's `MigrateV2`, and its `test_spec.json`, removed; a version 3 package is left alone ([ADR 19](adr/19-migrate-the-format-to-version-3.md)) |
 
 The forms that write do so only through the library. The task form:
 `plan.go` chooses the moves and applies them with `TransitionTask` (and, under
 `--force`, `CompleteTaskStates` and `ResetTaskStates`), so the state machine is
-`afspec`'s and not a copy; `task.go` sets `updated_at`, which `Save` does not, and
-calls `Spec.Save`, which writes every artifact, and the render `spec.md` beside
-them, through temporary files and then renames them, so that all of them are in the library's canonical encoding and
-have mode `0600` afterwards. A call that is refused, and a dry run, write nothing. Nothing
-outside the files that write may call `Save`, `Transition` or `Supersede` (`task.go`
-and the status form's files); a test of the sources checks it, and checks that the
-other forms leave the file tree as it was.
+`afspec`'s and not a copy; `task.go` sets the progress file's `updated_at` and
+calls `Spec.SaveProgress`, which writes `progress.json` alone, through a temporary
+file it renames, so that a task move touches no artifact of the contract and no
+`spec.md` (format v3 §8.7). The status form's writes go through `Transition`,
+`Supersede` and `Save`, which write every artifact and the render in the library's
+canonical encoding, with mode `0600` afterwards. A call that is refused, and a dry
+run, write nothing. Nothing outside the files that write may call `SaveProgress`,
+`Save`, `Transition`, `Supersede` or `MigrateV2` (`task.go`, `migrate.go` and the
+status form's files); a test of the sources checks it, and checks that the other
+forms leave the file tree as it was.
 
 The status form is a list of checks and a write (`status.go`, `statusChecks`). The
 checks run in the order the spec fixes (load, the move, the target's own, the keys

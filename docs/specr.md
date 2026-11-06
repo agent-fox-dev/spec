@@ -4,8 +4,9 @@
 specr [flags] <spec>    a specification package → the package as Markdown
 ```
 
-`specr` renders a version 2 package with `afspec`'s render functions: the
-whole package, or the package scoped to one task. It is built for an agent
+`specr` renders a version 3 package with `afspec`'s render functions: the
+whole package, or the package scoped to one task, the derived integration
+task included. It is built for an agent
 to call — from a prompt, or from a skill's instructions — and follows the
 same interface as `spec` and agent-fox's tools: **exactly one positional
 input**, **exactly one JSON object** on stdout on every program-driven path,
@@ -69,22 +70,24 @@ reads a package from disk.
 
 | Flags | What `result.markdown` holds |
 |---|---|
-| none | the whole package: `afspec.Spec.RenderCombined`, byte for byte — `# PRD` (with the frontmatter as a list), `# Architecture` when there is one, `# Requirements`, `# Test Specification`, `# Tasks` |
-| `--task N` | the package scoped to task N: `afspec.Spec.RenderIndividualScoped`, each section under the same headings, after a one-line note naming the task. The requirements that own the task's criteria, the task's tests and the execution paths they verify are in full; every other requirement, test and task is one line, by id and title. The PRD is there without its `## Background` and `## Requirements` sections, which the task's criteria restate; one line in their place names them and says they are in `prd.md` and `spec.md`. The architecture, the glossary, the external APIs and the test commands are unfiltered |
-| `--section a,b` | only the named sections — `prd`, `architecture`, `requirements`, `test_spec`, `tasks` — in that order, whichever order they were given in; with or without `--task` |
-| `--max-tokens N` | the library's budget: when the estimated tokens (bytes / 4) are over N, first the architecture section is dropped, then each test's `given`, `when`, `real_components` and `pseudocode`. What was dropped is `result.reduced`; a render still over N after both carries an `over_budget` warning. Cannot be combined with `--section` |
+| none | the whole package: `afspec.Spec.RenderCombined`, byte for byte — `# PRD` (with the frontmatter as a list), `# Architecture` when there is one, `# Requirements` (each criterion with its sentence, its contract and its check; each path with its steps and its smoke check), `# Tasks` (the test commands, the dependencies, every task of the plan, then the integration task). No task state is rendered |
+| `--task N` | the package scoped to task N: `afspec.Spec.RenderIndividualScoped`, each section under the same headings, after a one-line note naming the task. The requirements that own the task's criteria, with their checks, and the execution paths a `same_as` of those criteria names are in full; every other requirement, path and task, the integration task included, is one line, by id and title. The PRD is there without its `## Background` and `## Requirements` sections, which the task's criteria restate; one line in their place names them and says they are in `prd.md` and `spec.md`. The architecture, the external APIs and the test commands are unfiltered. `--task N+1`, the integration task of a `full` package, holds every path in full with its smoke check, every requirement one line each, the criteria that carry a contract under `## Contracts`, and the integration task in full |
+| `--section a,b` | only the named sections — `prd`, `architecture`, `requirements`, `tasks` — in that order, whichever order they were given in; with or without `--task` |
+| `--max-tokens N` | the library's budget: when the estimated tokens (bytes / 4) are over N, first the architecture section is dropped, then the `setup` and `pseudocode` of every check and smoke check. What was dropped is `result.reduced`; a render still over N after both carries an `over_budget` warning. Cannot be combined with `--section` |
 
 `--task` names an id from `result.tasks`. An id the plan does not have is a
 usage error whose `fix_hint.valid` lists the ids, or that says the plan has no
 tasks.
 
-`specr` reads format version 2 only. A package whose PRD frontmatter declares
-another `schema_version` — such as the version 1 packages under
+`specr` reads format version 3 only. A package whose PRD frontmatter declares
+another `schema_version` — a version 2 package, whose tasks carry their
+states and whose tests are in `test_spec.json`, or a version 1 package under
 `.specs/archive/`, whose plan is `task_groups` — still loads, but none of its
-tests or tasks are read. Rendered whole, it carries a high-severity
+progress or tasks is read. Rendered whole, it carries a high-severity
 `spec_invalid` warning saying so; `--task` on it is a usage error naming the
-version, since it has no task to scope to. Format v2 §13 maps each v1
-construct to its v2 form.
+version, since it has no task to scope to. Both name
+`speca <package> --migrate`, which converts a version 2 package to version 3
+by format v3 §13.
 
 ## The output
 
@@ -95,7 +98,7 @@ construct to its v2 form.
   "ok": true,
   "status": "done",
   "exit_code": 0,
-  "summary": "specr: rendered 09_agent_mode scoped to task 2 of 3 (prd, requirements, test_spec, tasks, ~1191 tokens)",
+  "summary": "specr: rendered 09_agent_mode scoped to task 2 of 3 (prd, requirements, tasks, ~1191 tokens)",
   "result": {
     "spec_dir": ".specs/09_agent_mode",
     "spec_id": "09",
@@ -106,13 +109,13 @@ construct to its v2 form.
     "scope": "task",
     "task": { "id": 2, "title": "Error envelope and closed-pipe handling", "kind": "implement",
               "state": "pending", "depends_on": [1] },
-    "sections": ["prd", "requirements", "test_spec", "tasks"],
+    "sections": ["prd", "requirements", "tasks"],
     "tokens": 1191,
     "tasks": [ { "id": 1, "title": "Detect agent mode and keep stdout JSON-only", "kind": "implement", "state": "pending", "ready": true }, … ],
     "markdown": "> The package `09_agent_mode`, scoped to task 2: …"
   },
   "next": [ { "tool": "specr", "input": ".specs/09_agent_mode", "flags": ["--task", "3"],
-              "why": "task 3 (Verify agent mode end to end) is the next task not done" } ],
+              "why": "task 3 (Verify every execution path end to end) is the next task not done" } ],
   "duration_ms": 7,
   "started_at": "2026-10-14T06:23:30Z"
 }
@@ -131,12 +134,12 @@ raw JSON.
 | `spec_id`, `spec_name`, `title`, `status` | from the PRD frontmatter |
 | `valid` | whether the package passes the format's validation. An invalid package still renders in full, with a `spec_invalid` warning naming the failing rules |
 | `scope` | `spec` (the whole package) or `task` |
-| `task` | the task the render is scoped to: `id`, `title`, `kind`, `state`, `optional`, `depends_on`, `ready`; present exactly when `scope` is `task` |
+| `task` | the task the render is scoped to: `id`, `title`, `kind` (`implement`, or `integration` for the derived last task), `state`, `depends_on`, `ready`; present exactly when `scope` is `task` |
 | `sections` | the sections the Markdown holds, in order |
 | `max_tokens` | the `--max-tokens` budget, when there was one |
-| `reduced` | what the budget dropped: `architecture`, `test_detail`; absent when nothing was |
+| `reduced` | what the budget dropped: `architecture`, `check_detail`; absent when nothing was |
 | `tokens` | the Markdown's estimated tokens, bytes / 4 |
-| `tasks` | every task of the plan, in order, without its body: the ids `--task` takes, and their states. A pending task whose dependencies are all done carries `"ready": true` (`afspec`'s `IsReady`, the same rule [`speca`](speca.md) uses); the field is absent otherwise |
+| `tasks` | every task of the plan, in order, the derived integration task last, without its body: the ids `--task` takes, and their states from `progress.json`. A pending task whose dependencies are all done carries `"ready": true` (`afspec`'s `IsReady`, the same rule [`speca`](speca.md) uses; the integration task is ready when every other task is done or dropped); the field is absent otherwise |
 | `markdown_file` | the absolute path `--markdown-file` wrote |
 | `markdown` | the render. It is the last field, so a reader meets what it is before what it says |
 
@@ -231,7 +234,7 @@ on a second identical try.
 
 | Code | Severity | Stage | When |
 |---|---|---|---|
-| `spec_invalid` | low, or high for a package in an older format | validate | the package does not validate; it is rendered as it is. An older-format package's tests and tasks are not read, so the render is missing them |
+| `spec_invalid` | low, or high for a package in an older format | validate | the package does not validate; it is rendered as it is. An older-format package's progress and tasks are not read, so the render holds only what the versions share, and the warning names `speca <package> --migrate` |
 | `section_absent` | low | render | `--section architecture` on a package without `architecture.md` |
 | `over_budget` | low | render | the render is still over `--max-tokens` with everything droppable dropped |
 
@@ -289,13 +292,14 @@ after it:
 `speca <package> --task <N> --state in_progress`. A refusal at stage `task`
 means another agent holds it; pick another from `result.tasks`. Then work
 from the spec scoped to it: run `specr <package> --task <N>` and read
-`result.markdown` — the requirements that own the task's criteria, its tests
-and the paths they verify in full, everything else by id. When its tests
-pass, record it: `speca <package> --task <N> --state done`, and follow `next`
-to the task after it. If you stop before it is done, release it with
-`--state pending`. Never edit `tasks.json` by hand: if `speca` or `specr` is
-not installed, read the four artefacts and scope them by hand, and say in your
-report which task you finished instead of changing its state.
+`result.markdown` — the requirements that own the task's criteria, with their
+checks, and the paths those checks name in full, everything else by id. When
+the checks of its criteria pass as tests, record it:
+`speca <package> --task <N> --state done`, and follow `next` to the task
+after it. If you stop before it is done, release it with `--state pending`.
+Never edit `progress.json` by hand: if `speca` or `specr` is not installed,
+read the three artefacts and scope them by hand, and say in your report
+which task you finished instead of changing its state.
 ```
 
 Where a JSON parser is not at hand, `--markdown-file` puts the Markdown in a
