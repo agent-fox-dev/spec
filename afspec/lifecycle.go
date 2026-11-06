@@ -86,10 +86,9 @@ func (s *Spec) Transition(target, dir string) (*Spec, error) {
 	// to the returned spec cannot alias back to the original.
 	newSpec := *s
 	newSpec.Supersedes = append([]string{}, s.Supersedes...)
-	newSpec.Tags = append([]string{}, s.Tags...)
 	newSpec.Requirements = deepCopyJSON(s.Requirements)
-	newSpec.TestSpec = deepCopyJSON(s.TestSpec)
 	newSpec.Tasks = deepCopyJSON(s.Tasks)
+	newSpec.Progress = deepCopyJSON(s.Progress)
 	newSpec.Status = target
 
 	// When activating a draft spec, compute and store the intent hash.
@@ -173,9 +172,9 @@ func ArchiveDestination(specDir, root string) (string, error) {
 
 // MoveUnderArchive moves the package at specDir to ArchiveDestination(specDir,
 // root) and returns the new directory. It rewrites no file, so the package's
-// status, updated_at and content stay as they were: the caller writes the
+// status, progress and content stay as they were: the caller writes the
 // status first, with Transition or Supersede, and only an archived or a
-// superseded package lives under archive/ (format v2 §9).
+// superseded package lives under archive/ (format v3 §9).
 //
 // It creates <root>/archive/ (mode 0755 before the umask) if it is missing.
 //

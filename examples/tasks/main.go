@@ -1,7 +1,7 @@
 // Command tasks shows how a coding agent works through a spec package with
 // the afspec library: pick the next task, mark it in progress, render the
 // package scoped to it, do the work, then record the task as done in
-// tasks.json.
+// progress.json.
 //
 //	go run ./examples/tasks [-task N] DIR
 //
@@ -52,13 +52,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("%s is not valid (%d errors); run the validate example on it", dir, len(result.Errors))
 	}
 
-	task, err := pick(spec.Tasks, *taskID)
+	task, err := pick(spec, *taskID)
 	if err != nil {
 		return err
 	}
 
 	// Claim the task: pending → in_progress, persisted before the work
-	// starts, so that anyone reading tasks.json sees it is taken.
+	// starts, so that anyone reading progress.json sees it is taken.
 	if task.State == afspec.TaskStatePending {
 		if err := setState(spec, task.Id, afspec.TaskStateInProgress); err != nil {
 			return err
@@ -67,8 +67,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	// The scoped render is what the coder reads instead of the files: the
-	// task, its criteria, tests and paths in full, everything else it does
-	// not own as one line by id and title. WithMaxTokens caps its size.
+	// task, its criteria with their checks and, for the integration task,
+	// the paths with their smoke checks in full, everything else it does not
+	// own as one line by id and title. WithMaxTokens caps its size.
 	markdown := renderScoped(spec, task.Id, afspec.WithMaxTokens(20000))
 
 	if err := implement(*task, markdown, stdout); err != nil {
@@ -81,13 +82,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	// The work is done: in_progress → done, written back to tasks.json.
+	// The work is done: in_progress → done, written back to progress.json.
 	if err := setState(spec, task.Id, afspec.TaskStateDone); err != nil {
 		return err
 	}
 	fmt.Fprintf(stderr, "task %d: %s → done\n", task.Id, task.Title)
 
-	if next, err := pick(spec.Tasks, 0); err == nil {
+	if next, err := pick(spec, 0); err == nil {
 		fmt.Fprintf(stderr, "next: task %d (%s)\n", next.Id, next.Title)
 	} else {
 		fmt.Fprintf(stderr, "next: %s\n", err)
@@ -98,10 +99,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 // pick returns the task with the given ID, or with id 0 the next one that is
 // ready: a task already in progress, else the first pending task whose
 // dependencies are all done (a task without depends_on follows the task
-// before it, format v2 §8.3). That choice is NextTask's.
-func pick(tasks *afspec.TasksV2Json, id int) (*afspec.Task, error) {
+// before it, format v3 §8.2). That choice is NextTask's. The plan it picks
+// from is the stored tasks and the integration task the package derives,
+// each with its state from progress.json.
+func pick(spec *afspec.Spec, id int) (*afspec.PlannedTask, error) {
 	if id != 0 {
-		task, ok := tasks.GetTask(id)
+		task, ok := spec.GetTask(id)
 		if !ok {
 			return nil, fmt.Errorf("task %d not found", id)
 		}
@@ -111,30 +114,31 @@ func pick(tasks *afspec.TasksV2Json, id int) (*afspec.Task, error) {
 		return task, nil
 	}
 
-	if task, ok := tasks.NextTask(); ok {
+	if task, ok := spec.NextTask(); ok {
 		return task, nil
 	}
-	if !slices.ContainsFunc(tasks.Tasks, func(t afspec.Task) bool { return t.State == afspec.TaskStatePending }) {
+	if !slices.ContainsFunc(spec.Plan(), func(t afspec.PlannedTask) bool { return t.State == afspec.TaskStatePending }) {
 		return nil, errors.New("every task is done or dropped")
 	}
 	return nil, errors.New("no pending task has all its dependencies done")
 }
 
-// setState moves one task through the task state machine and saves the
-// package. TransitionTask refuses a move the state machine does not allow
-// (pending → done, say) and returns a new TasksV2Json instead of changing
-// the one it is called on.
+// setState moves one task through the task state machine and writes the
+// package's progress. TransitionTask refuses a move the state machine does
+// not allow (pending → done, say) and returns the progress to write instead
+// of changing the package it is called on.
 func setState(spec *afspec.Spec, id int, target afspec.TaskState) error {
-	tasks, err := spec.Tasks.TransitionTask(id, string(target))
+	progress, err := spec.TransitionTask(id, string(target))
 	if err != nil {
 		return err
 	}
-	spec.Tasks = tasks
+	spec.Progress = progress
 	spec.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 
-	// Save writes every artifact atomically. On an active spec it refuses a
-	// changed ## Intent section or identity; a task's state is neither.
-	return spec.Save(spec.Dir)
+	// SaveProgress writes progress.json atomically and no other file. On an
+	// active spec it refuses a changed ## Intent section; a task's state is
+	// not that.
+	return spec.SaveProgress(spec.Dir)
 }
 
 // renderScoped joins the per-artifact parts of the scoped render into one
@@ -146,7 +150,6 @@ func renderScoped(spec *afspec.Spec, taskID int, opts ...afspec.RenderOption) st
 		{"prd", "PRD"},
 		{"architecture", "Architecture"},
 		{"requirements", "Requirements"},
-		{"test_spec", "Test Specification"},
 		{"tasks", "Tasks"},
 	} {
 		if text, ok := parts[part.key]; ok {
@@ -159,7 +162,7 @@ func renderScoped(spec *afspec.Spec, taskID int, opts ...afspec.RenderOption) st
 // implement stands in for the coder. A real agent would hand the Markdown to
 // a model, write the tests the task owns, make them pass and run the plan's
 // test commands; here the Markdown is only printed.
-func implement(task afspec.Task, markdown string, w io.Writer) error {
+func implement(task afspec.PlannedTask, markdown string, w io.Writer) error {
 	_, err := io.WriteString(w, markdown)
 	return err
 }

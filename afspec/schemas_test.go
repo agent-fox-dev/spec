@@ -2,9 +2,9 @@ package afspec
 
 import "testing"
 
-func TestSchemas_ReturnsTheFourV2Schemas(t *testing.T) {
+func TestSchemas_ReturnsTheFourV3Schemas(t *testing.T) {
 	schemas := Schemas()
-	want := []string{PRDFrontmatterSchemaName, RequirementsSchemaName, TestSpecSchemaName, TasksSchemaName}
+	want := []string{PRDFrontmatterSchemaName, RequirementsSchemaName, TasksSchemaName, ProgressSchemaName}
 	if len(schemas) != len(want) {
 		t.Errorf("bundled schemas = %d; want %d", len(schemas), len(want))
 	}

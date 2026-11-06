@@ -73,33 +73,39 @@ func TestCrossSpec_KeepsACycleForThePackagesWithAnEdge(t *testing.T) {
 	}
 }
 
-// A glossary conflict is kept, under a rule of its own and on
-// requirements.json, for a package that defines the term.
-func TestCrossSpec_KeepsAGlossaryConflictForThePackagesThatDefineTheTerm(t *testing.T) {
-	root := t.TempDir()
-	other := loadedSpec(t, "01", "a", "alpha")
-	other.Requirements.Glossary["spec"] = "something else entirely"
-	savedSpec(t, root, other)
-	b := saved(t, root, "02", "b", "alpha")
-	undefining := loadedSpec(t, "03", "c", "alpha")
-	delete(undefining.Requirements.Glossary, "spec")
-	c := savedSpec(t, root, undefining)
-
-	got, err := crossSpec(root, b, nil)
-	if err != nil {
-		t.Fatal(err)
+// The actor rule holds a dependency edge only between two packages that
+// have execution paths: a lite package, which has none, is held to nothing on
+// either side of the edge.
+func TestCrossSpec_HoldsALitePackageToNoActorRule(t *testing.T) {
+	lite := func(s *afspec.Spec) *afspec.Spec {
+		s.Profile = afspec.ProfileLite
+		s.Requirements.ExecutionPaths = nil
+		return s
 	}
-	if len(got.Warnings) == 0 {
-		t.Fatal("no glossary warning")
-	}
-	for _, w := range got.Warnings {
-		if w.Check != "cross_spec_glossary" || w.Artifact != "requirements.json" || w.EntityID != "spec" {
-			t.Errorf("warning = %+v; want cross_spec_glossary on requirements.json about spec", w)
+	t.Run("a lite package depended on", func(t *testing.T) {
+		root := t.TempDir()
+		savedSpec(t, root, lite(loadedSpec(t, "01", "a", "alpha")))
+		b := saved(t, root, "02", "b", "beta", "01")
+		if got, err := crossSpec(root, b, nil); err != nil || len(got.Errors) != 0 {
+			t.Errorf("%+v, %v; want no finding", got.Errors, err)
 		}
-	}
-	if got, err := crossSpec(root, c, nil); err != nil || len(got.Warnings) != 0 {
-		t.Errorf("for a package that does not define the term: %+v, %v; want none", got.Warnings, err)
-	}
+	})
+	t.Run("a lite package that depends", func(t *testing.T) {
+		root := t.TempDir()
+		saved(t, root, "01", "a", "alpha")
+		b := savedSpec(t, root, lite(loadedSpec(t, "02", "b", "beta", "01")))
+		if got, err := crossSpec(root, b, nil); err != nil || len(got.Errors) != 0 {
+			t.Errorf("%+v, %v; want no finding", got.Errors, err)
+		}
+	})
+	t.Run("two full packages", func(t *testing.T) {
+		root := t.TempDir()
+		saved(t, root, "01", "a", "alpha")
+		b := saved(t, root, "02", "b", "beta", "01")
+		if got, err := crossSpec(root, b, nil); err != nil || !slices.Equal(rulesOf(got), []string{"cross_spec_actor"}) {
+			t.Errorf("%+v, %v; want cross_spec_actor", got.Errors, err)
+		}
+	})
 }
 
 // A spec that is not in the spec root, an archived one or one a dry run has not

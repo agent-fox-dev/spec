@@ -2,7 +2,9 @@ package afspec
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,9 +19,19 @@ type immutableSnapshot struct {
 	CreatedAt string
 }
 
+// The files of a package, beside prd.md and architecture.md.
+const (
+	RequirementsFileName = "requirements.json"
+	TasksFileName        = "tasks.json"
+	// ProgressFileName is the file that holds the state of every task. The
+	// tools write it; it is not part of the package's contract (format v3
+	// §8.3).
+	ProgressFileName = "progress.json"
+)
+
 // Spec represents a complete specification package with all artifacts.
 // The PRD frontmatter fields are stored directly on the struct, while
-// the PRD Markdown body is stored in PRDBody. The three JSON artifacts
+// the PRD Markdown body is stored in PRDBody. The JSON artifacts
 // are stored as pointers to the auto-generated types.
 type Spec struct {
 	// PRD frontmatter fields
@@ -28,16 +40,21 @@ type Spec struct {
 	Title         string
 	Status        string
 	CreatedAt     string
-	UpdatedAt     string
-	Owner         string
 	Source        string
 	Supersedes    []string
-	Tags          []string
 	IntentHash    *string
 	SchemaVersion int
+	// Profile is the package's profile, ProfileFull or ProfileLite, or ""
+	// when the frontmatter names none, which is full (format v3 §4.1).
+	Profile string
 	// SteeringVersion is the version of the spec root's steering the package
 	// was written under, or "" when none was recorded.
 	SteeringVersion string
+
+	// UpdatedAt is when a task last changed state, from progress.json, or ""
+	// when none has. It is not in the PRD frontmatter: a task move writes the
+	// progress file alone (format v3 §8.7).
+	UpdatedAt string
 
 	// PRD Markdown body (everything after the closing --- delimiter)
 	PRDBody string
@@ -49,9 +66,11 @@ type Spec struct {
 	Dir string
 
 	// JSON artifacts
-	Requirements *RequirementsV2Json
-	TestSpec     *TestSpecV2Json
-	Tasks        *TasksV2Json
+	Requirements *RequirementsV3Json
+	Tasks        *TasksV3Json
+	// Progress is the state of every task, from progress.json, or nil when
+	// the package has no progress file yet: every task is then pending.
+	Progress *ProgressV3Json
 
 	// Optional architecture document
 	Architecture string
@@ -80,8 +99,8 @@ type Spec struct {
 }
 
 // LoadSpec reads all spec artifacts from a directory and returns a
-// populated Spec struct. It reads prd.md, requirements.json,
-// test_spec.json, tasks.json, and optionally architecture.md.
+// populated Spec struct. It reads prd.md, requirements.json, tasks.json,
+// progress.json when it is there, and optionally architecture.md.
 func LoadSpec(dir string) (*Spec, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -115,7 +134,7 @@ func LoadSpec(dir string) (*Spec, error) {
 		return nil, err // parsePRD already returns LoadError
 	}
 
-	// Read and parse the three JSON artifacts. Decoding checks JSON syntax and
+	// Read and parse the JSON artifacts. Decoding checks JSON syntax and
 	// Go types only: structural rules live in the compiled schemas and run in
 	// Validate. That is what lets an empty scaffold load and be reported as
 	// incomplete rather than failing to decode.
@@ -124,22 +143,35 @@ func LoadSpec(dir string) (*Spec, error) {
 	if len(fm.Extensions) > 0 {
 		extensions["prd.md"] = extensionSet{"": fm.Extensions}
 	}
-	reqPath := filepath.Join(dir, "requirements.json")
-	var req RequirementsV2Json
+	reqPath := filepath.Join(dir, RequirementsFileName)
+	var req RequirementsV3Json
 	if err := loadJSONArtifact(reqPath, &req, unknown, extensions); err != nil {
 		return nil, err
 	}
 
-	tsPath := filepath.Join(dir, "test_spec.json")
-	var ts TestSpecV2Json
-	if err := loadJSONArtifact(tsPath, &ts, unknown, extensions); err != nil {
+	tasksPath := filepath.Join(dir, TasksFileName)
+	var tasks TasksV3Json
+	if err := loadJSONArtifact(tasksPath, &tasks, unknown, extensions); err != nil {
 		return nil, err
 	}
 
-	tasksPath := filepath.Join(dir, "tasks.json")
-	var tasks TasksV2Json
-	if err := loadJSONArtifact(tasksPath, &tasks, unknown, extensions); err != nil {
-		return nil, err
+	// progress.json is the one file a package may lack: a package written by
+	// hand, or by a program that writes the contract alone, has every task
+	// pending until the first save writes it.
+	var progress *ProgressV3Json
+	progressPath := filepath.Join(dir, ProgressFileName)
+	if _, statErr := os.Stat(progressPath); statErr == nil {
+		var p ProgressV3Json
+		if err := loadJSONArtifact(progressPath, &p, unknown, extensions); err != nil {
+			return nil, err
+		}
+		progress = &p
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return nil, &LoadError{
+			Msg:  fmt.Sprintf("cannot read %s: %s", ProgressFileName, statErr),
+			File: progressPath,
+			Err:  &SpecError{Msg: fmt.Sprintf("cannot read %s: %s", ProgressFileName, statErr)},
+		}
 	}
 
 	// Read architecture.md (optional)
@@ -157,23 +189,24 @@ func LoadSpec(dir string) (*Spec, error) {
 		Title:           fm.Title,
 		Status:          fm.Status,
 		CreatedAt:       fm.CreatedAt,
-		UpdatedAt:       fm.UpdatedAt,
-		Owner:           fm.Owner,
 		Source:          fm.Source,
 		Supersedes:      fm.Supersedes,
-		Tags:            fm.Tags,
 		IntentHash:      fm.IntentHash,
 		SchemaVersion:   fm.SchemaVersion,
+		Profile:         fm.Profile,
 		SteeringVersion: fm.SteeringVersion,
 		PRDBody:         body,
 		Requirements:    &req,
-		TestSpec:        &ts,
 		Tasks:           &tasks,
+		Progress:        progress,
 		Architecture:    architecture,
 		Dir:             dir,
 		unknown:         unknown,
 		extensions:      extensions,
 		fromDisk:        true,
+	}
+	if progress != nil {
+		spec.UpdatedAt = progress.UpdatedAt
 	}
 
 	// Capture immutable snapshot for active specs so Save can detect mutations
@@ -227,15 +260,53 @@ func loadJSONArtifact(path string, target interface{}, unknown map[string][]stri
 	return nil
 }
 
-// Save atomically writes all spec artifacts to the given directory, and the
-// package's render beside them as RenderedFileName. Each file is written to a
-// temporary file first, then renamed to its final name. Returns a LifecycleError if the spec is sealed,
-// superseded, or archived.
+// Save atomically writes all spec artifacts to the given directory, the
+// progress file, and the package's render beside them as RenderedFileName.
+// Each file is written to a temporary file first, then renamed to its final
+// name. Returns a LifecycleError if the spec is sealed, superseded, or
+// archived.
 //
 // For active specs with a stored IntentHash, Save recomputes the hash from
 // the current PRD body and returns an IntentError if the ## Intent section
 // has changed since activation (intent drift detection).
 func (s *Spec) Save(dir string) error {
+	if err := s.checkWritable(); err != nil {
+		return err
+	}
+	return s.saveToDisk(dir)
+}
+
+// SaveProgress writes the package's progress file alone, atomically, and no
+// other file: it is what a task move writes (format v3 §8.7). The progress
+// holds every task of the plan and the integration task, in id order, with
+// the states the Spec carries, and UpdatedAt. The lifecycle and intent guards
+// of Save apply: a sealed package takes no task move either.
+func (s *Spec) SaveProgress(dir string) error {
+	if err := s.checkWritable(); err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return saveFailure("cannot access directory: %s", err)
+	}
+	data, err := marshalArtifact(s.progressArtifact(), s.extensions[ProgressFileName])
+	if err != nil {
+		return saveFailure("cannot marshal %s: %s", ProgressFileName, err)
+	}
+	tmpPath, err := writeTempFile(dir, ProgressFileName, data)
+	if err != nil {
+		return saveFailure("cannot write temp file for %s: %s", ProgressFileName, err)
+	}
+	if err := os.Rename(tmpPath, filepath.Join(dir, ProgressFileName)); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
+		return saveFailure("cannot rename temp file to %s: %s", ProgressFileName, err)
+	}
+	return nil
+}
+
+// checkWritable is what Save and SaveProgress refuse: a sealed, superseded or
+// archived package, an active package whose identity changed, and an active
+// package whose intent drifted.
+func (s *Spec) checkWritable() error {
 	if s.Status == "sealed" || s.Status == "superseded" || s.Status == "archived" {
 		return &LifecycleError{
 			Msg: fmt.Sprintf("cannot save spec in %s state", s.Status),
@@ -284,15 +355,12 @@ func (s *Spec) Save(dir string) error {
 			}
 		}
 	}
-
-	// Format v2 §7.1: coverage is derived by the validator, never stored, so
-	// there is nothing to recompute before writing.
-	return s.saveToDisk(dir)
+	return nil
 }
 
 // saveToDisk is the internal save method that bypasses lifecycle checks.
-// It is used by Transition, Supersede, and MoveToArchive which need to
-// persist specs in sealed, superseded, or archived states.
+// It is used by Transition, Supersede, MoveToArchive and MigrateV2, which
+// need to persist specs in sealed, superseded, or archived states.
 //
 // Two-phase write strategy:
 //
@@ -310,38 +378,26 @@ func (s *Spec) Save(dir string) error {
 func (s *Spec) saveToDisk(dir string) error {
 	// Verify directory exists
 	if _, err := os.Stat(dir); err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot access directory: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot access directory: %s", err)},
-		}
+		return saveFailure("cannot access directory: %s", err)
 	}
 
 	// Render PRD
 	prdContent := renderPRD(s)
 
 	// Marshal JSON artifacts
-	reqData, err := marshalArtifact(s.Requirements, s.extensions["requirements.json"])
+	reqData, err := marshalArtifact(s.Requirements, s.extensions[RequirementsFileName])
 	if err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot marshal requirements.json: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot marshal requirements.json: %s", err)},
-		}
+		return saveFailure("cannot marshal %s: %s", RequirementsFileName, err)
 	}
 
-	tsData, err := marshalArtifact(s.TestSpec, s.extensions["test_spec.json"])
+	tasksData, err := marshalArtifact(s.Tasks, s.extensions[TasksFileName])
 	if err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot marshal test_spec.json: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot marshal test_spec.json: %s", err)},
-		}
+		return saveFailure("cannot marshal %s: %s", TasksFileName, err)
 	}
 
-	tasksData, err := marshalArtifact(s.Tasks, s.extensions["tasks.json"])
+	progressData, err := marshalArtifact(s.progressArtifact(), s.extensions[ProgressFileName])
 	if err != nil {
-		return &SaveError{
-			Msg: fmt.Sprintf("cannot marshal tasks.json: %s", err),
-			Err: &SpecError{Msg: fmt.Sprintf("cannot marshal tasks.json: %s", err)},
-		}
+		return saveFailure("cannot marshal %s: %s", ProgressFileName, err)
 	}
 
 	// Build the list of (name, data) pairs to persist.
@@ -353,9 +409,9 @@ func (s *Spec) saveToDisk(dir string) error {
 
 	artifacts := []artifact{
 		{name: "prd.md", data: prdContent},
-		{name: "requirements.json", data: reqData},
-		{name: "test_spec.json", data: tsData},
-		{name: "tasks.json", data: tasksData},
+		{name: RequirementsFileName, data: reqData},
+		{name: TasksFileName, data: tasksData},
+		{name: ProgressFileName, data: progressData},
 	}
 
 	if s.Architecture != "" {
@@ -381,10 +437,7 @@ func (s *Spec) saveToDisk(dir string) error {
 	for i := range artifacts {
 		tmpPath, err := writeTempFile(dir, artifacts[i].name, artifacts[i].data)
 		if err != nil {
-			return &SaveError{
-				Msg: fmt.Sprintf("cannot write temp file for %s: %s", artifacts[i].name, err),
-				Err: &SpecError{Msg: fmt.Sprintf("cannot write temp file for %s: %s", artifacts[i].name, err)},
-			}
+			return saveFailure("cannot write temp file for %s: %s", artifacts[i].name, err)
 		}
 		artifacts[i].tmpPath = tmpPath
 		tmpPaths = append(tmpPaths, tmpPath)
@@ -397,16 +450,32 @@ func (s *Spec) saveToDisk(dir string) error {
 	for _, a := range artifacts {
 		finalPath := filepath.Join(dir, a.name)
 		if err := os.Rename(a.tmpPath, finalPath); err != nil {
-			return &SaveError{
-				Msg: fmt.Sprintf("cannot rename temp file to %s: %s", a.name, err),
-				Err: &SpecError{Msg: fmt.Sprintf("cannot rename temp file to %s: %s", a.name, err)},
-			}
+			return saveFailure("cannot rename temp file to %s: %s", a.name, err)
 		}
 	}
 
 	// All renames succeeded; clear the cleanup list — temp paths no longer exist.
 	tmpPaths = tmpPaths[:0]
 	return nil
+}
+
+// progressArtifact is the progress file as a save writes it: the package's
+// identity, UpdatedAt, and one entry per task of the plan and for the
+// integration task, in id order, with the state the Spec carries for each. An
+// entry that names no task of the package is not written.
+func (s *Spec) progressArtifact() *ProgressV3Json {
+	p := &ProgressV3Json{
+		Schema:        progressSchemaURI,
+		SpecId:        s.SpecID,
+		SpecName:      s.SpecName,
+		SchemaVersion: SchemaVersion,
+		UpdatedAt:     s.UpdatedAt,
+		Tasks:         []TaskProgress{},
+	}
+	for _, t := range s.Plan() {
+		p.Tasks = append(p.Tasks, TaskProgress{Id: t.Id, State: t.State})
+	}
+	return p
 }
 
 // writeTempFile writes data to a new temporary file inside dir (named

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "title": "Requirements",
+  "description": "Schema for requirements.json spec artifact (format version 3)",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "spec_id": { "type": "string", "minLength": 1 },
+    "spec_name": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "integer", "const": 3 },
+    "requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/requirement" },
+      "minItems": 1
+    },
+    "execution_paths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/execution_path" },
+      "description": "The end-to-end paths. A full package has at least one; a lite package has none."
+    },
+    "external_apis": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/external_api" }
+    }
+  },
+  "required": ["$schema", "spec_id", "spec_name", "schema_version", "requirements"],
+  "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+  "additionalProperties": false,
+  "$defs": {
+    "check": {
+      "type": "object",
+      "description": "How a criterion is verified: its own check (kind, setup, pseudocode), or the same as another criterion's check or a path's smoke check (same_as).",
+      "properties": {
+        "kind": { "type": "string", "enum": ["unit", "integration", "property"], "description": "unit exercises one component with its collaborators stubbed; integration two or more real components; property an invariant over an input domain." },
+        "setup": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "The preconditions the criterion's condition does not state." },
+        "pseudocode": { "type": "string", "minLength": 1, "description": "Language-agnostic assertions. May name the function, file and existing test the check extends." },
+        "same_as": { "type": "string", "pattern": "^(REQ-[0-9]+\\.[0-9]+|PATH-[0-9]+)$", "description": "The criterion whose own check verifies this one too, or the path whose smoke check does." }
+      },
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "required": ["same_as"] },
+          "then": { "not": { "anyOf": [ { "required": ["kind"] }, { "required": ["setup"] }, { "required": ["pseudocode"] } ] } },
+          "else": { "required": ["kind"] }
+        }
+      ]
+    },
+    "criterion": {
+      "type": "object",
+      "description": "One EARS statement with its check. The rendered sentence is derived from pattern, condition, system and action.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^REQ-[0-9]+\\.[0-9]+$" },
+        "pattern": {
+          "type": "string",
+          "enum": ["ubiquitous", "event_driven", "state_driven", "unwanted", "optional"]
+        },
+        "condition": { "type": "string", "minLength": 1, "description": "The WHEN / WHILE / IF / WHERE clause. Absent for ubiquitous. A second condition is written into it, joined with and." },
+        "system": { "type": "string", "minLength": 1, "description": "The acting component. Defaults to the requirement's system, then to \"system\", when rendering." },
+        "action": { "type": "string", "minLength": 1 },
+        "contract": { "type": "string", "minLength": 1, "description": "What the caller observes, and what the check asserts. Required for unwanted." },
+        "check": { "$ref": "#/$defs/check" }
+      },
+      "required": ["id", "pattern", "action", "check"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "pattern": { "const": "ubiquitous" } } },
+          "then": { "not": { "required": ["condition"] } },
+          "else": { "required": ["condition"] }
+        },
+        {
+          "if": { "properties": { "pattern": { "const": "unwanted" } } },
+          "then": { "required": ["contract"] }
+        }
+      ]
+    },
+    "requirement": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^REQ-[0-9]+$" },
+        "title": { "type": "string", "minLength": 1 },
+        "rationale": { "type": "string" },
+        "system": { "type": "string", "minLength": 1, "description": "The acting component of every criterion that names none." },
+        "criteria": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/criterion" },
+          "minItems": 1
+        }
+      },
+      "required": ["id", "title", "criteria"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    },
+    "path_step": {
+      "type": "object",
+      "properties": {
+        "actor": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 }
+      },
+      "required": ["actor", "action"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    },
+    "smoke": {
+      "type": "object",
+      "description": "The smoke check of a path: it runs the path once with its real components and asserts the end state.",
+      "properties": {
+        "real_components": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The components that must not be mocked." },
+        "setup": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "The preconditions." },
+        "end_state": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The side effects at the end of the path." },
+        "pseudocode": { "type": "string", "minLength": 1, "description": "Language-agnostic assertions. May name the existing end-to-end test the check extends." }
+      },
+      "required": ["real_components", "end_state"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    },
+    "execution_path": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^PATH-[0-9]+$" },
+        "title": { "type": "string", "minLength": 1 },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/path_step" },
+          "minItems": 2
+        },
+        "smoke": { "$ref": "#/$defs/smoke" }
+      },
+      "required": ["id", "title", "steps", "smoke"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    },
+    "external_api_symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "import_path": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      },
+      "required": ["name", "import_path", "signature"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    },
+    "external_api": {
+      "type": "object",
+      "properties": {
+        "package": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" },
+        "symbols": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/external_api_symbol" },
+          "minItems": 1
+        }
+      },
+      "required": ["package", "version", "verified", "symbols"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    }
+  }
+}

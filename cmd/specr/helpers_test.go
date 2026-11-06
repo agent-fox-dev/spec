@@ -16,9 +16,15 @@ import (
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-// example is the directory name of afspec's v2 example in a newRepo: three
-// tasks, task 2 depending on 1 and task 3 on 1 and 2, none done.
+// example is the directory name of the example package in a newRepo: afspec's
+// v3 example with a third task added to its plan, so that three tasks of the
+// plan, task 2 depending on 1 and task 3 on 1 and 2, none done, stand before
+// the derived integration task, task 4.
 const example = "09_agent_mode"
+
+// integrationTask is the id of the example's derived integration task: one
+// past its last task.
+const integrationTask = 4
 
 func TestMain(m *testing.M) {
 	code := m.Run()
@@ -28,13 +34,23 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// newRepo lays out a repository with two packages under .specs: the v2
-// example as 09_agent_mode, and the fixture with an architecture.md as
+// newRepo lays out a repository with two packages under .specs: the example
+// as 09_agent_mode, and the fixture with an architecture.md as
 // 01_test_feature. It returns the repository root.
 func newRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "v2_example"), filepath.Join(root, ".specs", example))
+	dir := filepath.Join(root, ".specs", example)
+	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "v3_example"), dir)
+	editTasks(t, dir, func(tasks []map[string]any) []map[string]any {
+		return append(tasks, map[string]any{
+			"id": 3, "title": "Run the agent-mode commands end to end",
+			"criteria":   []any{"REQ-1.3"},
+			"steps":      []any{"Run every command with AF_AGENT=1 against a temporary spec root", "Assert that stdout parses as JSON for each"},
+			"touches":    []any{"cmd/spec/agent_test.go"},
+			"depends_on": []any{1, 2},
+		})
+	})
 	copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "valid_spec_with_arch"), filepath.Join(root, ".specs", "01_test_feature"))
 	return root
 }
@@ -84,9 +100,9 @@ func load(t *testing.T, root, name string) *afspec.Spec {
 	return spec
 }
 
-// editTasks rewrites the plan of the package in dir: edit is given each task as
-// a JSON object.
-func editTasks(t *testing.T, dir string, edit func(tasks []map[string]any)) {
+// editTasks rewrites the plan of the package in dir: edit is given each stored
+// task as a JSON object, and returns the tasks to keep.
+func editTasks(t *testing.T, dir string, edit func(tasks []map[string]any) []map[string]any) {
 	t.Helper()
 	path := filepath.Join(dir, "tasks.json")
 	b, err := os.ReadFile(path)
@@ -101,7 +117,11 @@ func editTasks(t *testing.T, dir string, edit func(tasks []map[string]any)) {
 	for _, task := range m["tasks"].([]any) {
 		tasks = append(tasks, task.(map[string]any))
 	}
-	edit(tasks)
+	kept := []any{}
+	for _, task := range edit(tasks) {
+		kept = append(kept, task)
+	}
+	m["tasks"] = kept
 	if b, err = json.MarshalIndent(m, "", "  "); err != nil {
 		t.Fatal(err)
 	}
@@ -110,14 +130,19 @@ func editTasks(t *testing.T, dir string, edit func(tasks []map[string]any)) {
 	}
 }
 
-// plan gives the tasks of the example the states, and their depends_on. A nil
-// deps keeps the example's dependencies; a nil entry leaves the key out, so the
-// task depends on the one before it; an empty list says it depends on none.
+// plan gives the tasks of the example the states, in progress.json, and the
+// stored tasks their depends_on, in tasks.json. states are the states of
+// tasks 1, 2, 3 and, when a fourth is given, of the integration task, which is
+// otherwise left pending. A nil deps keeps the example's dependencies; a nil
+// entry leaves the key out, so the task depends on the one before it; an empty
+// list says it depends on none.
 func plan(t *testing.T, dir string, states []string, deps [][]int) {
 	t.Helper()
-	editTasks(t, dir, func(tasks []map[string]any) {
+	editTasks(t, dir, func(tasks []map[string]any) []map[string]any {
+		if len(deps) > len(tasks) {
+			t.Fatalf("%d dependency lists for %d stored tasks: the integration task's are derived", len(deps), len(tasks))
+		}
 		for i, task := range tasks {
-			task["state"] = states[i]
 			switch {
 			case deps == nil:
 			case deps[i] == nil:
@@ -126,7 +151,28 @@ func plan(t *testing.T, dir string, states []string, deps [][]int) {
 				task["depends_on"] = deps[i]
 			}
 		}
+		return tasks
 	})
+	path := filepath.Join(dir, "progress.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	entries := []any{}
+	for i, state := range states {
+		entries = append(entries, map[string]any{"id": i + 1, "state": state})
+	}
+	m["tasks"] = entries
+	if b, err = json.MarshalIndent(m, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // exampleWith is a newRepo whose example has its tasks in the states, with the
@@ -276,9 +322,9 @@ func treeOf(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-// newLegacyPackage adds a package in format version 1 as 07_legacy: the v2
-// example with its frontmatter's version set back and a v1 task plan, whose
-// task_groups the v2 types do not read.
+// newLegacyPackage adds a package in format version 1 as 07_legacy: afspec's
+// v2 example with its frontmatter's version set back and a v1 task plan, whose
+// task_groups the v3 types do not read.
 func newLegacyPackage(t *testing.T, root string) {
 	t.Helper()
 	dir := filepath.Join(root, ".specs", "07_legacy")
@@ -375,14 +421,13 @@ func speca(t *testing.T, bin string, argv ...string) (envelope.AdminEnvelope, in
 	return env, code
 }
 
-// taskState is the state of task id in the example, read from disk.
+// taskState is the state of task id in the example, read from its
+// progress.json on disk.
 func taskState(t *testing.T, root string, id int) string {
 	t.Helper()
-	for _, task := range load(t, root, example).Tasks.Tasks {
-		if task.Id == id {
-			return string(task.State)
-		}
+	spec := load(t, root, example)
+	if _, ok := spec.GetTask(id); !ok {
+		t.Fatalf("no task %d", id)
 	}
-	t.Fatalf("no task %d", id)
-	return ""
+	return string(spec.TaskState(id))
 }

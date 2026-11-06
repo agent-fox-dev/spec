@@ -1,24 +1,22 @@
-Generate the implementation plan: **one flat, ordered list of tasks**. A task is the unit of dispatch — one coder session, one task. There are no task groups, no subtasks, no verification subtasks and no `traceability` array.
+Generate the implementation plan: **one flat, ordered list of implement tasks**. A task is the unit of dispatch — one coder session, one task. There are no task groups, no subtasks, no verification subtasks, no `traceability` array and no integration task: the tool derives the last task from the paths, the contracts and the touches of the plan.
 
-The complete requirements artifact and the full table of tests are above. Use their real IDs. Do not invent one.
+The complete requirements artifact is above, with the check of every criterion and the smoke check of every path. Use its real IDs. Do not invent one.
 
 ## Task fields
 
 - `id` — integer, sequential from 1. Array order is the default execution order.
-- `kind` — `implement` or `integration`. **Exactly one `integration` task, and it is last.**
 - `title` — imperative and specific.
-- `criteria` — requirement or criterion IDs this task satisfies. Non-empty for `implement`; a requirement ID means all of its criteria. May be empty for `integration`.
-- `tests` — non-empty. The test IDs this task must make pass.
-- `steps` — non-empty, in order, concrete enough that a coder who sees only this task, its criteria and its tests needs nothing else. A step says a behaviour to add or a decision already taken, not an edit: it names no line of a file (`store.go:88`, "line 88") and quotes no block of code, because both are wrong after the first commit that moves them, and a line number is not a decision.
+- `criteria` — non-empty. The requirement or criterion IDs this task satisfies; a requirement ID means all of its criteria. The checks of those criteria are the tests the task writes.
+- `steps` — non-empty, in order, concrete enough that a coder who sees only this task, its criteria and their checks needs nothing else. A step says a behaviour to add or a decision already taken, not an edit: it names no line of a file (`store.go:88`, "line 88") and quotes no block of code, because both are wrong after the first commit that moves them, and a line number is not a decision.
 - `touches` — optional. The files, packages or modules the task creates or modifies, the test files it extends among them. This is where the files are named, each once, without a line number.
 - `depends_on` — optional. Task IDs that must be done first; must reference lower IDs. Absent means "the previous task": **omit it** when it would name only the task before, and write it only to let independent tasks run in parallel or to name more than one task.
 - `done_when` — optional. Extra completion checks beyond the implicit ones.
-- `state` — `pending` for a freshly generated plan.
-- `optional` — optional boolean, default false.
 
-Every task carries an implicit definition of done that you do not need to write out: the listed tests exist, are executable and pass; `test_commands.all_tests` passes; `test_commands.linter` passes. The coder works test-first, so **there are no separate "write the tests" tasks** — tests are written inside the task that owns them.
+There is no `kind`, no `tests`, no `state` and no `optional`: every stored task is an implement task, a task's tests are the checks of its criteria, and the state of every task lives in progress.json, which the tools write.
 
-A task's tests extend the test files of the code in its `touches`: the test file of each handler, store, command or function it changes, created only when there is none. A task does not create a test file of its own, or one named after itself, the spec or a test kind. Write steps that say the behaviours to add, not the test ids to write: the ids stay in the spec, and the coder records which test covers each one outside the code.
+Every task carries an implicit definition of done that you do not need to write out: the checks of its criteria exist as tests, are executable and pass; `test_commands.all_tests` passes; `test_commands.linter` passes. The coder works test-first, so **there are no separate "write the tests" tasks** — the checks are written inside the task that owns their criteria.
+
+A task's tests extend the test files of the code in its `touches`: the test file of each handler, store, command or function it changes, created only when there is none. A task does not create a test file of its own, or one named after itself, the spec or a check kind. Write steps that say the behaviours to add, not the criterion ids to test: the ids stay in the spec, and the coder records which test covers each one outside the code.
 
 ## Dependencies on other specs
 
@@ -26,24 +24,15 @@ A task's tests extend the test files of the code in its `touches`: the test file
 
 ## Rules that make the plan invalid
 
-- **Every test in the test spec is listed in the `tests` of at least one task.** Nothing may be left unowned — that is the single most common way a plan ships with holes.
-- **Before you submit, check ownership explicitly.** Go through the test spec and write down each test id next to the task whose `tests` lists it; then go through the requirements and do the same for each criterion id and the implement task whose `criteria` lists it. An id with no owner is rejected, and each rejection costs a full regeneration of this file. Criteria belong to implement tasks, never to the integration task.
-- **Every criterion is covered by the `criteria` of at least one `implement` task**, directly or through its requirement ID.
-- Every ID in `criteria`, `tests` and `depends_on` resolves.
-- The `integration` task's `tests` include **every** test of kind `smoke`.
+- **Every criterion is covered by the `criteria` of at least one task**, directly or through its requirement ID. Nothing may be left unowned — that is the single most common way a plan ships with holes.
+- **Before you submit, check ownership explicitly.** Go through the requirements and write each criterion id next to the task whose `criteria` lists it or its requirement. An id with no owner is rejected, and each rejection costs a full regeneration of this file.
+- Every ID in `criteria` and `depends_on` resolves, and `depends_on` names lower ids.
 
-Keep a task to at most 10 tests and 12 steps, and the spec to at most 12 tasks. Group by requirement, not by layer: a task should deliver one or two requirements end to end — model, logic, interface and tests — so that each task leaves the system in a working state.
+Keep a task to at most 12 steps, and the spec to at most 12 tasks. Group by requirement, not by layer: a task should deliver one or two requirements end to end — model, logic, interface and tests — so that each task leaves the system in a working state.
 
 ## The integration task
 
-The last task exists to catch wiring gaps that component-level tests cannot see. Its steps must cover, in the project's own vocabulary:
-
-1. Trace every execution path through the real code; confirm each step calls the next and no stub remains.
-2. For every criterion with a `contract`, confirm the producer's result is consumed by a caller in production code, not only by tests.
-3. Search the files listed in every task's `touches` for stub markers appropriate to the language — the project's own, named in the language block above, then the common ones: `TODO`, `NotImplementedError`, `todo!()`, `panic("not implemented")`, `throw new Error('not implemented')`, a bare `return nil` / `None` / `null` on a non-trivial path.
-4. For any path whose entry point belongs to another spec, confirm that entry point is called from production code.
-
-An execution path that is not live in production code fails this task. Errata and deferrals do not satisfy it.
+Do not write one. A full package's last task is derived by the tool: it depends on every task of the plan, touches what every task touches, runs every path's smoke check with its real components and traces the path through the real code, confirms every contract is consumed in production code, searches the touches for stub markers (the project's own, named in the language block above, then the common ones), and, where the package depends on other specs, confirms their entry points are called from production code. What the plan has to give it is in the requirements already: the paths with their smoke checks, the contracts, and each task's `touches`.
 
 ## Test commands
 
@@ -66,34 +55,27 @@ The example is a Go project's. In this project, use this project's own commands,
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Persist and read back recipes",
-      "criteria": ["07-REQ-1"],
-      "tests": ["TS-07-1", "TS-07-2", "TS-07-3"],
+      "criteria": ["REQ-1"],
       "steps": [
         "Add the task's behaviours to catalog/store_test.go and http/handlers_test.go and confirm they fail",
         "Add the recipe row type and the catalog Insert and Get methods",
         "Wire POST /recipes to Insert; return 201 with the assigned id",
-        "Reject a body with no name with 400 and an error string, writing nothing"
+        "Reject a body with no name or no ingredient with 400 and an error string, writing nothing"
       ],
-      "touches": ["catalog/recipe.go", "catalog/store.go", "catalog/store_test.go", "http/handlers.go", "http/handlers_test.go"],
-      "state": "pending"
+      "touches": ["catalog/recipe.go", "catalog/store.go", "catalog/store_test.go", "http/handlers.go", "http/handlers_test.go"]
     },
     {
       "id": 2,
-      "kind": "integration",
-      "title": "Verify the save-and-read path end to end",
-      "criteria": [],
-      "tests": ["TS-07-4"],
+      "title": "List recipes by ingredient",
+      "criteria": ["REQ-2"],
       "steps": [
-        "Extend the end-to-end test in http/server_test.go to save a recipe and read it back against the running service and a real database, and confirm it passes",
-        "Trace 07-PATH-1 from the HTTP handler through the catalog to the database; confirm each step calls the next",
-        "Confirm the identifier returned by Insert is consumed by the handler in production code, not only in tests",
-        "Grep catalog/ and http/ for TODO and panic(\"not implemented\") and remove any that remain"
+        "Add the task's behaviours to catalog/store_test.go and http/handlers_test.go and confirm they fail",
+        "Add the catalog ByIngredient query, ordered by name",
+        "Wire GET /recipes?ingredient= to it; return 200 with the list, 400 for an empty ingredient"
       ],
-      "touches": ["http/server_test.go"],
-      "done_when": ["`go test ./... -count=1` passes against a real database"],
-      "state": "pending"
+      "touches": ["catalog/store.go", "catalog/store_test.go", "http/handlers.go", "http/handlers_test.go"],
+      "depends_on": [1]
     }
   ]
 }

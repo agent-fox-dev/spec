@@ -1,7 +1,6 @@
 package afspec
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -185,35 +184,28 @@ func ComputeExitCode(findings []LintFinding) int {
 // RunLintSpecs — full lint execution
 // ---------------------------------------------------------------------------
 
-// isFullyImplemented reports whether a spec's tasks.json exists and every
-// task is in state done or dropped. A spec with no tasks at all is a scaffold,
-// not a finished spec, so it is not fully implemented. Returns false when
-// tasks.json cannot be read or parsed.
+// isFullyImplemented reports whether a spec's plan exists and every task,
+// the integration task included, is in state done or dropped, by the
+// package's progress. A spec with no tasks at all is a scaffold, not a
+// finished spec, so it is not fully implemented. Returns false when the
+// package cannot be loaded.
 func isFullyImplemented(info LintSpecInfo) bool {
 	if !info.HasTasks {
 		return false
 	}
-
-	data, err := os.ReadFile(filepath.Join(info.Path, "tasks.json"))
+	spec, err := LoadSpec(info.Path)
 	if err != nil {
 		return false
 	}
-
-	var tasks TasksV2Json
-	if err := json.Unmarshal(data, &tasks); err != nil {
+	plan := spec.Plan()
+	if len(plan) == 0 {
 		return false
 	}
-
-	if len(tasks.Tasks) == 0 {
-		return false
-	}
-
-	for _, task := range tasks.Tasks {
+	for _, task := range plan {
 		if task.State != TaskStateDone && task.State != TaskStateDropped {
 			return false
 		}
 	}
-
 	return true
 }
 

@@ -10,13 +10,13 @@ import (
 )
 
 // generateTasks runs the tasks phase on the scripted model with the fixture's
-// requirements and tests accepted before it, and returns the partial spec and
-// every request that reached the model.
+// requirements accepted before it, and returns the partial spec and every
+// request that reached the model.
 func generateTasks(t *testing.T, submission map[string]any) (*afspec.PartialSpec, []string) {
 	t.Helper()
 	ws := newWorkspace(t)
 	artifacts, _ := loadFixture(t, "01", "test_feature")
-	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec)
+	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements)
 	runner, p := fauxRunner(t, ws, toolCall("t1", ArtifactToolName(afspec.StepTasks), submission),
 		toolCall("t2", PatchToolName(afspec.StepTasks), map[string]any{"operations": []any{}}))
 	if _, _, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
@@ -36,13 +36,17 @@ func generateTasks(t *testing.T, submission map[string]any) (*afspec.PartialSpec
 func TestSubmitTasks_OmitsTheDefaultDependency(t *testing.T) {
 	artifacts, _ := loadFixture(t, "01", "test_feature")
 	tasks := deepCopy(t, artifacts[afspec.StepTasks])
+	// The fixture has two tasks; a third, owning a criterion again, gives
+	// the case of a dependency on two tasks.
+	tasks["tasks"] = append(tasks["tasks"].([]any), map[string]any{"id": 3.0, "title": "Render the verdict",
+		"criteria": []any{"REQ-2.1"}, "steps": []any{"Render the validation result as Markdown"}})
 	list := tasks["tasks"].([]any)
 	list[0].(map[string]any)["depends_on"] = []any{}         // the first task: kept
 	list[1].(map[string]any)["depends_on"] = []any{1.0}      // the task before: dropped
 	list[2].(map[string]any)["depends_on"] = []any{1.0, 2.0} // two ids: kept
 
 	ws := newWorkspace(t)
-	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec)
+	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements)
 	runner, _ := fauxRunner(t, ws, toolCall("t1", ArtifactToolName(afspec.StepTasks), tasks))
 	if _, _, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
 		Step: afspec.StepTasks, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: partial,
@@ -118,7 +122,7 @@ func TestLineReferenceRe_FindsALineOfAFile(t *testing.T) {
 		{"Lines 3 to 9", []string{"Lines 3"}},
 		{"add RenderedBytes to afspec/render.go", nil},
 		{"listen on localhost:8080", nil},
-		{"TS-15-4 verifies 15-REQ-1.4", nil},
+		{"REQ-1.4 shares the check of REQ-1.2", nil},
 		{"a timeout of 30s", nil},
 	} {
 		if got := lineReferenceRe.FindAllString(tc.text, -1); !slices.Equal(got, tc.want) {
@@ -131,21 +135,21 @@ func TestLineReferenceRe_FindsALineOfAFile(t *testing.T) {
 // generator: the package's validation no longer warns on it.
 func TestGeneratorHints_NameEachVagueWordOfACriterion(t *testing.T) {
 	cond := "the input is handled properly"
-	hints := generatorHints(afspec.StepRequirements, &afspec.RequirementsV2Json{Requirements: []afspec.Requirement{{
-		Id: "01-REQ-1", Criteria: []afspec.Criterion{{Id: "01-REQ-1.1", Condition: &cond,
+	hints := generatorHints(afspec.StepRequirements, &afspec.RequirementsV3Json{Requirements: []afspec.Requirement{{
+		Id: "REQ-1", Criteria: []afspec.Criterion{{Id: "REQ-1.1", Condition: &cond,
 			Action: "return a reasonable result, etc"}},
 	}}})
 	var msgs []string
 	for _, h := range hints {
-		if h.Check != "vague_language" || h.Artifact != "requirements.json" || h.EntityID != "01-REQ-1.1" {
+		if h.Check != "vague_language" || h.Artifact != "requirements.json" || h.EntityID != "REQ-1.1" {
 			t.Errorf("hint %+v", h)
 		}
 		msgs = append(msgs, h.Message)
 	}
 	want := []string{
-		`vague term "reasonable" in field action of criterion 01-REQ-1.1`,
-		`vague term "etc" in field action of criterion 01-REQ-1.1`,
-		`vague term "properly" in field condition of criterion 01-REQ-1.1`,
+		`vague term "reasonable" in field action of criterion REQ-1.1`,
+		`vague term "etc" in field action of criterion REQ-1.1`,
+		`vague term "properly" in field condition of criterion REQ-1.1`,
 	}
 	if !slices.Equal(msgs, want) {
 		t.Errorf("hints = %q, want %q", msgs, want)

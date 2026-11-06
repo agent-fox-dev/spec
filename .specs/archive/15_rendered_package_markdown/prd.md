@@ -4,9 +4,8 @@ spec_name: "rendered_package_markdown"
 title: "Commit the rendered package beside its JSON"
 status: "archived"
 created_at: "2026-11-06T12:17:17Z"
-updated_at: "2026-11-06T15:41:21Z"
 intent_hash: "940185862cce1a404a2ed345c4b0d24c4a8aa7bfb64715c2c53ea223aa361561"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"
 ---
 
@@ -306,3 +305,10 @@ whose `spec.md` is stale cannot be activated until it is rendered again.
   directory when missing, writes a temporary file in it, syncs, closes and
   renames over `path`. It is what `specr --markdown-file` writes with, and
   what the `--render` form writes `spec.md` with.
+
+## Glossary
+
+- **rendered**: Both the name of the verdict rule that compares a package's spec.md with its render, and the field of the --render form's result that says what became of one package: written, unchanged or failed.
+- **spec.md**: The Markdown render of a whole specification package, written in the package directory beside its four artifacts: one fixed header line, a blank line, and the package's combined render. It is derived from the artifacts, is never read as data, and is not part of the package's contract.
+- **the render**: The bytes afspec's combined render produces for a package with no scope and no budget: the PRD with its frontmatter as a list, the architecture when there is one, the requirements, the test specification and the tasks, in that order. It is what specr returns in result.markdown for an unscoped render.
+- **the sweep**: The form speca --render takes with no package reference: every package under the spec root, and with --all those under archive/ as well, each rendered and reported in turn.

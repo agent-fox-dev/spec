@@ -1,8 +1,8 @@
 {
   "tool": "speca",
-  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and saves the package through the library, which rewrites all of its artifacts. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
+  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and writes the package's progress.json and no other file. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. With --migrate it converts a version 2 package to version 3 in place. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
   "input": {
-    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render for every package.",
+    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render or --migrate for every package.",
     "examples": [
       ".specs/16_indexed_code_search",
       "16",
@@ -17,7 +17,7 @@
       "all": {
         "type": "boolean",
         "default": false,
-        "description": "with --list, also list the packages under archive/, marked archived; with --render and no input, also render them"
+        "description": "with --list, also list the packages under archive/, marked archived; with --render or --migrate and no input, also render or migrate them"
       },
       "by": {
         "type": "string",
@@ -32,7 +32,7 @@
       "dry-run": {
         "type": "boolean",
         "default": false,
-        "description": "with the task form, the status form (--status) or the render form (--render), run every check and report what would change, and write nothing"
+        "description": "with the task form, the status form (--status), the render form (--render) or the migrate form (--migrate), run every check and report what would change, and write nothing"
       },
       "force": {
         "type": "boolean",
@@ -43,6 +43,11 @@
         "type": "boolean",
         "default": false,
         "description": "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input"
+      },
+      "migrate": {
+        "type": "boolean",
+        "default": false,
+        "description": "the migrate form: convert a version 2 package to version 3 in place, whatever its status, by the rules of format v3 §13; a version 3 package is left alone; each package is reported written, unchanged or failed"
       },
       "render": {
         "type": "boolean",
@@ -84,7 +89,7 @@
       "validate": {
         "type": "boolean",
         "default": false,
-        "description": "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C11 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call"
+        "description": "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call"
       }
     }
   },
@@ -243,7 +248,11 @@
           },
           "updated_at": {
             "type": "string",
-            "description": "when the package was last updated, RFC 3339, from the PRD frontmatter; the report and the verdict"
+            "description": "when a task of the package last changed state, RFC 3339, from progress.json; absent when none has; the report and the verdict"
+          },
+          "profile": {
+            "type": "string",
+            "description": "the package's profile, full or lite, from the PRD frontmatter; absent when the frontmatter names none, which is full"
           },
           "intent_hash": {
             "type": "string",
@@ -256,16 +265,9 @@
               "type": "string"
             }
           },
-          "tags": {
-            "type": "array",
-            "description": "the package's tags, from the PRD frontmatter; absent when it has none",
-            "items": {
-              "type": "string"
-            }
-          },
           "valid": {
             "type": "boolean",
-            "description": "whether the package validates. In the report, its own verdict, from the schemas and the cross-file rules C1 to C11; with --validate, the combined verdict: true exactly when no error was kept from the package's own rules or the cross-spec rules. Absent under --list, where each entry holds its own"
+            "description": "whether the package validates. In the report, its own verdict, from the schemas and the cross-file rules C1 to C8; with --validate, the combined verdict: true exactly when no error was kept from the package's own rules or the cross-spec rules. Absent under --list, where each entry holds its own"
           },
           "failing_rules": {
             "type": "array",
@@ -280,7 +282,7 @@
           },
           "tasks": {
             "type": "array",
-            "description": "every task of the plan, in order, with its state and whether it is ready; [] when the plan has none; the report only",
+            "description": "every task of the plan, in order, the derived integration task last, with its state and whether it is ready; [] when the plan has none; the report only",
             "items": {
               "type": "object",
               "properties": {
@@ -294,15 +296,11 @@
                 },
                 "kind": {
                   "type": "string",
-                  "description": "implement, or integration for the plan's last task"
+                  "description": "implement for a task of tasks.json, or integration for the derived last task of a full package"
                 },
                 "state": {
                   "type": "string",
-                  "description": "pending, in_progress, done or dropped"
-                },
-                "optional": {
-                  "type": "boolean",
-                  "description": "true when the task may be skipped"
+                  "description": "pending, in_progress, done or dropped, from progress.json"
                 },
                 "depends_on": {
                   "type": "array",
@@ -326,7 +324,7 @@
           },
           "task_counts": {
             "type": "object",
-            "description": "the tasks counted by state, and their total; the report only",
+            "description": "the tasks counted by state, the integration task among them, and their total; the report only",
             "properties": {
               "pending": {
                 "type": "integer",
@@ -371,15 +369,11 @@
               },
               "kind": {
                 "type": "string",
-                "description": "implement, or integration for the plan's last task"
+                "description": "implement for a task of tasks.json, or integration for the derived last task of a full package"
               },
               "state": {
                 "type": "string",
-                "description": "pending, in_progress, done or dropped"
-              },
-              "optional": {
-                "type": "boolean",
-                "description": "true when the task may be skipped"
+                "description": "pending, in_progress, done or dropped, from progress.json"
               },
               "depends_on": {
                 "type": "array",
@@ -493,7 +487,7 @@
           },
           "traceability": {
             "type": "object",
-            "description": "the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and tests_unowned; --validate only",
+            "description": "the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and criteria_unowned; --validate only",
             "properties": {
               "criteria_covered": {
                 "type": "integer"
@@ -513,7 +507,7 @@
                   "type": "string"
                 }
               },
-              "tests_unowned": {
+              "criteria_unowned": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -599,7 +593,7 @@
                 },
                 "task_counts": {
                   "type": "object",
-                  "description": "the tasks counted by state; absent when the package did not load",
+                  "description": "the tasks counted by state, the integration task among them; absent when the package did not load",
                   "properties": {
                     "pending": {
                       "type": "integer",
@@ -644,15 +638,11 @@
                     },
                     "kind": {
                       "type": "string",
-                      "description": "implement, or integration for the plan's last task"
+                      "description": "implement for a task of tasks.json, or integration for the derived last task of a full package"
                     },
                     "state": {
                       "type": "string",
-                      "description": "pending, in_progress, done or dropped"
-                    },
-                    "optional": {
-                      "type": "boolean",
-                      "description": "true when the task may be skipped"
+                      "description": "pending, in_progress, done or dropped, from progress.json"
                     },
                     "depends_on": {
                       "type": "array",
@@ -725,6 +715,51 @@
               "required": [
                 "spec_dir",
                 "rendered"
+              ]
+            }
+          },
+          "migrated": {
+            "type": "array",
+            "description": "what --migrate did to each package: the one package named, or with no reference every package under the spec root in number order, then with --all those under archive/; [] when the spec root holds none; with --dry-run, what it would have done; --migrate only",
+            "items": {
+              "type": "object",
+              "properties": {
+                "spec_dir": {
+                  "type": "string",
+                  "description": "the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca"
+                },
+                "spec_id": {
+                  "type": "string",
+                  "description": "the spec id, from the PRD frontmatter; absent when the package did not load"
+                },
+                "spec_name": {
+                  "type": "string",
+                  "description": "the spec name, from the PRD frontmatter; absent when the package did not load"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "the package's lifecycle status; absent when the package did not load"
+                },
+                "from_version": {
+                  "type": "integer",
+                  "description": "the schema_version the package declared before the call; absent when the package did not load"
+                },
+                "migrated": {
+                  "type": "string",
+                  "description": "written (the package was version 2 and was converted to version 3 in place), unchanged (it is version 3 already, and was left alone) or failed (it is neither, it could not be read, it has a gap the conversion refuses, or it could not be written: reason says why); under --dry-run, what would have happened"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "why the package failed, in the library's or the file system's words; present exactly when migrated is failed"
+                },
+                "archived": {
+                  "type": "boolean",
+                  "description": "true for a package migrated from archive/ with --all; absent otherwise"
+                }
+              },
+              "required": [
+                "spec_dir",
+                "migrated"
               ]
             }
           }
@@ -831,8 +866,8 @@
     ]
   },
   "exit_codes": {
-    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, or what --render did to spec.md",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the spec root the sweep reads could not be read",
+    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read",
     "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written"
   }
 }

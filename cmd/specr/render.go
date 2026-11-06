@@ -19,14 +19,13 @@ var sectionHeading = map[string]string{
 	"prd":          "PRD",
 	"architecture": "Architecture",
 	"requirements": "Requirements",
-	"test_spec":    "Test Specification",
 	"tasks":        "Tasks",
 }
 
 // What --max-tokens can drop, in the order it drops it.
 const (
 	ReducedArchitecture = envelope.ReducedArchitecture
-	ReducedTestDetail   = envelope.ReducedTestDetail
+	ReducedCheckDetail  = envelope.ReducedCheckDetail
 )
 
 // Result is specr's result. Its fields are the envelope package's
@@ -195,7 +194,7 @@ func render(spec *afspec.Spec, opts renderOptions, res *Result, run *cli.Run) {
 		var b strings.Builder
 		if res.Task != nil {
 			fmt.Fprintf(&b, "> The package %s, scoped to task %d: %s. What the task owns is rendered in full; "+
-				"requirements, tests and tasks it does not own are listed by id and title only.\n\n",
+				"requirements and tasks it does not own are listed by id and title only.\n\n",
 				code(res.SpecID+"_"+res.SpecName), res.Task.ID, res.Task.Title)
 		}
 		for _, key := range Sections {
@@ -234,9 +233,9 @@ func reducedCombined(spec *afspec.Spec, got string) []string {
 		if got == noArch.RenderCombined() {
 			return []string{ReducedArchitecture}
 		}
-		return []string{ReducedArchitecture, ReducedTestDetail}
+		return []string{ReducedArchitecture, ReducedCheckDetail}
 	}
-	return []string{ReducedTestDetail}
+	return []string{ReducedCheckDetail}
 }
 
 // reducedParts says what a budgeted per-section render dropped, against the
@@ -246,8 +245,8 @@ func reducedParts(spec *afspec.Spec, got, full map[string]string) []string {
 	if _, ok := got["architecture"]; spec.Architecture != "" && !ok {
 		out = append(out, ReducedArchitecture)
 	}
-	if got["test_spec"] != full["test_spec"] {
-		out = append(out, ReducedTestDetail)
+	if got["requirements"] != full["requirements"] {
+		out = append(out, ReducedCheckDetail)
 	}
 	return out
 }

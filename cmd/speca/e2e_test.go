@@ -29,7 +29,8 @@ func TestAnAgentFollowsNextFromTheReportToTheFinishedTask(t *testing.T) {
 	// 1, then to render it.
 	report, code, _ := run(t, "09")
 	r := result(t, report)
-	if code != cli.ExitOK || r.SpecID != "09" || len(r.Tasks) != 3 || r.NextTask == nil || r.NextTask.ID != 1 || !r.Tasks[0].Ready || r.Tasks[1].Ready {
+	if code != cli.ExitOK || r.SpecID != "09" || len(r.Tasks) != 3 || r.NextTask == nil || r.NextTask.ID != 1 || !r.Tasks[0].Ready || r.Tasks[1].Ready ||
+		r.Tasks[2].Kind != "integration" || r.Tasks[2].Ready {
 		t.Fatalf("code %d: %+v", code, r)
 	}
 	const input = ".specs/09_agent_mode"
@@ -194,7 +195,7 @@ func TestAMaintainerAmendsTheSteeringAndClearsWhatAPackageMissed(t *testing.T) {
 	root := newRepo(t)
 	dir := pkgDir(root, "09_agent_mode")
 	setDependencies(t, dir) // the example depends on a spec 08 the root does not hold
-	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 2\n", "schema_version: 2\nsteering_version: \"1.0.0\"\n")
+	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 3\n", "schema_version: 3\nsteering_version: \"1.0.0\"\n")
 	activate(t, dir)
 	steering := filepath.Join(root, ".specs", "steering.md")
 	const baseline = "  - version: 1.0.0\n    date: 2026-10-15\n    change: The baseline.\n"

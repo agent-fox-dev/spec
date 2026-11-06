@@ -50,8 +50,8 @@ func TestForms_FailAtLoadOnAPackageTheLibraryRefuses(t *testing.T) {
 }
 
 // A package in another format version is reported by the report and the
-// verdict, with what loaded and a high warning that its tests and tasks were
-// not read.
+// verdict, with what loaded and a high warning that its progress and tasks
+// were not read, which names the migrate form.
 func TestForms_WarnAboutAPackageInAnotherFormatVersion(t *testing.T) {
 	root := newRepo(t)
 	addLegacyPackage(t, root)
@@ -63,7 +63,7 @@ func TestForms_WarnAboutAPackageInAnotherFormatVersion(t *testing.T) {
 			continue
 		}
 		if len(env.Warnings) != 1 || env.Warnings[0].Code != cli.WarnSpecInvalid || env.Warnings[0].Severity != "high" ||
-			!strings.Contains(env.Warnings[0].Message, "tests and tasks are not read") {
+			!strings.Contains(env.Warnings[0].Message, "progress and its tasks are not read") || !strings.Contains(env.Warnings[0].Message, "--migrate") {
 			t.Errorf("%s: warnings = %+v", form, env.Warnings)
 		}
 		if !strings.Contains(env.Summary, "1 high-severity warning") {

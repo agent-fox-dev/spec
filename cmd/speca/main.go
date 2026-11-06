@@ -1,5 +1,6 @@
-// Command speca reports the state of a version 2 specification package, moves
-// the state of its tasks, and moves the package through its lifecycle.
+// Command speca reports the state of a version 3 specification package, moves
+// the state of its tasks, moves the package through its lifecycle, and
+// converts a version 2 package to version 3.
 //
 //	speca [flags] <spec>
 //	speca <spec> --validate
@@ -8,19 +9,24 @@
 //	speca <spec> --status S [--by <spec>] [--force] [--dry-run]
 //	speca <spec> --render [--dry-run]
 //	speca --render [--all] [--dry-run]
+//	speca <spec> --migrate [--dry-run]
+//	speca --migrate [--all] [--dry-run]
 //
 // It takes one input, a reference to a spec package, and writes exactly one
 // JSON object to stdout: the package's state, its verdict under --validate,
 // with --list and no input, every package under the spec root, or, in the task
 // and status forms, the package's state after the change and the changes made,
-// and under --render what it did to the package's spec.md.
+// under --render what it did to the package's spec.md, and under --migrate
+// what it did to the package's format version.
 // The report, --validate and --list read the packages and change nothing: they
-// write no file. The task form and the status form write the package through
-// the library, which rewrites every artifact of it and its spec.md, and the
-// status form moves an archived or superseded package under archive/. The
-// render form writes spec.md, the package's render, and no other file. No form makes a model or
-// network call or reads a credential. Its siblings are spec, which writes a
-// package from an idea, and specr, which renders one as Markdown.
+// write no file. The task form writes progress.json and no other file. The
+// status form writes the package through the library, which rewrites every
+// artifact of it and its spec.md, and moves an archived or superseded package
+// under archive/. The render form writes spec.md, the package's render, and no
+// other file. The migrate form rewrites a version 2 package as version 3 and
+// removes its test_spec.json. No form makes a model or network call or reads a
+// credential. Its siblings are spec, which writes a package from an idea, and
+// specr, which renders one as Markdown.
 package main
 
 import (
@@ -47,16 +53,17 @@ const description = "Reports the state of a specification package: its lifecycle
 	"lifecycle moves allowed from its status, and the packages it depends on and that depend on it. " +
 	"With --validate, the format's full verdict on the package; with --list, every package under the " +
 	"spec root. With --task and --state it moves one or more tasks through the task state machine, " +
-	"every one or none, and saves the package through the library, which rewrites all of its " +
-	"artifacts. With --status it moves the package through its lifecycle: activates, seals, archives " +
+	"every one or none, and writes the package's progress.json and no other file. With --status it " +
+	"moves the package through its lifecycle: activates, seals, archives " +
 	"or supersedes it (with --by, the package that replaces it), and moves an archived or superseded " +
 	"package under archive/. With --render it writes the package's spec.md, its render, and no other " +
-	"file. Without these it changes nothing. " + cli.SiblingCommands
+	"file. With --migrate it converts a version 2 package to version 3 in place. Without these it " +
+	"changes nothing. " + cli.SiblingCommands
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
 	"inside it, or a directory name, spec number or spec name under the spec root " +
-	"(16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render for every package."
+	"(16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render or --migrate for every package."
 
 const usage = `speca — report the state of a specification package
 
@@ -69,6 +76,8 @@ Usage:
   speca <spec> --status S [--by <spec>] [flags]
   speca <spec> --render [--dry-run] [flags]
   speca --render [--all] [--dry-run] [flags]
+  speca <spec> --migrate [--dry-run] [flags]
+  speca --migrate [--all] [--dry-run] [flags]
 
 The spec is one reference to a package, tried in this order:
   a path to the package directory, or to a file inside it
@@ -83,7 +92,7 @@ Forms:
                            moves allowed from its status, and the packages it
                            depends on and that depend on it
   speca <spec> --validate  the format's full verdict: the schemas, the
-                           cross-file rules C1 to C11 and the cross-spec rules
+                           cross-file rules C1 to C8 and the cross-spec rules
                            that concern the package, each finding naming its
                            rule, and the derived traceability
   speca --list             every package under the spec root, in number order,
@@ -95,8 +104,10 @@ Forms:
                            next (the task to work on now) or all (every task
                            not already in S and not dropped); S is pending,
                            in_progress, done or dropped. Every move must be one
-                           the task state machine (format v2 §8.3.1) allows, or
+                           the task state machine (format v3 §8.1) allows, or
                            none is made, and the result lists the changes.
+                           The integration task of a full package, which the
+                           plan derives, is moved like any other
                            Claiming a task that is in_progress is refused, which
                            is how a second agent learns it is taken (calls made
                            at the same moment are not locked against each other)
@@ -125,8 +136,23 @@ Forms:
                            A package that cannot be loaded or written is
                            reported failed with its reason, and the others are
                            rendered all the same
-    --dry-run              with the task, status or render form, run every
-                           check and report what would change; write nothing
+  speca <spec> --migrate   the migrate form: convert a version 2 package to
+                           version 3 in place, by the rules of format v3 §13,
+                           whatever its status: requirements.json takes the
+                           checks of test_spec.json, which is removed,
+                           progress.json takes the task states, and spec.md is
+                           rendered again. A version 3 package is reported
+                           unchanged; a version 2 package with a criterion no
+                           test verifies, or a path no smoke test covers, is
+                           reported failed and left as it is
+  speca --migrate          the sweep: the migrate form for every package under
+                           the spec root, in number order; --all adds archive/.
+                           A package that cannot be converted is reported
+                           failed with its reason, and the others are converted
+                           all the same
+    --dry-run              with the task, status, render or migrate form, run
+                           every check and report what would change; write
+                           nothing
     --force                with the task form and done or pending, set a state
                            the machine refuses, through the library's own
                            bypasses (a high task_state_forced warning names
@@ -143,23 +169,25 @@ Output is one JSON object on stdout; next names the call to make after this
 one. --schema prints the flags and the shape of the output as JSON Schema.
 
 The report, --validate and --list change nothing. The task form changes the
-state of the tasks and the updated_at of prd.md, and the status form the
-lifecycle status, and each saves the package through the library, which
-rewrites every artifact of it (prd.md, requirements.json, test_spec.json,
-tasks.json and architecture.md if there is one) in its canonical encoding, and
-writes spec.md, the package's render, beside them, through temporary files it
-renames, so that formatting the encoding does not
-keep (a YAML comment in the frontmatter of prd.md, say) is lost and the files
-are left with mode 0600. The status form also moves the package directory under
-archive/ and, when superseding, adds an id to the replacing package's
-supersedes. The render form writes spec.md alone, through a temporary file it
-renames. With --dry-run it writes nothing. speca makes no model call and no
-network call, and reads no credential.
+state of the tasks and writes progress.json, with its updated_at, and no other
+file. The status form changes the lifecycle status and saves the package
+through the library, which rewrites every artifact of it (prd.md,
+requirements.json, tasks.json, progress.json and architecture.md if there is
+one) in its canonical encoding, and writes spec.md, the package's render,
+beside them, through temporary files it renames, so that formatting the
+encoding does not keep (a YAML comment in the frontmatter of prd.md, say) is
+lost and the files are left with mode 0600. The status form also moves the
+package directory under archive/ and, when superseding, adds an id to the
+replacing package's supersedes. The render form writes spec.md alone, through
+a temporary file it renames. The migrate form writes every artifact of a
+version 2 package as version 3 and removes its test_spec.json. With --dry-run
+each writes nothing. speca makes no model call and no network call, and reads
+no credential.
 
 Exit codes:
   0  reported — a package that does not validate is reported too, in valid
      and validation; or the tasks were moved; or the status was changed; or
-     spec.md was rendered
+     spec.md was rendered; or the package was migrated
   1  failed: the package could not be loaded, or the spec root --list reads
      could not be read; or the task form was refused after the package was
      read: the machine does not allow a move (stage task), the package can no
@@ -173,7 +201,11 @@ Exit codes:
      written, the result says so and the call is resumable. The render form
      fails when the package cannot be loaded (stage load) or its spec.md cannot
      be written (stage write), and the sweep when the spec root cannot be read
-     (stage load); a package the sweep cannot render is an entry, not a failure
+     (stage load); a package the sweep cannot render is an entry, not a failure.
+     The migrate form fails when the package cannot be read, has a gap the
+     conversion refuses or cannot be written (stage migrate), and the sweep
+     when the spec root cannot be read (stage load); a package the sweep
+     cannot convert is an entry, not a failure
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have; --status
      draft, or a --by that names the package itself, no package or one with
@@ -192,6 +224,8 @@ Examples:
   speca 03 --status superseded --by 12
   speca 16 --render
   speca --render --all --dry-run
+  speca 09 --migrate --dry-run
+  speca --migrate --all
 
 Flags:
 `
@@ -210,6 +244,7 @@ type options struct {
 	force    bool
 	dryRun   bool
 	render   bool
+	migrate  bool
 	schema   bool
 	version  bool
 }
@@ -223,16 +258,17 @@ func (o *options) taskForm() bool { return len(o.tasks) > 0 || o.state != "" }
 func (o *options) statusForm() bool { return o.status.given || o.by.given }
 
 func (o *options) register(fs *flag.FlagSet) {
-	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C11 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
+	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
 	fs.BoolVar(&o.list, "list", false, "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input")
-	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived; with --render and no input, also render them")
+	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived; with --render or --migrate and no input, also render or migrate them")
 	fs.Var(&o.tasks, "task", "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)")
 	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped")
 	fs.Var(&o.status, "status", "the status form: move the package to this lifecycle status: active (computes the intent hash), sealed, archived or superseded (which needs --by); archived and superseded packages are moved under archive/. A move the lifecycle does not allow is refused, with the moves that are allowed")
 	fs.Var(&o.by, "by", "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and when it can be saved its supersedes list gets this package's id")
 	fs.BoolVar(&o.force, "force", false, "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; with the status form (--status), skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not know would be dropped; it skips nothing else, and a high task_state_forced, spec_invalid or tasks_open warning says what it skipped")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, the status form (--status) or the render form (--render), run every check and report what would change, and write nothing")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, the status form (--status), the render form (--render) or the migrate form (--migrate), run every check and report what would change, and write nothing")
 	fs.BoolVar(&o.render, "render", false, "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed")
+	fs.BoolVar(&o.migrate, "migrate", false, "the migrate form: convert a version 2 package to version 3 in place, whatever its status, by the rules of format v3 §13; a version 3 package is left alone; each package is reported written, unchanged or failed")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
 	fs.StringVar(&o.dir, "dir", ".", "the repository the spec root and a relative reference are resolved against")
 	fs.BoolVar(&o.schema, "schema", false, "print the flags, the input and the output's JSON Schema as one JSON object, and exit")
@@ -251,9 +287,15 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		errs = append(errs, errors.New("--validate and --list are two operations: give one"))
 	}
 	if o.render {
-		errs = append(errs, o.renderErrors(ref)...)
+		errs = append(errs, o.sweepErrors("--render", "the render form writes one derived file in any status and refuses nothing", ref)...)
 	}
-	if o.all && !o.list && !o.render {
+	if o.migrate {
+		errs = append(errs, o.sweepErrors("--migrate", "the migrate form converts a package in any status and refuses nothing it can convert", ref)...)
+	}
+	if o.render && o.migrate {
+		errs = append(errs, errors.New("--render and --migrate are two operations: give one"))
+	}
+	if o.all && !o.list && !o.render && !o.migrate {
 		errs = append(errs, errors.New("--all adds the packages under archive/ to --list, and means nothing without it"))
 	}
 	if o.taskForm() {
@@ -285,7 +327,7 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			hint = statusHint
 		}
 	}
-	if !o.taskForm() && !o.statusForm() && !o.render {
+	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate {
 		for _, f := range []struct {
 			name  string
 			given bool
@@ -301,10 +343,11 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	return usageInfo(errors.Join(errs...), hint)
 }
 
-// renderErrors are the faults of a call that asks for the render form: it is
-// the only operation of the call, --force has nothing to override, and --all
-// goes with the sweep and not with one package.
-func (o *options) renderErrors(ref string) []error {
+// sweepErrors are the faults of a call that asks for the render form or the
+// migrate form (flag, with why --force is inert for it): it is the only
+// operation of the call, --force has nothing to override, and --all goes with
+// the sweep and not with one package.
+func (o *options) sweepErrors(flag, forceInert, ref string) []error {
 	var errs []error
 	for _, f := range []struct {
 		name  string
@@ -314,14 +357,14 @@ func (o *options) renderErrors(ref string) []error {
 		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
 	} {
 		if f.given {
-			errs = append(errs, fmt.Errorf("--render and %s are two operations: give one", f.name))
+			errs = append(errs, fmt.Errorf("%s and %s are two operations: give one", flag, f.name))
 		}
 	}
 	if o.force {
-		errs = append(errs, errors.New("--force has no effect with --render: the render form writes one derived file in any status and refuses nothing"))
+		errs = append(errs, fmt.Errorf("--force has no effect with %s: %s", flag, forceInert))
 	}
 	if o.all && ref != "" {
-		errs = append(errs, errors.New("--all adds the archive to the sweep (speca --render with no package), and means nothing for one package"))
+		errs = append(errs, fmt.Errorf("--all adds the archive to the sweep (speca %s with no package), and means nothing for one package", flag))
 	}
 	return errs
 }
@@ -349,16 +392,16 @@ func (o *options) statusErrors() ([]error, *cli.FixHint) {
 	switch {
 	case !o.status.given:
 		errs = append(errs, errors.New("--by goes with --status superseded: it names the package that replaces this one"))
-	case status == string(afspec.PrdFrontmatterV2JsonStatusDraft):
+	case status == string(afspec.PrdFrontmatterV3JsonStatusDraft):
 		errs = append(errs, errors.New("--status draft: no move leads back to draft; a package whose intent must change is superseded by a new one"))
 		hint = &cli.FixHint{Flag: "--status", Valid: slices.Clone(statusTargets)}
 	case !slices.Contains(statusTargets, status):
 		errs = append(errs, fmt.Errorf("--status %q is not a status to move to: the targets are %s",
 			status, "active, sealed, superseded and archived"))
 		hint = &cli.FixHint{Flag: "--status", Valid: slices.Clone(statusTargets)}
-	case status == string(afspec.PrdFrontmatterV2JsonStatusSuperseded) && !o.by.given:
+	case status == string(afspec.PrdFrontmatterV3JsonStatusSuperseded) && !o.by.given:
 		errs = append(errs, errors.New("--status superseded needs --by <spec>: the package that replaces this one"))
-	case status != string(afspec.PrdFrontmatterV2JsonStatusSuperseded) && o.by.given:
+	case status != string(afspec.PrdFrontmatterV3JsonStatusSuperseded) && o.by.given:
 		errs = append(errs, fmt.Errorf("--by goes with --status superseded, not --status %s: it names the package that replaces this one", status))
 	}
 	if o.by.given && strings.TrimSpace(o.by.value) == "" {
@@ -413,7 +456,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.render {
+	if ref == "" && !o.list && !o.render && !o.migrate {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage
@@ -485,8 +528,8 @@ func describe(fs *flag.FlagSet) selfDescription {
 		// classified input, so those envelope fields never appear.
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
-			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, or what --render did to spec.md",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the spec root the sweep reads could not be read",
+			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read",
 			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written",
 		},
 	}

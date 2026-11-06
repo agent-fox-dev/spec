@@ -1,11 +1,11 @@
-// Package specgen turns a product idea into a complete, validated version 2
+// Package specgen turns a product idea into a complete, validated version 3
 // specification package.
 //
 // It is the `afspec` skill rebuilt as a program. The skill is ~750 lines of
 // markdown describing a seven-step workflow across fifteen CLI subcommands,
 // with a refinement loop that stops to ask a person questions. This package
 // keeps the two things that genuinely need a model — write the PRD, and
-// generate the three artifacts — and turns everything else into a mechanism:
+// generate the two artifacts — and turns everything else into a mechanism:
 //
 //   - The workflow is the pipeline, not a numbered list the model may skip.
 //   - The refinement loop is gone. Nobody is waiting to answer questions, so
@@ -31,8 +31,7 @@
 //     and followed to the last package — by this run, or by the next run on
 //     the same input if this one stops early.
 //
-// The three generation phases are separate agents rather than one
-// conversation, because sharing a transcript would carry the requirements
-// phase's reasoning into the tests that are supposed to check the
-// requirements.
+// The generation phases are separate agents rather than one conversation,
+// because sharing a transcript would carry the requirements phase's reasoning
+// into the plan that is supposed to deliver the requirements.
 package specgen

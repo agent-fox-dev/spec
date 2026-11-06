@@ -4,7 +4,7 @@ import "testing"
 
 func TestComputeCoverage_CoversEverythingInACompleteSpec(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	report := spec.TestSpec.ComputeCoverage(spec.Requirements)
+	report := spec.Requirements.ComputeCoverage()
 
 	if len(report.Uncovered) != 0 {
 		t.Errorf("uncovered = %v; the canonical fixture covers everything", report.Uncovered)
@@ -14,15 +14,22 @@ func TestComputeCoverage_CoversEverythingInACompleteSpec(t *testing.T) {
 	}
 }
 
+// A criterion without a check, one whose shared check resolves nowhere, and
+// a path without a smoke check are the gaps, in artifact order; a shared
+// check that resolves to a criterion's own check or to a path covers.
 func TestComputeCoverage_ListsTheGapsInArtifactOrder(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	spec.TestSpec.Tests = spec.TestSpec.Tests[:1] // keep only TS-01-1
+	reqs := spec.Requirements
+	reqs.Requirements[0].Criteria[1].Check = Check{}
+	reqs.Requirements[0].Criteria[2].Check = SameAs("REQ-1.2")
+	reqs.Requirements[1].Criteria[0].Check = SameAs("PATH-1")
+	reqs.ExecutionPaths[0].Smoke.EndState = nil
 
-	report := spec.TestSpec.ComputeCoverage(spec.Requirements)
-	if len(report.Covered) != 1 || report.Covered[0] != "01-REQ-1.1" {
-		t.Errorf("covered = %v; want just 01-REQ-1.1", report.Covered)
+	report := reqs.ComputeCoverage()
+	if len(report.Covered) != 1 || report.Covered[0] != "REQ-1.1" {
+		t.Errorf("covered = %v; want just REQ-1.1", report.Covered)
 	}
-	want := []string{"01-REQ-1.2", "01-REQ-1.3", "01-REQ-2.1", "01-PATH-1"}
+	want := []string{"REQ-1.2", "REQ-1.3", "REQ-2.1", "PATH-1"}
 	if len(report.Uncovered) != len(want) {
 		t.Fatalf("uncovered = %v; want %v", report.Uncovered, want)
 	}
@@ -33,10 +40,11 @@ func TestComputeCoverage_ListsTheGapsInArtifactOrder(t *testing.T) {
 	}
 }
 
-// §8.5: the matrix comes from test.verifies and task.tests, so it cannot drift
-// from the artifacts.
-func TestComputeTraceability_DerivesLinksFromVerifiesAndTasks(t *testing.T) {
+// §8.5: the matrix comes from the checks and task.criteria, so it cannot
+// drift from the artifacts.
+func TestComputeTraceability_DerivesLinksFromChecksAndTasks(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
+	spec.Requirements.Requirements[0].Criteria[2].Check = SameAs("REQ-1.1")
 	matrix := spec.ComputeTraceability()
 
 	if len(matrix.Links) != 5 {
@@ -48,73 +56,57 @@ func TestComputeTraceability_DerivesLinksFromVerifiesAndTasks(t *testing.T) {
 		byID[l.ID] = l
 	}
 
-	link := byID["01-REQ-1.1"]
-	if link.Kind != "criterion" {
-		t.Errorf("kind = %q; want criterion", link.Kind)
+	link := byID["REQ-1.1"]
+	if link.Kind != "criterion" || link.Check != "unit" {
+		t.Errorf("link = %+v; want a criterion with a unit check", link)
 	}
-	if len(link.Tests) != 2 || link.Tests[0] != "TS-01-1" || link.Tests[1] != "TS-01-5" {
-		t.Errorf("tests = %v; want TS-01-1 and the smoke test that also verifies it", link.Tests)
-	}
-	if len(link.Tasks) != 2 || link.Tasks[0] != 1 || link.Tasks[1] != 3 {
-		t.Errorf("tasks = %v; want the owning implement task and the integration task", link.Tasks)
+	if len(link.Tasks) != 1 || link.Tasks[0] != 1 {
+		t.Errorf("tasks = %v; want the owning task", link.Tasks)
 	}
 	if !link.Covered || !link.Owned {
 		t.Errorf("covered=%v owned=%v; both should hold", link.Covered, link.Owned)
 	}
-
-	path := byID["01-PATH-1"]
-	if path.Kind != "path" || len(path.Tests) != 1 || path.Tests[0] != "TS-01-5" {
-		t.Errorf("path link = %+v; want the smoke test", path)
+	if shared := byID["REQ-1.3"]; shared.Check != "same as REQ-1.1" || !shared.Covered {
+		t.Errorf("shared link = %+v", shared)
 	}
-	if len(path.Tasks) != 1 || path.Tasks[0] != 3 {
+
+	path := byID["PATH-1"]
+	if path.Kind != "path" || path.Check != "smoke" || !path.Covered {
+		t.Errorf("path link = %+v; want the smoke check", path)
+	}
+	if len(path.Tasks) != 1 || path.Tasks[0] != 3 || !path.Owned {
 		t.Errorf("path tasks = %v; want the integration task", path.Tasks)
 	}
 }
 
 func TestComputeTraceability_MarksACoveredButUnownedCriterion(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	// Orphan the property test: the criterion stays covered but unowned.
-	spec.Tasks.Tasks[0].Tests = []string{"TS-01-1", "TS-01-2"}
+	spec.Tasks.Tasks[0].Criteria = []string{"REQ-1.1", "REQ-1.2"}
 
 	for _, link := range spec.ComputeTraceability().Links {
-		if link.ID != "01-REQ-1.3" {
+		if link.ID != "REQ-1.3" {
 			continue
 		}
 		if !link.Covered {
-			t.Error("the criterion is still verified by TS-01-3, so it is covered")
+			t.Error("the criterion still carries its check, so it is covered")
 		}
 		if link.Owned {
-			t.Error("no task owns TS-01-3 any more, so the criterion is not owned")
+			t.Error("no task owns REQ-1.3 any more, so the criterion is not owned")
 		}
 		return
 	}
-	t.Fatal("01-REQ-1.3 is missing from the matrix")
+	t.Fatal("REQ-1.3 is missing from the matrix")
 }
 
-// C5 asks for a smoke test on every execution path, so a path verified only by
-// another kind of test is not covered.
-func TestComputeTraceability_CoversAPathOnlyWithASmokeTest(t *testing.T) {
+// A lite package has no integration task, so a path (which it must not have)
+// would be owned by nothing.
+func TestComputeTraceability_OwnsAPathByTheIntegrationTask(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	covered := func() bool {
-		t.Helper()
-		for _, l := range spec.ComputeTraceability().Links {
-			if l.Kind == "path" && l.ID == "01-PATH-1" {
-				return l.Covered
-			}
+	spec.Profile = ProfileLite
+	for _, l := range spec.ComputeTraceability().Links {
+		if l.Kind == "path" && (l.Owned || len(l.Tasks) != 0) {
+			t.Errorf("a path of a lite package is owned: %+v", l)
 		}
-		t.Fatal("no link for 01-PATH-1")
-		return false
-	}
-	if !covered() {
-		t.Fatal("the smoke-tested path is not covered")
-	}
-	for i := range spec.TestSpec.Tests {
-		if spec.TestSpec.Tests[i].Kind == TestKindSmoke {
-			spec.TestSpec.Tests[i].Kind = TestKindUnit
-		}
-	}
-	if covered() {
-		t.Error("a path verified only by a unit test is reported covered")
 	}
 }
 

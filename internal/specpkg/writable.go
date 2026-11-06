@@ -8,7 +8,7 @@ import "github.com/agent-fox-dev/spec/afspec"
 // gone) or is another. It is the rule by which the library refuses to save an
 // active package, so a caller learns here why. A nil package has not drifted.
 func IntentDrift(spec *afspec.Spec) bool {
-	if spec == nil || spec.Status != string(afspec.PrdFrontmatterV2JsonStatusActive) || spec.IntentHash == nil {
+	if spec == nil || spec.Status != string(afspec.PrdFrontmatterV3JsonStatusActive) || spec.IntentHash == nil {
 		return false
 	}
 	hash, err := afspec.ComputeIntentHash(spec.PRDBody)
@@ -27,9 +27,9 @@ func Writable(spec *afspec.Spec) bool {
 		return false
 	}
 	switch spec.Status {
-	case string(afspec.PrdFrontmatterV2JsonStatusDraft):
+	case string(afspec.PrdFrontmatterV3JsonStatusDraft):
 		return true
-	case string(afspec.PrdFrontmatterV2JsonStatusActive):
+	case string(afspec.PrdFrontmatterV3JsonStatusActive):
 		return !IntentDrift(spec)
 	}
 	return false

@@ -11,8 +11,8 @@ import (
 )
 
 // Verdict is the format's full verdict on spec: its own validation (the schemas
-// and the cross-file rules C1 to C11), then the cross-spec rules (format v2
-// §10.4) that concern it, which only a run over the whole spec root can apply,
+// and the cross-file rules C1 to C8), then the cross-spec rules (format v3
+// §10.3) that concern it, which only a run over the whole spec root can apply,
 // then the warning-only rule steering_version, which reads the spec root's
 // steering. spec and speca give this one verdict, whichever of them asks.
 //
@@ -93,8 +93,8 @@ func crossSpec(specsDir string, spec *afspec.Spec, siblings []*afspec.Spec) (afs
 // The library tags an unknown dependency and a missing shared actor with the
 // downstream package, which decides them, so those are kept for it. The cycle
 // names no package, and a package with no edge cannot be on one, so it is kept
-// for any package with an edge. A glossary conflict is tagged with the term and
-// is kept for a package that defines the term.
+// for any package with an edge. A warning tagged with the package's id is kept
+// for it.
 func concern(spec *afspec.Spec, graph *afspec.DependencyGraph, all afspec.ValidationResult) afspec.ValidationResult {
 	linked := len(graph.Dependencies(spec.SpecID)) > 0 || len(graph.Dependents(spec.SpecID)) > 0
 	var kept afspec.ValidationResult
@@ -103,35 +103,20 @@ func concern(spec *afspec.Spec, graph *afspec.DependencyGraph, all afspec.Valida
 			kept.Errors = append(kept.Errors, named(e))
 		}
 	}
-	if spec.Requirements != nil {
-		for _, w := range all.Warnings {
-			if _, defined := spec.Requirements.Glossary[w.EntityID]; defined {
-				kept.Warnings = append(kept.Warnings, named(w))
-			}
+	for _, w := range all.Warnings {
+		if w.EntityID == spec.SpecID {
+			kept.Warnings = append(kept.Warnings, named(w))
 		}
 	}
 	return kept
 }
 
-// glossaryCheck is the rule a glossary conflict is reported under. The library
-// gives such a warning no rule of its own, and a verdict names the rule of
-// every finding.
-const glossaryCheck = "cross_spec_glossary"
-
-// named gives a cross-spec finding the rule and the artifact the library leaves
-// off: a glossary conflict has neither, and the dependency cycle, which is made
-// of the dependencies that tasks.json declares, has no artifact.
+// named gives a cross-spec finding the artifact the library leaves off: the
+// dependency cycle, which is made of the dependencies that tasks.json
+// declares, has none.
 func named(e afspec.ValidationEntry) afspec.ValidationEntry {
-	if e.Check == "" && e.Category == "warning" {
-		e.Check = glossaryCheck
-	}
-	if e.Artifact == "" {
-		switch e.Check {
-		case glossaryCheck:
-			e.Artifact = "requirements.json"
-		case "cross_spec_cycle":
-			e.Artifact = "tasks.json"
-		}
+	if e.Artifact == "" && e.Check == "cross_spec_cycle" {
+		e.Artifact = "tasks.json"
 	}
 	return e
 }

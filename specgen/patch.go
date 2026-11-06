@@ -45,8 +45,8 @@ func patchArtifactTool(step afspec.GenerationStep, partial *afspec.PartialSpec, 
 	return core.Tool{
 		Name: name,
 		Description: fmt.Sprintf("Correct your last rejected %s submission in place, instead of submitting "+
-			"the whole artifact again. The operations are applied in order to the artifact as you submitted it "+
-			"(with the glossary as an object from term to definition), and the result is validated like a "+
+			"the whole artifact again. The operations are applied in order to the artifact as you submitted it, "+
+			"and the result is validated like a "+
 			"submission: accepted, it ends this phase; rejected, it becomes the submission the next patch "+
 			"applies to. With no operations, the last submission is checked again as it is.", step),
 		InputSchema: schema.Object(

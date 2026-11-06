@@ -31,21 +31,23 @@ different kinds of thing that happen to share the words "spec-driven".
 | Age, activity | First commit 2026-09; `afspec` moved here 2026-10-13; no release tags | First commit 2025-08; 1.0.0 2026-08-21; v1.2.4 on 2026-10-27, releases every 3–5 days | v1.15.0 on 2026-10-24; weekly releases | Announced 2026-10-22; v0.1.0 prerelease 2026-10-27 |
 | Stars (2026-10-28) | — | ~143k | ~73k | ~3.9k |
 | Implementation | Go, ~24k lines plus ~24k lines of tests | Python CLI (`specify`); the method is Markdown prompts | TypeScript CLI (`openspec`), also standalone binaries | Markdown skills and personas; Python only for the kit's own tests and packaging |
-| Artifact formats | `prd.md` (YAML frontmatter), `requirements.json`, `test_spec.json`, `tasks.json`, optional `architecture.md` | Markdown only: `constitution.md`, `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`, `tasks.md`, `checklists/*.md` | Markdown only: living `specs/<capability>/spec.md`, per change `proposal.md`, delta `specs/`, `design.md`, `tasks.md`, plus `.openspec.yaml` and `config.yaml` | Markdown only: `concepts_brief.md`, `docs/designs/<feature>.md`, review reports, drift reports, bootstrap READMEs |
+| Artifact formats | `prd.md` (YAML frontmatter), `requirements.json`, `tasks.json`, optional `architecture.md`; `progress.json` written by the tools; `spec.md` rendered | Markdown only: `constitution.md`, `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`, `tasks.md`, `checklists/*.md` | Markdown only: living `specs/<capability>/spec.md`, per change `proposal.md`, delta `specs/`, `design.md`, `tasks.md`, plus `.openspec.yaml` and `config.yaml` | Markdown only: `concepts_brief.md`, `docs/designs/<feature>.md`, review reports, drift reports, bootstrap READMEs |
 | Where the model runs | Inside the kit: `spec` drives Claude itself (Anthropic API, Vertex, Bedrock) | In the user's agent; the CLI never calls a model | In the user's agent; the CLI never calls a model | In the user's agent; the kit needs a harness with subagents |
 | Agents supported | Claude Code skills; the generator is Claude-only | 43 integrations rendered from one command source | 40 tool targets, skills and commands | Antigravity, Claude Code, Codex; Cowork, ChatGPT Work and omp partially |
 
 ### 1.1 This repository
 
 One feature is one *package* under `.specs/NN_name/`. The PRD is prose
-with a hashed `## Intent`. Requirements are EARS criteria in six patterns,
-decomposed into fields, plus end-to-end *execution paths*. Tests are one
-flat list with a `kind` and a `verifies` link; tasks are one flat list
-owning criteria and tests, with steps, touched files, dependencies and a
-state. JSON Schemas validate each file; eleven cross-file rules (C1–C11)
-prove that every criterion is tested, every test is owned by a task, every
-path has a smoke test and the last task is the integration task; cross-spec
-rules check dependencies, cycles and shared actors. The lifecycle is
+with a hashed `## Intent`. Requirements are EARS criteria in five patterns,
+decomposed into fields, each carrying its *check* (its own, with a kind,
+setup and pseudocode, or the same as another's), plus end-to-end *execution
+paths* each carrying its *smoke check*. Tasks are one flat list owning
+criteria, with steps, touched files and dependencies; the integration task
+is derived from the package, and every task's state lives in
+`progress.json`. JSON Schemas validate each file; eight cross-file rules
+(C1–C8) prove that every id resolves, every shared check names an own one,
+every criterion is owned by a task and the profile holds; cross-spec rules
+check dependencies, cycles and shared actors. The lifecycle is
 `draft → active → sealed` with `superseded` and `archived`, and the task
 state machine is `pending → in_progress → done`, with `dropped`.
 
@@ -117,12 +119,12 @@ doc, and tests are a prose "Verification Plan".
 | Dimension | agent-fox spec | Spec Kit | OpenSpec | EGM |
 |---|---|---|---|---|
 | Requirement syntax | EARS, six patterns, fields not prose; `contract` required on `unwanted` | `FR-###: System MUST …`, free prose | `### Requirement:` with SHALL/MUST and `#### Scenario:` Given/When/Then | Goals, Non-goals, CUJs in Given/When/Then, prose |
-| Machine validation of the spec | JSON Schema per file; C1–C11 cross-file rules; cross-spec rules; warnings for scope and vague words | None. The CLI never reads the artifacts; `/speckit.analyze` is an LLM report | Structural, over a Markdown parse (zod): sections, scenario presence, SHALL/MUST, delta/live consistency; `--strict` turns warnings into errors | None for the user's documents; the kit tests its own skills |
-| Requirement → test → task traceability | Enforced and derived: every criterion `verifies`-linked, every test owned by a task, matrix computed, never stored | Inferred by the model from `FR-###`, `[US1]` labels and key phrases in `analyze`; "no tooling, no metadata schema" | None; `/opsx:verify` searches for tests per scenario heuristically and "won't block archive" | None; findings are traced to action items inside a review report |
-| Tests | First-class artifact, four kinds, smoke test per execution path, integration task required, TDD mandated by `af-impl` | "Tests are OPTIONAL - only include them if explicitly requested"; TDD when the constitution says so | Not mandated; each task "MUST state how to verify completion" | Not mandated; a Verification Plan section, flagged by one reviewer if missing |
+| Machine validation of the spec | JSON Schema per file; C1–C8 cross-file rules; cross-spec rules; warnings for scope, and for vague words from the generator | None. The CLI never reads the artifacts; `/speckit.analyze` is an LLM report | Structural, over a Markdown parse (zod): sections, scenario presence, SHALL/MUST, delta/live consistency; `--strict` turns warnings into errors | None for the user's documents; the kit tests its own skills |
+| Requirement → check → task traceability | Enforced and derived: every criterion carries a check the schema requires, every criterion is owned by a task, matrix computed, never stored | Inferred by the model from `FR-###`, `[US1]` labels and key phrases in `analyze`; "no tooling, no metadata schema" | None; `/opsx:verify` searches for tests per scenario heuristically and "won't block archive" | None; findings are traced to action items inside a review report |
+| Tests | A check on every criterion (unit, integration or property) and a smoke check on every execution path, required by the schema; the integration task derived, never authored; TDD mandated by `af-impl` | "Tests are OPTIONAL - only include them if explicitly requested"; TDD when the constitution says so | Not mandated; each task "MUST state how to verify completion" | Not mandated; a Verification Plan section, flagged by one reviewer if missing |
 | Lifecycle of a spec | `draft → active → sealed`, `superseded`, `archived`; intent hashed at activation; writes refused on drift | `**Status**: Draft` that nothing updates; three "persistence models" left to the team | Filesystem: in `changes/` or `changes/archive/`; the living spec accumulates | `Status: Draft/Proposed/In Review/Approved` by hand; no archive step |
 | Task state | State machine with compare-and-set claims through `speca`; readiness from `depends_on` | Checkboxes `[ ]` → `[X]` | Checkboxes; only `[x]` counts | None |
-| What a coder is given | `specr --task N`: the task's criteria, tests and paths in full, the rest by id; `--max-tokens` drops detail | The whole `tasks.md`, `plan.md`, `spec.md` and design files | `openspec instructions apply --json`: tasks, context files, progress | The design doc; "no Skill.md is required here because the design document is complete" |
+| What a coder is given | `specr --task N`: the task's criteria with their checks, and the paths they name, in full, the rest by id; `--max-tokens` drops detail | The whole `tasks.md`, `plan.md`, `spec.md` and design files | `openspec instructions apply --json`: tasks, context files, progress | The design doc; "no Skill.md is required here because the design document is complete" |
 | Human clarification | `af-prd` asks gap questions in batches of three or four; `spec` itself asks nothing and records decisions | `/speckit.clarify`: taxonomy-driven, at most five questions, one at a time, with a recommended option | `/opsx:explore` as a thinking partner; proposals written by the agent | Brainstorm with open-ended questions one at a time; section approval gates; "Owner Decides Architecture" |
 | Review of the spec | `--adversarial`: a fresh reviewer and a fresh reviser on the PRD, 1–5 rounds, stop when nothing critical or major | `/speckit.analyze` (read-only report), `checklist` ("unit tests for English") | `openspec validate`; `/opsx:verify` | The core of the kit: five stages, seven personas, five rubrics, CONTEST/ESCALATE/PROPOSE FIX/DECLINE, convergence on two clean rounds |
 | Project-level rules | `.specs/steering.md`, fed to every phase and skill, not versioned, not checked | Versioned `constitution.md` with a Constitution Check gate and semver amendments | `config.yaml` `context:` and per-artifact `rules:` injected into every planning call | Project "elephant" skill with context; rubrics are the kit's, not the project's |
@@ -137,20 +139,20 @@ doc, and tests are a prose "Verification Plan".
 
 ## 3. Where this kit is unique or stronger
 
-1. **It is the only one that can say a plan is complete.** The C-rules
-   make "every criterion is tested, every test is owned by a task, every
-   path is smoke-tested" a property the validator proves, and a package
-   that breaks one is invalid, not a warning. Spec Kit's coverage table is
+1. **It is the only one that can say a plan is complete.** The schema and
+   the C-rules make "every criterion has a check, every path a smoke check,
+   every criterion is owned by a task" a property the validator proves, and
+   a package that breaks one is invalid, not a warning. Spec Kit's coverage table is
    what a model inferred from key phrases; OpenSpec checks that sections
    exist; EGM checks nothing. The v2 rationale (§0 of the format) is exactly
    the failure the others cannot see: in every archived v1 spec, the
    edge-case and property tests were owned by no task, "so no coder ever
    implemented them".
-2. **Tests are a contract, not an option.** A test spec with kinds,
-   Given/When/Then and pseudocode, smoke tests that name the
-   `real_components` that may not be mocked, an integration task that must
-   own every smoke test, and a skill that refuses to implement a task
-   whose tests it has not seen fail. Spec Kit makes tests opt-in; OpenSpec
+2. **Tests are a contract, not an option.** A check on every criterion,
+   with its kind, setup and pseudocode, smoke checks that name the
+   `real_components` that may not be mocked, a derived integration task
+   that runs every smoke check, and a skill that refuses to implement a
+   task whose checks it has not seen fail. Spec Kit makes tests opt-in; OpenSpec
    and EGM leave them to prose.
 3. **State is a state machine, not a checkbox.** A `pending →
    in_progress` move through `speca` is a compare-and-set, so two agents
@@ -229,8 +231,8 @@ doc, and tests are a prose "Verification Plan".
    never does. EGM's rubrics ask the questions a structural check cannot:
    is the root problem stated, is one path proposed where alternatives
    exist, does the implementer have to make design decisions.
-8. **Only the PRD is reviewed adversarially.** `requirements.json`,
-   `test_spec.json` and `tasks.json` are checked by the validator alone,
+8. **Only the PRD is reviewed adversarially.** `requirements.json` and
+   `tasks.json` are checked by the validator alone,
    and a plan that validates can still name a module that does not exist
    or a test that proves nothing. EGM's implementation-readiness stage,
    with its Zero-Decision Rule and a codebase-details reviewer, is aimed
@@ -342,7 +344,7 @@ the moat; the rest is replaceable.
 ### 7.1 What to borrow, in order of return on effort
 
 1. **Review the plan, not only the PRD** (from EGM). Add an adversarial
-   stage over the generated `tasks.json` and `test_spec.json` with two
+   stage over the generated `requirements.json` and `tasks.json` with two
    written rubrics: the Zero-Decision Rule (an implementer who must make a
    design choice means the plan fails) and codebase grounding (every path
    in `touches` and every symbol in `pseudocode` exists or is said to be

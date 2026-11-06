@@ -27,12 +27,12 @@
       "max-tokens": {
         "type": "integer",
         "default": 0,
-        "description": "drop detail until the render's estimated tokens fit: first the architecture, then each test's given, when, real components and pseudocode; 0 means no budget"
+        "description": "drop detail until the render's estimated tokens fit: first the architecture, then each check's setup and pseudocode and each smoke check's detail; 0 means no budget"
       },
       "section": {
         "type": "string",
         "default": "",
-        "description": "render only these sections, in the package's order: prd, architecture, requirements, test_spec, tasks; comma-separated or repeated (default: every section)"
+        "description": "render only these sections, in the package's order: prd, architecture, requirements, tasks; comma-separated or repeated (default: every section)"
       },
       "specs-dir": {
         "type": "string",
@@ -42,7 +42,7 @@
       "task": {
         "type": "integer",
         "default": 0,
-        "description": "render the package scoped to this task id: what the task owns in full, every other requirement, test and task by id and title; 0 renders the whole package"
+        "description": "render the package scoped to this task id: what the task owns in full, every other requirement and task by id and title; 0 renders the whole package"
       }
     }
   },
@@ -217,15 +217,11 @@
               },
               "kind": {
                 "type": "string",
-                "description": "implement, or integration for the plan's last task"
+                "description": "implement for a task of tasks.json, or integration for the derived last task of a full package"
               },
               "state": {
                 "type": "string",
-                "description": "pending, in_progress, done or dropped"
-              },
-              "optional": {
-                "type": "boolean",
-                "description": "true when the task may be skipped"
+                "description": "pending, in_progress, done or dropped, from progress.json"
               },
               "depends_on": {
                 "type": "array",
@@ -248,7 +244,7 @@
           },
           "sections": {
             "type": "array",
-            "description": "the sections the Markdown holds, in order; a subset of prd, architecture, requirements, test_spec, tasks",
+            "description": "the sections the Markdown holds, in order; a subset of prd, architecture, requirements, tasks",
             "items": {
               "type": "string"
             }
@@ -259,7 +255,7 @@
           },
           "reduced": {
             "type": "array",
-            "description": "the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), test_detail (each test's given, when, real components and pseudocode); absent when nothing was dropped",
+            "description": "the detail --max-tokens dropped to fit, in the order it is dropped: architecture (the whole section), check_detail (the setup and pseudocode of every check and smoke check); absent when nothing was dropped",
             "items": {
               "type": "string"
             }
@@ -270,7 +266,7 @@
           },
           "tasks": {
             "type": "array",
-            "description": "every task of the plan, in order: the ids --task takes",
+            "description": "every task of the plan, in order, the derived integration task last: the ids --task takes, with their states from progress.json",
             "items": {
               "type": "object",
               "properties": {
@@ -284,15 +280,11 @@
                 },
                 "kind": {
                   "type": "string",
-                  "description": "implement, or integration for the plan's last task"
+                  "description": "implement for a task of tasks.json, or integration for the derived last task of a full package"
                 },
                 "state": {
                   "type": "string",
-                  "description": "pending, in_progress, done or dropped"
-                },
-                "optional": {
-                  "type": "boolean",
-                  "description": "true when the task may be skipped"
+                  "description": "pending, in_progress, done or dropped, from progress.json"
                 },
                 "depends_on": {
                   "type": "array",

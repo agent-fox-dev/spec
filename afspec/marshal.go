@@ -24,60 +24,66 @@ var omitWhenNilFields map[reflect.Type]map[string]bool
 
 func init() {
 	// Field orderings from JSON Schema properties order.
-	// These MUST match the order in the corresponding .v2.json schema files.
+	// These MUST match the order in the corresponding .v3.json schema files.
 	schemaFieldOrder = map[reflect.Type][]string{
-		// requirements.v2.json
-		reflect.TypeOf(RequirementsV2Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "introduction", "glossary", "requirements", "execution_paths", "external_apis"},
-		reflect.TypeOf(Requirement{}):        {"id", "title", "rationale", "criteria"},
-		reflect.TypeOf(Criterion{}):          {"id", "pattern", "condition", "guard", "system", "action", "contract"},
+		// requirements.v3.json
+		reflect.TypeOf(RequirementsV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "requirements", "execution_paths", "external_apis"},
+		reflect.TypeOf(Requirement{}):        {"id", "title", "rationale", "system", "criteria"},
+		reflect.TypeOf(Criterion{}):          {"id", "pattern", "condition", "system", "action", "contract", "check"},
+		reflect.TypeOf(Check{}):              {"kind", "setup", "pseudocode", "same_as"},
 		reflect.TypeOf(PathStep{}):           {"actor", "action"},
-		reflect.TypeOf(ExecutionPath{}):      {"id", "title", "steps"},
+		reflect.TypeOf(ExecutionPath{}):      {"id", "title", "steps", "smoke"},
+		reflect.TypeOf(Smoke{}):              {"real_components", "setup", "end_state", "pseudocode"},
 		reflect.TypeOf(ExternalApiSymbol{}):  {"name", "import_path", "signature", "notes"},
 		reflect.TypeOf(ExternalApi{}):        {"package", "version", "verified", "symbols"},
 
-		// test_spec.v2.json
-		reflect.TypeOf(TestSpecV2Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "tests"},
-		reflect.TypeOf(Test{}):           {"id", "kind", "verifies", "title", "given", "when", "then", "pseudocode", "real_components"},
-
-		// tasks.v2.json
-		reflect.TypeOf(TasksV2Json{}):  {"$schema", "spec_id", "spec_name", "schema_version", "test_commands", "dependencies", "tasks"},
+		// tasks.v3.json
+		reflect.TypeOf(TasksV3Json{}):  {"$schema", "spec_id", "spec_name", "schema_version", "test_commands", "dependencies", "tasks"},
 		reflect.TypeOf(TestCommands{}): {"all_tests", "linter", "spec_tests"},
 		reflect.TypeOf(Dependency{}):   {"spec", "reason"},
-		reflect.TypeOf(Task{}):         {"id", "kind", "title", "criteria", "tests", "steps", "touches", "depends_on", "done_when", "state", "optional"},
+		reflect.TypeOf(Task{}):         {"id", "title", "criteria", "steps", "touches", "depends_on", "done_when"},
+
+		// progress.v3.json
+		reflect.TypeOf(ProgressV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "updated_at", "tasks"},
+		reflect.TypeOf(TaskProgress{}):   {"id", "state"},
 	}
 
 	// Fields omitted when nil. Everything else is always written, so a nil
-	// value would appear as JSON null — which the v2 schemas reject.
+	// value would appear as JSON null — which the v3 schemas reject.
 	omitWhenNilFields = map[reflect.Type]map[string]bool{
 		reflect.TypeOf(Criterion{}): {
 			"condition": true,
-			"guard":     true,
 			"system":    true,
 			"contract":  true,
 		},
+		reflect.TypeOf(Check{}): {
+			"kind":       true,
+			"setup":      true,
+			"pseudocode": true,
+			"same_as":    true,
+		},
+		reflect.TypeOf(Smoke{}): {
+			"setup":      true,
+			"pseudocode": true,
+		},
 		reflect.TypeOf(Requirement{}): {
 			"rationale": true,
+			"system":    true,
 		},
-		reflect.TypeOf(RequirementsV2Json{}): {
-			"glossary":      true,
-			"external_apis": true,
+		reflect.TypeOf(RequirementsV3Json{}): {
+			"execution_paths": true,
+			"external_apis":   true,
 		},
 		reflect.TypeOf(ExternalApiSymbol{}): {
 			"notes": true,
-		},
-		reflect.TypeOf(Test{}): {
-			"pseudocode":      true,
-			"real_components": true,
 		},
 		reflect.TypeOf(TestCommands{}): {
 			"spec_tests": true,
 		},
 		reflect.TypeOf(Task{}): {
-			"criteria":   true,
 			"touches":    true,
 			"depends_on": true,
 			"done_when":  true,
-			"optional":   true,
 		},
 	}
 }

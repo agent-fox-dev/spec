@@ -31,11 +31,14 @@ func TestHelp_GoesToStderrAndDescribesEveryForm(t *testing.T) {
 				"-specs-dir", "-validate", "-list",
 				// The task form.
 				"speca <spec> --task T --state S", "--task", "--state", "--force", "--dry-run",
-				"next", "all", "pending, in_progress, done or dropped", "state machine", "§8.3.1",
-				"task_state_forced", "writes nothing",
+				"next", "all", "pending, in_progress, done or dropped", "state machine", "§8.1",
+				"task_state_forced", "writes nothing", "progress.json",
 				// The status form.
 				"speca <spec> --status S", "--by", "active, sealed, archived or superseded", "archive/", "intent hash",
 				"tasks_open", "supersedes_not_recorded", "resum",
+				// The render form and the migrate form.
+				"speca <spec> --render", "speca --render", "spec.md",
+				"speca <spec> --migrate", "speca --migrate", "version 2", "version 3", "test_spec.json", "C1 to C8",
 			} {
 				if !strings.Contains(help, want) {
 					t.Errorf("the help does not say %q", want)
@@ -165,6 +168,17 @@ func TestUsageErrors(t *testing.T) {
 		"--render --force":          {[]string{in, "--render", "--force"}, []string{"--force has no effect with --render"}, nil},
 		"--render --all, one package": {[]string{in, "--render", "--all"},
 			[]string{"--all adds the archive to the sweep", "means nothing for one package"}, nil},
+
+		// The migrate form.
+		"--migrate --validate": {[]string{in, "--migrate", "--validate"}, []string{"--migrate", "--validate", "two operations"}, nil},
+		"--migrate --list":     {[]string{"--migrate", "--list"}, []string{"--migrate", "--list", "two operations"}, nil},
+		"--migrate, the task form": {[]string{in, "--migrate", "--task", "1", "--state", "done"},
+			[]string{"--migrate", "--task", "two operations"}, nil},
+		"--migrate, the status form": {[]string{in, "--migrate", "--status", "active"}, []string{"--migrate", "--status", "two operations"}, nil},
+		"--migrate --render":         {[]string{in, "--migrate", "--render"}, []string{"--render", "--migrate", "two operations"}, nil},
+		"--migrate --force":          {[]string{in, "--migrate", "--force"}, []string{"--force has no effect with --migrate"}, nil},
+		"--migrate --all, one package": {[]string{in, "--migrate", "--all"},
+			[]string{"--all adds the archive to the sweep", "speca --migrate", "means nothing for one package"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := refusedAsUsage(t, root, append([]string{"--dir", root}, tc.argv...), tc.want...)
@@ -218,15 +232,19 @@ func TestUsageErrors_AcceptEveryWellFormedTaskCall(t *testing.T) {
 		"pending":       {"09", "--task", "1", "--state", "pending"},
 		"dropped":       {"09", "--task", "1", "--state", "dropped"},
 		"render":        {"09", "--render"},
+		"migrate":       {"09", "--migrate"},
 	} {
 		env, _, _ := run(t, append([]string{"--dir", root, "--dry-run"}, flags...)...)
 		if env.Error != nil && env.Error.Stage == "usage" {
 			t.Errorf("%s: refused as a usage error: %s", name, env.Error.Message)
 		}
 	}
-	// The render form takes --dry-run, and --all without a package, which
-	// every other form refuses.
-	for _, flags := range [][]string{{"--render", "--dry-run"}, {"--render", "--all"}, {"--render", "--all", "--dry-run"}} {
+	// The render form and the migrate form take --dry-run, and --all without
+	// a package, which every other form refuses.
+	for _, flags := range [][]string{
+		{"--render", "--dry-run"}, {"--render", "--all"}, {"--render", "--all", "--dry-run"},
+		{"--migrate", "--dry-run"}, {"--migrate", "--all"}, {"--migrate", "--all", "--dry-run"},
+	} {
 		if env, code, _ := run(t, append([]string{"--dir", root}, flags...)...); code != cli.ExitOK {
 			t.Errorf("%v: code %d: %+v", flags, code, env.Error)
 		}

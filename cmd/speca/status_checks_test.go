@@ -12,7 +12,8 @@ import (
 // included, which it does. Sealing needs an intent that has not drifted, which
 // --force does not override, and no task open, an optional one included, which
 // it does. Sealing, archiving and superseding refuse a package that holds keys
-// the schema does not allow, in prd.md or in any other artifact, naming each.
+// the schema does not allow, in prd.md, in progress.json or in any other
+// artifact, naming each.
 // Every refusal comes before anything is written.
 func TestStatus_RefusesWhatTheChecksOfTheTargetRefuse(t *testing.T) {
 	for name, tc := range map[string]struct {
@@ -27,33 +28,32 @@ func TestStatus_RefusesWhatTheChecksOfTheTargetRefuse(t *testing.T) {
 			[]string{"`## Intent`", "spelled exactly so", "on a line of its own", "prd.md"}, false},
 		"activation of a package that does not validate": {func(t *testing.T, root string) { breakValidity(t, pkgDir(root, "09_agent_mode")) },
 			[]string{"09", "--status", "active"}, "validate", "invalid_spec",
-			[]string{"09_agent_mode", "does not validate", "C6", "--validate"}, true},
+			[]string{"09_agent_mode", "does not validate", "C4", "--validate"}, true},
 		// The library reports no key of the frontmatter, and the write drops it.
 		"activation of a package with a key in the frontmatter": {func(t *testing.T, root string) { withFrontmatterKey(t, pkgDir(root, "09_agent_mode")) },
 			[]string{"09", "--status", "active"}, "validate", "invalid_spec",
 			[]string{"unknown_field", "prd.md", "badkey"}, true},
 		"sealing an edited intent, forced": {func(t *testing.T, root string) {
-			driftIntent(t, activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)))
+			driftIntent(t, activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done")))
 		}, []string{"03_a", "--status", "sealed", "--force"}, "status", "lifecycle",
 			[]string{"03_a", "restore the intent that was activated", "supersedes this one"}, false},
 		"sealing a removed intent, forced": {func(t *testing.T, root string) {
-			removeIntent(t, activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)))
+			removeIntent(t, activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done")))
 		}, []string{"03_a", "--status", "sealed", "--force"}, "status", "lifecycle",
 			[]string{"03_a", "restore the intent that was activated", "supersedes this one"}, false},
 		"sealing with open tasks": {func(t *testing.T, root string) { activePackage(t, root, "03_a", "03", "a", planWithOpenTasks()...) },
 			[]string{"03_a", "--status", "sealed"}, "status", "lifecycle",
 			[]string{"task 1 (pending)", "task 2 (in_progress)", "finish or drop"}, true},
 		"sealing with a key in the frontmatter": {func(t *testing.T, root string) {
-			withFrontmatterKey(t, activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)))
+			withFrontmatterKey(t, activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done")))
 		}, []string{"03_a", "--status", "sealed"}, "status", "lifecycle", []string{"prd.md", "badkey"}, true},
 		"archiving with a key in tasks.json": {func(t *testing.T, root string) { addUnknownKey(t, packageWith(t, root, "04_s", "04", "s", "sealed")) },
 			[]string{"04_s", "--status", "archived"}, "status", "lifecycle", []string{"tasks.json", "traceability"}, true},
 		"archiving with a key in requirements.json": {func(t *testing.T, root string) {
 			editJSON(t, filepath.Join(packageWith(t, root, "05_r", "05", "r", "sealed"), "requirements.json"), func(m map[string]any) { m["stray"] = 1 })
 		}, []string{"05_r", "--status", "archived"}, "status", "lifecycle", []string{"requirements.json", "stray"}, true},
-		"archiving with a key in test_spec.json": {func(t *testing.T, root string) {
-			editJSON(t, filepath.Join(packageWith(t, root, "06_t", "06", "t", "sealed"), "test_spec.json"), func(m map[string]any) { m["stray"] = 1 })
-		}, []string{"06_t", "--status", "archived"}, "status", "lifecycle", []string{"test_spec.json", "stray"}, true},
+		"archiving with a key in progress.json": {func(t *testing.T, root string) { addProgressKey(t, packageWith(t, root, "06_t", "06", "t", "sealed")) },
+			[]string{"06_t", "--status", "archived"}, "status", "lifecycle", []string{"progress.json", "stale"}, true},
 		"superseding with a key in tasks.json": {func(t *testing.T, root string) {
 			addUnknownKey(t, packageWith(t, root, "07_old", "07", "old", "sealed"))
 			packageWith(t, root, "12_new", "12", "new", "draft")
@@ -93,7 +93,7 @@ func TestStatus_ForceGoesPastTheChecksItOverrides(t *testing.T) {
 			dir := pkgDir(root, "09_agent_mode")
 			breakValidity(t, dir)
 			return dir
-		}, "09", "active", "spec_invalid", "validate", []string{"C6"}, ""},
+		}, "09", "active", "spec_invalid", "validate", []string{"C4"}, ""},
 		"activation of a package with a key in the frontmatter": {func(t *testing.T, root string) string {
 			dir := pkgDir(root, "09_agent_mode")
 			withFrontmatterKey(t, dir)
@@ -103,7 +103,7 @@ func TestStatus_ForceGoesPastTheChecksItOverrides(t *testing.T) {
 			return activePackage(t, root, "03_a", "03", "a", planWithOpenTasks()...)
 		}, "03_a", "sealed", "tasks_open", "status", []string{"task 1", "pending", "task 2", "in_progress"}, ""},
 		"sealing with a key in the frontmatter": {func(t *testing.T, root string) string {
-			dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+			dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
 			withFrontmatterKey(t, dir)
 			return dir
 		}, "03_a", "sealed", "spec_invalid", "validate", []string{"badkey"}, "badkey"},

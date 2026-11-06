@@ -1,4 +1,4 @@
-// Command spec turns a product idea into a complete, validated version 2
+// Command spec turns a product idea into a complete, validated version 3
 // specification package.
 //
 //	spec [flags] <text | file | issue-url | ->
@@ -49,9 +49,10 @@ like --budget.
 The run is unattended: nobody is waiting to answer questions, so the PRD phase
 resolves every open question itself, records each in a '## Design Decisions'
 section, and reports the ones it is least sure of as open_questions in the
-result. It then generates requirements.json, test_spec.json and tasks.json in
-that order — each validated against the format's schema and its cross-file
-rules before it is written — writes the package under .specs/NN_name/, checks
+result. It then generates requirements.json, with a check on every criterion
+and a smoke check on every path, and tasks.json, each validated against the
+format's schema and its cross-file rules before it is written, writes the
+package under .specs/NN_name/ with its progress.json and spec.md, checks
 it against the other specs of the spec root (an unknown dependency, a cycle, a
 dependency it shares no actor with), and activates it if it validates.
 
@@ -66,8 +67,8 @@ early is resumed by running spec on the same input again.
 agent looks for its flaws and another revises it to answer them, for up to
 --adversarial-rounds rounds (default 1). A review that cannot finish is a
 warning, not a failure: the package is generated from the last complete PRD.
---adversarial-plan reviews every package's plan — its requirements, tests and
-tasks — after the tasks phase and before the package is written, against the
+--adversarial-plan reviews every package's plan — its requirements with their
+checks, and its tasks — after the tasks phase and before the package is written, against the
 Zero-Decision Rule and codebase grounding; the two reviews are independent.
 
 Everything the model does here is read-only. The only thing written is the

@@ -7,16 +7,19 @@ speca <spec> --task T --state S          change the state of tasks of a package
 speca <spec> --status S [--by <spec>]    change the lifecycle status of a package
 speca <spec> --render                    write the package's spec.md, its render
 speca --render [--all]                   write the spec.md of every package
+speca <spec> --migrate                   convert a version 2 package to version 3
+speca --migrate [--all]                  convert every version 2 package
 ```
 
-`speca` is the spec admin command. It reads a version 2 package through
+`speca` is the spec admin command. It reads a version 3 package through
 `afspec` and reports what an agent with a shell needs to know about it: its
 lifecycle status, whether it validates, every task with its state and whether
-it is ready, the task to work on next, the lifecycle moves allowed from where
-it is, and the packages it depends on and that depend on it. It is built for an
+it is ready (the integration task a `full` package derives among them), the
+task to work on next, the lifecycle moves allowed from where it is, and the
+packages it depends on and that depend on it. It is built for an
 agent to call — from a prompt, or from a skill's instructions — and follows the
 same interface as `spec` and `specr`: **exactly one positional input**
-(none with `--list`, or with `--render` for every package), **exactly one JSON object** on stdout on every
+(none with `--list`, or with `--render` or `--migrate` for every package), **exactly one JSON object** on stdout on every
 program-driven path, the help on stderr, and one exit-code table. The forms are
 flags, not subcommands.
 
@@ -25,23 +28,25 @@ changes its state. Each command's help and each `--schema` description say so,
 in the sentence `cli.SiblingCommands`.
 
 The report, `--validate` and `--list` read the packages and change nothing.
-The task form and the status form write. The task form moves tasks through the
-library's task state machine, sets `updated_at`, and saves the package with the
-library's `Spec.Save`. The status form moves a package through its lifecycle
-(activating, sealing, archiving, superseding it) with the library's
-`Transition` and `Supersede`, sets `updated_at`, and moves an archived or
+The task form, the status form, the render form and the migrate form write.
+The task form moves tasks through the library's task state machine and
+writes `progress.json`, with its `updated_at`, through the library's
+`Spec.SaveProgress`, and no other file. The status form moves a package
+through its lifecycle (activating, sealing, archiving, superseding it) with
+the library's `Transition` and `Supersede`, and moves an archived or
 superseded package under `archive/`. The render form writes the package's
-`spec.md` and nothing else. `Save`, `Transition` and `Supersede` rewrite
-**every** artifact of the package (`prd.md`, `requirements.json`,
-`test_spec.json`, `tasks.json`, and `architecture.md` when there is one) in its
-canonical encoding, and write `spec.md`, the package's render, beside them,
-through temporary files that they rename. What a call changes
-in content is the task states or the status, and `updated_at`, but formatting the
-encoding does not keep (a YAML comment in the frontmatter of `prd.md`, say) is
-lost, and the files are left with mode `0600`, because the temporary files are
-created private. Moving the directory under `archive/` is a rename: it rewrites
-no file. With `--dry-run` neither form writes anything. `speca` makes no model
-call and no network call, and reads no credential.
+`spec.md` and nothing else. The migrate form converts a version 2 package to
+version 3 in place with the library's `MigrateV2`. `Transition`, `Supersede`
+and `Save` rewrite **every** artifact of the package (`prd.md`,
+`requirements.json`, `tasks.json`, `progress.json`, and `architecture.md`
+when there is one) in its canonical encoding, and write `spec.md`, the
+package's render, beside them, through temporary files that they rename. What
+a call changes in content is the status, but formatting the encoding does not
+keep (a YAML comment in the frontmatter of `prd.md`, say) is lost, and the
+files are left with mode `0600`, because the temporary files are created
+private. Moving the directory under `archive/` is a rename: it rewrites no
+file. With `--dry-run` no form writes anything. `speca` makes no model call
+and no network call, and reads no credential.
 
 ```sh
 speca 16                                # the state of package 16
@@ -57,6 +62,8 @@ speca 16 --status sealed                # seal an active package whose tasks are
 speca 03 --status superseded --by 12    # 12 replaces 03; 03 goes under archive/
 speca 16 --render                       # write spec.md, 16's render, and nothing else
 speca --render --all --dry-run          # which packages' spec.md are not their render
+speca 16 --migrate                      # convert 16 from version 2 to version 3, in place
+speca --migrate --all --dry-run         # which packages, archive/ included, are still version 2
 speca --schema                          # the interface, as JSON Schema
 ```
 
@@ -66,8 +73,8 @@ the build set them, from the variables in `version.go`), and `-h`/`--help` or a
 bare invocation prints the help to stderr. `--help` exits 0 and writes nothing
 to stdout. A bare invocation exits 2; when stdout is not a terminal it also
 writes a usage envelope, so a program still gets one object to parse. An
-invocation that names flags but no input, and is not `--list` or `--render`, is a bare
-invocation.
+invocation that names flags but no input, and is not `--list`, `--render` or
+`--migrate`, is a bare invocation.
 
 ## The input
 
@@ -106,14 +113,19 @@ Every one of these messages begins with `speca`.
 | `--render --dry-run` | the same, for a write that was not made: `dry_run` is true |
 | `--render` with no input | the sweep: `rendered` holds every package under the spec root, in the order of their numbers |
 | `--render --all` with no input | the same, then the packages under `archive/` |
+| `--migrate` | `migrated`: the package, and whether it was `written` as version 3, left `unchanged` (it was version 3 already) or `failed` |
+| `--migrate --dry-run` | the same, for a conversion that was not written: `dry_run` is true |
+| `--migrate` with no input | the sweep: `migrated` holds every package under the spec root, in the order of their numbers |
+| `--migrate --all` with no input | the same, then the packages under `archive/` |
 
 A call names one operation. `--validate` with `--list`, the task form or the
-status form with either of them or with each other, `--render` with any of
-them, a positional input with `--list`, and `--all` without `--list` (or without
-`--render` and with no input) are usage errors. `--force` with `--render` is
-one too: the render form refuses nothing, so there is nothing to override; and
-so is `--all` with `--render` and an input, since `--all` adds `archive/` to
-the sweep and means nothing for one package.
+status form with either of them or with each other, `--render` or `--migrate`
+with any of them or with each other, a positional input with `--list`, and
+`--all` without `--list` (or without `--render` or `--migrate` and with no
+input) are usage errors. `--force` with `--render` or `--migrate` is one too:
+neither form refuses anything `--force` could override; and so is `--all` with
+either and an input, since `--all` adds `archive/` to the sweep and means
+nothing for one package.
 
 ## The report: `speca <spec>`
 
@@ -123,13 +135,14 @@ empty, except where the table says the empty list is written.
 | Field | Meaning |
 |---|---|
 | `spec_dir` | the package directory, relative to `--dir` when inside it, absolute otherwise; runnable as the input of `speca` and `specr` |
-| `spec_id`, `spec_name`, `title`, `status`, `created_at`, `updated_at` | from the PRD frontmatter. `status` is `draft`, `active`, `sealed`, `superseded` or `archived` |
-| `intent_hash`, `supersedes`, `tags` | from the frontmatter; each is absent when it is unset or empty |
-| `valid` | the package's own verdict from `(*Spec).Validate`: the schemas and the cross-file rules C1 to C11. It is always written, so a `false` is not mistaken for an absent field |
+| `spec_id`, `spec_name`, `title`, `status`, `created_at` | from the PRD frontmatter. `status` is `draft`, `active`, `sealed`, `superseded` or `archived` |
+| `updated_at` | when a task of the package last changed state, from `progress.json`; absent when none has, or the package has no progress file yet |
+| `intent_hash`, `supersedes`, `profile` | from the frontmatter; each is absent when it is unset or empty. `profile` is `full` or `lite`; absent means `full` |
+| `valid` | the package's own verdict from `(*Spec).Validate`: the schemas and the cross-file rules C1 to C8. It is always written, so a `false` is not mistaken for an absent field |
 | `failing_rules` | the rules the package's errors break (`C3`, `C7`, `json_schema`, …), each once, in the order they first appear; present only when `valid` is `false` |
 | `intent_drift` | `true` when the package is `active`, has an `intent_hash`, and its PRD's `## Intent` section no longer hashes to it, or is gone. The library refuses every save of such a package, so a caller learns here why; absent otherwise |
-| `tasks` | every task of the plan, in order: `id`, `title`, `kind`, `state`, `optional`, `depends_on`, and `ready`. `[]` when the plan has none |
-| `task_counts` | `pending`, `in_progress`, `done`, `dropped` and `total`, the number of tasks. A task whose state is none of the four (the package then does not validate) is in the total and in no count |
+| `tasks` | every task of the plan, in order, the derived integration task last: `id`, `title`, `kind` (`implement` for a task of `tasks.json`, `integration` for the derived one), `state` (from `progress.json`; `pending` for a task with no entry), `depends_on`, and `ready`. `[]` when the plan has none |
+| `task_counts` | `pending`, `in_progress`, `done`, `dropped` and `total`, the number of tasks, the integration task among them. A task whose state is none of the four (the package then does not validate) is in the total and in no count |
 | `next_task` | the task to work on now, as the entries of `tasks`: the first task in progress, otherwise the first ready task; absent when there is none |
 | `allowed_status` | the lifecycle states the package may move to from its status, in the order `draft`, `active`, `sealed`, `superseded`, `archived`. `[]` for a terminal status |
 | `depends_on` | the spec ids in the package's own `tasks.json` `dependencies`, in file order, each once. `[]` when there are none |
@@ -138,20 +151,23 @@ empty, except where the table says the empty list is written.
 A task is **ready** when it is `pending` and everything it depends on is
 `done`. Its dependencies are its `depends_on` when that is present, where an
 empty list means none; when it is absent, the task before it in the plan, and
-the first task then has none (format v2 §8.3). A dependency the plan does not
-have, or one that is `dropped`, is not done. The same rule is
-`(*TasksV2Json).IsReady`, and `next_task` is `NextTask`, so `speca`, `specr` and
-the `examples/tasks` program agree on what "ready" and "next" mean. `ready` is
-written on a task only when it is true.
+the first task then has none (format v3 §8.2). The integration task, which
+depends on every task of the plan, is ready when each of them is `done` or
+`dropped`. A dependency the plan does not have, or one that is `dropped`, is
+not done. The same rule is `(*afspec.Spec).IsReady`, and `next_task` is
+`NextTask`, so `speca`, `specr` and the `examples/tasks` program agree on what
+"ready" and "next" mean. `ready` is written on a task only when it is true.
 
 `dependents` is found with the spec root's dependency graph. A dependency on a
 package that is not in the root does not stop it: the graph holds the edges
 that were read.
 
 A package in another format version (a PRD `schema_version` that is neither
-absent nor 2) loads, but none of its tests or tasks is read: a version 1 plan
-is `task_groups`, not `tasks`. It is reported with what did load — its `tasks`
-are `[]` — and a high-severity `spec_invalid` warning saying so. A version 2
+absent nor 3) loads, but none of its progress or tasks is read: a version 2
+task carries its state in `tasks.json`, and a version 1 plan is
+`task_groups`, not `tasks`. It is reported with what did load — its `tasks`
+are `[]` — and a high-severity `spec_invalid` warning saying so and naming
+`speca <package> --migrate`, which converts a version 2 package. A version 3
 package that does not validate raises no warning: `valid` and `failing_rules`
 are the answer.
 
@@ -162,16 +178,16 @@ are the answer.
 | Field | Meaning |
 |---|---|
 | `valid` | the combined verdict: `true` exactly when no error was kept from the package's own validation or from the cross-spec rules. It equals `validation.valid` |
-| `validation` | `valid`, `error_count`, `warning_count`, and `errors` and `warnings`, each finding with its `check` (the rule), `artifact`, `entity` and `message`. The package's own findings come first, then the cross-spec findings that concern it. The library names no rule for a glossary conflict, and no artifact for the dependency cycle; `speca` reports the conflict as `cross_spec_glossary` in `requirements.json`, and the cycle in `tasks.json` |
-| `traceability` | the derived coverage, in the shape `spec` reports: `criteria_covered`, `criteria_uncovered`, `paths_covered`, `paths_uncovered` and `tests_unowned` |
+| `validation` | `valid`, `error_count`, `warning_count`, and `errors` and `warnings`, each finding with its `check` (the rule), `artifact`, `entity` and `message`. The package's own findings come first, then the cross-spec findings that concern it. The library names no artifact for the dependency cycle; `speca` reports it in `tasks.json` |
+| `traceability` | the derived coverage, in the shape `spec` reports: `criteria_covered`, `criteria_uncovered`, `paths_covered`, `paths_uncovered` and `criteria_unowned` |
 
 The fields that are specific to the report (`tasks`, `task_counts`,
 `next_task`, `allowed_status`, `depends_on`, `dependents`, `failing_rules`) are
 absent.
 
-The cross-spec rules (format v2 §10.4: an unknown dependency, a dependency
-cycle, a missing shared actor, a glossary term defined two ways) need every
-package of the spec root, so this form loads each `NN_name` directory that
+The cross-spec rules (format v3 §10.3: an unknown dependency, a dependency
+cycle, a missing shared actor between two packages that both have execution
+paths) need every package of the spec root, so this form loads each `NN_name` directory that
 loads, adds the package itself when it is not among them — an archived package
 is not — builds the dependency graph and runs `afspec.ValidateCrossSpec`. `spec`
 gives every package it writes the same verdict (`specpkg.Verdict`), against the
@@ -182,15 +198,14 @@ spec root as it is then, before it activates the package. Of what that finds it 
   shared actor);
 - the dependency cycle, which names no package, when the package has an edge
   in the graph — one from it or to it — since a package with no edge cannot be
-  on a cycle;
-- the glossary warnings over a term the package's own glossary defines.
+  on a cycle.
 
 A package under the root that fails to load is left out of the run. A spec root
 that cannot be read skips the cross-spec rules, with a `specs_dir_unreadable`
 warning, and the verdict is the package's own.
 
-After the cross-spec rules comes the rule `steering_version` (format v2
-§10.5), which reads the spec root's `steering.md` and is always a warning on
+After the cross-spec rules comes the rule `steering_version` (format v3
+§10.4), which reads the spec root's `steering.md` and is always a warning on
 `prd.md`, never an error. It applies to a draft or active package whose PRD
 frontmatter records `steering_version`, under a steering that is versioned
 ([configuration.md](configuration.md#the-steering)):
@@ -210,7 +225,7 @@ setting `steering_version` to the steering's version, and then runs
 it; the field is outside the hashed `## Intent`, so an active package takes the
 change.
 
-The package's own validation includes the rule `rendered` (format v2 §10.2),
+The package's own validation includes the rule `rendered` (format v3 §10.2),
 which compares the package's `spec.md` with its render, in `artifact`
 `spec.md`:
 
@@ -262,8 +277,9 @@ would hide a mistyped flag. A root that exists and holds no package is an empty
 ## The task form: `speca <spec> --task T --state S`
 
 The task form moves one or more tasks of a package to a state, through the
-library's task state machine, and writes the package. It takes one input, as the
-report does.
+library's task state machine, and writes its `progress.json`. It takes one
+input, as the report does. The integration task of a `full` package, task
+`N+1`, is moved like any other.
 
 `--task` is given once or repeated, and each value may be comma-separated:
 `--task 1,2`, `--task 1 --task 2`. Each item is a task id (a whole number, 1 or
@@ -277,7 +293,7 @@ ids are one. `--state` is `pending`, `in_progress`, `done` or `dropped`.
 - `all` is every task except those already in `--state` and those `dropped`.
   When that is none, the call succeeds, changes nothing and writes nothing.
 
-**The state machine decides every move** (format v2 §8.3.1):
+**The state machine decides every move** (format v3 §8.1):
 
 | From | May move to |
 |---|---|
@@ -298,8 +314,9 @@ The checks run in this order, and each stops the call:
 
 1. the flags: the usage errors of the table below, before anything is read;
 2. the package loads (stage `load`);
-3. the package is in format version 2: a version 1 package is a usage error, with
-   or without `--force`, because a save would replace its plan with an empty one;
+3. the package is in format version 3: a version 1 or version 2 package is a
+   usage error, with or without `--force`, because none of its task states can
+   be read; the message names `speca <package> --migrate`;
 4. the package can take a write (stage `status`): it is a draft, or active with
    its intent matching its `intent_hash`. A sealed, superseded or archived package,
    and an active one whose `## Intent` section drifted or is gone, are refused,
@@ -309,14 +326,12 @@ The checks run in this order, and each stops the call:
    no tasks says so, rather than that every task is done), and `all` on a plan
    with no tasks are usage errors;
 6. the moves (stage `task`);
-7. the keys (stage `validate`), when a write would happen: `Save` re-encodes every
-   artifact and drops the keys the schema does not allow, so a package that holds
-   any (a leaked version 1 `traceability`, or a key of your own in the frontmatter
-   of `prd.md`) would lose them. That is refused, listing each artifact and key
-   (`tasks.json /traceability`, `prd.md /my_key`), unless `--force` is given. The
-   library reports such keys in the three JSON artifacts; the frontmatter of
-   `prd.md` is looked at by `speca`. A package that does not validate for another
-   reason still takes the change.
+7. the keys (stage `validate`), when a write would happen: `SaveProgress`
+   re-encodes `progress.json` and drops the keys the schema does not allow, so a
+   package whose progress file holds any would lose them. That is refused,
+   listing each key (`progress.json /my_key`), unless `--force` is given. The
+   other artifacts are not written by a task move, so their keys are safe. A
+   package that does not validate for another reason still takes the change.
 
 **`--force`** applies when `--state` is `done` or `pending`: a move the machine
 refuses is then made with the library's own bypasses, `CompleteTaskStates` or
@@ -334,17 +349,20 @@ refusal, with the same exit code. Its `next` is one entry, the same call without
 `--dry-run`, naming the ids it resolved (`--task 1,2`, not `all`) and keeping
 `--force`; with nothing to change it has none.
 
-**The write.** When at least one task changes, `updated_at` is set to the time of
-the call, UTC, RFC 3339 (`Save` does not), and the package is written with
-`Spec.Save`, which writes every artifact through temporary files and then
-renames them. A call that changes nothing writes nothing and leaves `updated_at`
-as it was. If the write fails, a failure while writing the temporary files leaves
-the package unchanged, and one during the renames may leave some files updated;
-the message says so and tells the caller to run `speca <spec>`.
+**The write.** When at least one task changes, the progress file's
+`updated_at` is set to the time of the call, UTC, RFC 3339, and
+`progress.json` is written with `Spec.SaveProgress`, through a temporary file
+it renames; no other file of the package changes, so `git diff` after a task
+move holds `progress.json` alone. A call that changes nothing writes nothing
+and leaves `updated_at` as it was. If the write fails, a failure while writing
+the temporary file leaves the package unchanged, and one during the rename may
+have replaced `progress.json`; the message says so and tells the caller to run
+`speca <spec>`.
 
 **The result** of a call that succeeds is the report of the package as it was
-written (its `valid` and `failing_rules` are the verdict on the files `Save`
-wrote, which hold none of the keys it deleted), with every field the report has,
+written (its `valid` and `failing_rules` are the verdict on the package with
+the progress `SaveProgress` wrote, which holds none of the keys it deleted),
+with every field the report has,
 and `changes`: one
 `{"kind": "task", "id", "from", "to"}` for each task whose state changed, in plan
 order, with `"forced": true` where a bypass was used.
@@ -357,7 +375,7 @@ another holds. A usage error or a package that does not load has no result.
 
 ## The status form: `speca <spec> --status S`
 
-The status form moves a package through its lifecycle (format v2 §9) and writes
+The status form moves a package through its lifecycle (format v3 §9) and writes
 it. It takes one input, as the report does. `--status` is `active`, `sealed`,
 `superseded` or `archived`. `superseded` needs `--by <spec>`, the package that
 replaces this one, named as the input is. `--status draft` is a usage error: no
@@ -390,8 +408,9 @@ the call: nothing is written, and the envelope has no `result`.
    is refused (usage; the message begins `--by:`).
 2. **Load** (stage `load`, category `input`). The package, and the `--by`
    package, are loaded. One the library refuses, and one in a format version
-   other than 2 (`speca` changes the state of version 2 packages only: a write
-   would discard the tasks and tests a version 1 package holds), are refused,
+   other than 3 (`speca` changes the state of version 3 packages only: a write
+   would discard what the version 3 types do not read of a version 1 or 2
+   package; the message names `speca <package> --migrate`), are refused,
    naming the directory and `--by` when the replacing package is at fault.
    `--force` does not reach either. A `--by` package with the input's own
    `spec_id` is a usage error, which only the loaded packages can tell.
@@ -412,8 +431,8 @@ the call: nothing is written, and the envelope has no `result`.
    the same as part of its validation): sealing, archiving and superseding. A
    write drops such a key, so a package that holds any is refused, naming each
    (`tasks.json /traceability`, `prd.md /my_key`), with `fix_hint.flag`
-   `--force`. The library reports those of the three JSON artifacts; the
-   frontmatter of `prd.md` is looked at by `speca`. A move-only call writes no
+   `--force`. The library reports those of the JSON artifacts, `progress.json`
+   included; the frontmatter of `prd.md` is looked at by `speca`. A move-only call writes no
    file, and is not asked.
 6. **The archive destination** (stage `archive`, category `disk`), for a move that
    ends under `archive/` from a package that is not there. A destination that is
@@ -433,14 +452,13 @@ the call: nothing is written, and the envelope has no `result`.
   does not change that: a drifted package cannot be saved, and sealing would make
   the drift permanent. The message says to restore the intent that was activated,
   or to write a new package that supersedes this one; there is no `fix_hint`. A
-  task still `pending` or `in_progress`, an optional one included, refuses it too,
-  naming each with its state, with `fix_hint.flag` `--force`. The write is
+  task still `pending` or `in_progress`, the integration task included, refuses
+  it too, naming each with its state, with `fix_hint.flag` `--force`. The write is
   `Transition("sealed")`.
 - `archived`, from `draft`, `sealed` or `superseded`. A package not under
   `archive/` gets `Transition("archived")` and then the move; one already under
   it gets the status only and stays. A move-only call (the package is `archived`
-  and not under `archive/`) only moves it: no file is rewritten and `updated_at`
-  stays as it was.
+  and not under `archive/`) only moves it: no file is rewritten.
 - `superseded`, from `sealed`, with `--by`. The replacing package must be a
   `draft`, an `active` or a `sealed` one; a superseded or archived package cannot
   replace another (stage `status`, `fix_hint.flag` `--by`; `--force` does not
@@ -465,15 +483,15 @@ does not reach a usage error, the version check, the lifecycle, a missing intent
 a drifted intent, the status of the replacing package, a taken destination, or
 the replacing package's own save.
 
-**The writes.** `updated_at` is set to the time of the call, UTC, RFC 3339 (the
-library does not), on every package the call writes, the replacing package too.
-The warnings are raised once the first write has been made: a call that is
-refused, or whose first write fails, raises none.
+**The writes.** `updated_at` is not touched: it is `progress.json`'s, and says
+when a task last changed state, which a lifecycle move is not. The warnings
+are raised once the first write has been made: a call that is refused, or
+whose first write fails, raises none.
 
 **`--dry-run`** runs every check and plans every warning, writes and moves
 nothing, and reports the package as it would be left, held in memory: its status,
-`updated_at`, the intent hash an activation would record, and the directory it
-would move to. `dry_run` is `true`, and the changes, warnings, refusals and exit
+the intent hash an activation would record, and the directory it would move
+to. `dry_run` is `true`, and the changes, warnings, refusals and exit
 code are the real call's. It cannot know that the disk would refuse the save of
 the replacing package, which is a warning in the real call and a change in the
 dry run. Its `next` is the same call without `--dry-run`, keeping `--by` and
@@ -511,13 +529,14 @@ move), with `changes` in the order they were written:
 ## The render form: `speca <spec> --render` and `speca --render [--all]`
 
 Every save of a package writes its render, `spec.md`, beside its artifacts
-(format v2 §3): a header line, a blank line, and what `specr <spec>` returns in
+(format v3 §3): a header line, a blank line, and what `specr <spec>` returns in
 `result.markdown`. The render form brings that file up to date without saving
 the package: it loads the package, composes the render
 (`afspec.(*Spec).RenderedBytes`), and writes it to `spec.md` through a temporary
 file it renames (`cli.WriteAtomic`), whatever the package's status — `spec.md`
 is derived, outside the package's contract, and touches no intent hash. It
-writes no other file, so `updated_at` is not touched.
+writes no other file. The render holds the contract and never the progress, so
+a task move does not change it.
 
 `result.rendered` holds one entry for the package named, or, with no input,
 one for every package under the spec root in the order of their numbers, then
@@ -544,6 +563,61 @@ that holds no package is `"rendered": []`. The `summary` counts the outcomes,
 `speca: <n> written, <n> unchanged, <n> failed`, with
 ` (dry run, nothing written)` under `--dry-run`; `next` is empty.
 
+## The migrate form: `speca <spec> --migrate` and `speca --migrate [--all]`
+
+The library reads version 3 only, and format v3 §13 maps every version 2
+construct to its version 3 form deterministically. The migrate form performs
+that conversion in place, whatever the package's status, with the library's
+`afspec.MigrateV2`: it reads the version 2 package, builds the version 3 one in
+memory and writes every file of it — `prd.md`, `requirements.json`,
+`tasks.json`, `progress.json`, `architecture.md` when there is one, and
+`spec.md`, rendered again — through the temporary files and renames a save
+uses, then removes `test_spec.json`. In short: every `REQ` and `PATH` id loses
+its `{spec_id}-` prefix; each criterion takes its `check` from the tests that
+verified it and each path its `smoke` check from its smoke tests; a
+`complex_event` criterion becomes `event_driven` with its guard joined into the
+condition; a `system` shared by every criterion of a requirement moves up to
+it; `introduction` is dropped and a glossary becomes a `## Glossary` section
+of the PRD; `updated_at` moves to `progress.json` with every task's state, the
+authored integration task leaving the plan to become the progress entry of task
+`N+1`; `owner` and `tags` become `x-owner` and `x-tags` when set. The
+`## Intent`, the `intent_hash` and the status are not changed, so an active
+package stays active with the hash it had. A version 2 package with a
+criterion no test verifies, or a path no smoke test verifies, has no
+deterministic conversion and is refused, naming the gap; version 2's own rules
+forbid both, so a valid version 2 package always converts.
+
+`result.migrated` holds one entry for the package named, or, with no input, one
+for every package under the spec root in the order of their numbers, then with
+`--all` one for every package under `archive/` — the sweep, which goes through
+the directories as `--list` and `--render` do. Each entry is:
+
+| Field | Meaning |
+|---|---|
+| `spec_dir`, `spec_id`, `spec_name`, `status` | the package, as in the report; the identity is absent when the package did not load |
+| `from_version` | the `schema_version` the package declared before the call; absent when it did not load |
+| `migrated` | `written` when the package was version 2 and was converted; `unchanged` when it is version 3 already, and was left alone; `failed` when it is neither, could not be read, has a gap the conversion refuses or could not be written |
+| `reason` | why the package failed; present exactly when `migrated` is `failed` |
+| `archived` | `true` for a package converted from `archive/`; absent otherwise |
+
+With `--dry-run` the conversion is made in memory and nothing is written:
+`dry_run` is `true`, and a package that would convert is `written`. When one
+package is named, a package that fails is a failure of the call at stage
+`migrate`, category `input`, with the reason, and nothing is written. The sweep
+has every package to report, so a package it cannot convert is an entry with
+`migrated` `failed` and its `reason`, the others are converted all the same,
+and the call exits 0. A spec root that does not exist, is not a directory or
+cannot be read fails the sweep at stage `load` with `fix_hint.flag`
+`--specs-dir`, as it fails `--list`; one that holds no package is
+`"migrated": []`. The `summary` counts the outcomes,
+`speca: <n> written, <n> unchanged, <n> failed`, with
+` (dry run, nothing written)` under `--dry-run`; `next` is empty.
+
+The conversion is run once over a spec root and never again: a version 3
+package is reported `unchanged`, and a sweep over a converted root writes
+nothing. The decision is
+[ADR 19](adr/19-migrate-the-format-to-version-3.md).
+
 ## The output
 
 Report on package `09`, whose first task is done:
@@ -569,7 +643,7 @@ Report on package `09`, whose first task is done:
       { "id": 1, "title": "Detect agent mode and keep stdout JSON-only", "kind": "implement", "state": "done" },
       { "id": 2, "title": "Error envelope and closed-pipe handling", "kind": "implement", "state": "pending",
         "depends_on": [1], "ready": true },
-      { "id": 3, "title": "Verify agent mode end to end", "kind": "integration", "state": "pending",
+      { "id": 3, "title": "Verify every execution path end to end", "kind": "integration", "state": "pending",
         "depends_on": [1, 2] }
     ],
     "task_counts": { "pending": 2, "in_progress": 0, "done": 1, "dropped": 0, "total": 3 },
@@ -655,10 +729,10 @@ result is the package as it is on disk, and there is no `next`:
   "tool": "speca",
   "ok": false,
   "exit_code": 1,
-  "summary": ".specs/09_agent_mode: the task state machine (format v2 §8.3.1) does not allow this move, so no task was changed: task 1 is in_progress and cannot move to in_progress (it is already there; it may move",
+  "summary": ".specs/09_agent_mode: the task state machine (format v3 §8.1) does not allow this move, so no task was changed: task 1 is in_progress and cannot move to in_progress (it is already there; it may move",
   "error": {
     "stage": "task", "category": "lifecycle", "retryable": false, "resumable": false,
-    "message": ".specs/09_agent_mode: the task state machine (format v2 §8.3.1) does not allow this move, so no task was changed: task 1 is in_progress and cannot move to in_progress (it is already there; it may move to pending or done)",
+    "message": ".specs/09_agent_mode: the task state machine (format v3 §8.1) does not allow this move, so no task was changed: task 1 is in_progress and cannot move to in_progress (it is already there; it may move to pending or done)",
     "fix_hint": { "flag": "--state", "valid": ["pending", "done"] }
   },
   "result": { "spec_dir": ".specs/09_agent_mode", "next_task": { "id": 1, "state": "in_progress", … }, … }
@@ -775,6 +849,7 @@ One sentence per form, which the shell caps at 200 characters:
 | `--list` | `speca: <n> packages` (`1 package` for one), then, when there is anything to count, ` (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
 | status form | `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <path>`, `speca: superseded <name> by <spec_id>, moved to <path>`, and `speca: moved <name> to <path>` for a call that only moves the package; `<name>` is the package's directory name, `<path>` where it went, as `spec_dir` shows it. An archive or a supersede that needs no move has no `, moved to` clause. Under `--dry-run` the sentence ends ` (dry run; nothing written)` (the task form's has a comma). After a move under `archive/` that failed, it says the status was written and the move was not. A refusal has no result, so its `summary` is the refusal's message |
 | render form | `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep; ` (dry run, nothing written)` is added under `--dry-run` |
+| migrate form | the same shape: `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep, with the dry-run clause |
 | task form | `speca: <directory> task N <from> → <to>`, `speca: <directory> tasks N, M → <to>`, or `speca: <directory> no task changed`; ` (dry run, nothing written)` is added under `--dry-run`. A refusal has no sentence of its own: its `summary` is the refusal's message. The shell adds `; <n> high-severity warning(s)` to the sentence of any success that raised a high warning, so a call that used `--force` to set a state, or to write over keys, ends in `; 1 high-severity warning` |
 
 ### Reading it from Go
@@ -831,20 +906,22 @@ if env.Result.NextTask != nil {
   `--by` and `--force` kept); after a move under `archive/` that failed after the
   status was written, the same call against the package where it is, with `--by`
   for a package being superseded;
-- after `--validate`, after a refusal or a failure other than the one just
-  described, and after a report or a list with nothing to name: nothing.
+- after `--validate`, `--render` or `--migrate`, after a refusal or a failure
+  other than the one just described, and after a report or a list with nothing
+  to name: nothing.
 
 ### `error`
 
 | `stage` | `category` | When |
 |---|---|---|
-| `usage` | `usage` | more than one input; an input with `--list`; `--validate` with `--list`; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task` or `--status`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 2. For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
-| `load` | `input` | `afspec.LoadSpec` refused the package (a missing artifact, malformed JSON or YAML), naming the directory and the library's reason; or `--list` on a spec root that cannot be read, with `fix_hint.flag` `--specs-dir`. The status form: also the `--by` package (the message names `--by`), a package in a format version other than 2, and a package that was written but cannot be read back (its `result` carries the changes) |
+| `usage` | `usage` | more than one input; an input with `--list`; `--validate` with `--list`; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task` or `--status`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 3 (the message names `speca <package> --migrate`). For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
+| `load` | `input` | `afspec.LoadSpec` refused the package (a missing artifact, malformed JSON or YAML), naming the directory and the library's reason; or `--list`, `--render` or `--migrate` with no input on a spec root that cannot be read, with `fix_hint.flag` `--specs-dir`. The status form: also the `--by` package (the message names `--by`), a package in a format version other than 3 (the message names `speca <package> --migrate`), and a package that was written but cannot be read back (its `result` carries the changes) |
 | `status` | `lifecycle` | the task form on a package that cannot take a write: sealed, superseded or archived, or active with a drifted `## Intent`; or `Save` refused it as such. No `fix_hint`; `--force` and `--dry-run` change nothing. The status form: a move the lifecycle does not allow (`fix_hint` is `{flag: "--status", valid: [the moves allowed]}`, none when there are none); an activation with no `## Intent`; sealing a package whose intent drifted (no `fix_hint`) or that has a task open (`fix_hint.flag` `--force`); a replacing package that is superseded or archived (`fix_hint.flag` `--by`); keys the schema does not allow (`fix_hint.flag` `--force`); or a lifecycle or intent error that reached the write. `--force` reaches only the ones with a `fix_hint.flag` of `--force` |
-| `task` | `lifecycle` | the task state machine does not allow a named move. The message names every refused task with its state and the target, cites §8.3.1 and says where each may go; `fix_hint` is `{flag: "--state", valid: [the first refused task's targets]}`, none when that task is `dropped`, and the message then says `--force` with `done` or `pending` is the only way out. Nothing was changed |
-| `validate` | `invalid_spec` | the task form: the write would delete keys the schema does not allow, and `--force` was not given. The message lists each artifact and key; no `fix_hint`. The status form: an activation of a package that does not validate (the message names the failing rules; `fix_hint.flag` `--force`) |
-| `write` | `disk` | `Save` could not write the package. Not retryable; see "The write" above. The status form: `Transition` or `Supersede` could not, with the library's message and no `result` |
+| `task` | `lifecycle` | the task state machine does not allow a named move. The message names every refused task with its state and the target, cites format v3 §8.1 and says where each may go; `fix_hint` is `{flag: "--state", valid: [the first refused task's targets]}`, none when that task is `dropped`, and the message then says `--force` with `done` or `pending` is the only way out. Nothing was changed |
+| `validate` | `invalid_spec` | the task form: the write would delete keys of `progress.json` the schema does not allow, and `--force` was not given. The message lists each key; no `fix_hint`. The status form: an activation of a package that does not validate (the message names the failing rules; `fix_hint.flag` `--force`) |
+| `write` | `disk` | `SaveProgress` could not write `progress.json`. Not retryable; see "The write" above. The status form: `Transition` or `Supersede` could not, with the library's message and no `result`. The render form: `spec.md` could not be written |
 | `archive` | `disk` | the status form: the archive destination is taken, before anything was written (no `result`, not resumable); or the move under `archive/` failed after the status was written (**resumable**, with a `result` and a `next`) |
+| `migrate` | `input` | the migrate form on one package: it could not be read as version 2 or 3, it has a gap the conversion refuses (a criterion no test verifies, a path no smoke test verifies), or it could not be written; the message is the library's reason, and nothing was written. The sweep never fails this way: such a package is an entry |
 | `schema` | `internal` | the `--schema` document could not be encoded |
 
 `result` is absent from the usage, `load` and `schema` errors. The task form's
@@ -861,8 +938,8 @@ else.
 
 | Code | `status` | Meaning |
 |---|---|---|
-| `0` | `done` | reported — including a package that does not validate; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already |
-| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`), or the spec root the sweep reads could not be read (stage `load`) |
+| `0` | `done` | reported — including a package that does not validate; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already |
+| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep reads could not be read (stage `load`) |
 | `2` | `usage` | usage error — nothing was written |
 
 ### Warning codes
@@ -871,7 +948,7 @@ else.
 |---|---|---|---|
 | `specs_dir_unreadable` | low | preflight | the spec root (or, for `--list --all`, `archive/`) could not be read. The report goes without `dependents`, the verdict without the cross-spec rules, the list without the archived packages |
 | `steering_malformed` | high | preflight | `--validate` only: the spec root's `steering.md` opens with frontmatter that breaks one of its rules ([configuration.md](configuration.md#the-steering)), each named in the message. The verdict is the one an unversioned steering gives |
-| `spec_invalid` | high | validate | the package is in a format version other than 2: its tests and tasks are not read. For the task form: `--force` writes over keys the schema does not allow, which the warning names |
+| `spec_invalid` | high | validate | the package is in a format version other than 3: its progress and tasks are not read, and the warning names `speca <package> --migrate`. For the task form: `--force` writes over keys of `progress.json` the schema does not allow, which the warning names |
 | `spec_invalid` | low | validate | the task form went ahead on a package that does not validate, which the warning names by rule. A call raises at most one `spec_invalid` |
 | `spec_invalid` | high | validate | the status form: `--force` activated a package that does not validate (naming the rules, and the keys the write drops), or wrote a package that holds keys the schema does not allow (naming them) |
 | `tasks_open` | high | status | `--force` sealed a package with a task `pending` or `in_progress`. The warning lists each task with its state |
@@ -890,14 +967,15 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 |---|---|---|
 | `--validate` | off | give the format's full verdict on the package |
 | `--list` | off | list every package under the spec root; takes no input |
-| `--all` | off | with `--list`, also list the packages under `archive/`, marked archived; with `--render` and no input, also render them |
+| `--all` | off | with `--list`, also list the packages under `archive/`, marked archived; with `--render` or `--migrate` and no input, also render or convert them |
 | `--task` | | the task form: the tasks to move, once or repeated, each value a comma-separated list of ids, `next` or `all` |
 | `--state` | | the task form: the state to move them to: `pending`, `in_progress`, `done` or `dropped` |
 | `--status` | | the status form: the lifecycle status to move the package to: `active`, `sealed`, `superseded` or `archived`. An archived or superseded package is moved under `archive/` |
 | `--by` | | with `--status superseded`: the package that replaces this one, named as the input is |
 | `--force` | off | with the task form: set `done` or `pending` where the machine refuses it, and write over keys the schema does not allow. With the status form: skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not allow would be dropped |
-| `--dry-run` | off | with the task form, the status form or the render form: run every check and report the result, write nothing |
+| `--dry-run` | off | with the task form, the status form, the render form or the migrate form: run every check and report the result, write nothing |
 | `--render` | off | the render form: write the package's `spec.md`, its render, and no other file |
+| `--migrate` | off | the migrate form: convert a version 2 package to version 3 in place, whatever its status, by format v3 §13; a version 3 package is left alone |
 | `--specs-dir` | `<dir>/.specs`, or `$AF_SPEC_DIR` | where `NN_name` packages live |
 | `--dir` | `.` | the repository the spec root and a relative reference are resolved against |
 | `--schema` | | print the self-description below and exit 0 |
@@ -926,7 +1004,7 @@ It reads nothing — no package, no `--dir` — so it runs anywhere:
 
 The document is checked in at `cmd/speca/testdata/schema.golden.json`, and a
 test fails when a flag or a result field changes without it;
-`UPDATE_GOLDEN=1 go test -run '^TestSchemaGolden_TS10_20$' ./cmd/speca`
+`UPDATE_GOLDEN=1 go test -run '^TestSchema_MatchesTheGoldenFile$' ./cmd/speca`
 regenerates it deliberately.
 
 ## Calling it from an agent
@@ -956,13 +1034,14 @@ and records it done after:
 `speca <package> --task <N> --state in_progress`. A refusal at stage `task`
 means another agent holds it; pick another from `result.tasks`. Then work
 from the spec scoped to it: run `specr <package> --task <N>` and read
-`result.markdown` — the requirements that own the task's criteria, its tests
-and the paths they verify in full, everything else by id. When its tests
-pass, record it: `speca <package> --task <N> --state done`, and follow `next`
-to the task after it. If you stop before it is done, release it with
-`--state pending`. Never edit `tasks.json` by hand: if `speca` or `specr` is
-not installed, read the four artefacts and scope them by hand, and say in your
-report which task you finished instead of changing its state.
+`result.markdown` — the requirements that own the task's criteria, with their
+checks, and the paths those checks name in full, everything else by id. When
+the checks of its criteria pass as tests, record it:
+`speca <package> --task <N> --state done`, and follow `next` to the task
+after it. If you stop before it is done, release it with `--state pending`.
+Never edit `progress.json` by hand: if `speca` or `specr` is not installed,
+read the three artefacts and scope them by hand, and say in your report
+which task you finished instead of changing its state.
 ```
 
 `specr` suggests those two calls itself: its `next` holds the claim after a whole
@@ -979,7 +1058,9 @@ second, recording a task as claimed, finished or released, is the task form. The
 loop an agent runs is: `speca <package>` and take the claim from `next`;
 `speca <package> --task next --state in_progress`; render the task and do the
 work; `speca <package> --task N --state done`, whose `next` is the claim of the
-task after it. `--dry-run` shows the effect of a call before it is made. Two
+task after it; after the last task of the plan comes the integration task,
+`N+1`, claimed and recorded the same way. `--dry-run` shows the effect of a
+call before it is made. Two
 agents that claim the same task get the machine's answer: the second call is
 refused, with the states the task may move to and the package as it is on disk.
 The same loop in Go is [`examples/tasks`](../examples/tasks/main.go).
@@ -997,18 +1078,23 @@ package and changes nothing else.
 
 `speca` is a fast call, so the parts of `spec`'s shell that serve a long model
 run are absent: there is no model, no `--preflight`, no `--detail`, no `--output`
-and no progress on stderr. (`--dry-run` here is that of the task, status and render forms, not `spec`'s.)
-It changes nothing but the state of the tasks of a package, its lifecycle status
-(with the `intent_hash` an activation records and the banner a superseded package
-is given) and where it lives, the `supersedes` of a replacing package, and the
-`updated_at` of what it writes, and its `spec.md`, which every save writes and the render form writes alone: not a package's content (requirements, tests, a task's title,
-steps or dependencies), and it creates no package and renders none to stdout, which are `spec`'s
-and `specr`'s. It does not move a package back to `draft`, reopen a sealed one,
-or take one out of `archive/`; it does not re-hash a changed `## Intent`, edit
-`owner`, `tags` or `source`, or remove an entry from `supersedes`; it does not
-copy and delete where a rename crosses filesystems; and it does not check that
-the replacing package covers what the old one did. (A save writes every artifact
-again, as the sections of the forms say, but with the content it had.) It takes no lock:
+and no progress on stderr. (`--dry-run` here is that of the task, status, render and migrate forms, not `spec`'s.)
+It changes nothing but the state of the tasks of a package, with the
+`updated_at` of its `progress.json`, its lifecycle status (with the
+`intent_hash` an activation records and the banner a superseded package is
+given) and where it lives, the `supersedes` of a replacing package, its
+`spec.md`, which every save writes and the render form writes alone, and the
+format version of a version 2 package, which the migrate form converts without
+changing what it says: not a package's content (requirements, checks, a task's
+title, steps or dependencies), and it creates no package and renders none to
+stdout, which are `spec`'s and `specr`'s. It does not move a package back to
+`draft`, reopen a sealed one, or take one out of `archive/`; it does not
+re-hash a changed `## Intent`, edit `profile` or `source`, or remove an entry
+from `supersedes`; it does not copy and delete where a rename crosses
+filesystems; and it does not check that the replacing package covers what the
+old one did. (A lifecycle move writes every artifact again, as the status
+form's section says, but with the content it had; a task move writes
+`progress.json` alone.) It takes no lock:
 two writers of one package at once get the last writer's files, as they do with
 the library, and the state machine is what a second claim, made after the first
 was written, meets. The decision to build it is

@@ -34,13 +34,13 @@ func statusSuggestion(r *Result, spec *afspec.Spec) []cli.Next {
 	}
 	holdsKeys := slices.Contains(r.FailingRules, "unknown_field") || len(frontmatterUnknownKeys(spec.Dir)) > 0
 	switch spec.Status {
-	case string(afspec.PrdFrontmatterV2JsonStatusDraft):
+	case string(afspec.PrdFrontmatterV3JsonStatusDraft):
 		if r.Valid != nil && *r.Valid && afspec.HasIntent(spec.PRDBody) && !holdsKeys {
 			return []cli.Next{{Tool: tool, Input: r.SpecDir, Flags: []string{"--status", "active"},
 				Why: "the package validates and has an intent; activating it records the hash of its ## Intent"}}
 		}
-	case string(afspec.PrdFrontmatterV2JsonStatusActive):
-		if len(openTasks(spec.Tasks)) == 0 && !r.IntentDrift && !holdsKeys {
+	case string(afspec.PrdFrontmatterV3JsonStatusActive):
+		if len(openTasks(spec)) == 0 && !r.IntentDrift && !holdsKeys {
 			return []cli.Next{{Tool: tool, Input: r.SpecDir, Flags: []string{"--status", "sealed"},
 				Why: "no task is open and the intent is as it was activated; sealing the package ends its work"}}
 		}
@@ -61,7 +61,7 @@ func (c *call) reportOf(dir string, spec *afspec.Spec) *Result {
 func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResult) *Result {
 	r := &Result{AdminResult: c.identityOf(dir, spec), writable: specpkg.Writable(spec)}
 
-	// The package's own verdict. A version 2 package that does not validate
+	// The package's own verdict. A version 3 package that does not validate
 	// raises no warning: valid and failing_rules are the answer.
 	valid := v.Valid
 	r.Valid = &valid
@@ -70,9 +70,9 @@ func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResu
 	}
 
 	r.Tasks = specpkg.TaskInfos(spec)
-	r.TaskCounts = countTasks(spec.Tasks)
-	if next, ok := spec.Tasks.NextTask(); ok {
-		info := specpkg.TaskInfo(spec.Tasks, *next)
+	r.TaskCounts = countTasks(spec)
+	if next, ok := spec.NextTask(); ok {
+		info := specpkg.TaskInfo(spec, *next)
 		r.NextTask = &info
 	}
 	r.AllowedStatus = allowedStatus(spec.Status)
@@ -83,15 +83,14 @@ func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResu
 	return r
 }
 
-// countTasks counts the plan's tasks by state. Total is the number of tasks, so
-// a task whose state is none of the four (which the package's validation
-// reports) is in the total and in no count.
-func countTasks(plan *afspec.TasksV2Json) *envelope.TaskCounts {
+// countTasks counts the plan's tasks by state, the derived integration task
+// included. Total is the number of tasks, so a task whose state is none of
+// the four (which the package's validation reports) is in the total and in
+// no count.
+func countTasks(spec *afspec.Spec) *envelope.TaskCounts {
 	c := &envelope.TaskCounts{}
-	if plan == nil {
-		return c
-	}
-	for _, t := range plan.Tasks {
+	plan := spec.Plan()
+	for _, t := range plan {
 		switch t.State {
 		case afspec.TaskStatePending:
 			c.Pending++
@@ -103,7 +102,7 @@ func countTasks(plan *afspec.TasksV2Json) *envelope.TaskCounts {
 			c.Dropped++
 		}
 	}
-	c.Total = len(plan.Tasks)
+	c.Total = len(plan)
 	return c
 }
 

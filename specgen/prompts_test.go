@@ -124,18 +124,17 @@ func TestActorsBlock(t *testing.T) {
 // compact JSON: one line per artifact, every id still there.
 func TestPriorArtifactsBlock(t *testing.T) {
 	artifacts, _ := loadFixture(t, "01", "test_feature")
-	partial := *acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec)
+	partial := *acceptedArtifacts(t, artifacts, afspec.GenerationSteps...)
 
 	if got := priorArtifactsBlock(partial, afspec.StepRequirements); got != "" {
 		t.Errorf("the requirements step was shown %q", got)
 	}
-	if got := priorArtifactsBlock(partial, afspec.StepTestSpec); !strings.Contains(got, "## requirements.json") ||
-		strings.Contains(got, "## test_spec.json") {
-		t.Errorf("the test_spec step was shown:\n%.300s", got)
-	}
 	block := priorArtifactsBlock(partial, afspec.StepTasks)
+	if !strings.Contains(block, "## requirements.json") || strings.Contains(block, "## tasks.json") {
+		t.Errorf("the tasks step was shown:\n%.300s", block)
+	}
 	fences := strings.Split(block, "```json\n")[1:]
-	if len(fences) != 2 {
+	if len(fences) != 1 {
 		t.Fatalf("the tasks step was shown %d artifacts", len(fences))
 	}
 	for _, fence := range fences {
@@ -143,7 +142,7 @@ func TestPriorArtifactsBlock(t *testing.T) {
 			t.Errorf("an artifact spans several lines:\n%.200s", body)
 		}
 	}
-	for _, id := range []string{"01-REQ-1.1", "TS-01-1", "01-PATH-1"} {
+	for _, id := range []string{"REQ-1.1", "PATH-1", `"check"`, "pseudocode", "real_components"} {
 		if !strings.Contains(block, id) {
 			t.Errorf("the block lost %s", id)
 		}
@@ -305,17 +304,20 @@ func TestPlanRevisionUserPrompt_HoldsTheFindingsAndNotTheInput(t *testing.T) {
 }
 
 // The plan is rendered as the package's own render gives each artifact, in
-// the order requirements, tests, tasks.
+// the order requirements, tasks, with the derived integration task after the
+// stored ones; a lite plan, which has no paths, has none.
 func TestRenderPlan_IsThePackagesRenderOfEachArtifact(t *testing.T) {
 	plan := planUnderReview(t)
-	empty := *plan
-	empty.TestSpec = &afspec.TestSpecV2Json{Tests: []afspec.Test{}}
-	for name, p := range map[string]*afspec.PartialSpec{"complete": plan, "with no tests": &empty} {
+	lite := deepCopyPlan(t, *plan)
+	lite.Profile = afspec.ProfileLite
+	lite.Requirements.ExecutionPaths = nil
+	for name, p := range map[string]*afspec.PartialSpec{"full": plan, "lite": &lite} {
 		t.Run(name, func(t *testing.T) {
 			got := renderPlan(p)
-			parts := []string{p.Requirements.Render(), p.TestSpec.Render(), p.Tasks.Render()}
+			spec := &afspec.Spec{Profile: p.Profile, Requirements: p.Requirements, Tasks: p.Tasks}
+			parts := []string{p.Requirements.Render(), spec.RenderTasks()}
 			at := 0
-			for i, heading := range []string{"# Requirements", "# Test Specification", "# Tasks"} {
+			for i, heading := range []string{"# Requirements", "# Tasks"} {
 				h := strings.Index(got[at:], heading)
 				if h < 0 {
 					t.Fatalf("no %q after %d", heading, at)
@@ -325,12 +327,48 @@ func TestRenderPlan_IsThePackagesRenderOfEachArtifact(t *testing.T) {
 					t.Errorf("the %s section is not the package's render of it", heading)
 				}
 			}
+			for _, task := range p.Tasks.Tasks {
+				if !strings.Contains(got, task.Title) {
+					t.Errorf("task %d is missing", task.Id)
+				}
+			}
+			if has := strings.Contains(got, afspec.IntegrationTaskTitle); has != (name == "full") {
+				t.Errorf("the integration task is rendered: %v", has)
+			}
+			if strings.Contains(got, "pending") || strings.Contains(got, "in_progress") {
+				t.Errorf("the plan shows a task state:\n%s", got)
+			}
 		})
 	}
-	for _, task := range plan.Tasks.Tasks {
-		if !strings.Contains(renderPlan(plan), task.Title) {
-			t.Errorf("task %d is missing", task.Id)
+	if renderPlan(nil) != "" {
+		t.Error("no plan, no render")
+	}
+}
+
+// The requirements step of a lite package is told the profile, which rule C7
+// holds its artifact to; the other steps, and a full package, are told
+// nothing, so their prompts are what they always were.
+func TestProfileBlock_TellsTheRequirementsStepALitePackage(t *testing.T) {
+	lite := profileBlock(afspec.StepRequirements, afspec.ProfileLite)
+	for _, want := range []string{"## The profile", "**lite**", "at most three requirements", "no execution path",
+		"no integration task", "`execution_paths`", "rejected"} {
+		if !strings.Contains(lite, want) {
+			t.Errorf("the block lacks %q:\n%s", want, lite)
 		}
+	}
+	for name, got := range map[string]string{
+		"a full package":               profileBlock(afspec.StepRequirements, afspec.ProfileFull),
+		"no profile":                   profileBlock(afspec.StepRequirements, ""),
+		"the tasks step of a lite one": profileBlock(afspec.StepTasks, afspec.ProfileLite),
+	} {
+		if got != "" {
+			t.Errorf("%s: the block is %q, want nothing", name, got)
+		}
+	}
+	prompt := generationUserPrompt(afspec.StepRequirements, "01", "x", "/r", "prd", "", "", "", lite)
+	if !strings.HasSuffix(strings.TrimSpace(prompt), strings.TrimSpace(stepInstructions(afspec.StepRequirements))) ||
+		!strings.Contains(prompt, lite) {
+		t.Errorf("the block is not in the requirements task ahead of the step's instructions:\n%.400s", prompt)
 	}
 }
 
@@ -351,7 +389,7 @@ func TestPlanReviewSystemPrompt_CarriesBothRubricsInFull(t *testing.T) {
 		"test command",
 		"`critical`: the plan builds the wrong thing",
 		"`major`: a choice is left to the coder",
-		"`minor`: a choice no test or task sees",
+		"`minor`: a choice no check or task sees",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the plan review system prompt lacks %q", want)

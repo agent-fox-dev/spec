@@ -6,17 +6,10 @@ import "fmt"
 // requirements.json
 // ---------------------------------------------------------------------------
 
-// deepCopyRequirements returns a copy whose slices and maps are independent of
-// the original's.
-func deepCopyRequirements(req RequirementsV2Json) RequirementsV2Json {
+// deepCopyRequirements returns a copy whose slices are independent of the
+// original's.
+func deepCopyRequirements(req RequirementsV3Json) RequirementsV3Json {
 	out := req
-
-	if req.Glossary != nil {
-		out.Glossary = make(RequirementsV2JsonGlossary, len(req.Glossary))
-		for k, v := range req.Glossary {
-			out.Glossary[k] = v
-		}
-	}
 
 	if req.Requirements != nil {
 		out.Requirements = make([]Requirement, len(req.Requirements))
@@ -31,6 +24,9 @@ func deepCopyRequirements(req RequirementsV2Json) RequirementsV2Json {
 			out.ExecutionPaths[i] = p
 			out.ExecutionPaths[i].Steps = make([]PathStep, len(p.Steps))
 			copy(out.ExecutionPaths[i].Steps, p.Steps)
+			out.ExecutionPaths[i].Smoke.RealComponents = copyStrings(p.Smoke.RealComponents)
+			out.ExecutionPaths[i].Smoke.Setup = copyStrings(p.Smoke.Setup)
+			out.ExecutionPaths[i].Smoke.EndState = copyStrings(p.Smoke.EndState)
 		}
 	}
 
@@ -50,14 +46,17 @@ func deepCopyRequirement(r Requirement) Requirement {
 	out := r
 	if r.Criteria != nil {
 		out.Criteria = make([]Criterion, len(r.Criteria))
-		copy(out.Criteria, r.Criteria)
+		for i, c := range r.Criteria {
+			out.Criteria[i] = c
+			out.Criteria[i].Check.Setup = copyStrings(c.Check.Setup)
+		}
 	}
 	return out
 }
 
 // AddRequirement appends a requirement and returns a new artifact. It fails
 // when the ID is already in use.
-func AddRequirement(req RequirementsV2Json, r Requirement) (RequirementsV2Json, error) {
+func AddRequirement(req RequirementsV3Json, r Requirement) (RequirementsV3Json, error) {
 	for _, existing := range req.Requirements {
 		if existing.Id == r.Id {
 			return req, fmt.Errorf("duplicate requirement ID %q", r.Id)
@@ -69,7 +68,7 @@ func AddRequirement(req RequirementsV2Json, r Requirement) (RequirementsV2Json, 
 }
 
 // GetRequirement returns a copy of the requirement with the given ID.
-func GetRequirement(req RequirementsV2Json, id string) (*Requirement, bool) {
+func GetRequirement(req RequirementsV3Json, id string) (*Requirement, bool) {
 	for _, r := range req.Requirements {
 		if r.Id == id {
 			out := deepCopyRequirement(r)
@@ -81,7 +80,7 @@ func GetRequirement(req RequirementsV2Json, id string) (*Requirement, bool) {
 
 // RemoveRequirement drops the requirement with the given ID and reports
 // whether it was present.
-func RemoveRequirement(req RequirementsV2Json, id string) (RequirementsV2Json, bool) {
+func RemoveRequirement(req RequirementsV3Json, id string) (RequirementsV3Json, bool) {
 	idx := -1
 	for i, r := range req.Requirements {
 		if r.Id == id {
@@ -97,28 +96,8 @@ func RemoveRequirement(req RequirementsV2Json, id string) (RequirementsV2Json, b
 	return out, true
 }
 
-// SetGlossaryEntry sets a glossary term, replacing any existing definition.
-func SetGlossaryEntry(req RequirementsV2Json, term, definition string) RequirementsV2Json {
-	out := deepCopyRequirements(req)
-	if out.Glossary == nil {
-		out.Glossary = RequirementsV2JsonGlossary{}
-	}
-	out.Glossary[term] = definition
-	return out
-}
-
-// RemoveGlossaryEntry drops a glossary term and reports whether it was present.
-func RemoveGlossaryEntry(req RequirementsV2Json, term string) (RequirementsV2Json, bool) {
-	out := deepCopyRequirements(req)
-	if _, ok := out.Glossary[term]; !ok {
-		return out, false
-	}
-	delete(out.Glossary, term)
-	return out, true
-}
-
 // AddExecutionPath appends an execution path. It fails on a duplicate ID.
-func AddExecutionPath(req RequirementsV2Json, p ExecutionPath) (RequirementsV2Json, error) {
+func AddExecutionPath(req RequirementsV3Json, p ExecutionPath) (RequirementsV3Json, error) {
 	for _, existing := range req.ExecutionPaths {
 		if existing.Id == p.Id {
 			return req, fmt.Errorf("duplicate execution path ID %q", p.Id)
@@ -130,7 +109,7 @@ func AddExecutionPath(req RequirementsV2Json, p ExecutionPath) (RequirementsV2Js
 }
 
 // AddExternalAPI appends an external API package entry.
-func AddExternalAPI(req RequirementsV2Json, api ExternalApi) (RequirementsV2Json, error) {
+func AddExternalAPI(req RequirementsV3Json, api ExternalApi) (RequirementsV3Json, error) {
 	for _, existing := range req.ExternalApis {
 		if existing.Package == api.Package {
 			return req, fmt.Errorf("duplicate external API package %q", api.Package)
@@ -159,75 +138,23 @@ func GetCriterion(r Requirement, id string) (*Criterion, bool) {
 	for _, c := range r.Criteria {
 		if c.Id == id {
 			out := c
+			out.Check.Setup = copyStrings(c.Check.Setup)
 			return &out, true
 		}
 	}
 	return nil, false
-}
-
-// ---------------------------------------------------------------------------
-// test_spec.json
-// ---------------------------------------------------------------------------
-
-func deepCopyTestSpec(ts TestSpecV2Json) TestSpecV2Json {
-	out := ts
-	if ts.Tests != nil {
-		out.Tests = make([]Test, len(ts.Tests))
-		for i, t := range ts.Tests {
-			out.Tests[i] = t
-			out.Tests[i].Verifies = copyStrings(t.Verifies)
-			out.Tests[i].Given = copyStrings(t.Given)
-			out.Tests[i].Then = copyStrings(t.Then)
-			out.Tests[i].RealComponents = copyStrings(t.RealComponents)
-		}
-	}
-	return out
-}
-
-// AddTest appends a test to the single flat list. It fails on a duplicate ID.
-func AddTest(ts TestSpecV2Json, t Test) (TestSpecV2Json, error) {
-	for _, existing := range ts.Tests {
-		if existing.Id == t.Id {
-			return ts, fmt.Errorf("duplicate test ID %q", t.Id)
-		}
-	}
-	out := deepCopyTestSpec(ts)
-	out.Tests = append(out.Tests, t)
-	return out, nil
-}
-
-// GetTest returns a copy of the test with the given ID.
-func GetTest(ts TestSpecV2Json, id string) (*Test, bool) {
-	for _, t := range ts.Tests {
-		if t.Id == id {
-			out := t
-			return &out, true
-		}
-	}
-	return nil, false
-}
-
-// TestsOfKind returns every test of the given kind, in artifact order.
-func (ts *TestSpecV2Json) TestsOfKind(kind TestKind) []Test {
-	var out []Test
-	for _, t := range ts.Tests {
-		if t.Kind == kind {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // ---------------------------------------------------------------------------
 // tasks.json
 // ---------------------------------------------------------------------------
 
-func deepCopyTasks(t TasksV2Json) TasksV2Json {
+func deepCopyTasks(t TasksV3Json) TasksV3Json {
 	return *t.deepCopy()
 }
 
 // AddTask appends a task. It fails on a duplicate ID.
-func AddTask(t TasksV2Json, task Task) (TasksV2Json, error) {
+func AddTask(t TasksV3Json, task Task) (TasksV3Json, error) {
 	for _, existing := range t.Tasks {
 		if existing.Id == task.Id {
 			return t, fmt.Errorf("duplicate task ID %d", task.Id)
@@ -239,7 +166,7 @@ func AddTask(t TasksV2Json, task Task) (TasksV2Json, error) {
 }
 
 // AddDependency appends a cross-spec dependency unconditionally.
-func AddDependency(t TasksV2Json, d Dependency) TasksV2Json {
+func AddDependency(t TasksV3Json, d Dependency) TasksV3Json {
 	out := deepCopyTasks(t)
 	out.Dependencies = append(out.Dependencies, d)
 	return out
@@ -250,8 +177,8 @@ func AddDependency(t TasksV2Json, d Dependency) TasksV2Json {
 // ---------------------------------------------------------------------------
 
 // LoadDependentInterfaces loads interface summaries from the upstream specs
-// that specID depends on: glossary entries, external API symbols and criterion
-// contracts, one map per upstream spec.
+// that specID depends on: external API symbols and criterion contracts, one
+// map per upstream spec.
 //
 // It degrades gracefully: any spec that cannot be discovered or loaded is
 // skipped and the remaining ones are still returned. The result is never nil.
@@ -295,20 +222,12 @@ func LoadDependentInterfaces(specID string, specRoot string) []map[string]any {
 	return result
 }
 
-// extractInterfaceSummary collects the glossary, external API symbols and
-// criterion contracts a downstream spec may need from an upstream one.
+// extractInterfaceSummary collects the external API symbols and criterion
+// contracts a downstream spec may need from an upstream one.
 func extractInterfaceSummary(spec *Spec) map[string]any {
 	entry := make(map[string]any)
 	if spec.Requirements == nil {
 		return entry
-	}
-
-	if spec.Requirements.Glossary != nil {
-		glossary := make(map[string]string, len(spec.Requirements.Glossary))
-		for k, v := range spec.Requirements.Glossary {
-			glossary[k] = v
-		}
-		entry["glossary"] = glossary
 	}
 
 	if len(spec.Requirements.ExternalApis) > 0 {

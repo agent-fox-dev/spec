@@ -7,7 +7,7 @@ func TestFinalize_ReportsEachMissingArtifact(t *testing.T) {
 	if spec != nil {
 		t.Error("Finalize returned a Spec despite missing artifacts")
 	}
-	if len(errs) != 4 {
+	if len(errs) != 3 {
 		t.Fatalf("errors = %v; want one per missing artifact", errs)
 	}
 	for _, e := range errs {
@@ -24,6 +24,24 @@ func TestFinalize_AssemblesAValidSpec(t *testing.T) {
 	}
 	if spec.SchemaVersion != SchemaVersion {
 		t.Errorf("schema_version = %d; want %d", spec.SchemaVersion, SchemaVersion)
+	}
+}
+
+// The profile is carried into the spec, so a lite bootstrap is held to the
+// lite rules.
+func TestFinalize_CarriesTheProfile(t *testing.T) {
+	b := bootstrapFrom(t, "01", "test_feature")
+	b.Profile = ProfileLite
+	spec, errs := b.Finalize()
+	if spec != nil || len(errs) == 0 {
+		t.Fatal("a lite bootstrap with a path was accepted")
+	}
+	b.Requirements = &RequirementsV3Json{}
+	*b.Requirements = deepCopyRequirements(*loadFixture(t, fixtureValidSpec).Requirements)
+	b.Requirements.ExecutionPaths = nil
+	spec, errs = b.Finalize()
+	if len(errs) > 0 || spec.Profile != ProfileLite {
+		t.Errorf("Finalize = %v, %v; want a lite spec", spec, errs)
 	}
 }
 

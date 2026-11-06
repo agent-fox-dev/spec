@@ -54,6 +54,9 @@ type PRD struct {
 	// CodebaseNotes is what the phase learned reading the code, for the
 	// phases after it. It is bounded by maxCodebaseNotes.
 	CodebaseNotes string `json:"codebase_notes,omitempty"`
+	// Profile is the package's profile: afspec.ProfileLite when the phase
+	// judged the work small enough (format v3 §12.4), "" for a full package.
+	Profile string `json:"profile,omitempty"`
 }
 
 // maxCodebaseNotes bounds the notes a PRD phase hands on, in bytes. Every
@@ -91,6 +94,10 @@ func prdSchema() *schema.Schema {
 		), "Set ONLY when the input is more than one spec's worth of work. List every scope, "+
 			"first one first — the PRD you submit covers that first scope alone.")),
 		schema.Opt("relevant_files", relevantFilesArraySchema()),
+		schema.Opt("profile", schema.Enum(
+			"The package's profile. Set it to lite ONLY when the work is at most three requirements and has no "+
+				"flow across components worth a smoke check: a lite package has no execution path and no integration "+
+				"task. Omit it for a full package, which is the default and the usual case.", "full", "lite")),
 		schema.Opt("codebase_notes", schema.String(
 			"What you learned reading the code that the later phases need and the PRD does not say: "+
 				"the files and modules involved and what each does, the real names and signatures of the "+
@@ -167,6 +174,7 @@ func submitPRDTool(sink *prdSink, ws *workspace.Workspace) core.Tool {
 			prd.SpecName = strings.TrimSpace(prd.SpecName)
 			prd.Title = strings.TrimSpace(prd.Title)
 			prd.CodebaseNotes = boundNotes(prd.CodebaseNotes)
+			prd.Profile = normalizeProfile(prd.Profile)
 
 			if !validName(prd.SpecName) {
 				return core.ErrResult("invalid_spec_name", fmt.Sprintf(
@@ -194,6 +202,15 @@ func submitPRDTool(sink *prdSink, ws *workspace.Workspace) core.Tool {
 			return res
 		},
 	}
+}
+
+// normalizeProfile is the profile as the package records it: afspec.ProfileLite
+// for lite, and "" for full or for none, since a full package names none.
+func normalizeProfile(profile string) string {
+	if strings.TrimSpace(strings.ToLower(profile)) == afspec.ProfileLite {
+		return afspec.ProfileLite
+	}
+	return ""
 }
 
 // checkPRDBody is the PRD tool's rejection of a body that cannot be written

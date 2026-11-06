@@ -18,20 +18,53 @@ func TestLoadSpec_PopulatesEveryArtifact(t *testing.T) {
 	if spec.SchemaVersion != SchemaVersion {
 		t.Errorf("schema_version = %d; want %d", spec.SchemaVersion, SchemaVersion)
 	}
-	if spec.Requirements == nil || spec.TestSpec == nil || spec.Tasks == nil {
-		t.Fatal("one of the three JSON artifacts is nil")
+	if spec.Requirements == nil || spec.Tasks == nil || spec.Progress == nil {
+		t.Fatal("one of the JSON artifacts is nil")
 	}
 	if got := len(spec.Requirements.Requirements); got != 2 {
 		t.Errorf("requirements = %d; want 2", got)
 	}
-	if got := len(spec.TestSpec.Tests); got != 5 {
-		t.Errorf("tests = %d; want 5", got)
+	if got := len(spec.Tasks.Tasks); got != 2 {
+		t.Errorf("tasks = %d; want 2", got)
 	}
-	if got := len(spec.Tasks.Tasks); got != 3 {
-		t.Errorf("tasks = %d; want 3", got)
+	if got := len(spec.Progress.Tasks); got != 3 {
+		t.Errorf("progress entries = %d; want 3: the two tasks and the integration task", got)
+	}
+	if spec.UpdatedAt != "2026-01-01T00:00:00Z" {
+		t.Errorf("UpdatedAt = %q; want the progress file's", spec.UpdatedAt)
 	}
 	if spec.Dir != fixtureValidSpec {
 		t.Errorf("Dir = %q; want %q", spec.Dir, fixtureValidSpec)
+	}
+}
+
+// A package without progress.json loads with every task pending and no
+// updated_at; its first save writes the file.
+func TestLoadSpec_ReadsAPackageWithoutProgress(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	if err := os.Remove(filepath.Join(dir, ProgressFileName)); err != nil {
+		t.Fatal(err)
+	}
+	spec := loadFixture(t, dir)
+	if spec.Progress != nil || spec.UpdatedAt != "" {
+		t.Errorf("Progress = %v, UpdatedAt = %q; want nil and empty", spec.Progress, spec.UpdatedAt)
+	}
+	for _, task := range spec.Plan() {
+		if task.State != TaskStatePending {
+			t.Errorf("task %d is %s; want pending", task.Id, task.State)
+		}
+	}
+	if v := spec.Validate(); !v.Valid {
+		t.Errorf("a package without progress does not validate: %v", v.Errors)
+	}
+	if err := spec.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(filepath.Join(dir, ProgressFileName)) {
+		t.Error("the save wrote no progress file")
+	}
+	if again := loadFixture(t, dir); len(again.Progress.Tasks) != 3 {
+		t.Errorf("the written progress has %d entries; want 3", len(again.Progress.Tasks))
 	}
 }
 
@@ -49,10 +82,15 @@ func TestLoadSpec_RefusesABrokenPackageWithALoadError(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	broken := copyFixture(t, fixtureValidSpec)
+	if err := os.WriteFile(filepath.Join(broken, ProgressFileName), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct{ name, dir string }{
 		{"missing artifact", "testdata/missing_req"},
 		{"malformed JSON", "testdata/malformed_json"},
 		{"malformed YAML frontmatter", "testdata/malformed_yaml"},
+		{"malformed progress", broken},
 		{"directory does not exist", "testdata/does_not_exist"},
 		{"a regular file", file},
 	} {
@@ -84,7 +122,8 @@ func TestSave_RoundTripIsByteIdentical(t *testing.T) {
 				t.Fatalf("Save = %v", err)
 			}
 
-			names := []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"}
+			names := append([]string{}, contractFiles...)
+			names = append(names, ProgressFileName)
 			if spec.Architecture != "" {
 				names = append(names, "architecture.md")
 			}
@@ -101,6 +140,9 @@ func TestSave_RoundTripIsByteIdentical(t *testing.T) {
 					t.Errorf("%s is not byte-identical after a save round trip:\n%s",
 						name, firstDifference(string(want), string(got)))
 				}
+			}
+			if exists(filepath.Join(dst, TestSpecFileName)) {
+				t.Error("a save wrote a test_spec.json")
 			}
 		})
 	}
@@ -119,24 +161,63 @@ func TestSave_LeavesNoTempFiles(t *testing.T) {
 	}
 }
 
-// Format v2 §7.1 and §8.5: coverage and traceability are computed, so nothing
-// resembling them may reach disk.
+// Format v3 §8.5: coverage and traceability are computed, so nothing
+// resembling them may reach disk, and no task state reaches tasks.json.
 func TestSave_StoresNoDerivedData(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	dst := t.TempDir()
 	if err := spec.Save(dst); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"test_spec.json", "tasks.json"} {
-		data, err := os.ReadFile(filepath.Join(dst, name))
-		if err != nil {
-			t.Fatal(err)
+	data, err := os.ReadFile(filepath.Join(dst, TasksFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`"coverage"`, `"traceability"`, `"state"`, `"tests"`, `"kind"`} {
+		if strings.Contains(string(data), forbidden) {
+			t.Errorf("tasks.json contains %s; derived data and progress are never stored there", forbidden)
 		}
-		for _, forbidden := range []string{`"coverage"`, `"traceability"`} {
-			if strings.Contains(string(data), forbidden) {
-				t.Errorf("%s contains %s; derived data must never be stored", name, forbidden)
-			}
+	}
+}
+
+// SaveProgress writes the progress file and no other file, and holds every
+// task of the plan and the integration task with the states the Spec carries.
+func TestSaveProgress_WritesTheProgressFileAlone(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	spec := loadFixture(t, dir)
+	before := treeOf(t, dir)
+
+	moved, err := spec.TransitionTask(1, string(TaskStateInProgress))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Progress = moved
+	spec.UpdatedAt = "2026-05-05T05:05:05Z"
+	if err := spec.SaveProgress(dir); err != nil {
+		t.Fatalf("SaveProgress = %v", err)
+	}
+
+	changed := changedFiles(before, treeOf(t, dir))
+	if len(changed) != 1 || changed[0] != ProgressFileName {
+		t.Errorf("SaveProgress changed %v; want progress.json alone", changed)
+	}
+	again := loadFixture(t, dir)
+	if again.TaskState(1) != TaskStateInProgress || again.UpdatedAt != "2026-05-05T05:05:05Z" {
+		t.Errorf("state %s, updated_at %q; want in_progress and the time set", again.TaskState(1), again.UpdatedAt)
+	}
+	if n := len(again.Progress.Tasks); n != 3 {
+		t.Errorf("progress entries = %d; want the two tasks and the integration task", n)
+	}
+	for _, name := range entriesOf(t, dir) {
+		if strings.Contains(name, ".tmp.") {
+			t.Errorf("temp file %q survived", name)
 		}
+	}
+
+	// The guards of Save apply.
+	spec.Status = "sealed"
+	if err := spec.SaveProgress(dir); !errors.As(err, new(*LifecycleError)) {
+		t.Errorf("SaveProgress on a sealed package = %v; want a *LifecycleError", err)
 	}
 }
 
@@ -194,7 +275,6 @@ func TestSave_KeepsAScaffoldLoadable(t *testing.T) {
 	spec.Title = "New Feature"
 	spec.Status = "draft"
 	spec.CreatedAt = "2026-01-01T00:00:00Z"
-	spec.UpdatedAt = "2026-01-01T00:00:00Z"
 	spec.PRDBody = "# New Feature\n\n## Intent\n\nSomething.\n"
 
 	if err := spec.Save(dir); err != nil {

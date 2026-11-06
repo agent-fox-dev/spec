@@ -1,4 +1,4 @@
-Command specr renders a version 2 specification package as Markdown: the whole
+Command specr renders a version 3 specification package as Markdown: the whole
 package, or the package scoped to one of its tasks.
 
     specr [flags] <spec>
@@ -13,7 +13,7 @@ CONSTANTS
 
 const (
 	ReducedArchitecture = envelope.ReducedArchitecture
-	ReducedTestDetail   = envelope.ReducedTestDetail
+	ReducedCheckDetail  = envelope.ReducedCheckDetail
 )
     What --max-tokens can drop, in the order it drops it.
 

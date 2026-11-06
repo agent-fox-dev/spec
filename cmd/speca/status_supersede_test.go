@@ -144,7 +144,7 @@ func TestStatus_AMoveOnlySupersedeCallRecordsOnlyAMissingID(t *testing.T) {
 			old := packageWith(t, root, "03_old", "03", "old", "superseded")
 			replacing := addPackage(t, root, "12_new", "12", "new")
 			if tc.recorded {
-				editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 2", "schema_version: 2\nsupersedes: [\"03\"]")
+				editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 3", "schema_version: 3\nsupersedes: [\"03\"]")
 			}
 			oldBefore, replacingBefore := treeBytes(t, old), treeBytes(t, replacing)
 
@@ -184,7 +184,7 @@ func TestStatus_TheOldIDIsInTheReplacingPackageExactlyOnce(t *testing.T) {
 			packageWith(t, root, "03_old", "03", "old", "sealed")
 			replacing := addPackage(t, root, "12_new", "12", "new")
 			if tc.initial != "" {
-				editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 2", "schema_version: 2\nsupersedes: "+tc.initial)
+				editFile(t, filepath.Join(replacing, "prd.md"), "schema_version: 3", "schema_version: 3\nsupersedes: "+tc.initial)
 			}
 			if interrupted {
 				// The status and the record are written; the move is not.

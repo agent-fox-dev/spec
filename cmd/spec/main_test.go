@@ -215,7 +215,7 @@ func TestUsageErrors_AreRefusedBeforeAnythingRuns(t *testing.T) {
 }
 
 // --preflight through the real shell: exit 0, stage preflight, the checklist
-// and the estimate of four phases in the default view, no usage, and nothing
+// and the estimate of three phases in the default view, no usage, and nothing
 // written: no spec root, no side effect, no artifact but the envelope's own
 // report and events files.
 func TestPreflight_ReportsTheChecklistAndWritesNothing(t *testing.T) {
@@ -234,7 +234,7 @@ func TestPreflight_ReportsTheChecklistAndWritesNothing(t *testing.T) {
 	if list, ok := res["preflight"].([]any); !ok || len(list) == 0 {
 		t.Errorf("the default view dropped result.preflight: %v", res)
 	}
-	if est, ok := res["estimate"].(map[string]any); !ok || est["phases"] != float64(4) {
+	if est, ok := res["estimate"].(map[string]any); !ok || est["phases"] != float64(3) {
 		t.Errorf("estimate = %v", res["estimate"])
 	}
 	if _, ok := env["usage"]; ok {
@@ -399,7 +399,7 @@ func TestTheRunsIndexIsClosedOnceAndNeverInvalidated(t *testing.T) {
 
 // The whole command against a scripted model: the real shell, the real
 // pipeline, the real agent loop and submit handlers. The model writes the
-// PRD, reads one file, then submits the three artifacts; spec writes,
+// PRD, reads one file, then submits the two artifacts; spec writes,
 // validates and activates the package and reports it.
 func TestSpec_WritesAValidPackageFromAnIdea(t *testing.T) {
 	cleanEnv(t)
@@ -418,7 +418,7 @@ func TestSpec_WritesAValidPackageFromAnIdea(t *testing.T) {
 
 	dir := goRepo(t)
 	code, env, stderr := runSpec(t, "--dir", dir, "--repo-map-tokens", "0", "--detail", "full",
-		"--phase-model", "test_spec=claude-haiku-4-5:low", "build the test feature")
+		"--phase-model", "tasks=claude-haiku-4-5:low", "build the test feature")
 	if code != cli.ExitOK || !env.OK || env.Result == nil {
 		t.Fatalf("code = %d: %+v\n%s", code, env.Error, stderr)
 	}
@@ -426,10 +426,10 @@ func TestSpec_WritesAValidPackageFromAnIdea(t *testing.T) {
 	if r.SpecID != "01" || r.SpecDir != filepath.Join(".specs", "01_test_feature") || r.Status != "active" || !r.Validation.Valid {
 		t.Errorf("result = %+v", r)
 	}
-	if strings.Join(r.Artifacts, ",") != "prd.md,requirements.json,test_spec.json,tasks.json,spec.md" {
+	if strings.Join(r.Artifacts, ",") != "prd.md,requirements.json,tasks.json,progress.json,spec.md" {
 		t.Errorf("artifacts = %v", r.Artifacts)
 	}
-	if r.Requirements == 0 || r.Tests == 0 || len(r.OpenQuestions) != 1 {
+	if r.Requirements == 0 || r.Criteria == 0 || r.ExecutionPaths == 0 || r.Tasks == 0 || len(r.OpenQuestions) != 1 {
 		t.Errorf("counts = %+v", r)
 	}
 	if len(env.Artifacts) != 1 || env.Artifacts[0].Kind != envelope.ArtifactSpecPackage || !env.Artifacts[0].Valid {
@@ -438,16 +438,16 @@ func TestSpec_WritesAValidPackageFromAnIdea(t *testing.T) {
 	if len(env.Next) != 1 || env.Next[0].Tool != "impl" || env.Next[0].Input != r.SpecDir {
 		t.Errorf("next = %+v", env.Next)
 	}
-	if got := strings.Join(phaseNames(env), ","); got != "prd,generate:requirements,generate:test_spec,generate:tasks" {
+	if got := strings.Join(phaseNames(env), ","); got != "prd,generate:requirements,generate:tasks" {
 		t.Errorf("phases = %v", got)
 	}
-	// STANDARD runs the PRD and the requirements at high effort and the rest
-	// at medium; --phase-model moved the test spec to another model.
+	// STANDARD runs the PRD and the requirements at high effort and the tasks
+	// at medium; --phase-model moved the tasks to another model.
 	var models []string
 	for _, p := range env.Usage.Phases {
 		models = append(models, p.Model+"/"+p.Effort)
 	}
-	if got := strings.Join(models, ","); got != "claude-sonnet-5-5/high,claude-sonnet-5-5/high,claude-haiku-4-5/low,claude-sonnet-5-5/medium" {
+	if got := strings.Join(models, ","); got != "claude-sonnet-5-5/high,claude-sonnet-5-5/high,claude-haiku-4-5/low" {
 		t.Errorf("phase models = %s", got)
 	}
 	if env.Usage.Turns != len(turns) {
@@ -505,7 +505,7 @@ func TestAdversarial_GeneratesThePackageFromTheRevisedPRD(t *testing.T) {
 		t.Fatalf("code = %d: %+v\n%s", code, env.Error, stderr)
 	}
 	if got := strings.Join(phaseNames(env), ","); got !=
-		"prd,prd_review,prd_revision,prd_review,generate:requirements,generate:test_spec,generate:tasks" {
+		"prd,prd_review,prd_revision,prd_review,generate:requirements,generate:tasks" {
 		t.Errorf("phases = %v", got)
 	}
 	r := env.Result
@@ -739,7 +739,7 @@ func TestAdversarial_TwoConsecutiveCleanRoundsConverge(t *testing.T) {
 		t.Errorf("clean = %v; want false, true, true", got)
 	}
 	if got := strings.Join(phaseNames(env), ","); got !=
-		"prd,prd_review,prd_revision,prd_review,prd_revision,prd_review,generate:requirements,generate:test_spec,generate:tasks" {
+		"prd,prd_review,prd_revision,prd_review,prd_revision,prd_review,generate:requirements,generate:tasks" {
 		t.Errorf("phases = %v; want no revision for the third round", got)
 	}
 	if !strings.Contains(env.Summary, "review: 3 rounds, 2 findings, 2 fixed") {
@@ -832,7 +832,7 @@ func TestAdversarial_ASteeringFindingCannotBeDeclined(t *testing.T) {
 	}
 }
 
-// planArtifacts are the fixture's three artifacts as a plan reviser submits
+// planArtifacts are the fixture's two artifacts as a plan reviser submits
 // them, each a JSON object.
 func planArtifacts(t *testing.T, artifacts map[afspec.GenerationStep]string) map[string]map[string]any {
 	t.Helper()
@@ -854,16 +854,16 @@ func TestAdversarialPlan_GroundsAPathThatIsNotThere(t *testing.T) {
 	withIndex(t, nil)
 	body, artifacts := fixture(t)
 	revised := planArtifacts(t, artifacts)
-	task3 := revised["tasks"]["tasks"].([]any)[2].(map[string]any)
-	task3["touches"] = []any{"go.mod"}
+	task2 := revised["tasks"]["tasks"].([]any)[1].(map[string]any)
+	task2["touches"] = []any{"go.mod"}
 	turns := []faux.Turn{submit("p1", "submit_prd", map[string]any{"spec_name": "test_feature", "title": "Test Feature", "body": body})}
 	turns = append(turns, generation(t, artifacts)...)
 	turns = append(turns,
 		submit("r1", "submit_plan_review", map[string]any{"findings": []any{map[string]any{
-			"severity": "major", "rubric": "grounding", "section": "task 3",
-			"flaw":     "The path `afspec/smoke_test.go` does not exist and no step of task 3 creates it.",
-			"evidence": "grounding fact: `afspec/smoke_test.go` does not exist", "remedy": "touch a file that exists", "reopens": ""}}}),
-		submit("v1", "submit_plan_revision", map[string]any{"requirements": revised["requirements"], "test_spec": revised["test_spec"],
+			"severity": "major", "rubric": "grounding", "section": "task 2",
+			"flaw":     "The path `afspec/validate.go` does not exist and no step of task 2 creates it.",
+			"evidence": "grounding fact: `afspec/validate.go` does not exist", "remedy": "touch a file that exists", "reopens": ""}}}),
+		submit("v1", "submit_plan_revision", map[string]any{"requirements": revised["requirements"],
 			"tasks": revised["tasks"], "dispositions": []any{revisionAnswer("R1-F1", "fixed", nil)}}),
 	)
 	model := faux.New(turns...)
@@ -883,7 +883,7 @@ func TestAdversarialPlan_GroundsAPathThatIsNotThere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"go.mod"`) || strings.Contains(string(written), "afspec/smoke_test.go") {
+	if !strings.Contains(string(written), `"go.mod"`) || strings.Contains(string(written), "afspec/validate.go") {
 		t.Errorf("the written tasks.json does not name the grounded path:\n%s", written)
 	}
 	if !strings.Contains(env.Summary, "plan review: 1 round, 1 finding, 1 fixed") {
@@ -947,12 +947,11 @@ func (m *routedModel) Stream(ctx context.Context, req core.Request) (<-chan core
 	return p.Stream(ctx, req)
 }
 
-// relabelled is a fixture artifact carrying spec id's ids.
+// relabelled is a fixture artifact as a scope's generation submits it: its
+// ids carry no spec prefix, and the identity is the submit handler's to write.
 func relabelled(artifact, id string) map[string]any {
-	text := strings.ReplaceAll(artifact, `"01-`, `"`+id+`-`)
-	text = strings.ReplaceAll(text, `TS-01-`, `TS-`+id+`-`)
 	var m map[string]any
-	if err := json.Unmarshal([]byte(text), &m); err != nil {
+	if err := json.Unmarshal([]byte(artifact), &m); err != nil {
 		panic(err)
 	}
 	delete(m, "spec_id")
@@ -1034,8 +1033,8 @@ func TestPreflight_PricesThePlanReview(t *testing.T) {
 		t.Fatalf("code = %d: %v", code, env)
 	}
 	res, _ := env["result"].(map[string]any)
-	if est, ok := res["estimate"].(map[string]any); !ok || est["phases"] != float64(4+6) {
-		t.Errorf("estimate = %v; want the four generating phases and six for the plan review", res["estimate"])
+	if est, ok := res["estimate"].(map[string]any); !ok || est["phases"] != float64(3+6) {
+		t.Errorf("estimate = %v; want the three generating phases and six for the plan review", res["estimate"])
 	}
 	detail := ""
 	for _, c := range res["preflight"].([]any) {

@@ -15,8 +15,8 @@ over the variable that supplies its default.
 With neither set the model is the `STANDARD` tier. A tier chooses a model and
 an effort per phase, and `--phase-model PHASE=MODEL[:EFFORT]` changes one
 phase (it has no environment variable). The phases are `prd`, `prd_review`,
-`prd_revision`, `requirements`, `test_spec`, `tasks`, `plan_review`,
-`plan_revision` and `architecture`. The context window, output cap and
+`prd_revision`, `requirements`, `tasks`, `plan_review`, `plan_revision` and
+`architecture`. The context window, output cap and
 price of every model id come from AgentKit's embedded catalog; see
 [cli.md](cli.md#the-model-and-the-ceilings).
 

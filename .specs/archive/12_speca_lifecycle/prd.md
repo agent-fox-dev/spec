@@ -4,9 +4,8 @@ spec_name: "speca_lifecycle"
 title: "speca: change a spec package's lifecycle status from the shell"
 status: "archived"
 created_at: "2026-10-22T07:38:59.238888Z"
-updated_at: "2026-11-06T15:39:57Z"
 intent_hash: "41b432c6da8f9ce99881f49e1f81acc48c449a79a999a82ad9a26d7cf1650419"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/02-change-the-state-of-a-package-with-its-own-command.md"
 ---
 ## Intent
@@ -225,3 +224,14 @@ Every package `speca` writes has `updated_at` set to the current UTC time in RFC
 |---|---|---|
 | `10_speca_state_report` | depends on | The `speca` command shell, the shared resolver and display rule in `internal/specpkg`, the report builder whose fields this form returns, `envelope.AdminResult`, `DecodeSpeca` and `TaskCounts`, and ADR 10 |
 | `11_speca_task_states` | depends on | The `--force` and `--dry-run` flags, `envelope.Change` with `changes` and `dry_run` on `AdminResult`, `envelope.CategoryLifecycle`, the pre-write guard against unknown keys, and the task claim form that `next` suggests after activation |
+
+## Glossary
+
+- **allowed_status**: The list of statuses that `afspec.ValidTransition` allows from a package's current status, as the report form of 10_speca_state_report reports it.
+- **display rule**: The rule in internal/specpkg (from 10_speca_state_report) that renders a package directory as a path relative to the working directory or the spec root.
+- **holding directory**: The directory that directly contains a package directory (filepath.Dir of the package path). Archived and superseded packages move to `<holding directory>/archive/<name>`.
+- **intent drift**: The state of a package whose `intent_hash` is set while its PRD body hashes to a different value or has no `## Intent` section.
+- **move-only call**: A `--status` call where the target equals the current status, that status is `archived` or `superseded`, and the package is not under archive/. It resumes an interrupted call by moving the directory without rewriting any file.
+- **open task**: A task in tasks.json whose state is `pending` or `in_progress`. Optional tasks count.
+- **replacing package**: The package named by `--by` when a package is superseded. The old package's spec_id is recorded in its `supersedes` list.
+- **under archive/**: Describes a package whose holding directory is named `archive`. No spec-root resolution is involved.

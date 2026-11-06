@@ -4,9 +4,8 @@ spec_name: "speca_task_states"
 title: "speca: change the state of a package's tasks"
 status: "archived"
 created_at: "2026-10-22T07:30:22.814235Z"
-updated_at: "2026-11-06T15:39:56Z"
 intent_hash: "cbc694a5761e9e7b068e3446dfc496a192d57bdf81188ae91e8c70a2969986da"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/02-change-the-state-of-a-package-with-its-own-command.md"
 ---
 ## Intent
@@ -199,3 +198,14 @@ A v1 package loads, but the v2 types read none of its tasks. `specr` refuses `--
 | Spec | Reason |
 |---|---|
 | `10_speca_state_report` | Provides `cmd/speca` and its report builder, `intent_drift`, `next_task` and `next`, `envelope.AdminResult`/`DecodeSpeca`, `internal/specpkg` (resolver, `TaskInfo` with `ready`), and `afspec`'s `IsReady`/`NextTask`. This spec adds the task form, `changes`/`dry_run` and the claim suggestions to them. |
+
+## Glossary
+
+- **bypass**: Setting a state with afspec's CompleteTaskStates (done) or ResetTaskStates (pending) instead of TransitionTask; reachable only through --force.
+- **change entry**: One element of the result's `changes`: {kind: "task", id, from, to, forced?} for a task whose state changed.
+- **claim**: A move of a task to in_progress. A claim of a task already in_progress is not a move, which makes the state machine the compare-and-set between agents.
+- **legacy package**: A package whose schema_version is neither 0 nor 2, by specr's rule.
+- **move**: A change of one task from its current state to the --state target; allowed exactly when afspec.ValidTaskTransition(current, target) is true (format v2 §8.3.1).
+- **task form**: The speca invocation `speca <spec> --task T --state S`, which changes task states; the first speca form that writes.
+- **unknown key**: A JSON key the v2 schema does not allow; LoadSpec drops it, ValidateSchema reports it as an unknown_field error, and a Save deletes it from disk.
+- **writable package**: A package Save would write: status draft, or status active without intent drift.

@@ -25,15 +25,30 @@ func TestSubmitArtifact_ARejectionIsRepairedInTheLoop(t *testing.T) {
 		before []afspec.GenerationStep
 		breakf func(map[string]any)
 		want   []string
+		// accepted checks that the artifact recorded is the corrected one.
+		accepted func(*afspec.PartialSpec) bool
 	}{
-		{"a criterion that does not exist", afspec.StepTestSpec, []afspec.GenerationStep{afspec.StepRequirements},
-			func(c map[string]any) { c["tests"].([]any)[0].(map[string]any)["verifies"] = []any{"01-REQ-99.1"} },
-			[]string{"C3", PatchToolName(afspec.StepTestSpec)}},
-		{"another ecosystem's runner", afspec.StepTasks, []afspec.GenerationStep{afspec.StepRequirements, afspec.StepTestSpec},
+		{"a same_as that names no criterion", afspec.StepRequirements, nil,
+			func(c map[string]any) {
+				crit := c["requirements"].([]any)[0].(map[string]any)["criteria"].([]any)[1].(map[string]any)
+				crit["check"] = map[string]any{"same_as": "REQ-99.1"}
+			},
+			[]string{"C3", PatchToolName(afspec.StepRequirements)},
+			func(p *afspec.PartialSpec) bool {
+				return p.Requirements != nil && !p.Requirements.Requirements[0].Criteria[1].Check.IsShared()
+			}},
+		{"a criterion that does not exist", afspec.StepTasks, []afspec.GenerationStep{afspec.StepRequirements},
+			func(c map[string]any) { c["tasks"].([]any)[0].(map[string]any)["criteria"] = []any{"REQ-99.1"} },
+			[]string{"C4", PatchToolName(afspec.StepTasks)},
+			func(p *afspec.PartialSpec) bool { return p.Tasks != nil && p.Tasks.Tasks[0].Criteria[0] == "REQ-1" }},
+		{"another ecosystem's runner", afspec.StepTasks, []afspec.GenerationStep{afspec.StepRequirements},
 			func(c map[string]any) {
 				c["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
 			},
-			[]string{"project_mismatch", "pytest", "go test ./... -count=1"}},
+			[]string{"project_mismatch", "pytest", "go test ./... -count=1"},
+			func(p *afspec.PartialSpec) bool {
+				return p.Tasks != nil && p.Tasks.TestCommands.AllTests == "go test ./... -count=1"
+			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := newWorkspace(t)
@@ -64,15 +79,8 @@ func TestSubmitArtifact_ARejectionIsRepairedInTheLoop(t *testing.T) {
 			if blocksText(reqs[0].System) != blocksText(reqs[1].System) {
 				t.Error("the system prompt changed between the attempt and the repair")
 			}
-			switch tc.step {
-			case afspec.StepTestSpec:
-				if partial.TestSpec == nil || partial.TestSpec.Tests[0].Verifies[0] == "01-REQ-99.1" {
-					t.Errorf("the rejected artifact was recorded: %+v", partial.TestSpec)
-				}
-			case afspec.StepTasks:
-				if partial.Tasks == nil || partial.Tasks.TestCommands.AllTests != "go test ./... -count=1" {
-					t.Errorf("the accepted plan = %+v", partial.Tasks)
-				}
+			if !tc.accepted(partial) {
+				t.Errorf("the corrected artifact was not the one recorded: %+v", *partial)
 			}
 		})
 	}
@@ -110,7 +118,7 @@ func TestSubmitArtifact_WritesTheFieldsThePipelineKnows(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateArtifact: %v", err)
 			}
-			const uri = "https://agent-fox.dev/schemas/requirements.v2.json"
+			const uri = "https://agent-fox.dev/schemas/requirements.v3.json"
 			if got["$schema"] != uri {
 				t.Errorf("the content carries $schema = %v, want %q", got["$schema"], uri)
 			}
@@ -162,11 +170,12 @@ func TestArtifactSchema_IsConvertedOnce(t *testing.T) {
 	}
 }
 
-// The glossary is asked for as a list of entries, which strict mode can
-// declare, and stored as the object the format defines. A submission in the
-// stored form, which a tool sent without the strict flag can receive, is
-// accepted too.
-func TestSubmitArtifact_TakesTheGlossaryAsEntriesOrAnObject(t *testing.T) {
+// Format v3 declares no dictionary: the v2 glossary is a section of the PRD
+// now. A submission that carries one out of habit, in either of the forms
+// the v2 tool took, is turned back naming the key — by the tool's own schema,
+// which declares no such property — and the next one is accepted; the
+// artifact recorded carries no glossary.
+func TestSubmitArtifact_TurnsBackTheV2Glossary(t *testing.T) {
 	for name, glossary := range map[string]any{
 		"entries": []any{map[string]any{"term": "widget", "definition": "A counted thing."}},
 		"object":  map[string]any{"widget": "A counted thing."},
@@ -176,18 +185,40 @@ func TestSubmitArtifact_TakesTheGlossaryAsEntriesOrAnObject(t *testing.T) {
 			artifacts, _ := loadFixture(t, "01", "test_feature")
 			submitted := deepCopy(t, artifacts[afspec.StepRequirements])
 			submitted["glossary"] = glossary
-			runner, _ := fauxRunner(t, ws, toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted))
-			got, _, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
+			runner, p := fauxRunner(t, ws,
+				toolCall("c1", ArtifactToolName(afspec.StepRequirements), submitted),
+				toolCall("c2", ArtifactToolName(afspec.StepRequirements), artifacts[afspec.StepRequirements]))
+			got, res, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
 				Step: afspec.StepRequirements, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n",
 				Partial: &afspec.PartialSpec{SpecID: "01", SpecName: "test_feature"},
 			})
-			if err != nil {
-				t.Fatalf("GenerateArtifact: %v", err)
+			if err != nil || res.Turns != 2 {
+				t.Fatalf("GenerateArtifact: %v after %d turn(s); want the rejection and the correction", err, res.Turns)
 			}
-			if g, ok := got["glossary"].(map[string]any); !ok || g["widget"] != "A counted thing." || len(g) != 1 {
-				t.Errorf("glossary = %#v, want the object form", got["glossary"])
+			if rejection := transcript(p.Requests()[1]); !strings.Contains(rejection, "glossary") ||
+				!strings.Contains(rejection, "not allow") {
+				t.Errorf("the rejection does not name the glossary:\n%s", rejection)
+			}
+			if _, ok := got["glossary"]; ok {
+				t.Errorf("the artifact recorded carries a glossary: %#v", got["glossary"])
 			}
 		})
+	}
+}
+
+// The entry form of a dictionary stays for a format that declares one, and a
+// dictionary this package has no entry form for is refused by name rather
+// than declared in a tool schema strict mode cannot carry.
+func TestDictionariesAsEntries_RefusesADictionaryWithNoEntryForm(t *testing.T) {
+	s, _ := toolSchema(t, `{"type":"object","properties":{"glossary":{"type":"object",
+		"description":"Terms.","additionalProperties":{"type":"string"}},"name":{"type":"string"}}}`)
+	err := dictionariesAsEntries(s, afspec.StepRequirements)
+	if err == nil || !strings.Contains(err.Error(), `"glossary"`) || !strings.Contains(err.Error(), "no entry form") {
+		t.Errorf("err = %v; want a refusal naming the dictionary", err)
+	}
+	plain, _ := toolSchema(t, `{"type":"object","properties":{"name":{"type":"string"}}}`)
+	if err := dictionariesAsEntries(plain, afspec.StepRequirements); err != nil {
+		t.Errorf("a schema with no dictionary was refused: %v", err)
 	}
 }
 
@@ -227,7 +258,7 @@ func TestSubmitArtifact_SendsItsWarningsBackOnce(t *testing.T) {
 func TestCheckArtifact_NamesEveryProblemAtOnceAndKeepsNone(t *testing.T) {
 	ws := newWorkspace(t)
 	artifacts, _ := loadFixture(t, "01", "test_feature")
-	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements, afspec.StepTestSpec)
+	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements)
 	before := *partial
 	audit := project.DetectProfile(ws.Root()).AuditTasks
 
@@ -235,18 +266,19 @@ func TestCheckArtifact_NamesEveryProblemAtOnceAndKeepsNone(t *testing.T) {
 	bad["test_commands"] = map[string]any{"all_tests": "pytest -q", "linter": "ruff check ."}
 	first := bad["tasks"].([]any)[0].(map[string]any)
 	first["title"] = ""
-	first["tests"] = []any{"TS-01-1"}
+	first["criteria"] = []any{"REQ-99.1"}
 	code, err := checkArtifact(bad, afspec.StepTasks, partial, audit, false)
 	if err == nil || code != "validation_failed" {
 		t.Fatalf("code %q, err %v", code, err)
 	}
 	msg := err.Error()
-	for _, want := range []string{"[json_schema]", "[C7]", "pytest", "go test ./... -count=1", "Cross-file rules", "The project's own tooling"} {
+	for _, want := range []string{"[json_schema]", "[C4]", "[C5]", "REQ-99.1", "REQ-1.3", "pytest", "go test ./... -count=1",
+		"Cross-file rules", "The project's own tooling"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the rejection lacks %q:\n%s", want, msg)
 		}
 	}
-	if strings.Index(msg, "[json_schema]") > strings.Index(msg, "[C7]") {
+	if strings.Index(msg, "[json_schema]") > strings.Index(msg, "[C4]") {
 		t.Errorf("schema errors should come first:\n%s", msg)
 	}
 	if *partial != before {
@@ -272,10 +304,10 @@ func TestArtifactSink_SaysWhatThePhaseWasStuckOn(t *testing.T) {
 	if sink.rejectionDetail() != "" || withRejections(errors.New("no result"), &sink).Error() != "no result" {
 		t.Error("nothing was rejected, so there is no detail")
 	}
-	sink.reject(nil, "the tasks artifact has 2 problem(s):\n[C7] test TS-01-3 is not owned by any task\n[C8] criterion X")
-	sink.reject(nil, "the tasks artifact has 1 problem(s):\nCross-file rules:\n[C7] test TS-01-4 is not owned by any task\n[C8] y")
+	sink.reject(nil, "the tasks artifact has 2 problem(s):\n[C5] criterion REQ-1.3 is not owned by any task\n[C4] task 2 claims X")
+	sink.reject(nil, "the tasks artifact has 1 problem(s):\nCross-file rules:\n[C5] criterion REQ-2.1 is not owned by any task\n[C4] y")
 	got := sink.rejectionDetail()
-	want := "2 submission(s) were rejected; the last failure: the tasks artifact has 1 problem(s): [C7] test TS-01-4 is not owned by any task"
+	want := "2 submission(s) were rejected; the last failure: the tasks artifact has 1 problem(s): [C5] criterion REQ-2.1 is not owned by any task"
 	if got != want {
 		t.Errorf("detail = %q, want %q", got, want)
 	}

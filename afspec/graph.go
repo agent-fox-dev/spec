@@ -35,7 +35,7 @@ func BuildDependencyGraph(metas []SpecMeta, root string) (*DependencyGraph, erro
 			continue
 		}
 
-		var tasks TasksV2Json
+		var tasks TasksV3Json
 		if err := json.Unmarshal(tasksData, &tasks); err != nil {
 			errs = append(errs, fmt.Errorf("cannot parse tasks.json for spec %s: %w", meta.SpecID, err))
 			continue

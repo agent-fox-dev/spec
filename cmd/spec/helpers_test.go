@@ -92,8 +92,9 @@ func runSpecRaw(t *testing.T, argv ...string) (int, map[string]any) {
 	return code, env
 }
 
-// fixture is afspec's valid package: its PRD body and its three artifacts,
-// with the artifacts' $schema field left for the submit handlers to write.
+// fixture is afspec's valid package: its PRD body and its two contract
+// artifacts, with the artifacts' $schema field left for the submit handlers
+// to write.
 func fixture(t *testing.T) (prdBody string, artifacts map[afspec.GenerationStep]string) {
 	t.Helper()
 	root := filepath.Join("..", "..", "afspec", "testdata", "valid_spec")
@@ -125,7 +126,7 @@ func submit(id, tool string, args any) faux.Turn {
 	return faux.Turn{Blocks: []core.ContentBlock{faux.FauxToolCall(id, tool, string(raw))}, StopReason: core.StopReasonToolUse}
 }
 
-// generation is the three generation phases of the fixture's package, each
+// generation is the two generation phases of the fixture's package, each
 // submitting the fixture's artifact.
 func generation(t *testing.T, artifacts map[afspec.GenerationStep]string) []faux.Turn {
 	t.Helper()

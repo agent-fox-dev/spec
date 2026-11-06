@@ -89,9 +89,9 @@ func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, wri
 	valid := spec.Validate().Valid
 	info.SpecID, info.SpecName, info.Title, info.Status = spec.SpecID, spec.SpecName, spec.Title, spec.Status
 	info.Valid = &valid
-	info.TaskCounts = countTasks(spec.Tasks)
-	if next, ok := spec.Tasks.NextTask(); ok {
-		task := specpkg.TaskInfo(spec.Tasks, *next)
+	info.TaskCounts = countTasks(spec)
+	if next, ok := spec.NextTask(); ok {
+		task := specpkg.TaskInfo(spec, *next)
 		info.NextTask = &task
 	}
 	info.Archived = archived

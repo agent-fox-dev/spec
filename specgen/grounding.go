@@ -21,7 +21,7 @@ type groundingFact struct {
 // task order and then touches order, whether it exists. The answer is the
 // file system's, not a model's (ADR 17): a path is resolved inside the
 // repository and looked at, so one that resolves outside it does not exist.
-func groundingFacts(ws *workspace.Workspace, tasks *afspec.TasksV2Json) []groundingFact {
+func groundingFacts(ws *workspace.Workspace, tasks *afspec.TasksV3Json) []groundingFact {
 	facts := []groundingFact{}
 	if tasks == nil {
 		return facts

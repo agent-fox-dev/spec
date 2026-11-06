@@ -4,9 +4,8 @@ spec_name: "render_skills_from_one_source"
 title: "Render the skills for every agent from one source"
 status: "archived"
 created_at: "2026-11-06T08:14:00Z"
-updated_at: "2026-11-06T15:39:57Z"
 intent_hash: "0fa8296fc069cac263cae0437e0a2188564e76c83633c22bd3f7c4b8b5602fcd"
-schema_version: 2
+schema_version: 3
 source: "docs/prd/03-render-the-skills-for-every-agent-from-one-source.md"
 ---
 
@@ -492,3 +491,12 @@ Two findings are warnings, which go to stderr and leave the exit code 0:
   the pages: `.github/skills/`, `.claude/skills/` and `.agents/skills/` in a
   repository, and `~/.copilot/skills/`, `~/.claude/skills/` and
   `~/.agents/skills/` for a user.
+
+## Glossary
+
+- **<source path>: <problem>**: The one line the skill render writes to stderr for each problem it finds: the path of the source file, a colon and a space, then the problem in words. Every refusal of the render takes this form, and a warning takes it too.
+- **agent**: One of the four coding agents the render targets: claude, codex, cursor and copilot. Each reads its own frontmatter keys and its own invocation syntax.
+- **body**: The part of a SKILL.md that follows the line closing its YAML frontmatter. It is loaded with the skill, which is why it carries the ceiling.
+- **reference file**: A Markdown file under a skill's own references/ or under skills/_shared/references/, read by the agent at the step that links it rather than loaded with the skill.
+- **skill**: A directory directly under skills/ whose name does not begin with an underscore, holding a SKILL.md and optionally its own references/ directory.
+- **skill render**: The program make runs to render, install and uninstall the skills.

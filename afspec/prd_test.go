@@ -14,9 +14,9 @@ func TestRenderPRD_WritesOptionalFieldsOnlyWhenSet(t *testing.T) {
 		SchemaVersion: SchemaVersion, PRDBody: "# Feature\n",
 	}
 	empty := string(renderPRD(&base))
-	for _, absent := range []string{"owner:", "source:", "supersedes:", "tags:"} {
+	for _, absent := range []string{"profile:", "source:", "supersedes:", "updated_at:", "owner:", "tags:"} {
 		if strings.Contains(empty, absent) {
-			t.Errorf("empty optional field %q was written:\n%s", absent, empty)
+			t.Errorf("field %q was written:\n%s", absent, empty)
 		}
 	}
 	if !strings.Contains(empty, "intent_hash: null") {
@@ -24,10 +24,10 @@ func TestRenderPRD_WritesOptionalFieldsOnlyWhenSet(t *testing.T) {
 	}
 
 	set := base
-	set.Owner, set.Source = "someone", "docs/prd.md"
-	set.Supersedes, set.Tags = []string{"04"}, []string{"a", "b"}
+	set.Profile, set.Source = ProfileLite, "docs/prd.md"
+	set.Supersedes = []string{"04"}
 	out := string(renderPRD(&set))
-	for _, want := range []string{`owner: "someone"`, `source: "docs/prd.md"`, `supersedes: ["04"]`, `tags: ["a", "b"]`} {
+	for _, want := range []string{`profile: "lite"`, `source: "docs/prd.md"`, `supersedes: ["04"]`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
 		}
@@ -55,7 +55,7 @@ func TestParsePRD_RefusesMalformedFrontmatter(t *testing.T) {
 }
 
 // withFrontmatterLine adds a line to the frontmatter of the prd.md in dir, right
-// after schema_version, where renderPRD writes steering_version.
+// after schema_version, where renderPRD writes profile and steering_version.
 func withFrontmatterLine(t *testing.T, dir, line string) {
 	t.Helper()
 	path := filepath.Join(dir, "prd.md")
@@ -63,7 +63,7 @@ func withFrontmatterLine(t *testing.T, dir, line string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const after = "schema_version: 2\n"
+	const after = "schema_version: 3\n"
 	if !strings.Contains(string(data), after) {
 		t.Fatalf("%s has no %q", path, after)
 	}
@@ -72,14 +72,16 @@ func withFrontmatterLine(t *testing.T, dir, line string) {
 	}
 }
 
-// steering_version is optional: it round-trips where it is set, after
-// schema_version and before owner, and is never written where it is not.
-func TestSteeringVersion_RoundTripsInItsPlace(t *testing.T) {
+// profile and steering_version are optional: each round-trips where it is set,
+// in its place, and is never written where it is not.
+func TestOptionalFrontmatter_RoundTripsInItsPlace(t *testing.T) {
 	for _, tc := range []struct {
-		name, line, want string
+		name, line                string
+		wantProfile, wantSteering string
 	}{
-		{"set", `steering_version: "2.0.1"`, "2.0.1"},
-		{"absent", "", ""},
+		{"steering set", `steering_version: "2.0.1"`, "", "2.0.1"},
+		{"profile set", `profile: "full"`, "full", ""},
+		{"absent", "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := copyFixture(t, fixtureValidSpec)
@@ -91,8 +93,8 @@ func TestSteeringVersion_RoundTripsInItsPlace(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec := loadFixture(t, dir)
-			if spec.SteeringVersion != tc.want {
-				t.Errorf("SteeringVersion = %q; want %q", spec.SteeringVersion, tc.want)
+			if spec.SteeringVersion != tc.wantSteering || spec.Profile != tc.wantProfile {
+				t.Errorf("SteeringVersion = %q, Profile = %q; want %q and %q", spec.SteeringVersion, spec.Profile, tc.wantSteering, tc.wantProfile)
 			}
 			if v := spec.Validate(); !v.Valid {
 				t.Errorf("the package does not validate: %v", v.Errors)
@@ -109,19 +111,35 @@ func TestSteeringVersion_RoundTripsInItsPlace(t *testing.T) {
 			if string(got) != string(want) {
 				t.Errorf("prd.md is not byte-identical after a round trip:\n%s", firstDifference(string(want), string(got)))
 			}
-			if tc.want == "" && strings.Contains(string(got), "steering_version") {
-				t.Errorf("an absent steering_version was written:\n%s", got)
-			}
-			if again := loadFixture(t, out); again.SteeringVersion != tc.want {
-				t.Errorf("reloaded SteeringVersion = %q; want %q", again.SteeringVersion, tc.want)
+			if tc.line == "" && (strings.Contains(string(got), "steering_version") || strings.Contains(string(got), "profile")) {
+				t.Errorf("an absent optional field was written:\n%s", got)
 			}
 		})
 	}
 
 	set := string(renderPRD(&Spec{SpecID: "05", SpecName: "f", Title: "F", Status: "draft", SchemaVersion: SchemaVersion,
-		SteeringVersion: "1.2.3", Owner: "someone", PRDBody: "# F\n"}))
-	sv, schema, owner := strings.Index(set, "steering_version:"), strings.Index(set, "schema_version:"), strings.Index(set, "owner:")
-	if !(schema < sv && sv < owner) {
-		t.Errorf("steering_version is not between schema_version and owner:\n%s", set)
+		Profile: ProfileLite, SteeringVersion: "1.2.3", Source: "docs/x.md", PRDBody: "# F\n"}))
+	schema, profile, sv, source := strings.Index(set, "schema_version:"), strings.Index(set, "profile:"),
+		strings.Index(set, "steering_version:"), strings.Index(set, "source:")
+	if !(schema < profile && profile < sv && sv < source) {
+		t.Errorf("the optional fields are not in the order profile, steering_version, source:\n%s", set)
+	}
+}
+
+// A version 2 frontmatter's updated_at, owner and tags are not fields of
+// version 3: they are ignored on a load and never written back.
+func TestParsePRD_IgnoresTheFieldsOfVersion2(t *testing.T) {
+	fm, _, err := parsePRD([]byte("---\nspec_id: \"01\"\nspec_name: \"x\"\nstatus: \"draft\"\nupdated_at: \"2026-01-01T00:00:00Z\"\nowner: \"me\"\ntags: [\"a\"]\n---\n# X\n"), "prd.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fm.Raw["owner"] != "me" || len(fm.Extensions) != 0 {
+		t.Errorf("Raw = %v, Extensions = %v", fm.Raw, fm.Extensions)
+	}
+	out := string(renderPRD(&Spec{SpecID: fm.SpecID, SpecName: fm.SpecName, Status: fm.Status, SchemaVersion: SchemaVersion, PRDBody: "# X\n"}))
+	for _, gone := range []string{"updated_at", "owner", "tags"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("%s was written back:\n%s", gone, out)
+		}
 	}
 }

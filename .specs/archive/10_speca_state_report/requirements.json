@@ -1,545 +1,966 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/requirements.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
   "spec_id": "10",
   "spec_name": "speca_state_report",
-  "schema_version": 2,
-  "introduction": "This spec adds `speca`, the read-only spec admin command, which reports a package's lifecycle and task state, gives the format's full verdict on a package, and lists every package under the spec root. It adds readiness and next-task rules to `afspec`, a shared `internal/specpkg` package used by `specr`, `speca` and `specgen`, and the public `AdminResult` output type in `envelope`.",
-  "glossary": {
-    "cross-spec rules": "The rules of afspec.ValidateCrossSpec (format v2 §10.4): unknown dependency, dependency cycle, actor, and glossary conflict.",
-    "display rule": "A package path is shown relative to --dir when it lies inside it, and absolute otherwise.",
-    "form": "One operation of speca: the report (speca <spec>), the verdict (--validate), or the list (--list).",
-    "intent drift": "An active package with an intent_hash whose PRD body no longer hashes to that value, or no longer has a ## Intent section.",
-    "next task": "The first in_progress task in plan order, otherwise the first ready task, as returned by (*TasksV2Json).NextTask.",
-    "package reference": "The single positional input of specr and speca: a path to a package directory or a file in it, or a directory name, number or name under the spec root.",
-    "program-driven path": "Any invocation other than -h/--help, --version and a bare invocation on a terminal; each writes exactly one JSON envelope to stdout.",
-    "ready task": "A pending task whose dependencies are all done; dependencies come from depends_on when present, otherwise the previous task in plan order (format v2 §8.3).",
-    "rule name": "The Check of a validation entry, or its Category when Check is empty.",
-    "spec root": "The directory holding the NN_name spec packages, resolved by afspec.ResolveSpecsDir from --specs-dir and --dir (default .specs)."
-  },
+  "schema_version": 3,
   "requirements": [
     {
-      "id": "10-REQ-1",
+      "id": "REQ-1",
       "title": "Readiness and the next task in afspec",
       "rationale": "\"Ready\" and \"next\" must mean the same thing in every command and follow format v2 §8.3, not the example's shortcut.",
       "criteria": [
         {
-          "id": "10-REQ-1.1",
+          "id": "REQ-1.1",
           "pattern": "ubiquitous",
           "system": "(*TasksV2Json).IsReady",
           "action": "return true exactly when the task with the given id exists, its state is pending, and every one of its dependencies is done, where the dependencies are its depends_on list when the field is present (an explicitly empty list meaning none) and otherwise the task immediately before it in plan order (none for the first task)",
-          "contract": "IsReady(id int) bool"
+          "contract": "IsReady(id int) bool",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan of four tasks: task 1 pending without depends_on, task 2 pending without depends_on, task 3 pending with depends_on [], task 4 pending with depends_on [1,2]",
+              "task 1 is done and task 2 is pending"
+            ],
+            "pseudocode": "p = plan(...); assert p.IsReady(2); assert p.IsReady(3); assert !p.IsReady(4); assert !p.IsReady(1)"
+          }
         },
         {
-          "id": "10-REQ-1.2",
+          "id": "REQ-1.2",
           "pattern": "unwanted",
           "condition": "a dependency id is not in the plan, or the dependency's state is dropped",
           "system": "(*TasksV2Json).IsReady",
           "action": "treat that dependency as not done",
-          "contract": "IsReady returns false for the dependent task"
+          "contract": "IsReady returns false for the dependent task",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "task 2 pending with depends_on [99]",
+              "task 3 pending with depends_on [1] where task 1 is dropped",
+              "task 4 pending without depends_on whose previous task 3 is dropped"
+            ],
+            "pseudocode": "assert !p.IsReady(2); assert !p.IsReady(3); assert !p.IsReady(4)"
+          }
         },
         {
-          "id": "10-REQ-1.3",
+          "id": "REQ-1.3",
           "pattern": "unwanted",
           "condition": "the task id is not in the plan or the receiver is nil",
           "system": "(*TasksV2Json).IsReady",
           "action": "report the task as not ready without panicking",
-          "contract": "IsReady returns false"
+          "contract": "IsReady returns false",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan with tasks 1 and 2",
+              "a nil *TasksV2Json"
+            ],
+            "pseudocode": "var n *TasksV2Json; assert !n.IsReady(1); assert !p.IsReady(42)"
+          }
         },
         {
-          "id": "10-REQ-1.4",
+          "id": "REQ-1.4",
           "pattern": "event_driven",
           "condition": "NextTask is called on a plan that has at least one in_progress task",
           "system": "(*TasksV2Json).NextTask",
           "action": "return a copy of the first in_progress task in plan order, so that mutating the copy leaves the plan unchanged",
-          "contract": "(*Task, true)"
+          "contract": "(*Task, true)",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan where task 2 and task 3 are in_progress and task 1 is done, task 4 pending and ready-looking"
+            ],
+            "pseudocode": "t, ok = p.NextTask(); assert ok && t.Id == 2; t.Title = 'x'; assert p.Tasks[1].Title != 'x'"
+          }
         },
         {
-          "id": "10-REQ-1.5",
+          "id": "REQ-1.5",
           "pattern": "event_driven",
           "condition": "NextTask is called on a plan that has no in_progress task",
           "system": "(*TasksV2Json).NextTask",
           "action": "return a copy of the first task in plan order for which IsReady is true",
-          "contract": "(*Task, true) when such a task exists"
+          "contract": "(*Task, true) when such a task exists",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan where task 1 is done, task 2 is dropped, task 3 is pending with depends_on [1], task 4 is pending with depends_on [3]"
+            ],
+            "pseudocode": "t, ok = p.NextTask(); assert ok && t.Id == 3"
+          }
         },
         {
-          "id": "10-REQ-1.6",
+          "id": "REQ-1.6",
           "pattern": "unwanted",
           "condition": "the receiver is nil, the plan is empty, or the plan has neither an in_progress task nor a ready task",
           "system": "(*TasksV2Json).NextTask",
           "action": "return no task without panicking",
-          "contract": "(nil, false)"
+          "contract": "(nil, false)",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a nil receiver",
+              "a plan with no tasks",
+              "a plan where every task is done or dropped",
+              "a plan where the only pending task depends on an unfinished pending task that is itself blocked"
+            ],
+            "pseudocode": "for p in cases: t, ok = p.NextTask(); assert t == nil && !ok"
+          }
         },
         {
-          "id": "10-REQ-1.7",
+          "id": "REQ-1.7",
           "pattern": "event_driven",
           "condition": "examples/tasks pick is called with id 0",
           "system": "examples/tasks",
           "action": "select the task with NextTask, and when there is none, fail with \"every task is done or dropped\" if every task is done or dropped and with \"no pending task has all its dependencies done\" otherwise",
-          "contract": "the existing examples/tasks tests pass unchanged"
+          "contract": "the existing examples/tasks tests pass unchanged",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan fully done or dropped",
+              "a plan whose only pending task has an unfinished dependency",
+              "a plan with an in_progress task and one with a ready pending task"
+            ],
+            "pseudocode": "_, err = pick(done, 0); assert contains(err, 'every task is done or dropped')"
+          }
         },
         {
-          "id": "10-REQ-1.8",
+          "id": "REQ-1.8",
           "pattern": "ubiquitous",
           "system": "(*TasksV2Json).NextTask",
-          "action": "for any task plan, when NextTask returns (t, true), t is the first in_progress task in plan order, or, when no task is in progress, IsReady(t.Id) is true and no earlier task in plan order is ready"
+          "action": "for any task plan, when NextTask returns (t, true), t is the first in_progress task in plan order, or, when no task is in progress, IsReady(t.Id) is true and no earlier task in plan order is ready",
+          "contract": "when it returns (t, true) and some task is in_progress, t is the first in_progress task in plan order; when it returns (t, true) and none is in progress, IsReady(t.Id) is true and no earlier task is ready; when it returns false, no task is in_progress and no task is ready",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "generated plans with random states, random present, absent or empty depends_on, and ids that may dangle"
+            ],
+            "pseudocode": "for p in gen_plans(): t, ok = p.NextTask(); if ok: if any(inprog): assert t.Id == first_inprog.Id else: assert p.IsReady(t.Id) and not any(p.IsReady(x.Id) for x in before(t)) else: assert none inprog and none ready"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-2",
+      "id": "REQ-2",
       "title": "Shared internal/specpkg package",
       "rationale": "specr, speca and specgen need one copy of the resolver, task summary and report converters instead of three.",
       "criteria": [
         {
-          "id": "10-REQ-2.1",
+          "id": "REQ-2.1",
           "pattern": "ubiquitous",
           "system": "internal/specpkg resolver",
           "action": "resolve a package reference first as a path to a package directory or a file in it (relative to the working directory, then to --dir), then as a directory name, number or name under the spec root, reaching an archived package only by its path, with the same results specr's former locate gave",
-          "contract": "the absolute package directory, or an error"
+          "contract": "the absolute package directory, or an error",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with .specs/01_a, .specs/09_b and .specs/archive/09_old",
+              "the working directory is the repo root and --dir is set"
+            ],
+            "pseudocode": "d = specpkg.Locate('speca', ref, root, specsDir); assert d == abs('.specs/09_b')"
+          }
         },
         {
-          "id": "10-REQ-2.2",
+          "id": "REQ-2.2",
           "pattern": "unwanted",
           "condition": "the reference is -, a URL, or multi-line, or it names no package or more than one",
           "system": "internal/specpkg resolver",
           "action": "refuse the reference with a usage error whose message names the caller-supplied tool, and when no live package matches but an archived one does, name that archived package in the message",
-          "contract": "*cli.UsageError with Category() \"usage\"; the message begins with the tool name passed in (specr or speca)"
+          "contract": "*cli.UsageError with Category() \"usage\"; the message begins with the tool name passed in (specr or speca)",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with .specs/09_b and an archived .specs/archive/05_old"
+            ],
+            "pseudocode": "err = Locate('speca', '-', ...); assert errors.As(err, &ue) && ue.Category()=='usage' && startsWith(err.Error(), 'speca')"
+          }
         },
         {
-          "id": "10-REQ-2.3",
+          "id": "REQ-2.3",
           "pattern": "ubiquitous",
           "system": "internal/specpkg",
-          "action": "list the NN_name directories under a root and format a package path by the display rule (relative to --dir when inside it, absolute otherwise)"
+          "action": "list the NN_name directories under a root and format a package path by the display rule (relative to --dir when inside it, absolute otherwise)",
+          "contract": "only NN_name directories are returned; a path inside --dir is shown relative to it; a path outside --dir is shown absolute",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a root holding 01_a, 10_b, notes.txt, a directory named misc, and archive/",
+              "a --dir containing the root, and a package path outside --dir"
+            ],
+            "pseudocode": "assert names(List(root)) == ['01_a','10_b']; assert Display(inside, dir) == '.specs/01_a'; assert Display(outside, dir) == outside"
+          }
         },
         {
-          "id": "10-REQ-2.4",
+          "id": "REQ-2.4",
           "pattern": "ubiquitous",
           "system": "internal/specpkg task summary",
           "action": "produce one envelope.TaskInfo per task in plan order carrying id, title, kind, state, optional, a copy of depends_on, and ready set from IsReady",
-          "contract": "[]envelope.TaskInfo"
+          "contract": "[]envelope.TaskInfo",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a plan with a done task, a ready pending task, a blocked pending task and an optional task"
+            ],
+            "pseudocode": "infos = specpkg.TaskInfos(spec); assert [i.ID for i in infos] == ids; assert infos[1].Ready && !infos[2].Ready"
+          }
         },
         {
-          "id": "10-REQ-2.5",
+          "id": "REQ-2.5",
           "pattern": "ubiquitous",
           "system": "internal/specpkg",
-          "action": "convert an afspec.ValidationResult into an envelope.ValidationReport and a spec's derived traceability into an envelope.TraceReport, and specgen uses these converters so that spec's result for the same package is byte-for-byte unchanged"
+          "action": "convert an afspec.ValidationResult into an envelope.ValidationReport and a spec's derived traceability into an envelope.TraceReport, and specgen uses these converters so that spec's result for the same package is byte-for-byte unchanged",
+          "contract": "ValidationReport has valid, error_count, warning_count and items with check, artifact, entity, message; TraceReport has criteria_covered, criteria_uncovered, paths_covered, paths_uncovered, tests_unowned; the JSON of spec's result is byte-for-byte equal to the golden output; specgen no longer defines reportOf, itemOf, traceOf, unownedTests",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture package with errors, warnings, uncovered criteria and an unowned test",
+              "the golden output captured from the pre-move specgen conversion"
+            ],
+            "pseudocode": "r = specpkg.ReportOf(spec.Validate()); tr = specpkg.TraceOf(spec); assert json(r) == golden"
+          }
         },
         {
-          "id": "10-REQ-2.6",
+          "id": "REQ-2.6",
           "pattern": "ubiquitous",
           "system": "internal/specpkg",
-          "action": "return the rule names of a set of validation entries as the distinct Check of each entry (its Category when Check is empty) in order of first appearance"
+          "action": "return the rule names of a set of validation entries as the distinct Check of each entry (its Category when Check is empty) in order of first appearance",
+          "contract": "it returns [C3, C7, schema, cross_spec_actor]; an empty set returns an empty result",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "entries with Check values C3, C7, C3, an entry with empty Check and Category schema, and one with Category cross_spec_actor and Check cross_spec_actor"
+            ],
+            "pseudocode": "assert Rules(entries) == ['C3','C7','schema','cross_spec_actor']"
+          }
         },
         {
-          "id": "10-REQ-2.7",
+          "id": "REQ-2.7",
           "pattern": "event_driven",
           "condition": "specr resolves and renders a package",
           "system": "specr",
           "action": "use the shared resolver, display rule and task summary, producing the same output as before except that each entry of result.tasks and result.task carries ready, and its regenerated schema golden file includes ready",
-          "contract": "cmd/specr tests and the regenerated cmd/specr/testdata/schema.golden.json pass"
+          "contract": "cmd/specr tests and the regenerated cmd/specr/testdata/schema.golden.json pass",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a repo with the 09_agent_mode and 01_test_feature fixtures"
+            ],
+            "pseudocode": "env = run('09'); assert all('ready' in t or state != pending for t in env.result.tasks)"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-3",
+      "id": "REQ-3",
       "title": "The speca command and its interface",
       "rationale": "speca must follow the single-input, single-envelope interface of spec and specr so an agent can call it the same way.",
       "criteria": [
         {
-          "id": "10-REQ-3.1",
+          "id": "REQ-3.1",
           "pattern": "ubiquitous",
           "system": "speca",
           "action": "accept speca [flags] <spec> and speca --list [--all], with the flags --validate, --list, --all, --specs-dir, --dir, --schema and --version given before or after the input, and write exactly one JSON envelope with tool \"speca\" to stdout on every program-driven path",
-          "contract": "stdout decodes with envelope.DecodeSpeca; process exit code equals the envelope's exit_code"
+          "contract": "stdout decodes with envelope.DecodeSpeca; process exit code equals the envelope's exit_code",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a repo with the v2_example fixture under .specs/09_agent_mode"
+            ],
+            "pseudocode": "code = Main(argv, out, err); env = DecodeSpeca(out); assert env.Tool=='speca' && code == env.ExitCode"
+          }
         },
         {
-          "id": "10-REQ-3.2",
+          "id": "REQ-3.2",
           "pattern": "event_driven",
           "condition": "speca is invoked with -h or --help",
           "system": "speca",
           "action": "print help naming the forms and examples, with one line near the top saying that spec writes a package from an idea, specr renders one and speca reports its state, to stderr",
-          "contract": "exit 0; stdout empty"
+          "contract": "exit 0; stdout empty",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "no repository"
+            ],
+            "pseudocode": "code = Main(['--help'], out, err); assert code==0 && out=='' && contains(err, 'speca reports its state')"
+          }
         },
         {
-          "id": "10-REQ-3.3",
+          "id": "REQ-3.3",
           "pattern": "event_driven",
           "condition": "speca is invoked with no positional input and without --list",
           "system": "speca",
           "action": "print the help to stderr and, when stdout is not a terminal, also write a usage envelope to stdout",
-          "contract": "exit 2"
+          "contract": "exit 2",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "stdout is a buffer, not a terminal"
+            ],
+            "pseudocode": "code = Main([], out, err); assert code==2; env = DecodeSpeca(out); assert env.Error.Stage=='usage'"
+          }
         },
         {
-          "id": "10-REQ-3.4",
+          "id": "REQ-3.4",
           "pattern": "event_driven",
           "condition": "speca is invoked with --version",
           "system": "speca",
           "action": "print speca followed by the build identity",
-          "contract": "stdout is \"speca <identity>\"; exit 0"
+          "contract": "stdout is \"speca <identity>\"; exit 0",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a known build identity"
+            ],
+            "pseudocode": "code = Main(['--version'], out, err); assert out.trim()=='speca '+Identity() && code==0"
+          }
         },
         {
-          "id": "10-REQ-3.5",
+          "id": "REQ-3.5",
           "pattern": "event_driven",
           "condition": "speca is invoked with --schema",
           "system": "speca",
           "action": "print a self-description holding tool, description (containing the sibling sentence), input with examples, flags from cli.FlagsDocument, result from cli.EnvelopeDocument without side_effects, input, model and usage, and exit_codes, without reading any package or directory",
-          "contract": "exit 0; stdout equals cmd/speca/testdata/schema.golden.json, which UPDATE_GOLDEN=1 regenerates"
+          "contract": "exit 0; stdout equals cmd/speca/testdata/schema.golden.json, which UPDATE_GOLDEN=1 regenerates",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a nonexistent --dir and input"
+            ],
+            "pseudocode": "code = Main(['--schema','--dir','/nonexistent','anything'], out, err); assert out == read(golden)"
+          }
         },
         {
-          "id": "10-REQ-3.6",
+          "id": "REQ-3.6",
           "pattern": "unwanted",
           "condition": "the invocation has more than one positional input, a positional input with --list, --validate with --list, --all without --list, an input that is -, a URL or multi-line, a --dir that is not a directory, a reference naming no package or two, or an undefined flag",
           "system": "speca",
           "action": "refuse the call before reading any package, print the message to stderr, and write a usage envelope",
-          "contract": "exit 2; error.stage \"usage\", error.category \"usage\"; result absent"
+          "contract": "exit 2; error.stage \"usage\", error.category \"usage\"; result absent",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a repo with .specs/09_agent_mode and another package sharing a number or name prefix for an ambiguous reference"
+            ],
+            "pseudocode": "for argv in cases: code = Main(argv,out,err); env = DecodeSpeca(out); assert code==2 && env.Error.Stage=='usage' && env.Error.Category=='usage' && env.Result==nil && err != ''"
+          }
         },
         {
-          "id": "10-REQ-3.7",
+          "id": "REQ-3.7",
           "pattern": "ubiquitous",
           "system": "speca",
           "action": "write no file, make no model or network call, and read no credential or model environment variable in any form",
-          "contract": "the spec root's file tree and modification times are identical before and after any speca call"
+          "contract": "the spec root's file tree and modification times are identical before and after any speca call",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a repo with several packages including an archive",
+              "credential and model variables set to invalid values, and no network access",
+              "a snapshot of the file tree and modification times"
+            ],
+            "pseudocode": "before = snapshot(root); for form in forms: Main(form); assert snapshot(root) == before"
+          }
         },
         {
-          "id": "10-REQ-3.8",
+          "id": "REQ-3.8",
           "pattern": "ubiquitous",
           "system": "Makefile build target",
-          "action": "install ./cmd/speca with the same $(LDFLAGS) as ./cmd/spec and ./cmd/specr, and name all three commands in the build target's help line"
+          "action": "install ./cmd/speca with the same $(LDFLAGS) as ./cmd/spec and ./cmd/specr, and name all three commands in the build target's help line",
+          "contract": "the output installs ./cmd/spec, ./cmd/specr and ./cmd/speca each with the same LDFLAGS value; the build target's help line names spec, specr and speca",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository Makefile"
+            ],
+            "pseudocode": "out = run('make -n build'); assert count(out, '-ldflags') == 3 and contains(out, './cmd/speca')"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-4",
+      "id": "REQ-4",
       "title": "The report: speca <spec>",
       "rationale": "An agent needs one call that tells it a package's status, validity and which task to work on.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "10-REQ-4.1",
+          "id": "REQ-4.1",
           "pattern": "event_driven",
           "condition": "speca <spec> resolves and loads a package",
-          "system": "speca",
           "action": "return in result spec_dir by the display rule, spec_id, spec_name, title, status, created_at and updated_at, plus intent_hash when set and supersedes and tags when not empty",
-          "contract": "exit 0; error absent"
+          "contract": "exit 0; error absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a repo with the v2_example package under .specs/09_agent_mode with an intent_hash, supersedes and tags set, and a second package with none of them"
+            ],
+            "pseudocode": "env = run('09'); assert env.Result.SpecDir=='.specs/09_agent_mode' && env.Result.Status!=''"
+          }
         },
         {
-          "id": "10-REQ-4.2",
+          "id": "REQ-4.2",
           "pattern": "event_driven",
           "condition": "speca <spec> reports a package",
-          "system": "speca",
           "action": "set valid from (*Spec).Validate and, when it is false, set failing_rules to the rule names of the errors",
-          "contract": "result.valid always present; result.failing_rules present only when valid is false"
+          "contract": "result.valid always present; result.failing_rules present only when valid is false",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a valid v2 package",
+              "a v2 package with a broken cross-file rule such as C3"
+            ],
+            "pseudocode": "assert *env.Result.Valid == false && env.Result.FailingRules == ['C3']; assert no warning code spec_invalid"
+          }
         },
         {
-          "id": "10-REQ-4.3",
+          "id": "REQ-4.3",
           "pattern": "event_driven",
           "condition": "speca <spec> or speca <spec> --validate reports a package",
-          "system": "speca",
-          "action": "set intent_drift to true when the package is active, has an intent_hash, and its PRD body either hashes to a different value with afspec.ComputeIntentHash or has no ## Intent section, and omit intent_drift otherwise"
+          "action": "set intent_drift to true when the package is active, has an intent_hash, and its PRD body either hashes to a different value with afspec.ComputeIntentHash or has no ## Intent section, and omit intent_drift otherwise",
+          "contract": "intent_drift is true for the edited and for the missing-Intent packages in both forms; intent_drift is absent for the matching, draft and no-hash packages",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "an active package with an intent_hash matching its PRD",
+              "an active package whose Intent section was edited",
+              "an active package whose PRD has no ## Intent section",
+              "a draft package with a mismatching hash",
+              "an active package with no intent_hash"
+            ],
+            "pseudocode": "assert env.Result.IntentDrift == true for edited; assert absent otherwise"
+          }
         },
         {
-          "id": "10-REQ-4.4",
+          "id": "REQ-4.4",
           "pattern": "event_driven",
           "condition": "speca <spec> reports a package",
-          "system": "speca",
-          "action": "return tasks as every task in plan order in TaskInfo form (an empty list when the plan has no tasks) and task_counts with pending, in_progress, done, dropped and total, and next_task as the TaskInfo of the task NextTask returns, omitted when there is none"
+          "action": "return tasks as every task in plan order in TaskInfo form (an empty list when the plan has no tasks) and task_counts with pending, in_progress, done, dropped and total, and next_task as the TaskInfo of the task NextTask returns, omitted when there is none",
+          "contract": "tasks lists every task in plan order as TaskInfo with ready; task_counts holds pending, in_progress, done, dropped and total; next_task is the in_progress task's TaskInfo for the first package; the empty plan gives tasks [] and total 0; next_task is absent when all tasks are done",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package with tasks in states done, in_progress, pending ready, pending blocked and dropped",
+              "a package whose plan has no tasks",
+              "a package whose tasks are all done"
+            ],
+            "pseudocode": "assert ids(r.Tasks)==[1..5] && r.TaskCounts=={1,1,1,1,5} && r.NextTask.ID==2"
+          }
         },
         {
-          "id": "10-REQ-4.5",
+          "id": "REQ-4.5",
           "pattern": "event_driven",
           "condition": "speca <spec> reports a package",
-          "system": "speca",
           "action": "return allowed_status as each of draft, active, sealed, superseded and archived, in that order, for which afspec.ValidTransition(status, target) holds",
-          "contract": "an empty list for a terminal status"
+          "contract": "an empty list for a terminal status",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "packages with status draft, active, sealed, superseded and archived"
+            ],
+            "pseudocode": "assert allowed['sealed']==['superseded','archived']; assert allowed['archived']==[]"
+          }
         },
         {
-          "id": "10-REQ-4.6",
+          "id": "REQ-4.6",
           "pattern": "event_driven",
           "condition": "speca <spec> reports a package",
-          "system": "speca",
-          "action": "return depends_on as the spec_ids in the package's own tasks.json dependencies in file order with duplicates removed (an empty list when none), and dependents as the spec_ids of other packages under the spec root whose dependencies name this package, found with afspec.DiscoverSpecs and afspec.BuildDependencyGraph, sorted with duplicates removed"
+          "action": "return depends_on as the spec_ids in the package's own tasks.json dependencies in file order with duplicates removed (an empty list when none), and dependents as the spec_ids of other packages under the spec root whose dependencies name this package, found with afspec.DiscoverSpecs and afspec.BuildDependencyGraph, sorted with duplicates removed",
+          "contract": "03's depends_on is [01, 02] in file order without duplicates; 03's dependents is [04, 05] sorted without duplicates; 01's depends_on is [] and present",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "package 03_c whose tasks.json depends on 01_a twice and 02_b",
+              "packages 04_d and 05_e whose dependencies name 03_c, with 05_e naming it twice",
+              "package 01_a with no dependencies"
+            ],
+            "pseudocode": "assert r.DependsOn==['01','02'] && r.Dependents==['04','05']"
+          }
         },
         {
-          "id": "10-REQ-4.7",
+          "id": "REQ-4.7",
           "pattern": "ubiquitous",
-          "system": "speca",
-          "action": "for any loaded package, task_counts.total equals the length of tasks and equals the sum of pending, in_progress, done and dropped"
+          "action": "for any loaded package, task_counts.total equals the length of tasks and equals the sum of pending, in_progress, done and dropped",
+          "contract": "task_counts.total == len(tasks); total == pending + in_progress + done + dropped",
+          "check": {
+            "kind": "property",
+            "setup": [
+              "generated packages with random plans of tasks in all four states, including empty plans"
+            ],
+            "pseudocode": "for p in gen_pkgs(): r = report(p); assert r.TaskCounts.Total == len(r.Tasks) == sum(r.TaskCounts.Pending, InProgress, Done, Dropped)"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-5",
+      "id": "REQ-5",
       "title": "Report and verdict edge cases",
       "rationale": "A partial answer with a warning is more useful to an agent than a failed call, except when the package itself cannot be read.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "10-REQ-5.1",
+          "id": "REQ-5.1",
           "pattern": "unwanted",
           "condition": "the spec root is missing, not a directory, or unreadable during speca <spec>",
-          "system": "speca",
           "action": "omit dependents and raise a low specs_dir_unreadable warning naming the root, reporting every other field",
-          "contract": "exit 0; warnings contains code specs_dir_unreadable, severity low, stage preflight"
+          "contract": "exit 0; warnings contains code specs_dir_unreadable, severity low, stage preflight",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package reached by an absolute path outside a --specs-dir that is missing",
+              "the same with --specs-dir naming a regular file"
+            ],
+            "pseudocode": "assert env.Result.Dependents == nil && warn.Code=='specs_dir_unreadable' && warn.Severity=='low'"
+          }
         },
         {
-          "id": "10-REQ-5.2",
+          "id": "REQ-5.2",
           "pattern": "unwanted",
           "condition": "afspec.BuildDependencyGraph reports a dangling dependency",
-          "system": "speca",
           "action": "use the partial graph it returned to compute dependents",
-          "contract": "exit 0; dependents lists the packages the partial graph names"
+          "contract": "exit 0; dependents lists the packages the partial graph names",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "package 03_c depends on missing package 99_x, and package 04_d depends on 03_c"
+            ],
+            "pseudocode": "assert r.Dependents == ['04']"
+          }
         },
         {
-          "id": "10-REQ-5.3",
+          "id": "REQ-5.3",
           "pattern": "unwanted",
           "condition": "afspec.LoadSpec refuses the resolved package in the report or the verdict form",
-          "system": "speca",
           "action": "fail the call with a message naming the package directory and the library's reason",
-          "contract": "exit 1; error.stage \"load\", error.category \"input\"; result absent"
+          "contract": "exit 1; error.stage \"load\", error.category \"input\"; result absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package directory with a malformed prd.md frontmatter, reached by path"
+            ],
+            "pseudocode": "assert code==1 && env.Error.Stage=='load' && env.Error.Category=='input' && env.Result==nil && contains(env.Error.Message, dir)"
+          }
         },
         {
-          "id": "10-REQ-5.4",
+          "id": "REQ-5.4",
           "pattern": "unwanted",
           "condition": "the package's PRD schema_version is neither absent nor 2, in the report or the verdict form",
-          "system": "speca",
           "action": "report whatever loaded and raise a high spec_invalid warning saying the package's tests and tasks are not read",
-          "contract": "exit 0; warnings contains code spec_invalid, severity high"
+          "contract": "exit 0; warnings contains code spec_invalid, severity high",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package whose PRD schema_version is 1"
+            ],
+            "pseudocode": "assert warn.Code=='spec_invalid' && warn.Severity=='high' && code==0"
+          }
         },
         {
-          "id": "10-REQ-5.5",
+          "id": "REQ-5.5",
           "pattern": "state_driven",
           "condition": "a format version 2 package is invalid",
-          "system": "speca",
           "action": "raise no spec_invalid warning in the report or the verdict form, leaving the answer to valid, failing_rules and validation",
-          "contract": "warnings contains no spec_invalid entry"
+          "contract": "warnings contains no spec_invalid entry",
+          "check": {
+            "same_as": "REQ-4.2"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-6",
+      "id": "REQ-6",
       "title": "The verdict: speca <spec> --validate",
       "rationale": "Only a call that loads every package under the root can apply the cross-spec rules, so the full verdict is its own form.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "10-REQ-6.1",
+          "id": "REQ-6.1",
           "pattern": "event_driven",
           "condition": "speca <spec> --validate resolves and loads a package",
-          "system": "speca",
           "action": "return the identity fields of the report, intent_drift, valid, validation as an envelope.ValidationReport (valid, error_count, warning_count, and each error and warning with check, artifact, entity and message) and traceability as an envelope.TraceReport (criteria_covered, criteria_uncovered, paths_covered, paths_uncovered, tests_unowned), and omit tasks, task_counts, next_task, allowed_status, depends_on, dependents and failing_rules",
-          "contract": "exit 0"
+          "contract": "exit 0",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a valid package and an invalid package with errors and warnings"
+            ],
+            "pseudocode": "assert *r.Valid == r.Validation.Valid == (r.Validation.ErrorCount == 0); assert r.Tasks == nil && r.FailingRules == nil"
+          }
         },
         {
-          "id": "10-REQ-6.2",
+          "id": "REQ-6.2",
           "pattern": "event_driven",
           "condition": "speca <spec> --validate runs",
-          "system": "speca",
-          "action": "combine (*Spec).Validate with afspec.ValidateCrossSpec run over every package under the spec root that loads, plus the target package when it is not among them, and a dependency graph built from those packages"
+          "action": "combine (*Spec).Validate with afspec.ValidateCrossSpec run over every package under the spec root that loads, plus the target package when it is not among them, and a dependency graph built from those packages",
+          "contract": "A's validation lists its own findings followed by its unknown-dependency error and the cycle error; B lists its actor error and the cycle error but not A's error; C lists the glossary warning for a term in its own glossary; D lists no cycle error; the archived target is included in the cross-spec run and its findings are kept; cross-spec findings come after the package's own findings",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "packages A, B and C where A names an unknown dependency, B has a cross_spec_actor error, C defines a glossary term conflicting with B, and A and B are on a dependency cycle",
+              "a target package D with no edges while the cycle exists",
+              "an archived target package reached by path"
+            ],
+            "pseudocode": "assert checks(A) == own + ['cross_spec_unknown_dependency','cross_spec_cycle']; assert 'cross_spec_cycle' not in checks(D)"
+          }
         },
         {
-          "id": "10-REQ-6.3",
+          "id": "REQ-6.3",
           "pattern": "event_driven",
           "condition": "afspec.ValidateCrossSpec returns findings",
-          "system": "speca",
           "action": "keep only the errors whose entity is the package's spec_id, the errors that name no entity when the package has at least one edge in the graph, and the warnings whose entity is a term defined in the package's own glossary",
-          "contract": "validation lists exactly the kept cross-spec findings after the package's own findings"
+          "contract": "validation lists exactly the kept cross-spec findings after the package's own findings",
+          "check": {
+            "same_as": "REQ-6.2"
+          }
         },
         {
-          "id": "10-REQ-6.4",
+          "id": "REQ-6.4",
           "pattern": "ubiquitous",
-          "system": "speca",
           "action": "set result.valid and validation.valid to true exactly when no error was kept from either source, with error_count and warning_count equal to the numbers of errors and warnings listed",
-          "contract": "result.valid == validation.valid == (validation.error_count == 0)"
+          "contract": "result.valid == validation.valid == (validation.error_count == 0)",
+          "check": {
+            "same_as": "REQ-6.1"
+          }
         },
         {
-          "id": "10-REQ-6.5",
+          "id": "REQ-6.5",
           "pattern": "unwanted",
           "condition": "the spec root cannot be read during --validate",
-          "system": "speca",
           "action": "skip the cross-spec rules, raise a low specs_dir_unreadable warning naming the root, and report the per-package verdict on its own",
-          "contract": "exit 0; warnings contains specs_dir_unreadable with severity low"
+          "contract": "exit 0; warnings contains specs_dir_unreadable with severity low",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package reached by path with --specs-dir pointing to a missing directory"
+            ],
+            "pseudocode": "assert warn.Code=='specs_dir_unreadable' && warn.Severity=='low' && code==0"
+          }
         },
         {
-          "id": "10-REQ-6.6",
+          "id": "REQ-6.6",
           "pattern": "unwanted",
           "condition": "a package under the spec root other than the target fails to load during --validate",
-          "system": "speca",
           "action": "leave that package out of the cross-spec rules and continue",
-          "contract": "exit 0; error absent"
+          "contract": "exit 0; error absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a root with a valid target package and a sibling whose prd.md is malformed"
+            ],
+            "pseudocode": "assert code==0 && env.Error == nil && env.Result.Valid != nil"
+          }
         },
         {
-          "id": "10-REQ-6.7",
+          "id": "REQ-6.7",
           "pattern": "unwanted",
           "condition": "the target package is invalid",
-          "system": "speca",
           "action": "report the verdict as a successful call",
-          "contract": "exit 0; result.valid false; error absent"
+          "contract": "exit 0; result.valid false; error absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a package that fails the cross-file rule C3"
+            ],
+            "pseudocode": "assert code==0 && *r.Valid==false && env.Error==nil"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-7",
+      "id": "REQ-7",
       "title": "The list: speca --list [--all]",
       "rationale": "An agent needs an overview of every package, including those that no longer load.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "10-REQ-7.1",
+          "id": "REQ-7.1",
           "pattern": "event_driven",
           "condition": "speca --list runs on a readable spec root",
-          "system": "speca",
           "action": "list the NN_name directories under the root itself (not through DiscoverSpecs), sort them by numeric prefix compared as a number with ties broken by full name, and load each with LoadSpec",
-          "contract": "exit 0; result.packages in that order (100_x after 99_x)"
+          "contract": "exit 0; result.packages in that order (100_x after 99_x)",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a root with 100_x, 99_y, 02_b, 02_a, and a directory without NN_ prefix"
+            ],
+            "pseudocode": "assert dirs(r.Packages) == ['.specs/02_a','.specs/02_b','.specs/99_y','.specs/100_x']"
+          }
         },
         {
-          "id": "10-REQ-7.2",
+          "id": "REQ-7.2",
           "pattern": "event_driven",
           "condition": "a listed package loads",
-          "system": "speca",
-          "action": "emit an entry with spec_dir, spec_id, spec_name, title, status, valid from Validate, task_counts, and next_task when NextTask returns one"
+          "action": "emit an entry with spec_dir, spec_id, spec_name, title, status, valid from Validate, task_counts, and next_task when NextTask returns one",
+          "contract": "exit 0; loaded entries have spec_dir, spec_id, spec_name, title, status, valid, task_counts and next_task when NextTask returns one; an invalid package has valid false; unloadable entries hold only spec_dir and load_error with the library's message; the call continues past them",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a valid package with tasks, an invalid package, a package with malformed prd.md and a package with no prd.md"
+            ],
+            "pseudocode": "assert pkgs[2].LoadError != '' && pkgs[2].SpecID=='' && pkgs[2].Valid==nil"
+          }
         },
         {
-          "id": "10-REQ-7.3",
+          "id": "REQ-7.3",
           "pattern": "unwanted",
           "condition": "a listed package fails to load, including a missing or malformed prd.md",
-          "system": "speca",
           "action": "emit an entry holding only spec_dir and load_error with the library's message, and continue with the next package",
-          "contract": "exit 0; the entry has no other fields"
+          "contract": "exit 0; the entry has no other fields",
+          "check": {
+            "same_as": "REQ-7.2"
+          }
         },
         {
-          "id": "10-REQ-7.4",
+          "id": "REQ-7.4",
           "pattern": "optional",
           "condition": "--all is given with --list",
-          "system": "speca",
           "action": "append the package directories under <root>/archive/ in the same order, each marked archived: true regardless of its status",
-          "contract": "a superseded package under archive/ appears with archived: true and status: superseded"
+          "contract": "a superseded package under archive/ appears with archived: true and status: superseded",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a root with 01_a and archive/ holding 05_old (superseded) and 03_older",
+              "a second root without archive/"
+            ],
+            "pseudocode": "assert last.Archived && last.Status=='superseded'; assert warnings == []"
+          }
         },
         {
-          "id": "10-REQ-7.5",
+          "id": "REQ-7.5",
           "pattern": "unwanted",
           "condition": "--all is given and <root>/archive/ does not exist",
-          "system": "speca",
           "action": "add no entries and raise no warning",
-          "contract": "exit 0; warnings empty"
+          "contract": "exit 0; warnings empty",
+          "check": {
+            "same_as": "REQ-7.4"
+          }
         },
         {
-          "id": "10-REQ-7.6",
+          "id": "REQ-7.6",
           "pattern": "unwanted",
           "condition": "the spec root does not exist or cannot be read during --list",
-          "system": "speca",
           "action": "fail the call with a message naming the root",
-          "contract": "exit 1; error.stage \"load\", error.category \"input\", error.fix_hint.flag \"--specs-dir\""
+          "contract": "exit 1; error.stage \"load\", error.category \"input\", error.fix_hint.flag \"--specs-dir\"",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a --specs-dir that does not exist",
+              "a --specs-dir that is a regular file"
+            ],
+            "pseudocode": "assert code==1 && env.Error.FixHint.Flag=='--specs-dir' && contains(env.Error.Message, root)"
+          }
         },
         {
-          "id": "10-REQ-7.7",
+          "id": "REQ-7.7",
           "pattern": "event_driven",
           "condition": "speca --list runs on a spec root that exists and holds no package directories",
-          "system": "speca",
           "action": "return an empty packages list",
-          "contract": "exit 0; result.packages is []"
+          "contract": "exit 0; result.packages is []",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "an existing empty .specs directory"
+            ],
+            "pseudocode": "assert code==0 && raw(result.packages)=='[]'"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-8",
+      "id": "REQ-8",
       "title": "summary and next",
       "rationale": "An agent reading only summary and next must learn the answer and the one useful follow-up call that exists today.",
+      "system": "speca",
       "criteria": [
         {
-          "id": "10-REQ-8.1",
+          "id": "REQ-8.1",
           "pattern": "event_driven",
           "condition": "the report form succeeds",
-          "system": "speca",
           "action": "set summary to one sentence naming the package directory, its status, done tasks out of the total, the next task when there is one, and that the package does not validate when valid is false",
-          "contract": "e.g. \"speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4\"; at most 200 characters"
+          "contract": "e.g. \"speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4\"; at most 200 characters",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a result for 16_indexed_code_search active with 3 of 7 tasks done and next task 4",
+              "a result with valid false",
+              "a result with no tasks and no next task",
+              "a very long spec dir name"
+            ],
+            "pseudocode": "assert Result{...}.Summary()=='speca: 16_indexed_code_search active, 3 of 7 tasks done; next task 4'"
+          }
         },
         {
-          "id": "10-REQ-8.2",
+          "id": "REQ-8.2",
           "pattern": "event_driven",
           "condition": "the --validate form succeeds",
-          "system": "speca",
           "action": "set summary to one sentence saying whether the package validates and, when it does not, the error count and the rule names",
-          "contract": "e.g. \"speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)\"; at most 200 characters"
+          "contract": "e.g. \"speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)\"; at most 200 characters",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a valid verdict",
+              "a verdict with 3 errors whose rules are C3, C7, cross_spec_actor"
+            ],
+            "pseudocode": "assert s == 'speca: 16_indexed_code_search does not validate (3 errors: C3, C7, cross_spec_actor)'"
+          }
         },
         {
-          "id": "10-REQ-8.3",
+          "id": "REQ-8.3",
           "pattern": "event_driven",
           "condition": "the --list form succeeds",
-          "system": "speca",
           "action": "set summary to one sentence with the number of packages, the non-zero counts per status in lifecycle order, and the number unreadable when non-zero",
-          "contract": "e.g. \"speca: 9 packages (2 draft, 5 active, 2 sealed)\"; at most 200 characters"
+          "contract": "e.g. \"speca: 9 packages (2 draft, 5 active, 2 sealed)\"; at most 200 characters",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "9 packages: 2 draft, 5 active, 2 sealed",
+              "a list with 1 draft and 2 unreadable packages",
+              "a list of zero packages"
+            ],
+            "pseudocode": "assert Summary()=='speca: 9 packages (2 draft, 5 active, 2 sealed)'"
+          }
         },
         {
-          "id": "10-REQ-8.4",
+          "id": "REQ-8.4",
           "pattern": "event_driven",
           "condition": "the report form has a next_task N",
-          "system": "speca",
           "action": "suggest specr <spec_dir> --task N with a why saying whether the task is in progress or is the next ready task",
-          "contract": "next contains exactly one entry with tool \"specr\""
+          "contract": "next contains exactly one entry with tool \"specr\"",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a result whose next_task 4 is in_progress",
+              "a result whose next_task 5 is a ready pending task"
+            ],
+            "pseudocode": "n = r.Next(); assert len(n)==1 && n[0].Tool=='specr' && n[0].Flags['--task']=='4'"
+          }
         },
         {
-          "id": "10-REQ-8.5",
+          "id": "REQ-8.5",
           "pattern": "event_driven",
           "condition": "the --list form contains an active package with no task in progress and a ready task",
-          "system": "speca",
           "action": "suggest specr <spec_dir> --task N for the first such package in list order, where N is its next task",
-          "contract": "next contains exactly one entry with tool \"specr\""
+          "contract": "next contains exactly one entry with tool \"specr\"",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a list in order: a draft package with a ready task, an active package with a task in progress, an active package with ready task 3, another active package with ready task 1"
+            ],
+            "pseudocode": "n = r.Next(); assert len(n)==1 && n[0].Input=='.specs/03_c' && task=='3'"
+          }
         },
         {
-          "id": "10-REQ-8.6",
+          "id": "REQ-8.6",
           "pattern": "unwanted",
           "condition": "the form is --validate, or the report has no next_task, or the list has no qualifying package",
-          "system": "speca",
           "action": "suggest no call",
-          "contract": "next is absent or empty"
+          "contract": "next is absent or empty",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a validate result",
+              "a report result with no next_task",
+              "a list whose active packages all have a task in progress or no ready task"
+            ],
+            "pseudocode": "for r in cases: assert len(r.Next())==0"
+          }
         }
       ]
     },
     {
-      "id": "10-REQ-9",
+      "id": "REQ-9",
       "title": "Public output types and error envelopes",
       "rationale": "Callers decode every speca form with one standard-library-only type.",
       "criteria": [
         {
-          "id": "10-REQ-9.1",
+          "id": "REQ-9.1",
           "pattern": "ubiquitous",
           "system": "envelope",
-          "action": "provide AdminResult as the single result type of every speca form, with valid as a pointer, the slices that must show as empty in their own form tagged omitzero, every field documented with a description tag, and every field a form does not produce absent from its JSON"
+          "action": "provide AdminResult as the single result type of every speca form, with valid as a pointer, the slices that must show as empty in their own form tagged omitzero, every field documented with a description tag, and every field a form does not produce absent from its JSON",
+          "contract": "every field has a non-empty description tag; valid is a *bool and is absent when nil; a report's empty tasks, allowed_status, depends_on appear as [] while a validate result omits them; a list result's packages appears as [] when empty and is absent in the other forms",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "an AdminResult for each of the three forms"
+            ],
+            "pseudocode": "b = json(AdminResult{}); assert not contains(b,'valid'); for f in fields(AdminResult): assert f.Tag.Get('description') != ''"
+          }
         },
         {
-          "id": "10-REQ-9.2",
+          "id": "REQ-9.2",
           "pattern": "ubiquitous",
           "system": "envelope",
           "action": "provide AdminEnvelope = Envelope[*AdminResult] and DecodeSpeca(data []byte) (AdminEnvelope, error), which decodes the envelope of every speca form",
-          "contract": "DecodeSpeca returns the decoded AdminEnvelope for any speca output, and a non-nil error for input that is not a JSON envelope"
+          "contract": "DecodeSpeca returns the decoded AdminEnvelope for any speca output, and a non-nil error for input that is not a JSON envelope",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "captured outputs of the report, --validate, --list and an error call",
+              "the text \"not json\""
+            ],
+            "pseudocode": "env, err = DecodeSpeca(data); assert err==nil; _, err = DecodeSpeca('not json'); assert err != nil"
+          }
         },
         {
-          "id": "10-REQ-9.3",
+          "id": "REQ-9.3",
           "pattern": "ubiquitous",
           "system": "envelope",
-          "action": "provide TaskCounts and PackageInfo, and add ready to TaskInfo, true for a pending task whose dependencies are all done and absent otherwise"
+          "action": "provide TaskCounts and PackageInfo, and add ready to TaskInfo, true for a pending task whose dependencies are all done and absent otherwise",
+          "contract": "ready is true in JSON for a ready pending task and absent otherwise; TaskCounts has pending, in_progress, done, dropped and total; a failed PackageInfo has only spec_dir and load_error; an archived PackageInfo has archived true",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a TaskInfo with ready true and one with ready false",
+              "a TaskCounts value and PackageInfo values for a loaded and a failed package"
+            ],
+            "pseudocode": "assert json(TaskInfo{Ready:false}) lacks 'ready'; assert json(PackageInfo{SpecDir:'x',LoadError:'e'}) == {spec_dir,load_error}"
+          }
         },
         {
-          "id": "10-REQ-9.4",
+          "id": "REQ-9.4",
           "pattern": "ubiquitous",
           "system": "envelope",
-          "action": "import only the standard library and keep every existing exported name and JSON field with its meaning"
+          "action": "import only the standard library and keep every existing exported name and JSON field with its meaning",
+          "contract": "every import is in the standard library; the existing envelope tests pass unchanged; existing exported names remain",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the envelope package's source and its existing tests"
+            ],
+            "pseudocode": "for imp in importsOf('envelope'): assert isStd(imp)"
+          }
         },
         {
-          "id": "10-REQ-9.5",
+          "id": "REQ-9.5",
           "pattern": "ubiquitous",
           "system": "cmd/speca",
-          "action": "define Result embedding envelope.AdminResult with Summary() and Next() methods, and set retryable and resumable to false on every envelope it writes"
+          "action": "define Result embedding envelope.AdminResult with Summary() and Next() methods, and set retryable and resumable to false on every envelope it writes",
+          "contract": "Result embeds envelope.AdminResult and has Summary() and Next() methods; retryable is false and resumable is false on every envelope",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a success envelope for each form and an error envelope for each stage (usage, load)"
+            ],
+            "pseudocode": "for env in all: assert !env.Retryable && !env.Resumable"
+          }
         },
         {
-          "id": "10-REQ-9.6",
+          "id": "REQ-9.6",
           "pattern": "unwanted",
           "condition": "the --schema document cannot be encoded",
           "system": "speca",
           "action": "fail the call with an error envelope",
-          "contract": "exit 1; error.stage \"schema\", error.category \"internal\""
+          "contract": "exit 1; error.stage \"schema\", error.category \"internal\"",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema encoder is replaced by one that returns an error"
+            ],
+            "pseudocode": "encode = failing; code = Main(['--schema'],out,err); assert code==1 && env.Error.Stage=='schema' && env.Error.Category=='internal'"
+          }
         }
       ]
     }
   ],
   "execution_paths": [
     {
-      "id": "10-PATH-1",
+      "id": "PATH-1",
       "title": "An agent reads a package's state and follows the suggested next call",
       "steps": [
         {
@@ -562,10 +983,32 @@
           "actor": "agent",
           "action": "runs specr <spec_dir> --task N and receives a RenderResult whose task carries ready"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "speca Main",
+          "internal/specpkg resolver",
+          "afspec LoadSpec, Validate, IsReady, NextTask",
+          "DiscoverSpecs and BuildDependencyGraph",
+          "internal/cli envelope",
+          "specr Main",
+          "filesystem"
+        ],
+        "setup": [
+          "a repo with v2_example under .specs/09_agent_mode and valid_spec_with_arch under .specs/01_test_feature",
+          "the spec and specr commands' real Main entry points"
+        ],
+        "end_state": [
+          "speca exits 0 with one envelope holding the package state, tasks with ready, next_task and allowed_status",
+          "next holds one entry specr <spec_dir> --task N",
+          "running that call returns a RenderResult whose task carries ready and N as id",
+          "no file in the repo changed"
+        ],
+        "pseudocode": "e1 = speca('09'); n = e1.Next[0]; e2 = specr(n.Input, n.Flags); assert e2.Result.Task.ID == e1.Result.NextTask.ID"
+      }
     },
     {
-      "id": "10-PATH-2",
+      "id": "PATH-2",
       "title": "An agent asks for the full verdict on a package",
       "steps": [
         {
@@ -584,10 +1027,30 @@
           "actor": "speca",
           "action": "writes one envelope with valid, validation, traceability and a summary naming the failing rules, and exits 0"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "speca Main",
+          "internal/specpkg converters",
+          "afspec LoadSpec, Validate, ValidateCrossSpec, BuildDependencyGraph",
+          "internal/cli envelope",
+          "filesystem"
+        ],
+        "setup": [
+          "a repo with several packages, one depending on another, one with a cross-spec actor error",
+          "real Validate and ValidateCrossSpec"
+        ],
+        "end_state": [
+          "exit 0",
+          "one envelope with valid false, validation listing the package's own and kept cross-spec findings, and traceability",
+          "summary names the error count and rule names",
+          "no tasks field and no file changed"
+        ],
+        "pseudocode": "env = speca(pkg,'--validate'); assert code==0 && !*env.Result.Valid && contains(env.Summary, 'does not validate')"
+      }
     },
     {
-      "id": "10-PATH-3",
+      "id": "PATH-3",
       "title": "An agent lists every package including the archive",
       "steps": [
         {
@@ -606,10 +1069,30 @@
           "actor": "speca",
           "action": "writes one envelope with packages, a per-status summary and the first claimable task as next, and exits 0"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "speca Main",
+          "internal/specpkg listing",
+          "afspec LoadSpec, Validate, NextTask",
+          "internal/cli envelope",
+          "filesystem"
+        ],
+        "setup": [
+          "a repo with live packages in several states, one malformed package, and archive/ holding a superseded package"
+        ],
+        "end_state": [
+          "exit 0",
+          "packages are in numeric order with the archived package at the end marked archived: true",
+          "the malformed package has load_error only",
+          "summary has per-status counts and the unreadable count",
+          "next suggests specr <spec_dir> --task N for the first active package with a ready task and none in progress"
+        ],
+        "pseudocode": "env = speca('--list','--all'); assert env.Result.Packages[-1].Archived; assert env.Next[0].Tool=='specr'"
+      }
     },
     {
-      "id": "10-PATH-4",
+      "id": "PATH-4",
       "title": "A malformed invocation is refused before anything is read",
       "steps": [
         {
@@ -624,7 +1107,25 @@
           "actor": "speca",
           "action": "prints the message to stderr, writes one usage envelope with stage usage and category usage to stdout, and exits 2"
         }
-      ]
+      ],
+      "smoke": {
+        "real_components": [
+          "speca Main",
+          "cli.SplitArgs",
+          "internal/cli envelope",
+          "filesystem"
+        ],
+        "setup": [
+          "a repo with .specs/09_agent_mode and a snapshot of its file tree"
+        ],
+        "end_state": [
+          "exit 2",
+          "stderr holds the message",
+          "stdout holds one usage envelope with stage usage and category usage and no result",
+          "the file tree is unchanged"
+        ],
+        "pseudocode": "code = Main(['--list','09'], out, err); assert code==2 && env.Error.Stage=='usage' && err != ''"
+      }
     }
   ]
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
@@ -25,7 +24,7 @@ var (
 // change.
 func (sc *statusCall) checkReplacing() *cli.ErrorInfo {
 	switch sc.by.Status {
-	case string(afspec.PrdFrontmatterV2JsonStatusDraft), string(afspec.PrdFrontmatterV2JsonStatusActive), string(afspec.PrdFrontmatterV2JsonStatusSealed):
+	case string(afspec.PrdFrontmatterV3JsonStatusDraft), string(afspec.PrdFrontmatterV3JsonStatusActive), string(afspec.PrdFrontmatterV3JsonStatusSealed):
 		return nil
 	}
 	return lifecycleRefusal(fmt.Sprintf("the --by package %s is %s, and a package that is %s cannot replace another one: name a draft, active or sealed package",
@@ -60,7 +59,7 @@ func (sc *statusCall) recordSupersedes() *envelope.Change {
 		return nil
 	}
 	switch {
-	case by.Status == string(afspec.PrdFrontmatterV2JsonStatusSealed):
+	case by.Status == string(afspec.PrdFrontmatterV3JsonStatusSealed):
 		return notRecorded("it is sealed, and a sealed package cannot be saved")
 	case specpkg.IntentDrift(by):
 		return notRecorded("its ## Intent has changed since it was activated, and the library refuses every save of such a package")
@@ -74,7 +73,6 @@ func (sc *statusCall) recordSupersedes() *envelope.Change {
 		return change
 	}
 	by.Supersedes = append(slices.Clone(by.Supersedes), oldID)
-	by.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := saveReplacing(by, sc.byDir); err != nil {
 		return notRecorded("it could not be saved: " + err.Error())
 	}

@@ -10,13 +10,50 @@ import (
 	"testing"
 )
 
-// The checked-in fixtures satisfy schema validation and every rule C1 to C11.
+// The checked-in fixtures satisfy schema validation and every rule C1 to C8.
 func TestValidate_AcceptsEveryValidFixture(t *testing.T) {
 	for _, fixture := range validFixtures {
 		t.Run(filepath.Base(fixture), func(t *testing.T) {
 			result := loadFixture(t, fixture).Validate()
 			if !result.Valid {
 				t.Fatalf("Validate reported %d errors on a valid fixture: %v", len(result.Errors), result.Errors)
+			}
+		})
+	}
+}
+
+// The proofs of format v2 that moved into the schema: a criterion without a
+// check, a path without a smoke check, and a check that mixes its two forms
+// cannot be written at all.
+func TestValidateSchema_RequiresACheckAndASmokeCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Spec)
+		path   string
+	}{
+		{"a criterion with no check", func(s *Spec) { s.Requirements.Requirements[0].Criteria[0].Check = Check{} }, "/requirements/0/criteria/0/check"},
+		{"a check with both forms", func(s *Spec) {
+			c := &s.Requirements.Requirements[0].Criteria[0]
+			c.Check.SameAs = strPtr("REQ-1.2")
+		}, "/requirements/0/criteria/0/check"},
+		{"a path with no real components", func(s *Spec) { s.Requirements.ExecutionPaths[0].Smoke.RealComponents = nil }, "/execution_paths/0/smoke"},
+		{"a path with no end state", func(s *Spec) { s.Requirements.ExecutionPaths[0].Smoke.EndState = []string{} }, "/execution_paths/0/smoke/end_state"},
+		{"a complex_event criterion", func(s *Spec) { s.Requirements.Requirements[0].Criteria[0].Pattern = "complex_event" }, "/requirements/0/criteria/0/pattern"},
+		{"a task with tests", func(s *Spec) { s.Tasks.Tasks[0].Criteria = nil }, "/tasks/0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := mutateFixture(t, tc.mutate).ValidateSchema()
+			if result.Valid {
+				t.Fatal("the schema accepted the package")
+			}
+			found := false
+			for _, e := range result.Errors {
+				if e.Check == "json_schema" && strings.HasPrefix(e.Path, tc.path) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("no json_schema error under %s; got %+v", tc.path, result.Errors)
 			}
 		})
 	}
@@ -37,85 +74,69 @@ func TestValidateCrossFile_ReportsEachBrokenRule(t *testing.T) {
 			mutate: func(s *Spec) { s.Requirements.SpecId = "99" }},
 		{name: "tasks disagrees on spec_name", check: "C1",
 			mutate: func(s *Spec) { s.Tasks.SpecName = "other_name" }},
+		{name: "progress disagrees on spec_id", check: "C1",
+			mutate: func(s *Spec) { s.Progress.SpecId = "99" }},
 		{name: "folder name disagrees with spec_id", check: "C1",
 			mutate: func(s *Spec) { s.Dir = "/tmp/07_test_feature" }},
 
 		{name: "criterion ID in the wrong format", check: "C2",
-			mutate: func(s *Spec) { s.Requirements.Requirements[0].Criteria[0].Id = "01-REQ-1.E1" }},
-		{name: "test ID carries another spec's prefix", check: "C2",
-			mutate: func(s *Spec) { s.TestSpec.Tests[0].Id = "TS-77-1" }},
+			mutate: func(s *Spec) { s.Requirements.Requirements[0].Criteria[0].Id = "REQ-1.E1" }},
+		{name: "requirement ID carries a spec prefix", check: "C2",
+			mutate: func(s *Spec) { s.Requirements.Requirements[0].Id = "01-REQ-1" }},
 		{name: "duplicate task ID", check: "C2",
 			mutate: func(s *Spec) { s.Tasks.Tasks[1].Id = s.Tasks.Tasks[0].Id }},
 		{name: "criterion listed under the wrong requirement", check: "C2",
-			mutate: func(s *Spec) { s.Requirements.Requirements[1].Criteria[0].Id = "01-REQ-1.9" }},
-
-		{name: "verifies names an unknown criterion", check: "C3", message: "01-REQ-9.9",
-			mutate: func(s *Spec) { s.TestSpec.Tests[0].Verifies = []string{"01-REQ-9.9"} }},
-
-		// TS-01-4 is the only test verifying 01-REQ-2.1.
-		{name: "criterion verified by no test", check: "C4", entity: "01-REQ-2.1",
-			mutate: func(s *Spec) { s.TestSpec.Tests[3].Verifies = []string{"01-REQ-1.1"} }},
-
-		// Demote the smoke test; the path is then verified by nothing.
-		{name: "path verified only by a unit test", check: "C5", entity: "01-PATH-1",
+			mutate: func(s *Spec) { s.Requirements.Requirements[1].Criteria[0].Id = "REQ-1.9" }},
+		{name: "duplicate path ID", check: "C2",
 			mutate: func(s *Spec) {
-				s.TestSpec.Tests[4].Kind = TestKindUnit
-				s.TestSpec.Tests[4].RealComponents = nil
-				s.Tasks.Tasks[2].Kind = TaskKindIntegration
+				s.Requirements.ExecutionPaths = append(s.Requirements.ExecutionPaths, s.Requirements.ExecutionPaths[0])
 			}},
-		{name: "smoke test verifying no path", check: "C5",
-			mutate: func(s *Spec) { s.TestSpec.Tests[4].Verifies = []string{"01-REQ-1.1"} }},
 
-		{name: "task names an unknown criterion", check: "C6",
-			mutate: func(s *Spec) { s.Tasks.Tasks[0].Criteria = []string{"01-REQ-8"} }},
-		{name: "task names an unknown test", check: "C6",
-			mutate: func(s *Spec) { s.Tasks.Tasks[0].Tests = []string{"TS-01-99"} }},
-		{name: "depends_on names a missing task", check: "C6",
+		{name: "same_as names an unknown criterion", check: "C3", entity: "REQ-2.1", message: "REQ-9.9",
+			mutate: func(s *Spec) { s.Requirements.Requirements[1].Criteria[0].Check = SameAs("REQ-9.9") }},
+		{name: "same_as names the criterion itself", check: "C3", entity: "REQ-2.1",
+			mutate: func(s *Spec) { s.Requirements.Requirements[1].Criteria[0].Check = SameAs("REQ-2.1") }},
+		{name: "same_as chains through a shared check", check: "C3", entity: "REQ-1.3", message: "itself shared",
+			mutate: func(s *Spec) {
+				s.Requirements.Requirements[0].Criteria[1].Check = SameAs("REQ-1.1")
+				s.Requirements.Requirements[0].Criteria[2].Check = SameAs("REQ-1.2")
+			}},
+
+		{name: "task names an unknown criterion", check: "C4",
+			mutate: func(s *Spec) { s.Tasks.Tasks[0].Criteria = []string{"REQ-8"} }},
+		{name: "depends_on names a missing task", check: "C4",
 			mutate: func(s *Spec) { s.Tasks.Tasks[1].DependsOn = []int{42} }},
-		{name: "depends_on names a later task", check: "C6", message: "lower task IDs",
-			mutate: func(s *Spec) { s.Tasks.Tasks[0].DependsOn = []int{3} }},
+		{name: "depends_on names a later task", check: "C4", message: "lower task IDs",
+			mutate: func(s *Spec) { s.Tasks.Tasks[0].DependsOn = []int{2} }},
 
-		// The defect that motivated format v2: under v1 every edge-case and
-		// property test in every archived spec was owned by no task, and
-		// validation accepted it.
-		{name: "test owned by no task", check: "C7", entity: "TS-01-3",
-			mutate: func(s *Spec) { s.Tasks.Tasks[0].Tests = []string{"TS-01-1", "TS-01-2"} }},
+		{name: "criterion claimed by no task", check: "C5", entity: "REQ-2.1",
+			mutate: func(s *Spec) { s.Tasks.Tasks[1].Criteria = []string{"REQ-1.1"} }},
 
-		{name: "criterion claimed by no task", check: "C8", entity: "01-REQ-2.1",
-			mutate: func(s *Spec) { s.Tasks.Tasks[1].Criteria = []string{"01-REQ-1.1"} }},
-		{name: "criterion claimed only by the integration task", check: "C8",
-			mutate: func(s *Spec) {
-				s.Tasks.Tasks[1].Criteria = []string{"01-REQ-1.1"}
-				s.Tasks.Tasks[2].Criteria = []string{"01-REQ-2.1"}
-			}},
-
-		{name: "no integration task", check: "C9",
-			mutate: func(s *Spec) {
-				s.Tasks.Tasks[2].Kind = TaskKindImplement
-				s.Tasks.Tasks[2].Criteria = []string{"01-REQ-2.1"}
-			}},
-		{name: "integration task is not last", check: "C9",
-			mutate: func(s *Spec) {
-				s.Tasks.Tasks[0].Kind, s.Tasks.Tasks[2].Kind = TaskKindIntegration, TaskKindImplement
-				s.Tasks.Tasks[2].Criteria = []string{"01-REQ-2.1"}
-				s.Tasks.Tasks[0].Tests = append(s.Tasks.Tasks[0].Tests, "TS-01-5")
-			}},
-		{name: "integration task does not own every smoke test", check: "C9", entity: "TS-01-5",
-			mutate: func(s *Spec) {
-				s.Tasks.Tasks[2].Tests = []string{"TS-01-1"}
-				s.Tasks.Tasks[0].Tests = append(s.Tasks.Tasks[0].Tests, "TS-01-5")
-			}},
-		{name: "two integration tasks", check: "C9",
-			mutate: func(s *Spec) { s.Tasks.Tasks[1].Kind = TaskKindIntegration }},
-
-		// 01-REQ-1.2 is the unwanted criterion.
-		{name: "unwanted criterion without a contract", check: "C10", entity: "01-REQ-1.2",
+		// REQ-1.2 is the unwanted criterion.
+		{name: "unwanted criterion without a contract", check: "C6", entity: "REQ-1.2",
 			mutate: func(s *Spec) { s.Requirements.Requirements[0].Criteria[1].Contract = nil }},
 
-		{name: "smoke test without real components", check: "C11",
-			mutate: func(s *Spec) { s.TestSpec.Tests[4].RealComponents = nil }},
-		{name: "unit test with real components", check: "C11",
-			mutate: func(s *Spec) { s.TestSpec.Tests[0].RealComponents = []string{"a database"} }},
+		{name: "a full package without a path", check: "C7", message: "profile: lite",
+			mutate: func(s *Spec) { s.Requirements.ExecutionPaths = nil }},
+		{name: "a lite package with a path", check: "C7", message: "lite",
+			mutate: func(s *Spec) { s.Profile = ProfileLite }},
+		{name: "a lite package with four requirements", check: "C7", message: "at most 3",
+			mutate: func(s *Spec) {
+				s.Profile = ProfileLite
+				s.Requirements.ExecutionPaths = nil
+				for i := 3; i <= 5; i++ {
+					s.Requirements.Requirements = append(s.Requirements.Requirements, Requirement{
+						Id: fmt.Sprintf("REQ-%d", i), Title: "more",
+						Criteria: []Criterion{UbiquitousCriterion(fmt.Sprintf("REQ-%d.1", i), "", "do").WithCheck(CheckKindUnit, nil, "")},
+					})
+					s.Tasks.Tasks[0].Criteria = append(s.Tasks.Tasks[0].Criteria, fmt.Sprintf("REQ-%d", i))
+				}
+			}},
+
+		{name: "a progress entry for a task that is not in the plan", check: "C8", entity: "9",
+			mutate: func(s *Spec) { s.Progress.Tasks = append(s.Progress.Tasks, TaskProgress{Id: 9, State: TaskStateDone}) }},
+		{name: "two progress entries for one task", check: "C8", entity: "1", message: "twice",
+			mutate: func(s *Spec) { s.Progress.Tasks = append(s.Progress.Tasks, TaskProgress{Id: 1, State: TaskStateDone}) }},
 	} {
 		t.Run(tc.check+" "+tc.name, func(t *testing.T) {
 			result := mutateFixture(t, tc.mutate).ValidateCrossFile()
@@ -137,36 +158,61 @@ func TestValidateCrossFile_ReportsEachBrokenRule(t *testing.T) {
 
 func TestValidateCrossFile_LetsARequirementIDClaimAllItsCriteria(t *testing.T) {
 	spec := mutateFixture(t, func(s *Spec) {
-		s.Tasks.Tasks[0].Criteria = []string{"01-REQ-1"}
-		s.Tasks.Tasks[1].Criteria = []string{"01-REQ-2"}
+		s.Tasks.Tasks[0].Criteria = []string{"REQ-1"}
+		s.Tasks.Tasks[1].Criteria = []string{"REQ-2"}
 	})
 	if result := spec.ValidateCrossFile(); !result.Valid {
 		t.Fatalf("claiming a requirement wholesale should cover its criteria; got %v", result.Errors)
 	}
 }
 
-// The ownership errors say how to fix them, not just what is wrong.
-func TestValidateCrossFile_OwnershipErrorsCarryARemedy(t *testing.T) {
+// A shared check may name a criterion with its own check, or a path; the
+// integration task's progress entry is a task of the package.
+func TestValidateCrossFile_AcceptsSharedChecksAndTheIntegrationEntry(t *testing.T) {
+	spec := mutateFixture(t, func(s *Spec) {
+		s.Requirements.Requirements[0].Criteria[1].Check = SameAs("REQ-1.1")
+		s.Requirements.Requirements[1].Criteria[0].Check = SameAs("PATH-1")
+		s.Progress.Tasks = []TaskProgress{{Id: 3, State: TaskStateDone}}
+	})
+	if result := spec.ValidateCrossFile(); !result.Valid {
+		t.Fatalf("got %v", result.Errors)
+	}
+}
+
+// A lite package of three requirements and no path validates, and has no
+// integration task; a package with no progress file validates too.
+func TestValidateCrossFile_AcceptsALitePackageAndAPackageWithoutProgress(t *testing.T) {
+	lite := mutateFixture(t, func(s *Spec) {
+		s.Profile = ProfileLite
+		s.Requirements.ExecutionPaths = nil
+		s.Progress = nil
+	})
+	if result := lite.Validate(); !result.Valid {
+		t.Fatalf("a lite package does not validate: %v", result.Errors)
+	}
+	if _, ok := lite.IntegrationTaskID(); ok {
+		t.Error("a lite package has an integration task")
+	}
+	if len(lite.Plan()) != 2 {
+		t.Errorf("plan = %d tasks; want the two of tasks.json", len(lite.Plan()))
+	}
+}
+
+// The ownership error says how to fix it, not just what is wrong.
+func TestValidateCrossFile_OwnershipErrorCarriesARemedy(t *testing.T) {
 	spec := mutateFixture(t, func(s *Spec) {
 		for i := range s.Tasks.Tasks {
-			s.Tasks.Tasks[i].Tests = nil
-			s.Tasks.Tasks[i].Criteria = nil
+			s.Tasks.Tasks[i].Criteria = []string{"REQ-1.1"}
 		}
 	})
-	var c7, c8 string
+	var c5 string
 	for _, e := range spec.ValidateCrossFile().Errors {
-		switch e.Check {
-		case "C7":
-			c7 = e.Message
-		case "C8":
-			c8 = e.Message
+		if e.Check == "C5" {
+			c5 = e.Message
 		}
 	}
-	if !strings.Contains(c7, "add ") || !strings.Contains(c7, "tests of an existing task") {
-		t.Errorf("C7 = %q", c7)
-	}
-	if !strings.Contains(c8, "implement task that builds it") || !strings.Contains(c8, "not the integration task") {
-		t.Errorf("C8 = %q", c8)
+	if !strings.Contains(c5, "add ") || !strings.Contains(c5, "task that builds it") {
+		t.Errorf("C5 = %q", c5)
 	}
 }
 
@@ -198,14 +244,6 @@ func TestValidateCrossFile_WarnsWithoutFailing(t *testing.T) {
 				s.Tasks.Tasks[0].Steps[i] = "do a thing"
 			}
 		}},
-		// §10.3: the v1 rule made every backticked identifier a validation
-		// error and produced most of the repair churn. In v2 it is at most a
-		// warning, and only from three uses.
-		{"an undefined term used in three criteria", "WidgetRegistry", func(s *Spec) {
-			for i := range s.Requirements.Requirements[0].Criteria {
-				s.Requirements.Requirements[0].Criteria[i].Action += " using the `WidgetRegistry`"
-			}
-		}},
 		{"an error outcome without a contract", "describes an error outcome but has no contract", func(s *Spec) {
 			c := &s.Requirements.Requirements[0].Criteria[2] // the ubiquitous one
 			c.Action = "for any malformed input, reject the request as invalid"
@@ -229,12 +267,16 @@ func TestValidateCrossFile_WarnsWithoutFailing(t *testing.T) {
 	}
 }
 
-func TestValidateCrossFile_GivesNoGlossaryHintBelowThreeUses(t *testing.T) {
+// The glossary is a PRD section now: a backticked term in the criteria is
+// nobody's hint.
+func TestValidateCrossFile_GivesNoGlossaryHint(t *testing.T) {
 	spec := mutateFixture(t, func(s *Spec) {
-		s.Requirements.Requirements[0].Criteria[0].Action += " using the `WidgetRegistry`"
+		for i := range s.Requirements.Requirements[0].Criteria {
+			s.Requirements.Requirements[0].Criteria[i].Action += " using the `WidgetRegistry`"
+		}
 	})
 	if hasWarningContaining(spec.ValidateCrossFile(), "WidgetRegistry") {
-		t.Error("a term used in one criterion produced a glossary hint")
+		t.Error("a backticked term produced a glossary hint")
 	}
 }
 
@@ -270,25 +312,40 @@ func TestValidate_ReportsAScaffoldAsIncompleteNotSchemaInvalid(t *testing.T) {
 	}
 }
 
-// A version 1 spec produces one sentence naming the version and where the
-// conversion is described, not a schema error per artifact plus every shape
+// A spec of another version produces one sentence naming the version and the
+// way to convert it, not a schema error per artifact plus every shape
 // difference underneath.
 func TestValidate_ReportsALegacySpecAsOneVersionMismatch(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	spec.SchemaVersion = 1
+	for _, tc := range []struct {
+		version int
+		want    string
+	}{
+		{2, "speca <package> --migrate"},
+		{1, "no conversion"},
+	} {
+		t.Run(fmt.Sprint(tc.version), func(t *testing.T) {
+			spec := loadFixture(t, fixtureValidSpec)
+			spec.SchemaVersion = tc.version
 
-	result := spec.Validate()
-	if result.Valid {
-		t.Fatal("a version 1 spec validated against the version 2 rules")
+			result := spec.Validate()
+			if result.Valid {
+				t.Fatalf("a version %d spec validated against the version 3 rules", tc.version)
+			}
+			if len(result.Errors) != 1 {
+				t.Fatalf("want a single version error, got %d: %v", len(result.Errors), result.Errors)
+			}
+			if result.Errors[0].Check != "schema_version" {
+				t.Errorf("check = %q; want schema_version", result.Errors[0].Check)
+			}
+			if m := result.Errors[0].Message; !strings.Contains(m, "§13") || !strings.Contains(m, tc.want) {
+				t.Errorf("the message does not say where the conversion is described and how it is made: %q", m)
+			}
+		})
 	}
-	if len(result.Errors) != 1 {
-		t.Fatalf("want a single version error, got %d: %v", len(result.Errors), result.Errors)
-	}
-	if result.Errors[0].Check != "schema_version" {
-		t.Errorf("check = %q; want schema_version", result.Errors[0].Check)
-	}
-	if !strings.Contains(result.Errors[0].Message, "§13") {
-		t.Errorf("the message does not say where the conversion is described: %q", result.Errors[0].Message)
+	// A version 2 package on disk loads, and is reported the same way.
+	result := loadFixture(t, fixtureV2Example).Validate()
+	if result.Valid || len(result.Errors) != 1 || result.Errors[0].Check != "schema_version" {
+		t.Errorf("a v2 package on disk: valid %v, errors %v", result.Valid, result.Errors)
 	}
 }
 
@@ -344,9 +401,9 @@ func TestValidateStructured_ShapesEachKindOfEntry(t *testing.T) {
 		}
 	})
 	t.Run("integrity", func(t *testing.T) {
-		out := mutateFixture(t, func(s *Spec) { s.Tasks.Tasks[0].Tests = []string{"TS-01-1"} }).ValidateStructured()
+		out := mutateFixture(t, func(s *Spec) { s.Tasks.Tasks[1].Criteria = []string{"REQ-1.1"} }).ValidateStructured()
 		if valid, _ := out["valid"].(bool); valid {
-			t.Fatal("valid = true on a spec with orphaned tests")
+			t.Fatal("valid = true on a spec with an unowned criterion")
 		}
 		entries := out["errors"].([]map[string]any)
 		if len(entries) == 0 {
@@ -357,7 +414,7 @@ func TestValidateStructured_ShapesEachKindOfEntry(t *testing.T) {
 		}
 	})
 	t.Run("schema", func(t *testing.T) {
-		out := mutateFixture(t, func(s *Spec) { s.Requirements.Introduction = "" }).ValidateStructured()
+		out := mutateFixture(t, func(s *Spec) { s.Requirements.Requirements[0].Title = "" }).ValidateStructured()
 		entries := out["errors"].([]map[string]any)
 		if len(entries) == 0 {
 			t.Fatal("no error entries")
@@ -369,7 +426,9 @@ func TestValidateStructured_ShapesEachKindOfEntry(t *testing.T) {
 	})
 	t.Run("warning", func(t *testing.T) {
 		out := mutateFixture(t, func(s *Spec) {
-			s.Requirements.Requirements[0].Criteria[0].Action = "return a reasonable result"
+			c := &s.Requirements.Requirements[0].Criteria[2]
+			c.Action = "for any malformed input, reject the request as invalid"
+			c.Contract = nil
 		}).ValidateStructured()
 		warnings, ok := out["warnings"].([]map[string]any)
 		if !ok || len(warnings) == 0 || warnings[0]["category"] != "warning" {
@@ -379,7 +438,7 @@ func TestValidateStructured_ShapesEachKindOfEntry(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ValidateCrossSpec (§10.4)
+// ValidateCrossSpec (§10.3)
 // ---------------------------------------------------------------------------
 
 func TestValidateCrossSpec_AcceptsTwoConsistentSpecs(t *testing.T) {
@@ -441,21 +500,30 @@ func TestValidateCrossSpec_ReportsEachBrokenRule(t *testing.T) {
 	}
 }
 
-func TestValidateCrossSpec_WarnsOnAGlossaryConflict(t *testing.T) {
-	a := loadFixture(t, fixtureValidSpec)
-	b := loadFixture(t, fixtureValidSpec)
-	b.SpecID = "02"
-	b.Requirements.SpecId = "02"
-	b.Requirements.Glossary["spec"] = "Something else entirely."
-	b.Tasks.Dependencies = nil
-
-	result := ValidateCrossSpec([]*Spec{a, b}, &DependencyGraph{})
-	if !result.Valid {
-		t.Fatalf("a glossary conflict must warn, not fail: %v", result.Errors)
-	}
-	if !hasWarningContaining(result, "defined differently") {
-		t.Errorf("no glossary conflict warning: %v", result.Warnings)
-	}
+// The actor rule holds only between two packages that have paths: a lite
+// package, on either side of the edge, is held to nothing.
+func TestValidateCrossSpec_SkipsTheActorRuleForALitePackage(t *testing.T) {
+	graph := &DependencyGraph{Edges: []DependencyEdge{{FromSpec: "02", ToSpec: "01"}}}
+	t.Run("lite downstream", func(t *testing.T) {
+		downstream := loadFixture(t, fixtureDraft)
+		downstream.Profile, downstream.Requirements.ExecutionPaths = ProfileLite, nil
+		if result := ValidateCrossSpec([]*Spec{loadFixture(t, fixtureValidSpec), downstream}, graph); !result.Valid {
+			t.Errorf("got %v", result.Errors)
+		}
+	})
+	t.Run("lite upstream", func(t *testing.T) {
+		upstream := loadFixture(t, fixtureValidSpec)
+		upstream.Profile, upstream.Requirements.ExecutionPaths = ProfileLite, nil
+		downstream := loadFixture(t, fixtureDraft)
+		for i := range downstream.Requirements.ExecutionPaths {
+			for j := range downstream.Requirements.ExecutionPaths[i].Steps {
+				downstream.Requirements.ExecutionPaths[i].Steps[j].Actor = "unrelated actor"
+			}
+		}
+		if result := ValidateCrossSpec([]*Spec{upstream, downstream}, graph); !result.Valid {
+			t.Errorf("got %v", result.Errors)
+		}
+	})
 }
 
 // renderedFindings returns the errors and the warnings the rendered rule
@@ -618,7 +686,7 @@ func inMemory(t *testing.T) *Spec {
 	loaded := loadFixture(t, fixtureValidSpec)
 	s := CreateSpec(loaded.SpecID, loaded.SpecName)
 	s.Title, s.CreatedAt, s.UpdatedAt, s.PRDBody = loaded.Title, loaded.CreatedAt, loaded.UpdatedAt, loaded.PRDBody
-	s.Requirements, s.TestSpec, s.Tasks = loaded.Requirements, loaded.TestSpec, loaded.Tasks
+	s.Requirements, s.Tasks, s.Progress = loaded.Requirements, loaded.Tasks, loaded.Progress
 	return s
 }
 
@@ -652,4 +720,20 @@ func TestValidate_RefusesASteeringVersionOutsideTheVersionForm(t *testing.T) {
 			t.Errorf("an empty steering_version was written back:\n%s", out)
 		}
 	})
+}
+
+// A profile outside full and lite is a schema error on prd.md.
+func TestValidate_RefusesAnUnknownProfile(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	withFrontmatterLine(t, dir, `profile: "medium"`)
+	v := loadFixture(t, dir).Validate()
+	found := false
+	for _, e := range v.Errors {
+		if e.Check == "json_schema" && e.Artifact == "prd.md" && strings.Contains(e.Path, "profile") {
+			found = true
+		}
+	}
+	if !found || v.Valid {
+		t.Errorf("valid %v, errors %+v; want a json_schema error on prd.md naming profile", v.Valid, v.Errors)
+	}
 }

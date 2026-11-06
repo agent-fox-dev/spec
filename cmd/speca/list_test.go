@@ -31,15 +31,16 @@ func TestList_IsInNumberOrder(t *testing.T) {
 	}
 }
 
-// A package that loads has a full entry; one that does not has its directory
-// and the library's reason alone, and the list goes on.
+// A package that loads has a full entry, its integration task counted; one
+// that does not has its directory and the library's reason alone, and the
+// list goes on.
 func TestList_Entries(t *testing.T) {
 	root := t.TempDir()
 	setTasks(t, addPackage(t, root, "01_good", "01", "good"), planTask(1, "done", nil), planTask(2, "pending", []int{1}), planTask(3, "pending", []int{2}))
 	breakValidity(t, addPackage(t, root, "02_invalid", "02", "invalid"))
 	writeFile(t, filepath.Join(addPackage(t, root, "03_malformed", "03", "malformed"), "prd.md"), "---\nspec_id: [unclosed\n---\n")
 	mustMkdir(t, pkgDir(root, "04_noprd"))
-	setTasks(t, addPackage(t, root, "05_after", "05", "after"), planTask(1, "done", nil))
+	setTasks(t, addPackage(t, root, "05_after", "05", "after"), planTask(1, "done", nil), integrationTask("done"))
 
 	env, packages := rawPackages(t, "--dir", root, "--list")
 	if env.ExitCode != cli.ExitOK || len(packages) != 5 {
@@ -48,7 +49,7 @@ func TestList_Entries(t *testing.T) {
 
 	r := env.Result.Packages
 	if g := r[0]; g.SpecID != "01" || g.SpecName != "good" || g.Title == "" || g.Status != "draft" || g.Valid == nil || g.Archived ||
-		g.TaskCounts == nil || *g.TaskCounts != (envelope.TaskCounts{Pending: 2, Done: 1, Total: 3}) ||
+		g.TaskCounts == nil || *g.TaskCounts != (envelope.TaskCounts{Pending: 3, Done: 1, Total: 4}) ||
 		g.NextTask == nil || g.NextTask.ID != 2 || !g.NextTask.Ready {
 		t.Errorf("a package that loads: %+v", g)
 	}

@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "13",
   "spec_name": "state_command_cross_links",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -25,17 +25,11 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Add cli.SiblingCommands and name the siblings in spec and specr help, doc comments and specr --schema",
       "criteria": [
-        "13-REQ-1",
-        "13-REQ-2.3",
-        "13-REQ-3.1"
-      ],
-      "tests": [
-        "TS-13-1",
-        "TS-13-5",
-        "TS-13-8"
+        "REQ-1",
+        "REQ-2.3",
+        "REQ-3.1"
       ],
       "steps": [
         "Write TS-13-1, TS-13-5 and TS-13-8 and confirm they fail",
@@ -58,29 +52,18 @@
       ],
       "done_when": [
         "go test ./cmd/spec ./cmd/specr ./internal/cli -count=1 passes"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Name the siblings in speca help, doc comment and --schema; verify all three commands and both goldens",
       "criteria": [
-        "13-REQ-2.1",
-        "13-REQ-2.2",
-        "13-REQ-2.4",
-        "13-REQ-2.5",
-        "13-REQ-3.2",
-        "13-REQ-3.3"
-      ],
-      "tests": [
-        "TS-13-2",
-        "TS-13-3",
-        "TS-13-4",
-        "TS-13-6",
-        "TS-13-7",
-        "TS-13-9",
-        "TS-13-10"
+        "REQ-2.1",
+        "REQ-2.2",
+        "REQ-2.4",
+        "REQ-2.5",
+        "REQ-3.2",
+        "REQ-3.3"
       ],
       "steps": [
         "Write TS-13-2, TS-13-3, TS-13-4, TS-13-6, TS-13-7, TS-13-9 and TS-13-10 and confirm they fail",
@@ -106,24 +89,16 @@
       ],
       "done_when": [
         "go test ./cmd/... ./internal/cli -count=1 passes without UPDATE_GOLDEN"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Add specpkg.IntentDrift and Writable and make speca use them",
       "criteria": [
-        "13-REQ-4.1",
-        "13-REQ-4.2",
-        "13-REQ-4.3",
-        "13-REQ-4.4"
-      ],
-      "tests": [
-        "TS-13-11",
-        "TS-13-12",
-        "TS-13-13",
-        "TS-13-14"
+        "REQ-4.1",
+        "REQ-4.2",
+        "REQ-4.3",
+        "REQ-4.4"
       ],
       "steps": [
         "Write TS-13-11, TS-13-12 (property over statuses x hash set/unset x body match/mismatch/no ## Intent), TS-13-13 and TS-13-14 and confirm they fail",
@@ -146,26 +121,14 @@
       ],
       "done_when": [
         "go test ./internal/specpkg ./cmd/speca -count=1 passes"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Keep writability in specr's Result and add the speca claim to next after a whole render",
       "criteria": [
-        "13-REQ-4.5",
-        "13-REQ-5"
-      ],
-      "tests": [
-        "TS-13-15",
-        "TS-13-16",
-        "TS-13-17",
-        "TS-13-18",
-        "TS-13-19",
-        "TS-13-20",
-        "TS-13-21",
-        "TS-13-22"
+        "REQ-4.5",
+        "REQ-5"
       ],
       "steps": [
         "Write TS-13-15 to TS-13-22 and confirm they fail; TS-13-22 is a property test comparing specr's whole-render claim with speca's report claim over generated package states",
@@ -185,27 +148,14 @@
       ],
       "done_when": [
         "go test ./cmd/specr -count=1 passes"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 5,
-      "kind": "implement",
       "title": "Add the claim and done suggestions after a task render and verify next's shape",
       "criteria": [
-        "13-REQ-6",
-        "13-REQ-7"
-      ],
-      "tests": [
-        "TS-13-23",
-        "TS-13-24",
-        "TS-13-25",
-        "TS-13-26",
-        "TS-13-27",
-        "TS-13-28",
-        "TS-13-29",
-        "TS-13-30",
-        "TS-13-31"
+        "REQ-6",
+        "REQ-7"
       ],
       "steps": [
         "Write TS-13-23 to TS-13-31 and confirm those not already satisfied fail",
@@ -225,44 +175,7 @@
       ],
       "done_when": [
         "go test ./cmd/specr -count=1 passes"
-      ],
-      "state": "done"
-    },
-    {
-      "id": 6,
-      "kind": "integration",
-      "title": "Verify the claim, done and help paths end to end and update the docs",
-      "tests": [
-        "TS-13-32",
-        "TS-13-33",
-        "TS-13-34"
-      ],
-      "steps": [
-        "Write TS-13-32, TS-13-33 and TS-13-34 against real specr and speca Main entry points and a temp repository on disk and confirm they pass",
-        "Trace 13-PATH-1, 13-PATH-2 and 13-PATH-3 through the real code: specr loads the package, calls specpkg.Writable, emits next from Result.Next(); speca consumes the same flags and accepts the call; confirm each step calls the next and no stub remains",
-        "Confirm specpkg.Writable and IntentDrift results are consumed by both cmd/specr and cmd/speca in production code, not only tests, and cli.SiblingCommands is referenced by all three commands",
-        "Search every touched file for panic(\"not implemented\"), TODO, and bare return nil on non-trivial paths and remove any",
-        "Update docs: docs/specr.md (introduction names spec and speca, `artifacts` and `next` section describes the speca entries, JSON example's next matches what its render produces, 'Calling it from an agent' uses the af-impl block from the PRD); docs/speca.md (same af-impl block, says specr's next suggests the claim and done calls); docs/cli.md companion paragraph naming specr and speca with both links; README.md sentence on specr's next; docs/architecture.md sentence on cli.SiblingCommands and internal/specpkg writability; docs/api.md unchanged",
-        "Run make doc and commit docs/generated/, then make check"
-      ],
-      "touches": [
-        "cmd/specr/smoke_test.go",
-        "docs/specr.md",
-        "docs/speca.md",
-        "docs/cli.md",
-        "README.md",
-        "docs/architecture.md",
-        "docs/generated/"
-      ],
-      "depends_on": [
-        2,
-        5
-      ],
-      "done_when": [
-        "make test and make lint pass",
-        "make doc leaves docs/generated up to date"
-      ],
-      "state": "done"
+      ]
     }
   ]
 }

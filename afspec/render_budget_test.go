@@ -11,59 +11,59 @@ func TestRenderCombined_DropsTheArchitectureFirst(t *testing.T) {
 	if strings.Contains(out, "# Architecture") {
 		t.Error("the architecture section survived a budget it could not fit in")
 	}
-	if !strings.Contains(out, "# Requirements") || !strings.Contains(out, "**Pseudocode:**") {
+	if !strings.Contains(out, "# Requirements") || !strings.Contains(out, "- setup:") {
 		t.Error("the first level dropped more than the architecture section")
 	}
 }
 
-// Past the architecture, the budget slims the tests; a spec without an
+// Past the architecture, the budget slims the checks; a spec without an
 // architecture goes straight to that.
-func TestRenderCombined_SlimsTheTestsWhenTheBudgetIsTight(t *testing.T) {
+func TestRenderCombined_SlimsTheChecksWhenTheBudgetIsTight(t *testing.T) {
 	for _, fixture := range []string{fixtureWithArch, fixtureValidSpec} {
 		t.Run(fixture, func(t *testing.T) {
 			spec := loadFixture(t, fixture)
 			out := spec.RenderCombined(WithMaxTokens(1))
-			if strings.Contains(out, "# Architecture") || strings.Contains(out, "**Pseudocode:**") {
-				t.Error("the tightest budget kept the architecture or the pseudocode")
+			if strings.Contains(out, "# Architecture") || strings.Contains(out, "- setup:") || strings.Contains(out, "**Setup:**") {
+				t.Error("the tightest budget kept the architecture or the setup")
 			}
-			for _, section := range []string{"# PRD", "# Requirements", "# Test Specification", "# Tasks"} {
+			for _, section := range []string{"# PRD", "# Requirements", "# Tasks"} {
 				if !strings.Contains(out, section) {
 					t.Errorf("section %q is missing", section)
 				}
 			}
-			for _, test := range spec.TestSpec.Tests {
-				if !strings.Contains(out, test.Id) {
-					t.Errorf("test %s is missing from the slim render", test.Id)
+			for _, r := range spec.Requirements.Requirements {
+				for _, c := range r.Criteria {
+					if !strings.Contains(out, "["+c.Id+"]") || !strings.Contains(out, "Check: "+c.Check.KindText()) {
+						t.Errorf("criterion %s or its check kind is missing from the slim render", c.Id)
+					}
 				}
 			}
 		})
 	}
 }
 
-// Slimming may drop context but never what a test asserts or what it verifies.
-func TestRenderTestSpecSlim_KeepsVerifiesAndThen(t *testing.T) {
+// Slimming may drop context but never what a check is or what a smoke check
+// asserts.
+func TestRenderRequirementsSlim_KeepsTheKindAndTheEndState(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
-	slim := renderTestSpecSlim(spec.TestSpec)
+	slim := renderRequirements(spec.Requirements, true)
 
-	for _, test := range spec.TestSpec.Tests {
-		if !strings.Contains(slim, test.Id) {
-			t.Errorf("test %s is missing from the slim render", test.Id)
-		}
-		for _, ref := range test.Verifies {
-			if !strings.Contains(slim, ref) {
-				t.Errorf("test %s: verifies %s is missing from the slim render", test.Id, ref)
+	for _, p := range spec.Requirements.ExecutionPaths {
+		for _, line := range p.Smoke.EndState {
+			if !strings.Contains(slim, line) {
+				t.Errorf("path %s: an end-state line is missing from the slim render", p.Id)
 			}
 		}
-		for _, then := range test.Then {
-			if !strings.Contains(slim, then) {
-				t.Errorf("test %s: a Then clause is missing from the slim render", test.Id)
+		for _, c := range p.Smoke.RealComponents {
+			if !strings.Contains(slim, c) {
+				t.Errorf("path %s: a real component is missing from the slim render", p.Id)
 			}
 		}
 	}
-	if strings.Contains(slim, "**Pseudocode:**") {
+	if strings.Contains(slim, "```") {
 		t.Error("the slim render kept the pseudocode it is meant to drop")
 	}
-	if EstimateTokens(slim) >= EstimateTokens(spec.TestSpec.Render()) {
+	if EstimateTokens(slim) >= EstimateTokens(spec.Requirements.Render()) {
 		t.Error("the slim render is not smaller than the full one")
 	}
 }
@@ -75,13 +75,13 @@ func TestRenderIndividual_AppliesTheBudgetInLevels(t *testing.T) {
 	if _, present := out["architecture"]; present {
 		t.Error("architecture was not dropped at the first level")
 	}
-	if !strings.Contains(out["test_spec"], "**Pseudocode:**") {
-		t.Error("the first level slimmed the tests as well")
+	if !strings.Contains(out["requirements"], "- setup:") {
+		t.Error("the first level slimmed the checks as well")
 	}
 
 	out = spec.RenderIndividual(WithMaxTokens(1))
-	if strings.Contains(out["test_spec"], "**Pseudocode:**") {
-		t.Error("the test spec was not slimmed at the second level")
+	if strings.Contains(out["requirements"], "- setup:") {
+		t.Error("the checks were not slimmed at the second level")
 	}
 }
 
@@ -96,13 +96,13 @@ func TestRenderIndividualScoped_AppliesTheBudgetInLevels(t *testing.T) {
 	if _, present := out["architecture"]; present {
 		t.Error("architecture was not dropped at the first level")
 	}
-	if out["test_spec"] != full["test_spec"] {
-		t.Error("the first level changed the tests as well")
+	if out["requirements"] != full["requirements"] {
+		t.Error("the first level changed the requirements as well")
 	}
 
 	out = spec.RenderIndividualScoped(1, WithMaxTokens(1))
-	if strings.Contains(out["test_spec"], "**Pseudocode:**") || !strings.Contains(out["test_spec"], "## Other tests") {
-		t.Errorf("the second level did not slim the task's tests and keep the others listed:\n%s", out["test_spec"])
+	if strings.Contains(out["requirements"], "- setup:") || !strings.Contains(out["requirements"], "**REQ-2:** Cross-file validation (other task)") {
+		t.Errorf("the second level did not slim the task's checks and keep the others listed:\n%s", out["requirements"])
 	}
 }
 

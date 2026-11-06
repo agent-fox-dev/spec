@@ -35,8 +35,8 @@ const ToolSubmitArchitecture = "submit_architecture"
 // It is the default: --max-tokens replaces it for every phase of a run.
 const maxTokens = 65536
 
-// author is the model-driven half of this package: the four steps where
-// judgment is required and nothing else.
+// author is the model-driven half of this package: the steps where judgment
+// is required and nothing else.
 //
 // Keeping it an interface is what makes the split checkable — a test swaps in
 // a scripted provider and the pipeline does not notice.
@@ -128,13 +128,16 @@ type revisionRequest struct {
 }
 
 type artifactRequest struct {
-	Step      afspec.GenerationStep
-	SpecID    string
-	SpecName  string
-	Root      string
-	PRD       string
-	Profile   project.Profile
-	Landscape []afspec.SpecMeta
+	Step     afspec.GenerationStep
+	SpecID   string
+	SpecName string
+	// SpecProfile is the package's profile, afspec.ProfileLite or "" for
+	// full, which the requirements step is told and held to.
+	SpecProfile string
+	Root        string
+	PRD         string
+	Profile     project.Profile
+	Landscape   []afspec.SpecMeta
 	// SpecRoot is the directory the specs live in, relative to Root.
 	SpecRoot string
 	// Steering is the body of the project's steering.md, or "", and
@@ -245,7 +248,7 @@ func (a *agentAuthor) ReviewPlan(ctx context.Context, req planReviewRequest) ([]
 }
 
 // RevisePlan runs one plan revision phase: another fresh conversation, which
-// answers every finding of the round and submits the three revised plan
+// answers every finding of the round and submits the two revised plan
 // artifacts.
 func (a *agentAuthor) RevisePlan(ctx context.Context, req planRevisionRequest) (afspec.PartialSpec, []Disposition, agentrun.Result, error) {
 	var sink planRevisionSink
@@ -314,7 +317,7 @@ func (a *agentAuthor) GenerateArtifact(ctx context.Context, req artifactRequest)
 		System: generationSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap),
 		User: generationUserPrompt(req.Step, req.SpecID, req.SpecName, req.Root, req.PRD,
 			codebaseNotesBlock(req.CodebaseNotes), landscapeBlock(req.Landscape, req.SpecRoot)+actorsBlock(req.Actors),
-			priorArtifactsBlock(*req.Partial, req.Step), relevantFilesBlock(req.RelevantFiles)),
+			priorArtifactsBlock(*req.Partial, req.Step), relevantFilesBlock(req.RelevantFiles)+profileBlock(req.Step, req.SpecProfile)),
 		RepoMap:    req.RepoMap,
 		Terminator: name,
 		Custom: []core.Tool{

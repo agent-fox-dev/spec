@@ -15,11 +15,11 @@ import (
 // lifecycle is the five lifecycle statuses in the order of a package's life:
 // the order the list's summary counts them in, and allowed_status names them.
 var lifecycle = []string{
-	string(afspec.PrdFrontmatterV2JsonStatusDraft),
-	string(afspec.PrdFrontmatterV2JsonStatusActive),
-	string(afspec.PrdFrontmatterV2JsonStatusSealed),
-	string(afspec.PrdFrontmatterV2JsonStatusSuperseded),
-	string(afspec.PrdFrontmatterV2JsonStatusArchived),
+	string(afspec.PrdFrontmatterV3JsonStatusDraft),
+	string(afspec.PrdFrontmatterV3JsonStatusActive),
+	string(afspec.PrdFrontmatterV3JsonStatusSealed),
+	string(afspec.PrdFrontmatterV3JsonStatusSuperseded),
+	string(afspec.PrdFrontmatterV3JsonStatusArchived),
 }
 
 // Result is speca's result. Its fields are the envelope package's
@@ -36,6 +36,9 @@ type Result struct {
 	// renderForm marks the result of the render form, whose summary names what
 	// it did to spec.md and which suggests nothing.
 	renderForm bool
+	// migrateForm marks the result of the migrate form, whose summary counts
+	// what it did to the packages and which suggests nothing.
+	migrateForm bool
 	// callNext, where nextSet, is the next of a dry run: the one call that makes
 	// the changes, or none. It replaces what the report would suggest, since the
 	// result is that of a package that has not changed.
@@ -75,6 +78,8 @@ func (r *Result) Summary() string {
 		return r.taskSummary()
 	case r.renderForm:
 		return r.renderSummary()
+	case r.migrateForm:
+		return r.migrateSummary()
 	case r.Packages != nil:
 		return r.listSummary()
 	case r.Validation != nil:
@@ -167,6 +172,23 @@ func (r *Result) renderSummary() string {
 	return s
 }
 
+// migrateSummary counts what the migrate form did to the packages: how many
+// were written as version 3, how many were version 3 already and how many
+// failed, which add up to the entries; and, under --dry-run, that nothing was
+// written.
+func (r *Result) migrateSummary() string {
+	counts := map[string]int{}
+	for _, e := range r.Migrated {
+		counts[e.Migrated]++
+	}
+	s := fmt.Sprintf("%s: %d %s, %d %s, %d %s", tool, counts[migratedWritten], migratedWritten,
+		counts[migratedUnchanged], migratedUnchanged, counts[migratedFailed], migratedFailed)
+	if r.DryRun {
+		s += " (dry run, nothing written)"
+	}
+	return s
+}
+
 // refused is the result of a call that was refused or failed after the package
 // was read: the report of the package as it is, so that the caller sees its
 // tasks without another call. It has no sentence of its own, so the envelope's
@@ -214,7 +236,7 @@ func (r *Result) Next() []cli.Next {
 	switch {
 	case r.nextSet:
 		return r.callNext
-	case r.renderForm:
+	case r.renderForm, r.migrateForm:
 		return nil
 	case r.Packages != nil:
 		return r.listNext()
@@ -265,7 +287,7 @@ func claimOf(dir string, t envelope.TaskInfo) cli.Next {
 // one.
 func (r *Result) listNext() []cli.Next {
 	for _, p := range r.Packages {
-		if p.Archived || p.LoadError != "" || p.Status != string(afspec.PrdFrontmatterV2JsonStatusActive) ||
+		if p.Archived || p.LoadError != "" || p.Status != string(afspec.PrdFrontmatterV3JsonStatusActive) ||
 			p.TaskCounts == nil || p.TaskCounts.InProgress > 0 || p.NextTask == nil || !p.NextTask.Ready || !r.writableDirs[p.SpecDir] {
 			continue
 		}

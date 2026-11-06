@@ -25,6 +25,8 @@ cannot drift.
 ## Dependencies
 
 ## Verified External API
+
+## Glossary
 ```
 
 Those are the sections `spec`'s PRD phase writes, in its order. What each
@@ -58,7 +60,7 @@ holds:
   - every way it can fail, each with what the caller observes (an exit code,
     an error and its wording or category, what is left on disk, that nothing
     was written). This is the `contract` of an `unwanted` criterion, which
-    the format requires and which the tests assert. "It reports an error" is
+    the format requires and which its check asserts. "It reports an error" is
     not one;
   - the boundaries, with numbers: empty input, the largest input, a limit
     and what happens one past it;
@@ -69,7 +71,7 @@ holds:
   its last observable effect, through the real components it passes on the
   way ("the operator runs `speca 16 --task 4 --state done`; the package is
   written through the library; the result lists the change"). `spec` turns
-  them into execution paths, and each path into a smoke test that runs those
+  them into execution paths, each with a smoke check that runs those
   components unmocked. Mark a constraint as one: "Constraint: Linux and
   macOS; Windows is best effort."
 - **`## Design Decisions`.** Every question the input left open, numbered:
@@ -86,6 +88,10 @@ holds:
   exist and does not is marked **NOT FOUND**, with what was assumed. Omit
   the section when the work uses only the standard library and the project's
   own code.
+- **`## Glossary`.** Project vocabulary a newcomer would not know, one
+  `- **term**: definition` line per term. It is the package's only glossary:
+  the format keeps none in `requirements.json`. A term an existing package's
+  PRD defines keeps that sense. Omit the section when there is no such term.
 
 No other sections. In particular there is no `## Open Questions`: `spec`
 would answer each one itself, unattended, and report the ones it is least
@@ -109,3 +115,11 @@ one foundational. Count the areas of `## Requirements`: past what one
 package holds, tell the person a split is coming, and make each area one
 that can be built and tested on its own, the foundational one first. A
 PRD of several scopes is written whole; `spec` does the split.
+
+At the other end, work of at most three requirements with no flow that
+crosses components end to end — a flag on one command, a message, a field —
+fits a `lite` package: no execution path, no smoke check and no integration
+task. The PRD's author decides it: say so in `## Design Decisions`
+("Profile: lite, because …"), and `spec`'s PRD phase and `{{invoke af-spec}}`
+keep the choice instead of making it again. When in doubt, say nothing: the
+package is `full`.

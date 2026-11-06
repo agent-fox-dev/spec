@@ -1,8 +1,8 @@
 {
-  "$schema": "https://agent-fox.dev/schemas/tasks.v2.json",
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
   "spec_id": "17",
   "spec_name": "review_triage_convergence",
-  "schema_version": 2,
+  "schema_version": 3,
   "test_commands": {
     "all_tests": "make test",
     "linter": "make lint",
@@ -21,30 +21,20 @@
   "tasks": [
     {
       "id": 1,
-      "kind": "implement",
       "title": "Answer every finding one of four ways, carry a rubric, and record the answer",
       "criteria": [
-        "17-REQ-1.1",
-        "17-REQ-1.2",
-        "17-REQ-1.3",
-        "17-REQ-1.4",
-        "17-REQ-1.5",
-        "17-REQ-1.6",
-        "17-REQ-5.2",
-        "17-REQ-5.3",
-        "17-REQ-5.4",
-        "17-REQ-5.5",
-        "17-REQ-5.6",
-        "17-REQ-6.5"
-      ],
-      "tests": [
-        "TS-17-1",
-        "TS-17-2",
-        "TS-17-3",
-        "TS-17-4",
-        "TS-17-5",
-        "TS-17-15",
-        "TS-17-16"
+        "REQ-1.1",
+        "REQ-1.2",
+        "REQ-1.3",
+        "REQ-1.4",
+        "REQ-1.5",
+        "REQ-1.6",
+        "REQ-5.2",
+        "REQ-5.3",
+        "REQ-5.4",
+        "REQ-5.5",
+        "REQ-5.6",
+        "REQ-6.5"
       ],
       "steps": [
         "Add the disposition, counter-evidence, decline and record behaviours to specgen/revision_tool_test.go, specgen/rounds_test.go and envelope/spec_result_test.go, and confirm they fail",
@@ -72,22 +62,15 @@
         "docs/cli.md",
         "docs/api.md",
         "docs/generated/"
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 2,
-      "kind": "implement",
       "title": "Escalate with a provisional decision and hand the question to the caller",
       "criteria": [
-        "17-REQ-2.1",
-        "17-REQ-2.2",
-        "17-REQ-2.3"
-      ],
-      "tests": [
-        "TS-17-6",
-        "TS-17-7",
-        "TS-17-17"
+        "REQ-2.1",
+        "REQ-2.2",
+        "REQ-2.3"
       ],
       "steps": [
         "Add the escalation behaviours to specgen/revision_tool_test.go and the open-question behaviours to specgen/pipeline_test.go, and confirm they fail",
@@ -108,22 +91,16 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 3,
-      "kind": "implement",
       "title": "Hold a later round to what the earlier rounds settled",
       "criteria": [
-        "17-REQ-3.1",
-        "17-REQ-3.2",
-        "17-REQ-3.3",
-        "17-REQ-3.4"
-      ],
-      "tests": [
-        "TS-17-8",
-        "TS-17-11"
+        "REQ-3.1",
+        "REQ-3.2",
+        "REQ-3.3",
+        "REQ-3.4"
       ],
       "steps": [
         "Add the repeat and reopen behaviours to specgen/review_tool_test.go and the earlier-rounds block behaviours to specgen/prompts_test.go, and confirm they fail",
@@ -143,28 +120,21 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 4,
-      "kind": "implement",
       "title": "Converge on two consecutive clean rounds",
       "criteria": [
-        "17-REQ-1.7",
-        "17-REQ-4.1",
-        "17-REQ-4.2",
-        "17-REQ-4.3",
-        "17-REQ-4.4",
-        "17-REQ-4.5",
-        "17-REQ-4.6",
-        "17-REQ-4.7",
-        "17-REQ-5.1"
-      ],
-      "tests": [
-        "TS-17-12",
-        "TS-17-13",
-        "TS-17-14"
+        "REQ-1.7",
+        "REQ-4.1",
+        "REQ-4.2",
+        "REQ-4.3",
+        "REQ-4.4",
+        "REQ-4.5",
+        "REQ-4.6",
+        "REQ-4.7",
+        "REQ-5.1"
       ],
       "steps": [
         "Add the clean-round, convergence and incomplete behaviours to specgen/rounds_test.go, and confirm they fail",
@@ -182,25 +152,17 @@
       ],
       "depends_on": [
         1
-      ],
-      "state": "done"
+      ]
     },
     {
       "id": 5,
-      "kind": "implement",
       "title": "Check the PRD against the steering directives, and report the review in the summary",
       "criteria": [
-        "17-REQ-5.7",
-        "17-REQ-6.1",
-        "17-REQ-6.2",
-        "17-REQ-6.3",
-        "17-REQ-6.4"
-      ],
-      "tests": [
-        "TS-17-9",
-        "TS-17-10",
-        "TS-17-18",
-        "TS-17-19"
+        "REQ-5.7",
+        "REQ-6.1",
+        "REQ-6.2",
+        "REQ-6.3",
+        "REQ-6.4"
       ],
       "steps": [
         "Add the steering-rubric behaviours to specgen/review_tool_test.go and the alignment and summary cases to specgen/pipeline_test.go, and confirm they fail",
@@ -224,48 +186,7 @@
       "depends_on": [
         1,
         4
-      ],
-      "state": "done"
-    },
-    {
-      "id": 6,
-      "kind": "integration",
-      "title": "Verify the three paths end to end and record the break in an ADR",
-      "tests": [
-        "TS-17-20",
-        "TS-17-21",
-        "TS-17-22"
-      ],
-      "steps": [
-        "Add the three end-to-end cases to cmd/spec/main_test.go, beside TestAdversarial_GeneratesThePackageFromTheRevisedPRD, each against a real temporary repository and the scripted model, and confirm they pass",
-        "Trace 17-PATH-1 from the scripted reviews through the round loop's clean flags to the converged stop reason and the summary clause, and confirm no revision phase is billed for a round with no findings",
-        "Trace 17-PATH-2 from the escalated answer through the revision tool's decision check and the round loop's collection to the package's open questions and the Provisional entry in the written prd.md, and confirm each step calls the next with no stub left",
-        "Trace 17-PATH-3 from the quoted directive through the refused decline to the recorded escalation, and confirm the refusal reached the model as a tool error rather than failing the run",
-        "For every criterion with a contract, confirm a caller in production code consumes the producer's result and not only a test: the round loop consumes the review tool's findings and the revision tool's answers, buildReview consumes the rounds, the pipeline consumes the escalations, and the summary clause consumes the record",
-        "Grep envelope/, specgen/ and cmd/spec/ for TODO and panic(\"not implemented\") and remove any that remain",
-        "Confirm no file of the repository still names accepted, rejected, accepted_count, rejected_count, no_findings or no_serious_findings as a review value: grep the source, the templates, docs/ and specification/",
-        "Write the ADR as docs/adr/NN-triage-every-review-finding-four-ways.md, NN being the next free number by the rule in CLAUDE.md, recording the four dispositions and what each requires, the machine-checkable counter-evidence and decision rules, two-clean-round convergence with the default of one round, the steering rubric that cannot be declined, and that this is a breaking change to envelope.Review which replaces the vocabulary ADR 09 records",
-        "Describe the triage and convergence rules in the round loop in docs/architecture.md, and recommend --adversarial-rounds 3 in docs/cli.md where the rounds are described",
-        "Run make doc and then make check"
-      ],
-      "touches": [
-        "cmd/spec/main_test.go",
-        "docs/adr/",
-        "docs/architecture.md",
-        "docs/cli.md"
-      ],
-      "depends_on": [
-        2,
-        3,
-        4,
-        5
-      ],
-      "done_when": [
-        "`make check` passes, fmt, vet, lint, test and skills-check among it",
-        "no file under specgen/, envelope/, cmd/, docs/ or specification/ names accepted, rejected, accepted_count, rejected_count, no_findings or no_serious_findings as a value of the review",
-        "a run with the adversarial review and a round limit of 1 bills the same phases it bills before this change"
-      ],
-      "state": "done"
+      ]
     }
   ]
 }

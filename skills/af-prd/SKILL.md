@@ -17,11 +17,11 @@ right: it was built from the errors a generator makes when a PRD is vague to
 it.
 
 `spec` reads the file it is given as the idea, verifies it against the code,
-and writes the package's `prd.md` from it. Every requirement, test and task
+and writes the package's `prd.md` from it. Every requirement, check and task
 it generates comes from what the PRD says, so the PRD's holes become the
 package's holes. Four rules shape everything below. **Behaviour, not
 design**: the PRD says what the system does and how it behaves, as the
-people and programs that use it see it; the requirements, tests, tasks and
+people and programs that use it see it; the requirements, checks, tasks and
 architecture are `spec`'s. **The same shape as `spec`'s**: the sections, in
 the order, that the PRD phase writes, so `spec` refines the PRD instead of
 rewriting it. **Checkable, failures included**: every behaviour has its
@@ -80,9 +80,9 @@ Before reading any code in depth, find out what already exists:
 - The existing packages: `speca --list --all` lists every package under the
   spec root, the archived ones too, each with its `spec_id`, `title`,
   `status` and task counts. For each one the idea touches, read what it
-  promises and what it excludes: `specr <NN> --section prd`, and
-  `specr <NN> --section requirements` for its glossary, whose terms this PRD
-  uses in the same sense. Read
+  promises and what it excludes: `specr <NN> --section prd`, with its
+  `## Glossary` where it has one, whose terms this PRD uses in the same
+  sense. Read
   [references/speca-specr.md](references/speca-specr.md) before the first call
   for what the two commands return, their exit codes, and what to do when they
   are not installed.
@@ -99,7 +99,7 @@ Then check what would make the PRD pointless or wrong in kind:
   an active package's `## Intent`, so the change is a new package that
   supersedes the old one, and the PRD's `## Dependencies` says so.
 - **The idea builds on unfinished work.** A package it depends on that is
-  neither sealed nor has its integration task `done` cannot be implemented
+  neither sealed nor has its last task `done` cannot be implemented
   before it (`af-impl` refuses). That is not a stop: record it in
   `## Dependencies` with the package's status, and say so in the report.
 
@@ -115,9 +115,10 @@ the requirements use, and into the questions of §5:
   exists under another name.
 - **What exists already.** Each part of the idea the code already does, or
   half does. It is either out of scope or named as what changes.
-- **The vocabulary.** The names the code, the docs and the existing glossaries
-  give the things the idea is about. Use them; a new term for an old thing
-  becomes a glossary conflict between packages.
+- **The vocabulary.** The names the code, the docs and the existing packages'
+  glossaries give the things the idea is about. Use them; a new term for an
+  old thing misleads every reader of both packages, and the PRD's own
+  `## Glossary` is where a term a newcomer would not know is defined.
 - **The checks.** The project's lint and test commands (`make check`,
   `go test ./...`, `pytest`, `npm test`). `spec` writes them into the
   package's `test_commands`, and refuses one from another ecosystem.
@@ -178,7 +179,8 @@ will demand of it, and fix what fails:
 - **No vague words, and the size.** Both are in
   [references/prd-shape.md](references/prd-shape.md), which §4 already sent you
   to: say what each flagged word stands for, and count the areas of
-  `## Requirements` against what one package holds.
+  `## Requirements` against what one package holds — and, at the other end,
+  say in `## Design Decisions` when the work fits a `lite` package.
 - **Behaviour, not design.** No package layout, internal types or
   signatures of code that does not exist yet, database schemas no user
   sees, concurrency design or optimisation strategy. A performance
@@ -220,8 +222,8 @@ run that costs money, and they may want to read the PRD first or add
 - Write the how: package layout, internal types, signatures of code that
   does not exist, schemas no user sees. Constraints the person labelled as
   such are not the how.
-- Write requirements in EARS, or `requirements.json`, `test_spec.json`,
-  `tasks.json` or `architecture.md`. They are `spec`'s.
+- Write requirements in EARS, or `requirements.json`, `tasks.json` or
+  `architecture.md`. They are `spec`'s.
 - Create or edit anything under the spec root, or change a package's state
   (`speca --task`, `speca --status`). A change to an active package's intent
   is a new PRD that supersedes it.

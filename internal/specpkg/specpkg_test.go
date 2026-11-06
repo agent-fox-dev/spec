@@ -46,35 +46,42 @@ func TestRules_NamesEachRuleOnceInOrder(t *testing.T) {
 	}
 }
 
-// One TaskInfo per task in plan order, with depends_on copied and ready from
-// the plan's own rule; a package without a plan lists none.
+// One TaskInfo per task in plan order, the derived integration task last,
+// with depends_on copied, the state from the progress and ready from the
+// plan's own rule; a package without a plan lists none.
 func TestTaskInfos_ListsThePlanWithReadiness(t *testing.T) {
-	yes := true
-	plan := &afspec.TasksV2Json{Tasks: []afspec.Task{
-		{Id: 1, Title: "first", Kind: afspec.TaskKindImplement, State: afspec.TaskStateDone},
-		{Id: 2, Title: "second", Kind: afspec.TaskKindImplement, State: afspec.TaskStatePending, DependsOn: []int{1}},
-		{Id: 3, Title: "third", Kind: afspec.TaskKindImplement, State: afspec.TaskStatePending, DependsOn: []int{2}},
-		{Id: 4, Title: "fourth", Kind: afspec.TaskKindIntegration, State: afspec.TaskStateInProgress, Optional: &yes, DependsOn: []int{1, 2}},
+	spec := afspec.CreateSpec("05", "plan")
+	spec.Tasks.Tasks = []afspec.Task{
+		{Id: 1, Title: "first", Criteria: []string{"REQ-1"}, Steps: []string{"s"}},
+		{Id: 2, Title: "second", Criteria: []string{"REQ-1"}, Steps: []string{"s"}, DependsOn: []int{1}},
+		{Id: 3, Title: "third", Criteria: []string{"REQ-1"}, Steps: []string{"s"}, DependsOn: []int{1, 2}},
+	}
+	spec.Progress = &afspec.ProgressV3Json{Tasks: []afspec.TaskProgress{
+		{Id: 1, State: afspec.TaskStateDone}, {Id: 2, State: afspec.TaskStatePending},
+		{Id: 3, State: afspec.TaskStatePending}, {Id: 4, State: afspec.TaskStateInProgress},
 	}}
-	infos := TaskInfos(&afspec.Spec{Tasks: plan})
-	if len(infos) != 4 {
+	plan := spec.Plan()
+	infos := TaskInfos(spec)
+	if len(infos) != 4 || len(plan) != 4 {
 		t.Fatalf("TaskInfos = %+v", infos)
 	}
 	for i, info := range infos {
-		task := plan.Tasks[i]
+		task := plan[i]
 		if info.ID != task.Id || info.Title != task.Title || info.Kind != string(task.Kind) ||
-			info.State != string(task.State) || info.Optional != task.IsOptional() {
+			info.State != string(task.State) || !slices.Equal(info.DependsOn, task.DependsOn) {
 			t.Errorf("entry %d = %+v; want task %+v", i, info, task)
 		}
 		if want := task.Id == 2; info.Ready != want {
 			t.Errorf("task %d: ready = %v; want %v", task.Id, info.Ready, want)
 		}
 	}
-	if !slices.Equal(infos[3].DependsOn, []int{1, 2}) {
-		t.Errorf("depends_on = %v", infos[3].DependsOn)
+	last := infos[3]
+	if last.ID != 4 || last.Kind != string(afspec.TaskKindIntegration) || last.Title != afspec.IntegrationTaskTitle ||
+		last.State != string(afspec.TaskStateInProgress) || !slices.Equal(last.DependsOn, []int{1, 2, 3}) {
+		t.Errorf("the integration task = %+v", last)
 	}
-	infos[3].DependsOn[0] = 99
-	if plan.Tasks[3].DependsOn[0] != 1 {
+	infos[2].DependsOn[0] = 99
+	if spec.Tasks.Tasks[2].DependsOn[0] != 1 {
 		t.Error("mutating a TaskInfo's depends_on changed the plan")
 	}
 
@@ -83,10 +90,10 @@ func TestTaskInfos_ListsThePlanWithReadiness(t *testing.T) {
 	}
 }
 
-// A package whose format version is neither absent nor 2 is legacy: the v2
-// types read none of its tests or tasks.
-func TestLegacy_IsAFormatVersionOtherThanTwo(t *testing.T) {
-	for version, want := range map[int]bool{0: false, afspec.SchemaVersion: false, 1: true, 3: true} {
+// A package whose format version is neither absent nor 3 is legacy: the v3
+// types read none of its progress and little of its plan.
+func TestLegacy_IsAFormatVersionOtherThanThree(t *testing.T) {
+	for version, want := range map[int]bool{0: false, afspec.SchemaVersion: false, 1: true, 2: true, 4: true} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			if got := Legacy(&afspec.Spec{SchemaVersion: version}); got != want {
 				t.Errorf("Legacy(version %d) = %v; want %v", version, got, want)

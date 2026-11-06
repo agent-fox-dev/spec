@@ -90,38 +90,38 @@ func TestApplyPatch(t *testing.T) {
 func TestPatchArtifact_CorrectsTheLastRejectedSubmission(t *testing.T) {
 	ws := newWorkspace(t)
 	artifacts, _ := loadFixture(t, "01", "test_feature")
-	broken := deepCopy(t, artifacts[afspec.StepTestSpec])
-	good := broken["tests"].([]any)[0].(map[string]any)["verifies"]
-	broken["tests"].([]any)[0].(map[string]any)["verifies"] = []any{"01-REQ-99.1"}
+	broken := deepCopy(t, artifacts[afspec.StepTasks])
+	good := broken["tasks"].([]any)[0].(map[string]any)["criteria"]
+	broken["tasks"].([]any)[0].(map[string]any)["criteria"] = []any{"REQ-99.1"}
 	fix, _ := json.Marshal(good)
 	patch := func(id string, ops ...map[string]any) faux.Turn {
 		if ops == nil {
 			ops = []map[string]any{}
 		}
-		return toolCall(id, PatchToolName(afspec.StepTestSpec), map[string]any{"operations": ops})
+		return toolCall(id, PatchToolName(afspec.StepTasks), map[string]any{"operations": ops})
 	}
 
 	runner, p := fauxRunner(t, ws,
 		patch("c1"),
-		toolCall("c2", ArtifactToolName(afspec.StepTestSpec), broken),
-		patch("c3", map[string]any{"op": "replace", "path": "/tests/0/nope", "value": `1`}),
-		patch("c4", map[string]any{"op": "replace", "path": "/tests/0/verifies", "value": string(fix)}),
+		toolCall("c2", ArtifactToolName(afspec.StepTasks), broken),
+		patch("c3", map[string]any{"op": "replace", "path": "/tasks/0/nope", "value": `1`}),
+		patch("c4", map[string]any{"op": "replace", "path": "/tasks/0/criteria", "value": string(fix)}),
 	)
 	partial := acceptedArtifacts(t, artifacts, afspec.StepRequirements)
 	got, res, err := (&agentAuthor{runner: runner}).GenerateArtifact(context.Background(), artifactRequest{
-		Step: afspec.StepTestSpec, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: partial,
+		Step: afspec.StepTasks, SpecID: "01", SpecName: "test_feature", Root: ws.Root(), PRD: "## Intent\n\nx\n", Partial: partial,
 	})
 	if err != nil {
 		t.Fatalf("GenerateArtifact: %v", err)
 	}
-	if got == nil || partial.TestSpec == nil || partial.TestSpec.Tests[0].Verifies[0] == "01-REQ-99.1" {
-		t.Fatalf("the patched artifact was not recorded: %+v", partial.TestSpec)
+	if got == nil || partial.Tasks == nil || partial.Tasks.Tasks[0].Criteria[0] != "REQ-1" {
+		t.Fatalf("the patched artifact was not recorded: %+v", partial.Tasks)
 	}
 	if res.Turns != 4 {
 		t.Errorf("Turns = %d, want 4", res.Turns)
 	}
 	reqs := p.Requests()
-	for i, want := range []string{"nothing_to_patch", PatchToolName(afspec.StepTestSpec), "patch_failed"} {
+	for i, want := range []string{"nothing_to_patch", PatchToolName(afspec.StepTasks), "patch_failed"} {
 		if !strings.Contains(transcript(reqs[i+1]), want) {
 			t.Errorf("request %d lacks %q:\n%s", i+2, want, transcript(reqs[i+1]))
 		}

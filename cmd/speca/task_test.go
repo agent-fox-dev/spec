@@ -18,15 +18,17 @@ import (
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-// A save re-encodes every artifact from the version 2 types, which read none of
-// a version 1 plan, so a package in another format version is refused before
-// anything, --force or not.
+// The version 3 types read none of a version 2 plan's states, which live in
+// its tasks.json and not in a progress.json, so a package in another format
+// version is refused before anything, --force or not, and pointed at the
+// migrate form.
 func TestTask_RefusesAPackageInAnotherFormatVersion(t *testing.T) {
 	root := newRepo(t)
 	addLegacyPackage(t, root)
 	for _, extra := range [][]string{nil, {"--force"}, {"--dry-run"}} {
 		argv := append([]string{"--dir", root, "07", "--task", "1", "--state", "in_progress"}, extra...)
-		refusedAsUsage(t, root, argv, "07_legacy", "format version 1", "writes format version 2 only", "discard", "v1 plan")
+		refusedAsUsage(t, root, argv, "07_legacy", "format version 2", "writes format version 3 only", "none of its task states",
+			"speca .specs/07_legacy --migrate converts a version 2 package")
 		if env, _, _ := run(t, argv...); len(env.Warnings) != 0 {
 			t.Errorf("%v: warnings %v; a refusal does not also report what loaded", extra, warningCodes(env))
 		}
@@ -35,7 +37,8 @@ func TestTask_RefusesAPackageInAnotherFormatVersion(t *testing.T) {
 
 // A --task that names what the plan cannot supply is a usage error, whatever
 // --force says: an id it does not have, next when there is no next task, all
-// when there is no task.
+// when there is no task. The plan is the package's, the integration task
+// included: the example's two tasks and their integration task are 1, 2 and 3.
 func TestTask_RefusesTasksThePlanDoesNotHave(t *testing.T) {
 	for name, tc := range map[string]struct {
 		tasks  []map[string]any // nil keeps the example's three
@@ -49,11 +52,12 @@ func TestTask_RefusesTasksThePlanDoesNotHave(t *testing.T) {
 		"an unknown id under --force": {nil, []string{"--task", "99", "--state", "done", "--force"}, []string{"has no task 99;"}, "",
 			&cli.FixHint{Flag: "--task", Valid: []string{"1", "2", "3"}}},
 		"an id on a plan with no tasks": {[]map[string]any{}, []string{"--task", "1", "--state", "in_progress"}, []string{"09_agent_mode", "no tasks"}, "", nil},
-		"next with every task done or dropped": {[]map[string]any{planTask(1, "done", nil), planTask(2, "dropped", []int{1})},
+		"next with every task done or dropped": {[]map[string]any{planTask(1, "done", nil), planTask(2, "dropped", []int{1}), integrationTask("done")},
 			[]string{"--task", "next", "--state", "in_progress"}, []string{"09_agent_mode", "every task is done or dropped"}, "", nil},
+		// The integration task is pending too, and not ready while task 2 is not done.
 		"next with the pending tasks blocked": {[]map[string]any{planTask(1, "dropped", nil), planTask(2, "pending", []int{1})},
-			[]string{"--task", "next", "--state", "in_progress"}, []string{"09_agent_mode", "no pending task has its dependencies done"}, "",
-			&cli.FixHint{Flag: "--task", Valid: []string{"2"}}},
+			[]string{"--task", "next", "--state", "in_progress"}, []string{"09_agent_mode", "no pending task has its dependencies done", "the pending tasks are 2, 3"}, "",
+			&cli.FixHint{Flag: "--task", Valid: []string{"2", "3"}}},
 		// A plan with no tasks has none, not all done.
 		"next on a plan with no tasks": {[]map[string]any{}, []string{"--task", "next", "--state", "in_progress"}, []string{"09_agent_mode", "no tasks"}, "done or dropped", nil},
 		"all on a plan with no tasks":  {[]map[string]any{}, []string{"--task", "all", "--state", "done"}, []string{"09_agent_mode", "no tasks"}, "", nil},
@@ -159,8 +163,8 @@ func TestTask_RefusesAClaimOfATakenTask(t *testing.T) {
 	if h := env.Error.FixHint; h == nil || h.Flag != "--state" || !slices.Equal(h.Valid, []string{"pending", "done"}) {
 		t.Errorf("fix_hint = %+v; want --state with pending and done", h)
 	}
-	if r := env.Result; len(r.Tasks) != 2 || r.Tasks[0].State != "in_progress" || r.NextTask == nil || r.NextTask.ID != 1 {
-		t.Errorf("result = %+v; want task 1 in progress, as on disk", r)
+	if r := env.Result; len(r.Tasks) != 3 || r.Tasks[0].State != "in_progress" || r.NextTask == nil || r.NextTask.ID != 1 {
+		t.Errorf("result = %+v; want task 1 in progress, as on disk, and the integration task after the two", r)
 	}
 }
 
@@ -177,8 +181,38 @@ func TestTask_NextIsTheReportsNextTask(t *testing.T) {
 	if c := result(t, env).Changes[0]; c.Kind != "task" || c.From != "pending" || c.To != "in_progress" || c.Forced {
 		t.Errorf("change = %+v", c)
 	}
-	if got := onDisk(t, pkgDir(root, "09_agent_mode")); got[1] != "in_progress" || got[2] != "pending" {
+	if got := onDisk(t, pkgDir(root, "09_agent_mode")); got[1] != "in_progress" || got[2] != "pending" || got[3] != "pending" {
 		t.Errorf("on disk: %v", got)
+	}
+}
+
+// The integration task, which the plan derives, is moved like any other: by
+// its id, as next once every other task is done or dropped, and by all.
+func TestTask_MovesTheIntegrationTask(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setTasks(t, dir, planTask(1, "done", nil), planTask(2, "dropped", []int{}))
+
+	env, r := succeeds(t, root, "09", "--task", "next", "--state", "in_progress")
+	if !slices.Equal(changed(r), []int{3}) || r.Changes[0].From != "pending" || onDisk(t, dir)[3] != "in_progress" {
+		t.Fatalf("next: changes %+v, on disk %v; want the integration task 3 claimed", r.Changes, onDisk(t, dir))
+	}
+	if r.NextTask == nil || r.NextTask.ID != 3 || r.NextTask.Kind != "integration" || r.NextTask.State != "in_progress" {
+		t.Errorf("next_task %+v; want the integration task, in progress", r.NextTask)
+	}
+	if len(env.Next) != 1 || !sameCall(env.Next[0], envelope.Next{Tool: "specr", Input: ".specs/09_agent_mode", Flags: []string{"--task", "3"}}) {
+		t.Errorf("next = %+v; want the render of task 3", env.Next)
+	}
+
+	_, r = succeeds(t, root, "09", "--task", "3", "--state", "done")
+	if !slices.Equal(changed(r), []int{3}) || r.TaskCounts == nil || *r.TaskCounts != (envelope.TaskCounts{Done: 2, Dropped: 1, Total: 3}) {
+		t.Errorf("by id: changes %+v, counts %+v", r.Changes, r.TaskCounts)
+	}
+
+	setTasks(t, dir, planTask(1, "pending", nil), planTask(2, "pending", []int{}))
+	_, r = succeeds(t, root, "09", "--task", "all", "--state", "dropped")
+	if !slices.Equal(changed(r), []int{1, 2, 3}) || !maps.Equal(onDisk(t, dir), map[int]string{1: "dropped", 2: "dropped", 3: "dropped"}) {
+		t.Errorf("all: changes %+v, on disk %v; want every task dropped, the integration task too", r.Changes, onDisk(t, dir))
 	}
 }
 
@@ -201,13 +235,13 @@ func TestTask_ReportsThePackageAfterTheChange(t *testing.T) {
 	if r.SpecDir != filepath.Join(".specs", "09_agent_mode") || r.SpecID != "09" {
 		t.Errorf("package %q %q", r.SpecDir, r.SpecID)
 	}
-	if want := (envelope.TaskCounts{InProgress: 2, Done: 1, Total: 3}); r.TaskCounts == nil || *r.TaskCounts != want {
-		t.Errorf("task_counts = %+v; want %+v, the counts after the change", r.TaskCounts, want)
+	if want := (envelope.TaskCounts{Pending: 1, InProgress: 2, Done: 1, Total: 4}); r.TaskCounts == nil || *r.TaskCounts != want {
+		t.Errorf("task_counts = %+v; want %+v, the counts after the change, the integration task counted", r.TaskCounts, want)
 	}
-	if len(r.Tasks) != 3 || r.Tasks[0].State != "in_progress" || r.Tasks[2].State != "in_progress" {
+	if len(r.Tasks) != 4 || r.Tasks[0].State != "in_progress" || r.Tasks[2].State != "in_progress" || r.Tasks[3].Kind != "integration" {
 		t.Errorf("tasks = %+v", r.Tasks)
 	}
-	if got := onDisk(t, dir); !maps.Equal(got, map[int]string{1: "in_progress", 2: "done", 3: "in_progress"}) {
+	if got := onDisk(t, dir); !maps.Equal(got, map[int]string{1: "in_progress", 2: "done", 3: "in_progress", 4: "pending"}) {
 		t.Errorf("on disk: %v", got)
 	}
 	for _, k := range []string{"spec_dir", "spec_id", "status", "valid", "tasks", "task_counts", "next_task", "allowed_status", "depends_on", "dependents", "changes"} {
@@ -223,8 +257,8 @@ func TestTask_ReportsThePackageAfterTheChange(t *testing.T) {
 func TestTask_NothingToMoveWritesNothing(t *testing.T) {
 	root := newRepo(t)
 	dir := pkgDir(root, "09_agent_mode")
-	setTasks(t, dir, planTask(1, "done", nil), planTask(2, "dropped", nil))
-	addUnknownKey(t, dir)
+	setTasks(t, dir, planTask(1, "done", nil), planTask(2, "dropped", nil), integrationTask("done"))
+	addProgressKey(t, dir)
 	before := snapshot(t, root)
 	env, raw := rawRun(t, "--dir", root, "09", "--task", "all", "--state", "done")
 	if env.ExitCode != cli.ExitOK || !env.OK || len(env.Warnings) != 0 {
@@ -247,7 +281,7 @@ func TestTask_NothingToMoveWritesNothing(t *testing.T) {
 // A call applies every named move or none, never a subset. For any plan, ids and
 // target, with and without --force: a call that is refused leaves the files as
 // they were, and one that goes ahead has put every named task in the target
-// state and left the rest alone.
+// state and left the rest alone, the integration task among them.
 func TestTask_AppliesEveryMoveOrNone(t *testing.T) {
 	rng := rand.New(rand.NewPCG(11, 21))
 	root := newRepo(t)
@@ -265,11 +299,13 @@ func TestTask_AppliesEveryMoveOrNone(t *testing.T) {
 			}
 			tasks = append(tasks, planTask(id, state, deps))
 		}
+		before[n+1] = wantTaskStates[rng.IntN(len(wantTaskStates))]
+		tasks = append(tasks, integrationTask(before[n+1]))
 		setTasks(t, dir, tasks...)
 		files := snapshot(t, root)
 
 		var named []int
-		for _, id := range rng.Perm(n)[:1+rng.IntN(n)] {
+		for _, id := range rng.Perm(n + 1)[:1+rng.IntN(n+1)] {
 			named = append(named, id+1)
 		}
 		target := wantTaskStates[rng.IntN(len(wantTaskStates))]
@@ -289,7 +325,7 @@ func TestTask_AppliesEveryMoveOrNone(t *testing.T) {
 			continue
 		}
 		got := onDisk(t, dir)
-		for id := 1; id <= n; id++ {
+		for id := 1; id <= n+1; id++ {
 			if slices.Contains(named, id) {
 				if got[id] != target {
 					t.Fatalf("%v: task %d is %s; want %s, the call having gone ahead (plan %v)", argv, id, got[id], target, before)
@@ -302,7 +338,8 @@ func TestTask_AppliesEveryMoveOrNone(t *testing.T) {
 }
 
 // A plan with a task id twice is invalid, and still takes a change: the library
-// addresses a task by id and finds the first, so the id is moved once.
+// addresses a task by id, and the progress keeps one state for the id, so the
+// id is moved once.
 func TestTask_ADuplicateTaskIDIsMovedOnce(t *testing.T) {
 	duplicated := []map[string]any{planTask(1, "pending", nil), planTask(2, "pending", []int{}), planTask(1, "pending", []int{})}
 	root := newRepo(t)
@@ -313,26 +350,21 @@ func TestTask_ADuplicateTaskIDIsMovedOnce(t *testing.T) {
 	if code != cli.ExitOK || !slices.Equal(changed(result(t, env)), []int{1}) {
 		t.Fatalf("code %d: changes %+v, error %+v", code, result(t, env).Changes, env.Error)
 	}
-	// onDisk maps by id, so the second task 1 would hide the first: read the plan.
-	var states []string
-	for _, task := range loadSpec(t, dir).Tasks.Tasks {
-		states = append(states, string(task.State))
-	}
-	if want := []string{"in_progress", "pending", "pending"}; !slices.Equal(states, want) {
-		t.Errorf("states on disk %v; want %v: the first task 1 moves, the other does not", states, want)
+	if spec := loadSpec(t, dir); spec.TaskState(1) != afspec.TaskStateInProgress || spec.TaskState(2) != afspec.TaskStatePending {
+		t.Errorf("states on disk: task 1 %s, task 2 %s; want task 1 in progress and task 2 as it was", spec.TaskState(1), spec.TaskState(2))
 	}
 
 	other := newRepo(t)
 	setTasks(t, pkgDir(other, "09_agent_mode"), duplicated...)
 	env, code, _ = run(t, "--dir", other, "09", "--task", "all", "--state", "in_progress")
-	if code != cli.ExitOK || !slices.Equal(changed(result(t, env)), []int{1, 2}) {
-		t.Errorf("all: code %d: changes %+v, error %+v", code, result(t, env).Changes, env.Error)
+	if code != cli.ExitOK || !slices.Equal(changed(result(t, env)), []int{1, 2, 3}) {
+		t.Errorf("all: code %d: changes %+v, error %+v; want 1 once, 2 and the integration task 3", code, result(t, env).Changes, env.Error)
 	}
 }
 
 // After a move, next is what the report would say of the package now: the
-// render of a claimed task, the claim of the next one, and nothing when there
-// is no task left.
+// render of a claimed task, the claim of the next one, the integration task
+// last, and nothing when there is no task left.
 func TestTask_NextAfterAMove(t *testing.T) {
 	root := newRepo(t)
 	setTasks(t, pkgDir(root, "09_agent_mode"), planTask(1, "pending", nil), planTask(2, "pending", []int{1}))
@@ -354,17 +386,53 @@ func TestTask_NextAfterAMove(t *testing.T) {
 		t.Errorf("after task 1 is done: next = %+v; want the claim of task 2 first", env.Next)
 	}
 	step("2", "in_progress")
-	if env = step("2", "done"); len(env.Next) != 0 {
-		t.Errorf("after the last task: next = %+v; want none", env.Next)
+	if env = step("2", "done"); len(env.Next) == 0 || !sameCall(env.Next[0], claim(dir, 3)) {
+		t.Errorf("after task 2 is done: next = %+v; want the claim of the integration task 3 first", env.Next)
+	}
+	step("3", "in_progress")
+	if env = step("3", "done"); len(env.Next) != 0 {
+		t.Errorf("after the integration task: next = %+v; want none", env.Next)
 	}
 }
 
-// A save re-encodes every artifact from the Go types, which drops the keys they
-// lack: a write that would delete keys the schema does not allow, in the JSON
-// artifacts or in the frontmatter of prd.md (which the library does not report),
-// is refused at stage validate. --force writes over them, with a high warning
-// naming them, and the package it writes holds none and validates.
+// A task move writes progress.json and no other file, re-encoded from the Go
+// types, which drops the keys they lack: a write that would delete keys the
+// schema does not allow from progress.json is refused at stage validate.
+// --force writes over them, with a high warning naming them, and the package it
+// writes holds none and validates. A key in another artifact, or in the
+// frontmatter of prd.md, is not touched by the write, so it neither refuses
+// the move nor is deleted by it.
 func TestTask_UnknownKeys(t *testing.T) {
+	t.Run("in progress.json", func(t *testing.T) {
+		root := newRepo(t)
+		dir := pkgDir(root, "09_agent_mode")
+		addProgressKey(t, dir)
+		argv := []string{"09", "--task", "1", "--state", "in_progress"}
+
+		refused := refusedWithReport(t, root, "validate", "invalid_spec", argv...)
+		saysAll(t, argv, refused.Error.Message, "progress.json", "stale", "delete", "--force")
+		if refused.Error.FixHint != nil || len(refused.Warnings) != 0 {
+			t.Errorf("fix_hint %+v, warnings %v; want neither", refused.Error.FixHint, warningCodes(refused))
+		}
+		if r := refused.Result; r.Tasks[0].State != "pending" || *r.Valid {
+			t.Errorf("result %+v; want the package on disk, which does not validate", r)
+		}
+
+		env, r := succeeds(t, root, append(argv, "--force")...)
+		if onDisk(t, dir)[1] != "in_progress" {
+			t.Errorf("on disk %v; want task 1 in progress", onDisk(t, dir))
+		}
+		if w := oneWarning(t, env, "spec_invalid", "high"); w.Stage != "validate" || !strings.Contains(w.Message, "progress.json") || !strings.Contains(w.Message, "stale") {
+			t.Errorf("warning %+v; want one at stage validate naming progress.json stale", w)
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, afspec.ProgressFileName)); strings.Contains(string(b), "stale") {
+			t.Errorf("progress.json still holds the key")
+		}
+		if r.Valid == nil || !*r.Valid || len(r.FailingRules) != 0 {
+			t.Errorf("valid %v failing_rules %v; want the package as written, which validates", r.Valid, r.FailingRules)
+		}
+	})
+
 	for name, tc := range map[string]struct {
 		add   func(t *testing.T, dir string)
 		file  string
@@ -378,48 +446,46 @@ func TestTask_UnknownKeys(t *testing.T) {
 			root := newRepo(t)
 			dir := pkgDir(root, "09_agent_mode")
 			tc.add(t, dir)
-			argv := []string{"09", "--task", "1", "--state", "in_progress"}
+			before := treeBytes(t, dir)
 
-			refused := refusedWithReport(t, root, "validate", "invalid_spec", argv...)
-			saysAll(t, argv, refused.Error.Message, tc.file, tc.key, "delete", "--force")
-			if refused.Error.FixHint != nil || len(refused.Warnings) != 0 {
-				t.Errorf("fix_hint %+v, warnings %v; want neither", refused.Error.FixHint, warningCodes(refused))
-			}
-			// The library reports a key of the JSON artifacts, not one of the
-			// frontmatter, so only the first leaves the package invalid.
-			if r := refused.Result; r.Tasks[0].State != "pending" || *r.Valid != tc.valid {
-				t.Errorf("result %+v; want the package on disk, valid %v", r, tc.valid)
-			}
-
-			env, r := succeeds(t, root, append(argv, "--force")...)
+			env, _ := succeeds(t, root, "09", "--task", "1", "--state", "in_progress")
 			if onDisk(t, dir)[1] != "in_progress" {
 				t.Errorf("on disk %v; want task 1 in progress", onDisk(t, dir))
 			}
-			if w := oneWarning(t, env, "spec_invalid", "high"); w.Stage != "validate" || !strings.Contains(w.Message, tc.file) || !strings.Contains(w.Message, tc.key) {
-				t.Errorf("warning %+v; want one at stage validate naming %s %s", w, tc.file, tc.key)
+			if ws := warningsOf(env, "spec_invalid"); len(ws) != 0 && (ws[0].Severity == "high" || strings.Contains(ws[0].Message, tc.key)) {
+				t.Errorf("warnings %+v; the write does not touch %s, so it deletes nothing of it", ws, tc.file)
 			}
-			if b, _ := os.ReadFile(filepath.Join(dir, tc.file)); strings.Contains(string(b), tc.key) {
-				t.Errorf("%s still holds %s", tc.file, tc.key)
+			// The library reports a key of the JSON artifacts, not one of the
+			// frontmatter, so only the first leaves the package invalid, after
+			// the move as before it.
+			fresh, _, _ := run(t, "--dir", root, "09")
+			if v := result(t, fresh).Valid; v == nil || *v != tc.valid {
+				t.Errorf("after the move the package is valid %v; want %v, as it was", v, tc.valid)
 			}
-			if r.Valid == nil || !*r.Valid || len(r.FailingRules) != 0 {
-				t.Errorf("valid %v failing_rules %v; want the package as written, which validates", r.Valid, r.FailingRules)
+			after := treeBytes(t, dir)
+			delete(before, afspec.ProgressFileName)
+			delete(after, afspec.ProgressFileName)
+			if !maps.Equal(before, after) {
+				t.Errorf("a file other than progress.json changed")
+			}
+			if b, _ := os.ReadFile(filepath.Join(dir, tc.file)); !strings.Contains(string(b), tc.key) {
+				t.Errorf("%s lost %s", tc.file, tc.key)
 			}
 		})
 	}
 }
 
 // An extension key is the format's own allowance for a team's metadata: a
-// write keeps it, so a task move on a package that holds one, in tasks.json or
-// in the frontmatter, is neither refused nor warned about, and the key is
-// still there after it.
+// write keeps it, so a task move on a package that holds one in progress.json,
+// on the file or on an entry, is neither refused nor warned about, and the
+// key is still there after it.
 func TestTask_KeepsExtensionKeys(t *testing.T) {
 	root := newRepo(t)
 	dir := pkgDir(root, "09_agent_mode")
-	editJSON(t, filepath.Join(dir, "tasks.json"), func(m map[string]any) {
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) {
 		m["x-board"] = "core"
-		m["tasks"].([]any)[0].(map[string]any)["x-estimate"] = 3.0
+		m["tasks"].([]any)[0].(map[string]any)["x-claimed-by"] = "agent-7"
 	})
-	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 2", "schema_version: 2\nx-jira: \"ABC-1\"")
 
 	env, _ := succeeds(t, root, "09", "--task", "1", "--state", "in_progress")
 	if len(env.Warnings) != 0 {
@@ -428,15 +494,11 @@ func TestTask_KeepsExtensionKeys(t *testing.T) {
 	if onDisk(t, dir)[1] != "in_progress" {
 		t.Errorf("on disk %v; want task 1 in progress", onDisk(t, dir))
 	}
-	tasks, _ := os.ReadFile(filepath.Join(dir, "tasks.json"))
-	prd, _ := os.ReadFile(filepath.Join(dir, "prd.md"))
-	for _, want := range []string{`"x-board": "core"`, `"x-estimate": 3`} {
-		if !strings.Contains(string(tasks), want) {
-			t.Errorf("tasks.json lost %s:\n%s", want, tasks)
+	progress, _ := os.ReadFile(filepath.Join(dir, afspec.ProgressFileName))
+	for _, want := range []string{`"x-board": "core"`, `"x-claimed-by": "agent-7"`} {
+		if !strings.Contains(string(progress), want) {
+			t.Errorf("progress.json lost %s:\n%s", want, progress)
 		}
-	}
-	if !strings.Contains(string(prd), `x-jira: "ABC-1"`) {
-		t.Errorf("prd.md lost its extension key:\n%s", prd)
 	}
 }
 
@@ -452,7 +514,7 @@ func TestTask_TheResultOfAForcedWriteValidatesAsTheWrittenPackageDoes(t *testing
 		for _, dry := range []bool{false, true} {
 			root := newRepo(t)
 			dir := pkgDir(root, "09_agent_mode")
-			addUnknownKey(t, dir)
+			addProgressKey(t, dir)
 			damage(t, dir)
 			argv := []string{"--dir", root, "09", "--task", "1", "--state", "in_progress", "--force"}
 			if dry {
@@ -521,6 +583,9 @@ func TestTask_RaisesAtMostOneSpecInvalidWarning(t *testing.T) {
 		if rng.IntN(2) == 0 {
 			addUnknownKey(t, dir)
 		}
+		if rng.IntN(2) == 0 {
+			addProgressKey(t, dir)
+		}
 		if rng.IntN(3) == 0 {
 			editJSON(t, filepath.Join(dir, "requirements.json"), func(m map[string]any) { m["leaked"] = 1 })
 		}
@@ -549,14 +614,14 @@ func TestTask_ARefusedCallRaisesNoWarning(t *testing.T) {
 	// The same claim, refused for the unknown keys the write would delete.
 	keys := newRepo(t)
 	setTasks(t, pkgDir(keys, "09_agent_mode"), planTask(1, "pending", nil), planTask(2, "pending", []int{1}))
-	addUnknownKey(t, pkgDir(keys, "09_agent_mode"))
+	addProgressKey(t, pkgDir(keys, "09_agent_mode"))
 	env, code, _ = run(t, "--dir", keys, "09", "--task", "2", "--state", "in_progress")
 	if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "validate" || len(env.Warnings) != 0 {
 		t.Errorf("unknown keys: code %d, error %+v, warnings %v; want none", code, env.Error, warningCodes(env))
 	}
 
 	// A move set through a bypass, whose write then fails.
-	failWith(t, &saveSpec, func(*afspec.Spec, string) error { return &afspec.SaveError{Msg: "cannot rename tasks.json"} })
+	failWith(t, &saveProgress, func(*afspec.Spec, string) error { return &afspec.SaveError{Msg: "cannot rename progress.json"} })
 	failed := newRepo(t)
 	setTasks(t, pkgDir(failed, "09_agent_mode"), planTask(1, "dropped", nil))
 	env, code, _ = run(t, "--dir", failed, "09", "--task", "1", "--state", "pending", "--force")
@@ -565,9 +630,9 @@ func TestTask_ARefusedCallRaisesNoWarning(t *testing.T) {
 	}
 }
 
-// What Save returns is reported by what it says: a lifecycle or intent error as
-// the status refusal it is, a save error as a write failure that tells the
-// caller what may be left.
+// What SaveProgress returns is reported by what it says: a lifecycle or intent
+// error as the status refusal it is, a save error as a write failure that
+// tells the caller what may be left of progress.json.
 func TestTask_SaveErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err             error
@@ -576,11 +641,11 @@ func TestTask_SaveErrors(t *testing.T) {
 	}{
 		"lifecycle": {&afspec.LifecycleError{Msg: "cannot save spec in sealed state"}, "status", "lifecycle", nil},
 		"intent":    {&afspec.IntentError{Msg: "intent drift detected"}, "status", "lifecycle", nil},
-		"save": {&afspec.SaveError{Msg: "cannot rename tasks.json"}, "write", "disk",
-			[]string{"temporary files", "unchanged", "final renames", "some files updated", "`speca .specs/09_agent_mode`"}},
+		"save": {&afspec.SaveError{Msg: "cannot rename progress.json"}, "write", "disk",
+			[]string{"temporary file", "unchanged", "final rename", "replaced progress.json", "`speca .specs/09_agent_mode`"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			failWith(t, &saveSpec, func(*afspec.Spec, string) error { return tc.err })
+			failWith(t, &saveProgress, func(*afspec.Spec, string) error { return tc.err })
 			root := newRepo(t)
 			env := refusedWithReport(t, root, tc.stage, tc.category, "09", "--task", "1", "--state", "in_progress")
 			saysAll(t, nil, env.Error.Message, append([]string{tc.err.Error()}, tc.want...)...)
@@ -588,14 +653,14 @@ func TestTask_SaveErrors(t *testing.T) {
 	}
 }
 
-// A change sets updated_at to now, in UTC, in RFC 3339, every time, and the
-// package is saved with it.
+// A change sets updated_at, which is progress.json's, to now, in UTC, in RFC
+// 3339, every time, and the progress is written with it.
 func TestTask_SetsUpdatedAtOnEveryWrite(t *testing.T) {
 	root := newRepo(t)
 	dir := pkgDir(root, "09_agent_mode")
 	for _, state := range []string{"in_progress", "done"} {
 		// The second call finds an old updated_at, and must leave a new one.
-		editFile(t, filepath.Join(dir, "prd.md"), `updated_at: "`+loadSpec(t, dir).UpdatedAt+`"`, `updated_at: "2000-01-01T00:00:00Z"`)
+		setUpdatedAt(t, dir, "2000-01-01T00:00:00Z")
 		start := time.Now().UTC().Truncate(time.Second)
 		env, r := succeeds(t, root, "09", "--task", "1", "--state", state)
 		got := updatedAtIn(t, dir)
@@ -608,13 +673,14 @@ func TestTask_SetsUpdatedAtOnEveryWrite(t *testing.T) {
 	}
 }
 
-// A write goes through Spec.Save, which writes every artifact again: each file
-// is replaced by a temporary one renamed over it, so it has that one's mode, and
-// the content of the artifacts the call did not change is the content it had.
-func TestTask_ASaveRewritesEveryArtifactAtMode0600(t *testing.T) {
+// A write goes through Spec.SaveProgress, which writes progress.json alone:
+// that file is replaced by a temporary one renamed over it, so it has that
+// one's mode, and every other file of the package is the file it was, with
+// the content and the mode it had.
+func TestTask_AMoveRewritesProgressAloneAtMode0600(t *testing.T) {
 	root := newRepo(t)
 	dir := pkgDir(root, "09_agent_mode")
-	files := []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json"}
+	files := []string{"prd.md", afspec.RequirementsFileName, afspec.TasksFileName, afspec.ProgressFileName}
 	var before []os.FileInfo
 	for _, f := range files {
 		if err := os.Chmod(filepath.Join(dir, f), 0o644); err != nil {
@@ -626,7 +692,7 @@ func TestTask_ASaveRewritesEveryArtifactAtMode0600(t *testing.T) {
 		}
 		before = append(before, info)
 	}
-	was := loadSpec(t, dir)
+	was := treeBytes(t, dir)
 
 	succeeds(t, root, "09", "--task", "1", "--state", "in_progress")
 
@@ -635,6 +701,12 @@ func TestTask_ASaveRewritesEveryArtifactAtMode0600(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if f != afspec.ProgressFileName {
+			if !os.SameFile(before[i], info) || info.Mode().Perm() != 0o644 || treeBytes(t, dir)[f] != was[f] {
+				t.Errorf("%s was replaced, changed or re-moded; a task move writes progress.json alone", f)
+			}
+			continue
+		}
 		if os.SameFile(before[i], info) {
 			t.Errorf("%s was not replaced", f)
 		}
@@ -642,9 +714,8 @@ func TestTask_ASaveRewritesEveryArtifactAtMode0600(t *testing.T) {
 			t.Errorf("%s has mode %v; want 0600, the temporary file's", f, info.Mode().Perm())
 		}
 	}
-	now := loadSpec(t, dir)
-	if !reflect.DeepEqual(was.Requirements, now.Requirements) || !reflect.DeepEqual(was.TestSpec, now.TestSpec) {
-		t.Error("requirements.json or test_spec.json holds other content than before the write")
+	if exists(filepath.Join(dir, afspec.RenderedFileName)) {
+		t.Error("a task move wrote spec.md, which never changes with the progress")
 	}
 }
 
@@ -682,7 +753,7 @@ func TestTask_ADryRunIsRefusedAsTheRealCallIs(t *testing.T) {
 	taken := newRepo(t)
 	setTasks(t, pkgDir(taken, "09_agent_mode"), planTask(1, "in_progress", nil), planTask(2, "pending", []int{1}))
 	unknown := newRepo(t)
-	addUnknownKey(t, pkgDir(unknown, "09_agent_mode"))
+	addProgressKey(t, pkgDir(unknown, "09_agent_mode"))
 
 	for name, root := range map[string]string{"a taken task": taken, "unknown keys": unknown} {
 		base := []string{"--dir", root, "09", "--task", "1", "--state", "in_progress"}
@@ -708,9 +779,10 @@ func TestTask_ADryRunSuggestsTheRealCall(t *testing.T) {
 		argv  []string
 		want  envelope.Next
 	}{
+		// all names the two tasks and their integration task.
 		"all, resolved to ids": {[]map[string]any{planTask(1, "pending", []int{}), planTask(2, "pending", []int{})},
 			[]string{"--task", "all", "--state", "in_progress", "--force"},
-			envelope.Next{Tool: "speca", Input: dir, Flags: []string{"--task", "1,2", "--state", "in_progress", "--force"}}},
+			envelope.Next{Tool: "speca", Input: dir, Flags: []string{"--task", "1,2,3", "--state", "in_progress", "--force"}}},
 		"a forced recovery of a dropped task": {[]map[string]any{planTask(1, "done", nil), planTask(2, "done", []int{1}), planTask(3, "dropped", nil)},
 			[]string{"--task", "3", "--state", "pending", "--force"},
 			envelope.Next{Tool: "speca", Input: dir, Flags: []string{"--task", "3", "--state", "pending", "--force"}}},
@@ -737,23 +809,28 @@ func TestTask_ADryRunSuggestsTheRealCall(t *testing.T) {
 	}
 
 	root := newRepo(t)
-	setTasks(t, pkgDir(root, "09_agent_mode"), planTask(1, "done", nil), planTask(2, "dropped", nil))
+	setTasks(t, pkgDir(root, "09_agent_mode"), planTask(1, "done", nil), planTask(2, "dropped", nil), integrationTask("done"))
 	if env, _ := succeeds(t, root, "09", "--task", "all", "--state", "done", "--dry-run"); len(env.Next) != 0 {
 		t.Errorf("no changes: next = %+v; want none", env.Next)
 	}
 }
 
 // unknownKeys reads the key out of the library's message, and falls back to the
-// whole message when it cannot.
+// whole message when it cannot; progressUnknownKeys keeps those of
+// progress.json, the one file a task move writes.
 func TestUnknownKeys_NamesTheKeysThatWouldBeLost(t *testing.T) {
 	entries := []afspec.ValidationEntry{
 		{Check: "unknown_field", Artifact: "tasks.json", Message: "tasks.json: the key /traceability is not allowed by the schema (additionalProperties: false); remove it"},
 		{Check: "unknown_field", Artifact: "tasks.json", Message: "tasks.json: the key /tasks/0/a b is not allowed by the schema (additionalProperties: false); remove it"},
-		{Check: "unknown_field", Artifact: "test_spec.json", Message: "a message in other words"},
-		{Check: "C7", Artifact: "test_spec.json", Message: "the key /x is not allowed by the schema"},
+		{Check: "unknown_field", Artifact: "progress.json", Message: "progress.json: the key /stale is not allowed by the schema (additionalProperties: false); remove it"},
+		{Check: "unknown_field", Artifact: "progress.json", Message: "a message in other words"},
+		{Check: "C4", Artifact: "progress.json", Message: "the key /x is not allowed by the schema"},
 	}
-	want := []string{"tasks.json /traceability", "tasks.json /tasks/0/a b", "a message in other words"}
+	want := []string{"tasks.json /traceability", "tasks.json /tasks/0/a b", "progress.json /stale", "a message in other words"}
 	if got := unknownKeys(entries); !slices.Equal(got, want) {
 		t.Errorf("unknownKeys = %q; want %q", got, want)
+	}
+	if got, want := progressUnknownKeys(entries), want[2:]; !slices.Equal(got, want) {
+		t.Errorf("progressUnknownKeys = %q; want %q", got, want)
 	}
 }

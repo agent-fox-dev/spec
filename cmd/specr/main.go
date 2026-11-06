@@ -1,4 +1,4 @@
-// Command specr renders a version 2 specification package as Markdown: the
+// Command specr renders a version 3 specification package as Markdown: the
 // whole package, or the package scoped to one of its tasks.
 //
 //	specr [flags] <spec>
@@ -52,13 +52,13 @@ The spec is one reference to a package, tried in this order:
 
 Forms:
   specr <spec>                  the whole package: PRD, architecture,
-                                requirements, test specification, tasks
+                                requirements with their checks, tasks
   specr <spec> --task N         scoped to task N: what the task owns in full,
-                                every other requirement, test and task by id
+                                every other requirement and task by id
   specr <spec> --section tasks  only the named sections, with or without --task
   specr <spec> --max-tokens N   drop detail until the render fits: first the
-                                architecture, then each test's given, when,
-                                real components and pseudocode
+                                architecture, then each check's setup and
+                                pseudocode and each smoke check's detail
 
 Output is one JSON object on stdout. The Markdown is result.markdown; the rest
 of result says what was rendered and lists the plan's tasks, and next names
@@ -117,9 +117,9 @@ func (f *sectionFlag) Set(raw string) error {
 }
 
 func (o *options) register(fs *flag.FlagSet) {
-	fs.IntVar(&o.task, "task", 0, "render the package scoped to this task id: what the task owns in full, every other requirement, test and task by id and title; 0 renders the whole package")
+	fs.IntVar(&o.task, "task", 0, "render the package scoped to this task id: what the task owns in full, every other requirement and task by id and title; 0 renders the whole package")
 	fs.Var(&o.sections, "section", "render only these sections, in the package's order: "+strings.Join(Sections, ", ")+"; comma-separated or repeated (default: every section)")
-	fs.IntVar(&o.maxTokens, "max-tokens", 0, "drop detail until the render's estimated tokens fit: first the architecture, then each test's given, when, real components and pseudocode; 0 means no budget")
+	fs.IntVar(&o.maxTokens, "max-tokens", 0, "drop detail until the render's estimated tokens fit: first the architecture, then each check's setup and pseudocode and each smoke check's detail; 0 means no budget")
 	fs.StringVar(&o.markdownFile, "markdown-file", "", "also write the Markdown to this file, atomically; relative to the working directory")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
 	fs.StringVar(&o.dir, "dir", ".", "the repository the spec root and a relative reference are resolved against")
@@ -241,17 +241,18 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 		Status:   spec.Status,
 		Tasks:    specpkg.TaskInfos(spec),
 	}, writable: specpkg.Writable(spec)}
-	// A package in an older format loads, but the v2 types read none of its
-	// tests or tasks: a v1 plan is task_groups, not tasks.
+	// A package in an older format loads, but the v3 types read none of its
+	// progress and little of its plan: a v2 task carries its state, a v1
+	// plan is task_groups, not tasks.
 	legacy := specpkg.Legacy(spec)
 	if o.task > 0 {
 		if legacy {
 			return cli.ExitUsage, nil, usageInfo(fmt.Errorf(
 				"%s is format version %d, and specr reads version %d only: none of its tasks can be read, so it cannot be scoped to one; "+
-					"render it whole without --task, or convert it to version %d (format v2 §13 maps each v1 construct to its v2 form)",
+					"render it whole without --task, or convert it to version %d (speca <package> --migrate converts a version 2 package)",
 				res.SpecDir, spec.SchemaVersion, afspec.SchemaVersion, afspec.SchemaVersion), nil)
 		}
-		t, ok := findTask(spec, o.task)
+		t, ok := spec.GetTask(o.task)
 		if !ok {
 			ids := make([]string, len(res.Tasks))
 			for i, ti := range res.Tasks {
@@ -264,7 +265,7 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 				fmt.Errorf("%s has no task %d; its tasks are %s", res.SpecDir, o.task, strings.Join(ids, ", ")),
 				&cli.FixHint{Flag: "--task", Valid: ids})
 		}
-		info := specpkg.TaskInfo(spec.Tasks, t)
+		info := specpkg.TaskInfo(spec, *t)
 		res.Task = &info
 	}
 
@@ -272,8 +273,8 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 		res.Valid = true
 	} else if legacy {
 		run.Warn(cli.WarnSpecInvalid, "high", "the package is format version %d, and specr reads version %d only: "+
-			"its tests and tasks are not read, and the render holds only what the two versions share — "+
-			"format v2 §13 maps each v1 construct to its v2 form", spec.SchemaVersion, afspec.SchemaVersion)
+			"its progress and its tasks are not read, and the render holds only what the two versions share — "+
+			"speca <package> --migrate converts a version 2 package", spec.SchemaVersion, afspec.SchemaVersion)
 	} else {
 		run.Warn(cli.WarnSpecInvalid, "low", "the package does not validate (%d errors: %s); it is rendered as it is",
 			len(v.Errors), strings.Join(specpkg.Rules(v.Errors), ", "))
@@ -293,18 +294,6 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 		res.MarkdownFile = path
 	}
 	return cli.ExitOK, res, nil
-}
-
-func findTask(spec *afspec.Spec, id int) (afspec.Task, bool) {
-	if spec.Tasks == nil {
-		return afspec.Task{}, false
-	}
-	for _, t := range spec.Tasks.Tasks {
-		if t.Id == id {
-			return t, true
-		}
-	}
-	return afspec.Task{}, false
 }
 
 func usageInfo(err error, hint *cli.FixHint) *cli.ErrorInfo {

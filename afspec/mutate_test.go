@@ -10,9 +10,9 @@ func TestAddRequirement_AppendsToACopyAndRefusesADuplicate(t *testing.T) {
 	req := *spec.Requirements
 
 	added, err := AddRequirement(req, Requirement{
-		Id:       "01-REQ-3",
+		Id:       "REQ-3",
 		Title:    "Third",
-		Criteria: []Criterion{UbiquitousCriterion("01-REQ-3.1", "loader", "do a thing")},
+		Criteria: []Criterion{UbiquitousCriterion("REQ-3.1", "loader", "do a thing").WithCheck(CheckKindUnit, nil, "")},
 	})
 	if err != nil {
 		t.Fatalf("AddRequirement = %v", err)
@@ -21,7 +21,7 @@ func TestAddRequirement_AppendsToACopyAndRefusesADuplicate(t *testing.T) {
 		t.Errorf("added=%d original=%d; the original must not change", len(added.Requirements), len(req.Requirements))
 	}
 
-	if _, err := AddRequirement(req, Requirement{Id: "01-REQ-1", Title: "Dup"}); err == nil {
+	if _, err := AddRequirement(req, Requirement{Id: "REQ-1", Title: "Dup"}); err == nil {
 		t.Error("a duplicate requirement ID was accepted")
 	}
 }
@@ -30,45 +30,22 @@ func TestGetAndRemoveRequirement_WorkOnCopies(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	req := *spec.Requirements
 
-	got, ok := GetRequirement(req, "01-REQ-2")
+	got, ok := GetRequirement(req, "REQ-2")
 	if !ok || got.Title != "Cross-file validation" {
 		t.Fatalf("GetRequirement = %v, %v", got, ok)
 	}
 	got.Title = "changed"
-	if req.Requirements[1].Title == "changed" {
+	got.Criteria[0].Check.Setup[0] = "changed"
+	if req.Requirements[1].Title == "changed" || req.Requirements[1].Criteria[0].Check.Setup[0] == "changed" {
 		t.Error("GetRequirement returned a view into the artifact")
 	}
 
-	reduced, removed := RemoveRequirement(req, "01-REQ-1")
+	reduced, removed := RemoveRequirement(req, "REQ-1")
 	if !removed || len(reduced.Requirements) != 1 {
 		t.Errorf("RemoveRequirement removed=%v len=%d", removed, len(reduced.Requirements))
 	}
-	if _, removed := RemoveRequirement(req, "01-REQ-9"); removed {
+	if _, removed := RemoveRequirement(req, "REQ-9"); removed {
 		t.Error("RemoveRequirement reported removing a requirement that does not exist")
-	}
-}
-
-func TestGlossaryEntries_AreSetAndRemovedOnCopies(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	req := *spec.Requirements
-
-	withTerm := SetGlossaryEntry(req, "coder", "The agent that executes one task at a time.")
-	if withTerm.Glossary["coder"] == "" {
-		t.Error("SetGlossaryEntry did not add the term")
-	}
-	if _, present := req.Glossary["coder"]; present {
-		t.Error("SetGlossaryEntry mutated the original")
-	}
-
-	without, removed := RemoveGlossaryEntry(withTerm, "coder")
-	if !removed {
-		t.Error("RemoveGlossaryEntry reported nothing removed")
-	}
-	if _, present := without.Glossary["coder"]; present {
-		t.Error("the term survived removal")
-	}
-	if _, removed := RemoveGlossaryEntry(req, "absent"); removed {
-		t.Error("RemoveGlossaryEntry reported removing a term that is not there")
 	}
 }
 
@@ -76,24 +53,25 @@ func TestAddCriterionAndExecutionPath_RefuseDuplicates(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	r, err := AddCriterion(spec.Requirements.Requirements[0],
-		UbiquitousCriterion("01-REQ-1.4", "loader", "do another thing"))
+		UbiquitousCriterion("REQ-1.4", "loader", "do another thing").WithSameCheckAs("REQ-1.1"))
 	if err != nil {
 		t.Fatalf("AddCriterion = %v", err)
 	}
 	if len(r.Criteria) != 4 || len(spec.Requirements.Requirements[0].Criteria) != 3 {
 		t.Error("AddCriterion mutated the original requirement")
 	}
-	if _, err := AddCriterion(r, UbiquitousCriterion("01-REQ-1.1", "loader", "dup")); err == nil {
+	if _, err := AddCriterion(r, UbiquitousCriterion("REQ-1.1", "loader", "dup")); err == nil {
 		t.Error("a duplicate criterion ID was accepted")
 	}
 
-	if _, ok := GetCriterion(r, "01-REQ-1.4"); !ok {
-		t.Error("GetCriterion did not find the criterion just added")
+	if c, ok := GetCriterion(r, "REQ-1.4"); !ok || !c.Check.IsShared() || *c.Check.SameAs != "REQ-1.1" {
+		t.Errorf("GetCriterion = %+v, %v; want the criterion just added with its shared check", c, ok)
 	}
 
 	withPath, err := AddExecutionPath(*spec.Requirements, ExecutionPath{
-		Id: "01-PATH-2", Title: "Another path",
+		Id: "PATH-2", Title: "Another path",
 		Steps: []PathStep{{Actor: "operator", Action: "does something"}, {Actor: "system", Action: "responds"}},
+		Smoke: Smoke{RealComponents: []string{"system"}, EndState: []string{"it responded"}},
 	})
 	if err != nil {
 		t.Fatalf("AddExecutionPath = %v", err)
@@ -101,41 +79,8 @@ func TestAddCriterionAndExecutionPath_RefuseDuplicates(t *testing.T) {
 	if len(withPath.ExecutionPaths) != 2 {
 		t.Errorf("paths = %d; want 2", len(withPath.ExecutionPaths))
 	}
-	if _, err := AddExecutionPath(withPath, ExecutionPath{Id: "01-PATH-1", Title: "Dup"}); err == nil {
+	if _, err := AddExecutionPath(withPath, ExecutionPath{Id: "PATH-1", Title: "Dup"}); err == nil {
 		t.Error("a duplicate path ID was accepted")
-	}
-}
-
-func TestAddTest_AppendsToACopyAndRefusesADuplicate(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-
-	added, err := AddTest(*spec.TestSpec, Test{
-		Id: "TS-01-6", Kind: TestKindUnit, Verifies: []string{"01-REQ-1.1"},
-		Title: "Another", Given: []string{}, When: "x happens", Then: []string{"y"},
-	})
-	if err != nil {
-		t.Fatalf("AddTest = %v", err)
-	}
-	if len(added.Tests) != 6 || len(spec.TestSpec.Tests) != 5 {
-		t.Error("AddTest mutated the original")
-	}
-	if _, err := AddTest(added, Test{Id: "TS-01-1"}); err == nil {
-		t.Error("a duplicate test ID was accepted")
-	}
-}
-
-func TestTestsOfKindAndGetTest_FindTestsInTheTestSpec(t *testing.T) {
-	spec := loadFixture(t, fixtureValidSpec)
-	if got := len(spec.TestSpec.TestsOfKind(TestKindSmoke)); got != 1 {
-		t.Errorf("smoke tests = %d; want 1", got)
-	}
-	if got := len(spec.TestSpec.TestsOfKind(TestKindUnit)); got != 2 {
-		t.Errorf("unit tests = %d; want 2", got)
-	}
-
-	got, ok := GetTest(*spec.TestSpec, "TS-01-3")
-	if !ok || got.Kind != TestKindProperty {
-		t.Errorf("GetTest = %v, %v", got, ok)
 	}
 }
 
@@ -143,14 +88,14 @@ func TestAddTaskAndDependency_WorkOnCopies(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 
 	added, err := AddTask(*spec.Tasks, Task{
-		Id: 4, Kind: TaskKindImplement, Title: "Another",
-		Criteria: []string{"01-REQ-1.1"}, Tests: []string{"TS-01-1"},
-		Steps: []string{"do it"}, State: TaskStatePending,
+		Id: 3, Title: "Another",
+		Criteria: []string{"REQ-1.1"},
+		Steps:    []string{"do it"},
 	})
 	if err != nil {
 		t.Fatalf("AddTask = %v", err)
 	}
-	if len(added.Tasks) != 4 || len(spec.Tasks.Tasks) != 3 {
+	if len(added.Tasks) != 3 || len(spec.Tasks.Tasks) != 2 {
 		t.Error("AddTask mutated the original")
 	}
 	if _, err := AddTask(added, Task{Id: 1}); err == nil {
@@ -180,15 +125,13 @@ func TestAddExternalAPI_RefusesADuplicatePackage(t *testing.T) {
 	}
 }
 
-func TestExtractInterfaceSummary_ReportsGlossaryAndContracts(t *testing.T) {
+func TestExtractInterfaceSummary_ReportsContracts(t *testing.T) {
 	spec := loadFixture(t, fixtureValidSpec)
 	summary := extractInterfaceSummary(spec)
 
-	glossary, ok := summary["glossary"].(map[string]string)
-	if !ok || glossary["spec"] == "" {
-		t.Errorf("glossary missing from the summary: %v", summary)
+	if _, present := summary["glossary"]; present {
+		t.Error("the summary carries a glossary, which version 3 has no field for")
 	}
-
 	contracts, ok := summary["contracts"].([]map[string]string)
 	if !ok || len(contracts) == 0 {
 		t.Fatalf("contracts missing from the summary: %v", summary)
@@ -200,8 +143,8 @@ func TestExtractInterfaceSummary_ReportsGlossaryAndContracts(t *testing.T) {
 	}
 }
 
-// A dependent spec sees the glossary and contracts of the specs it depends on,
-// and nothing when there are none or the root cannot be read.
+// A dependent spec sees the contracts of the specs it depends on, and nothing
+// when there are none or the root cannot be read.
 func TestLoadDependentInterfaces_SummarisesTheUpstreamSpecs(t *testing.T) {
 	root := specRoot(t, map[string]string{
 		"01_test_feature":  fixtureValidSpec,
@@ -212,8 +155,8 @@ func TestLoadDependentInterfaces_SummarisesTheUpstreamSpecs(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("summaries = %v; want one for the upstream spec", summaries)
 	}
-	if _, ok := summaries[0]["glossary"]; !ok {
-		t.Errorf("the summary carries no glossary: %v", summaries[0])
+	if _, ok := summaries[0]["contracts"]; !ok {
+		t.Errorf("the summary carries no contracts: %v", summaries[0])
 	}
 
 	if got := LoadDependentInterfaces("01", root); len(got) != 0 {

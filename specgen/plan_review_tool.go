@@ -23,7 +23,7 @@ var planRubrics = []string{envelope.RubricZeroDecision, envelope.RubricGrounding
 // review, whose input it never shows, and the plan and its grounding facts.
 type planReviewRequest struct {
 	reviewRequest
-	// Plan is the plan under review: requirements, test spec and tasks.
+	// Plan is the plan under review: requirements and tasks.
 	Plan *afspec.PartialSpec
 	// Facts are the grounding facts, computed before the first round.
 	Facts []groundingFact
@@ -50,7 +50,7 @@ func newPlanReviewTool(sink *reviewSink, round int, earlier []Finding, plan *afs
 		name: ToolSubmitPlanReview,
 		description: "Submit the flaws you found in the plan and end this phase. Call this once, after you " +
 			"have checked the plan against the PRD, the grounding facts and the code.",
-		schema: reviewSchema(planRubrics, "The place in the plan by id: a task by its number ('task 3'), a test id, "+
+		schema: reviewSchema(planRubrics, "The place in the plan by id: a task by its number ('task 3'), "+
 			"a criterion id or an execution path id"),
 		rubrics:  planRubrics,
 		steering: steering,
@@ -58,7 +58,7 @@ func newPlanReviewTool(sink *reviewSink, round int, earlier []Finding, plan *afs
 			var problems []string
 			if f.Section != "" && !places.holds(f.Section) {
 				problems = append(problems, fmt.Sprintf("finding %d has section %q, which names no place in this plan: "+
-					"name a task by its number, a test id, a criterion id or an execution path id of it", pos, f.Section))
+					"name a task by its number, a criterion id or an execution path id of it", pos, f.Section))
 			}
 			if f.Rubric == envelope.RubricGrounding && saysMissing(f) {
 				if paths := pathsNamed(f.Flaw + " " + f.Evidence); !slices.ContainsFunc(paths, func(p string) bool { return listed[p] }) {
@@ -97,14 +97,14 @@ func placesOf(plan *afspec.PartialSpec) planPlaces {
 			p.ids[path.Id] = true
 		}
 	}
-	if plan.TestSpec != nil {
-		for _, t := range plan.TestSpec.Tests {
-			p.ids[t.Id] = true
-		}
-	}
 	if plan.Tasks != nil {
 		for _, t := range plan.Tasks.Tasks {
 			p.tasks[t.Id] = true
+		}
+		// The derived integration task is in the plan the reviewer reads.
+		spec := &afspec.Spec{Profile: plan.Profile, Requirements: plan.Requirements, Tasks: plan.Tasks}
+		if id, ok := spec.IntegrationTaskID(); ok {
+			p.tasks[id] = true
 		}
 	}
 	return p
@@ -113,7 +113,7 @@ func placesOf(plan *afspec.PartialSpec) planPlaces {
 var taskSection = regexp.MustCompile(`(?i)^task\s+(\d+)\b`)
 
 // holds reports whether section names a place in the plan: a task by its
-// number, or, as its first word, a test, criterion or execution path id.
+// number, or, as its first word, a criterion or execution path id.
 func (p planPlaces) holds(section string) bool {
 	if m := taskSection.FindStringSubmatch(section); m != nil {
 		n, _ := strconv.Atoi(m[1])

@@ -5,51 +5,62 @@
 Natural-language requirements are ambiguous, untestable, and drift from
 implementation. The spec format solves this by defining a structured,
 machine-readable package that turns design intent into verifiable contracts.
-Every requirement maps to a test, every test maps to a task — nothing is
+Every criterion carries its check and is owned by a task — nothing is
 specified without verification and nothing is built without a requirement.
 
 ## Overview
 
 A specification package ("spec") is the durable artifact that captures design
-intent, acceptance criteria, verification contracts, and implementation plans
+intent, acceptance criteria with their checks, and the implementation plan
 for one cohesive feature. Every spec lives in a numbered directory
-(`{NN}_{snake_case_name}/`) and contains four required artifacts plus one
-optional artifact, and the render generated from them:
+(`{NN}_{snake_case_name}/`) and contains three contract artifacts, a progress
+file the tools write, one optional artifact, and the render generated from
+them:
 
 | Artifact | Format | Purpose |
 | --- | --- | --- |
 | `prd.md` | Markdown + YAML frontmatter | Narrative intent — the "why" and "what." Human-authored. Contains a hashed `## Intent` section that is protected after approval. |
-| `requirements.json` | JSON (schema-validated) | What the system must do: EARS acceptance criteria, correctness properties, execution paths, and error handling. |
-| `test_spec.json` | JSON (schema-validated) | How each requirement is verified: unit tests, property tests, edge-case tests, and smoke tests with computed coverage. |
-| `tasks.json` | JSON (schema-validated) | What work to do, in what order: task groups, subtasks with a state machine, cross-spec dependencies, and requirement-to-test traceability. |
+| `requirements.json` | JSON (schema-validated) | What the system must do, and how it is verified: EARS acceptance criteria, each with its check (unit, integration or property, or the same as another's), and execution paths, each with its smoke check. |
+| `tasks.json` | JSON (schema-validated) | What work to do, in what order: one flat list of implement tasks owning criteria, with steps, test commands and cross-spec dependencies. The integration task is derived from the package, not stored. |
+| `progress.json` | JSON (schema-validated) | The state of every task, the integration task included, and when it last changed. Written by the tools, never by hand, and never rendered: a task move changes this file alone. |
 | `architecture.md` | Markdown (free-form) | Optional. Architectural context — modules, interfaces, data models, technology choices. No schema, not cross-validated. |
 | `spec.md` | Markdown (generated) | The whole package rendered as one document, what `specr <package>` returns, for a reviewer to read in a diff. Written by every save of the package, never read as data, and not part of its contract; `speca <package> --render` writes it again. |
 
 **Key properties:**
 
-- **EARS patterns.** Requirements use the Easy Approach to Requirements Syntax — six
-  structured patterns (`ubiquitous`, `event_driven`, `complex_event`,
-  `state_driven`, `unwanted`, `optional`) that produce testable, unambiguous
-  acceptance criteria from decomposed fields.
-- **Two-layer validation.** Schema validation (per-file, sub-millisecond) plus
-  cross-file integrity checks (referential integrity of IDs, requirement-to-test
-  coverage, glossary completeness) run on every mutation.
+- **EARS patterns.** Requirements use the Easy Approach to Requirements Syntax — five
+  structured patterns (`ubiquitous`, `event_driven`, `state_driven`,
+  `unwanted`, `optional`) that produce testable, unambiguous acceptance
+  criteria from decomposed fields.
+- **Two-layer validation.** Schema validation (per-file, sub-millisecond; a
+  criterion without a check or a path without a smoke check fails it) plus
+  cross-file integrity checks (referential integrity of IDs, every shared
+  check resolving, every criterion owned by a task, the profile, the
+  progress) run on every mutation.
 - **Lifecycle.** A spec progresses through `draft → active → sealed`, with
   optional `superseded` and `archived` terminal states. The `## Intent` section
   is hashed at the `draft → active` transition and protected thereafter.
-- **Traceability.** Bidirectional links connect every requirement through its
-  test spec and task to an executable test, ensuring nothing is specified without
-  verification and nothing is built without a requirement.
+- **Traceability.** Every criterion carries its check and is owned by a task,
+  and every path's smoke check is run by the derived integration task, so
+  nothing is specified without verification and nothing is built without a
+  requirement. Coverage and the traceability matrix are computed, never
+  stored.
+- **Profiles.** A package is `full`, with at least one execution path and an
+  integration task, or `lite`: at most three requirements, no path and no
+  integration task, for a small change.
 
 The full specification — field-level schemas, EARS pattern definitions, ID
 formats, validation rules, task state machine, and rendering — is at
-**[spec-format-v2.md](specification/spec-format-v2.md)**. Version 1.3 is kept
-for reference at [spec-format.md](specification/spec-format.md).
+**[spec-format-v3.md](specification/spec-format-v3.md)**. Version 2 is kept
+for reference at [spec-format-v2.md](specification/spec-format-v2.md), and
+version 1.3 at [spec-format.md](specification/spec-format.md); §13 of the v3
+reference maps every version 2 construct to its version 3 form, and
+`speca <package> --migrate` performs the conversion.
 
 JSON Schemas for all artifacts are available in `specification/schemas/`
-(`prd-frontmatter.v2.json`, `requirements.v2.json`, `test_spec.v2.json`,
-`tasks.v2.json`, plus the v1 set). These schemas can be used for external
-validation or code generation.
+(`prd-frontmatter.v3.json`, `requirements.v3.json`, `tasks.v3.json`,
+`progress.v3.json`, plus the v1 and v2 sets). These schemas can be used for
+external validation or code generation.
 
 ## Implementations
 
@@ -60,11 +71,11 @@ reports their state:
 | Path | What it is |
 | --- | --- |
 | `specification/` | The format: the reference documents and the canonical JSON Schemas |
-| [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save and render spec packages. It embeds a copy of the v2 schemas in `afspec/schemas/` |
+| [`afspec/`](afspec/README.md) | The `afspec` Go library — load, validate, mutate, save, render and migrate spec packages. It embeds a copy of the v3 schemas in `afspec/schemas/` |
 | [`envelope/`](docs/api.md#envelope) | The JSON `spec`, `specr` and `speca` write to stdout, as Go types for a program to decode it into; standard library only |
 | `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline, built on `afspec` and [agentkit-go](https://github.com/agent-fox-dev/agentkit-go) |
 | `cmd/specr/` | The `specr` command: a package rendered as Markdown, whole or scoped to one task |
-| `cmd/speca/` | The `speca` command: a package's state, the format's verdict on it, or the list of every package |
+| `cmd/speca/` | The `speca` command: a package's state, the format's verdict on it, the list of every package, and the migration of a version 2 package |
 
 See [docs/architecture.md](docs/architecture.md) for how the pieces fit
 together.
@@ -84,17 +95,20 @@ spec -                                                  # read the idea from std
 
 Nobody is waiting to answer questions, so the run resolves every open
 question itself, records each in a `## Design Decisions` section of the PRD,
-and reports the ones it is least sure of as `open_questions` in the result.
-It then generates `requirements.json`, `test_spec.json` and `tasks.json` in
-that order — each validated against the format's schema and its cross-file
-rules before it is written — writes the package under `.specs/{NN}_{name}/`,
+reports the ones it is least sure of as `open_questions` in the result, and
+chooses the package's profile (`lite` for a change of at most three
+requirements with no end-to-end flow, else `full`). It then generates
+`requirements.json`, with a check on every criterion and a smoke check on
+every path, and `tasks.json`, in that order — each validated against the
+format's schema and its cross-file rules before it is written — writes the
+package under `.specs/{NN}_{name}/` with its `progress.json` and `spec.md`,
 validates it against the other specs of the spec root (an unknown dependency, a
 cycle, a dependency with no actor in common), and activates it if it validates.
 A package that fails either is still written to disk, in `draft`, with the
 broken rules named in the result. It is the verdict `speca <spec> --validate` gives.
 
 Output is one JSON object on stdout — spec id, artifacts written, requirement
-and test counts, the validation report, derived traceability coverage, and
+and task counts, the validation report, derived traceability coverage, and
 any `open_questions` — with progress on stderr. Exit codes: `0` a valid
 package was written, `1` the run failed (the stage is named in the JSON),
 `2` a usage error.
@@ -113,7 +127,7 @@ package was written, `1` the run failed (the stage is named in the JSON),
 | `--max-tokens` | The output token cap of one model response, thinking included (default 65536) |
 | `--preflight` | Run every check that would refuse the run, then stop before any model call |
 | `--max-parallel` | How many packages of a split are generated at once (default 3) |
-| `--adversarial-plan` | Have a fresh agent review every package's plan — its requirements, tests and tasks — against the Zero-Decision Rule and codebase grounding, and another revise it, before the package is written |
+| `--adversarial-plan` | Have a fresh agent review every package's plan — its requirements with their checks, and its tasks — against the Zero-Decision Rule and codebase grounding, and another revise it, before the package is written |
 | `--adversarial`, `--adversarial-rounds` | Have a fresh agent look for flaws in every PRD, the steering's directives among them, and another answer each one fixed, contested, escalated or declined, before the package is generated; up to 1–5 rounds (default 1), stopping once two consecutive rounds raise nothing serious (`3` gives a PRD room to converge) |
 
 The model is Claude, reached through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
@@ -158,19 +172,23 @@ Everything is in [docs/specr.md](docs/specr.md); the decision is
 ## Reporting a Spec Package's State
 
 The `speca` CLI is the spec admin command. It reports a package's state, gives
-the format's full verdict on it, lists every package under the spec root, and
-moves the state of a package's tasks. It takes one reference to a package (none
-with `--list`) and writes one JSON object to stdout, as `spec` and `specr` do:
+the format's full verdict on it, lists every package under the spec root,
+moves the state of a package's tasks, moves a package through its lifecycle,
+and converts a version 2 package to version 3. It takes one reference to a
+package (none with `--list`, or with a sweep) and writes one JSON object to
+stdout, as `spec` and `specr` do:
 
 ```bash
 speca 16                  # status, validity, every task with its state and readiness, the next task,
                           # the lifecycle moves allowed, the packages it depends on and that depend on it
-speca 16 --validate       # schema errors, the cross-file rules C1–C11 and the cross-spec rules, by rule
+speca 16 --validate       # schema errors, the cross-file rules C1–C8 and the cross-spec rules, by rule
 speca --list              # every package under the spec root, in number order
 speca --list --all        # and those under archive/
 speca 16 --task next --state in_progress   # claim the task to work on now
 speca 16 --task 4 --state done             # finish task 4 (--task 1,2 or all, --dry-run, --force)
 speca 16 --status active                   # activate a draft; also sealed, archived, or superseded --by 12
+speca 16 --migrate                         # convert a version 2 package to version 3 in place
+speca --migrate --all --dry-run            # which packages of the spec root and archive/ are still version 2
 speca --schema            # the flags and the output, as JSON Schema
 ```
 
@@ -180,15 +198,22 @@ it, after the claim of the task where it can be claimed. A package that does not
 validate is reported with exit 0, in `valid`; exit codes `0`, `1` and `2` are
 those of the other two commands. The task form moves tasks through the library's
 task state machine, every one or none, so a second claim of a task that is taken
-is refused with the states it may move to, and it writes through the library's
-`Spec.Save`, which writes every artifact of the package again. The status form
+is refused with the states it may move to, and it writes `progress.json`
+through the library's `Spec.SaveProgress`, and no other file; the integration
+task of a `full` package, which the library derives as task `N+1`, is moved
+like any other. The status form
 moves a package through its lifecycle with the library's `Transition` and
 `Supersede`, refuses a move the lifecycle does not allow with the way to get
 there, moves an archived or superseded package under `archive/`, and, when that
 move fails after the status was written, says so and is resumable: the same call
 moves the package and changes nothing else. The render form, `speca <spec>
 --render` (or `speca --render [--all]` for every package), writes the package's
-`spec.md` and no other file. The other forms write no file. `speca`
+`spec.md` and no other file. The migrate form, `speca <spec> --migrate` (or
+`speca --migrate [--all]` for every package of the spec root, and its
+`archive/`), converts a version 2 package to version 3 in place, whatever its
+status, with the library's `MigrateV2`: `requirements.json` takes the checks
+of `test_spec.json`, which is removed, `progress.json` takes the task states,
+and `spec.md` is rendered again. The other forms write no file. `speca`
 makes no model or network call and reads no credential. Everything is in
 [docs/speca.md](docs/speca.md); the decision is
 [ADR 10](docs/adr/10-report-and-change-the-state-of-a-package-with-its-own-command.md).
@@ -201,7 +226,7 @@ own session, one for each step around `spec`:
 | Skill | Step | What it does |
 | --- | --- | --- |
 | `af-prd` | before `spec` | writes a PRD with the user, in the shape `spec`'s own PRD phase writes, checked against what the format demands, and saves it where `spec <prd>` takes it |
-| `af-spec` | instead of `spec` | writes the package itself, in the session: the four artifacts in the pipeline's own order, `speca --validate` after each one, and activation only on a clean verdict |
+| `af-spec` | instead of `spec` | writes the package itself, in the session: the three artifacts in the pipeline's own order, `speca --validate` after each one, and activation only on a clean verdict |
 | `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request, with an issue for each item it leaves open (through aflib's `issue` command) |
 
 ### One source, four agents
@@ -298,8 +323,8 @@ and no API key: the command's tests run against a scripted model.
 
 ## Documentation
 
-- [Spec Format Reference v2](specification/spec-format-v2.md) — field-level schemas, EARS patterns, validation rules, and rendering
-- [Spec Format Reference v1.3](specification/spec-format.md) — the superseded format
+- [Spec Format Reference v3](specification/spec-format-v3.md) — field-level schemas, EARS patterns, checks, validation rules, rendering, and the migration from v2
+- [Spec Format Reference v2](specification/spec-format-v2.md) and [v1.3](specification/spec-format.md) — the superseded formats
 - [afspec](afspec/README.md) — the Go library's API
 - [Examples](examples/README.md) — programs that create, validate and work through a spec with `afspec`
 - [Public Go API](docs/api.md) — the packages and where their reference lives
@@ -318,3 +343,4 @@ and no API key: the command's tests run against a scripted model.
 - [ADR 16](docs/adr/16-triage-every-review-finding-four-ways.md) — why a review finding is fixed, contested, escalated or declined, and the review converges on two clean rounds
 - [ADR 17](docs/adr/17-review-the-plan-adversarially.md) — why the plan gets a review of its own, against the Zero-Decision Rule and computed grounding facts
 - [ADR 18](docs/adr/18-allow-extension-keys-and-move-word-checks-out-of-the-validator.md) — why every object accepts `x-` keys that every save keeps, and why vague wording is the generator's and the reviewers' to catch, not the validator's
+- [ADR 19](docs/adr/19-migrate-the-format-to-version-3.md) — why a criterion carries its check, progress lives in its own file, the integration task is derived, and a version 2 package is converted once with `speca --migrate`

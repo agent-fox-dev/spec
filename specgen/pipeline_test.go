@@ -53,17 +53,17 @@ func TestRun_WritesAValidatedActivatedPackage(t *testing.T) {
 	}
 
 	// One PRD phase, then the generation steps in the format's order: a step
-	// that cannot see a test id cannot own it.
+	// that cannot see a criterion id cannot own it.
 	if !slices.Equal(a.steps, afspec.GenerationSteps) || len(a.prdRequests) != 1 {
 		t.Errorf("%d PRD phases, steps %v", len(a.prdRequests), a.steps)
 	}
 
 	dir := filepath.Join(ws.Root(), got.SpecDir)
 	files := dirNames(t, dir)
-	if !slices.Equal(files, []string{"prd.md", "requirements.json", "spec.md", "tasks.json", "test_spec.json"}) {
+	if !slices.Equal(files, []string{"prd.md", "progress.json", "requirements.json", "spec.md", "tasks.json"}) {
 		t.Errorf("package files = %v", files)
 	}
-	if want := []string{"prd.md", "requirements.json", "test_spec.json", "tasks.json", "spec.md"}; !slices.Equal(got.Package.Artifacts, want) {
+	if want := []string{"prd.md", "requirements.json", "tasks.json", "progress.json", "spec.md"}; !slices.Equal(got.Package.Artifacts, want) {
 		t.Errorf("artifacts = %v, want %v: the run reports every file it wrote", got.Package.Artifacts, want)
 	}
 	// The relevant files are reported, never written into the package.
@@ -90,10 +90,10 @@ func TestRun_WritesAValidatedActivatedPackage(t *testing.T) {
 	}
 
 	// The counts and the traceability are derived, not stored.
-	if got.Requirements == 0 || got.Tests == 0 || got.Tasks == 0 {
+	if got.Requirements == 0 || got.ExecutionPaths == 0 || got.Tasks == 0 {
 		t.Errorf("counts = %+v", got.Package)
 	}
-	if len(got.Traceability.CriteriaUncovered) != 0 || len(got.Traceability.TestsUnowned) != 0 ||
+	if len(got.Traceability.CriteriaUncovered) != 0 || len(got.Traceability.CriteriaUnowned) != 0 ||
 		got.Traceability.CriteriaCovered != got.Criteria {
 		t.Errorf("traceability = %+v for %d criteria", got.Traceability, got.Criteria)
 	}
@@ -116,7 +116,7 @@ func TestRun_WritesAValidatedActivatedPackage(t *testing.T) {
 			t.Errorf("phase %s: tool calls %v, scope %q", p.Name, p.ToolCalls, p.Scope)
 		}
 	}
-	if want := []string{"prd", "generate:requirements", "generate:test_spec", "generate:tasks"}; !slices.Equal(names, want) {
+	if want := []string{"prd", "generate:requirements", "generate:tasks"}; !slices.Equal(names, want) {
 		t.Errorf("usage phases = %v, want %v", names, want)
 	}
 
@@ -294,14 +294,15 @@ func TestRun_AFailedGenerationStepLeavesNothingAndClaimsNoPackage(t *testing.T) 
 
 // A package that does not validate is still written, because a spec you can
 // read and fix is worth more than none: it is reported with the rules it
-// breaks, not activated, and not posted to the issue. The break is a test no
-// task owns, made with the per-step check bypassed, which is how a model that
-// satisfies each step and still produces an inconsistent package looks.
+// breaks, not activated, and not posted to the issue. The break is a
+// criterion no task owns, made with the per-step check bypassed, which is how
+// a model that satisfies each step and still produces an inconsistent package
+// looks.
 func TestRun_WritesAnInvalidPackageAndReportsIt(t *testing.T) {
 	ws := newWorkspace(t)
 	a := newAuthor(t, "01", "test_feature")
 	a.skipStepValidation = true
-	dropOneOwnedTest(a.artifacts[afspec.StepTasks])
+	dropOneOwnedCriterion(a.artifacts[afspec.StepTasks])
 	o := newOptions(ws, a)
 	forge := &mockForge{authenticated: true}
 	commentOn(&o, forge)
@@ -573,7 +574,7 @@ func TestRun_ChecksThePackageAgainstTheSpecsItDependsOn(t *testing.T) {
 			[]string{"cross_spec_unknown_dependency"}},
 		// One report, the package's own findings first, as speca gives them.
 		{"breaking its own rules too", packageShape{dependsOn: "01", actor: "somebody else"}, true,
-			[]string{"C7", "cross_spec_actor"}},
+			[]string{"C5", "cross_spec_actor"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := newWorkspace(t)
@@ -584,7 +585,7 @@ func TestRun_ChecksThePackageAgainstTheSpecsItDependsOn(t *testing.T) {
 			a.shapes = map[string]packageShape{"widget_github": tc.shape}
 			if tc.breakOwn {
 				a.skipStepValidation = true
-				dropOneOwnedTest(a.artifacts[afspec.StepTasks])
+				dropOneOwnedCriterion(a.artifacts[afspec.StepTasks])
 			}
 			got, err := Run(context.Background(), newOptions(ws, a))
 			if tc.want == nil {
@@ -860,7 +861,7 @@ func TestRun_TheReviewedPRDFeedsEverythingAfterIt(t *testing.T) {
 	if !reflect.DeepEqual(res.OpenQuestions, revQuestions) || !reflect.DeepEqual(res.RelevantFiles, revFiles) {
 		t.Errorf("result open questions %+v, relevant files %+v", res.OpenQuestions, res.RelevantFiles)
 	}
-	if len(a.artifactReqs) != 3 || len(a.archReqs) != 1 {
+	if len(a.artifactReqs) != len(afspec.GenerationSteps) || len(a.archReqs) != 1 {
 		t.Fatalf("%d generation and %d architecture phases", len(a.artifactReqs), len(a.archReqs))
 	}
 	type sent struct {
@@ -882,7 +883,7 @@ func TestRun_TheReviewedPRDFeedsEverythingAfterIt(t *testing.T) {
 	}
 	dir := filepath.Join(ws.Root(), res.SpecDir)
 	files := dirNames(t, dir)
-	if !slices.Equal(files, []string{"architecture.md", "prd.md", "requirements.json", "spec.md", "tasks.json", "test_spec.json"}) {
+	if !slices.Equal(files, []string{"architecture.md", "prd.md", "progress.json", "requirements.json", "spec.md", "tasks.json"}) {
 		t.Errorf("package files = %v", files)
 	}
 	for _, f := range files {
@@ -1041,23 +1042,23 @@ func TestRunPreflight_EstimatesThePhases(t *testing.T) {
 		set  func(*testing.T, *Options)
 		want int
 	}{
-		{"a fresh input", func(*testing.T, *Options) {}, 4},
-		{"--architecture", func(_ *testing.T, o *Options) { o.Architecture = true }, 5},
-		{"--adversarial with three rounds", func(_ *testing.T, o *Options) { o.Adversarial, o.AdversarialRounds = true, 3 }, 10},
+		{"a fresh input", func(*testing.T, *Options) {}, 3},
+		{"--architecture", func(_ *testing.T, o *Options) { o.Architecture = true }, 4},
+		{"--adversarial with three rounds", func(_ *testing.T, o *Options) { o.Adversarial, o.AdversarialRounds = true, 3 }, 9},
 		{"--adversarial and --architecture", func(_ *testing.T, o *Options) {
 			o.Adversarial, o.AdversarialRounds, o.Architecture = true, 3, true
-		}, 11},
+		}, 10},
 		{"resuming a plan with two scopes to write", func(t *testing.T, o *Options) {
 			plan := newSplitPlan(o.Input, []SplitScope{{Name: "first", Scope: "a"}, {Name: "second", Scope: "b"}, {Name: "third", Scope: "c"}})
 			plan.Scopes[0].Dir, plan.Scopes[0].SpecID = "01_first", "01"
 			if err := plan.save(resolveSpecsDir(*o, o.Workspace.Root())); err != nil {
 				t.Fatal(err)
 			}
-		}, 8},
-		{"--adversarial-plan with three rounds", func(_ *testing.T, o *Options) { o.AdversarialPlan, o.AdversarialRounds = true, 3 }, 10},
+		}, 6},
+		{"--adversarial-plan with three rounds", func(_ *testing.T, o *Options) { o.AdversarialPlan, o.AdversarialRounds = true, 3 }, 9},
 		{"both reviews with three rounds", func(_ *testing.T, o *Options) {
 			o.Adversarial, o.AdversarialPlan, o.AdversarialRounds = true, true, 3
-		}, 16},
+		}, 15},
 		{"the plan review over two scopes to write", func(t *testing.T, o *Options) {
 			o.AdversarialPlan, o.AdversarialRounds = true, 3
 			plan := newSplitPlan(o.Input, []SplitScope{{Name: "first", Scope: "a"}, {Name: "second", Scope: "b"}, {Name: "third", Scope: "c"}})
@@ -1065,7 +1066,7 @@ func TestRunPreflight_EstimatesThePhases(t *testing.T) {
 			if err := plan.save(resolveSpecsDir(*o, o.Workspace.Root())); err != nil {
 				t.Fatal(err)
 			}
-		}, 20},
+		}, 18},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o := preflightOptions(t)
@@ -1089,7 +1090,7 @@ func TestRunPreflight_EstimatesThePhases(t *testing.T) {
 // phase_models names the model and effort each phase will run on, in the
 // order a package is built, so a caller sees what a choice resolved to.
 func TestRunPreflight_NamesEachPhasesModel(t *testing.T) {
-	const gen = "requirements claude-opus-5-5/high; test_spec claude-sonnet-5-5/high; tasks claude-sonnet-5-5/high"
+	const gen = "requirements claude-opus-5-5/high; tasks claude-sonnet-5-5/high"
 	for _, tc := range []struct {
 		name string
 		set  func(*Options)
@@ -1546,7 +1547,7 @@ func TestRun_ReviewsThePlanBetweenTheTasksAndTheArchitecture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	want := []string{"prd", "generate:requirements", "generate:test_spec", "generate:tasks", "plan_review", "plan_revision", "architecture"}
+	want := []string{"prd", "generate:requirements", "generate:tasks", "plan_review", "plan_revision", "architecture"}
 	if names := phasesRun(o, got); !slices.Equal(names, want) {
 		t.Errorf("phases = %v; want %v", names, want)
 	}
@@ -1561,16 +1562,16 @@ func TestRun_ReviewsThePlanBetweenTheTasksAndTheArchitecture(t *testing.T) {
 // The two review flags are independent, and a run with neither runs the
 // phases it always ran.
 func TestRun_TheTwoReviewsAreIndependent(t *testing.T) {
-	gen := []string{"prd", "generate:requirements", "generate:test_spec", "generate:tasks"}
+	gen := []string{"prd", "generate:requirements", "generate:tasks"}
 	for _, tc := range []struct {
 		name      string
 		prd, plan bool
 		want      []string
 	}{
 		{"neither", false, false, gen},
-		{"the PRD review", true, false, []string{"prd", "prd_review", "generate:requirements", "generate:test_spec", "generate:tasks"}},
+		{"the PRD review", true, false, []string{"prd", "prd_review", "generate:requirements", "generate:tasks"}},
 		{"the plan review", false, true, append(slices.Clone(gen), "plan_review")},
-		{"both", true, true, []string{"prd", "prd_review", "generate:requirements", "generate:test_spec", "generate:tasks", "plan_review"}},
+		{"both", true, true, []string{"prd", "prd_review", "generate:requirements", "generate:tasks", "plan_review"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rv := &scriptedReviewer{t: t, reviews: []reviewOutcome{{}}, planReviews: []reviewOutcome{{}}}

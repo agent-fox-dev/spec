@@ -32,8 +32,8 @@ func TestStatus_FailsAtLoad(t *testing.T) {
 	}{
 		"the input does not load":  {[]string{"05_bad", "--status", "sealed", "--force"}, []string{"05_bad", "could not be read"}},
 		"the --by does not load":   {[]string{"09_agent_mode", "--status", "superseded", "--by", "05_bad", "--force"}, []string{"--by", "05_bad", "could not be read"}},
-		"the input is version 1":   {[]string{"07_legacy", "--status", "sealed", "--force"}, []string{"07_legacy", "format version 1", "format version 2 packages only"}},
-		"the --by is version 1":    {[]string{"09_agent_mode", "--status", "superseded", "--by", "07_legacy", "--force"}, []string{"--by", "07_legacy", "format version 1", "format version 2 packages only"}},
+		"the input is version 2":   {[]string{"07_legacy", "--status", "sealed", "--force"}, []string{"07_legacy", "format version 2", "format version 3 packages only", "--migrate"}},
+		"the --by is version 2":    {[]string{"09_agent_mode", "--status", "superseded", "--by", "07_legacy", "--force"}, []string{"--by", "07_legacy", "format version 2", "format version 3 packages only"}},
 		"both, the input is first": {[]string{"05_bad", "--status", "superseded", "--by", "07_legacy"}, []string{"05_bad", "could not be read"}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -303,11 +303,11 @@ func TestStatus_ActivatesADraft(t *testing.T) {
 	}
 }
 
-// An active package with no drift and no open task is sealed where it is, and
-// its tasks stay as they were.
+// An active package with no drift and no open task, the integration task
+// included, is sealed where it is, and its tasks stay as they were.
 func TestStatus_SealsAnActivePackage(t *testing.T) {
 	root := newRepo(t)
-	dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), planTask(2, "dropped", []int{}))
+	dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), planTask(2, "dropped", []int{}), integrationTask("done"))
 
 	_, r := succeeds(t, root, "03_a", "--status", "sealed")
 	if r.Status != "sealed" || r.SpecDir != ".specs/03_a" || statusOnDisk(t, dir) != "sealed" {
@@ -316,7 +316,7 @@ func TestStatus_SealsAnActivePackage(t *testing.T) {
 	if want := []envelope.Change{{Kind: "status", From: "active", To: "sealed"}}; !slices.Equal(r.Changes, want) {
 		t.Errorf("changes %+v; want %+v", r.Changes, want)
 	}
-	if got := onDisk(t, dir); !maps.Equal(got, map[int]string{1: "done", 2: "dropped"}) {
+	if got := onDisk(t, dir); !maps.Equal(got, map[int]string{1: "done", 2: "dropped", 3: "done"}) {
 		t.Errorf("the tasks on disk are %v; want them as they were", got)
 	}
 }
@@ -363,7 +363,7 @@ func TestStatus_Archives(t *testing.T) {
 func TestStatus_ArchivesAPackageOutsideTheSpecRootInItsOwnTree(t *testing.T) {
 	root := newRepo(t)
 	external := filepath.Join(root, "elsewhere", "03_x")
-	copyDir(t, fixture("v2_example"), external)
+	copyDir(t, fixture("v3_example"), external)
 	setStatus(t, external, "sealed")
 
 	_, r := succeeds(t, root, "elsewhere/03_x", "--status", "archived")
@@ -420,22 +420,30 @@ func TestStatus_TheResultIsReadBackFromWhereThePackageIsNow(t *testing.T) {
 	}
 }
 
-// Every package the call writes, the replacing one too, gets the time of the
-// call as its updated_at.
-func TestStatus_SetsUpdatedAtOnEveryPackageItWrites(t *testing.T) {
+// updated_at is progress.json's, and says when a task last changed state,
+// which a status change is not: no package the call writes, the replacing one
+// included, has its updated_at touched, though the library rewrites the
+// progress file with the rest.
+func TestStatus_LeavesUpdatedAtAsItWas(t *testing.T) {
 	root := newRepo(t)
-	start := time.Now().UTC().Truncate(time.Second)
-	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
 	packageWith(t, root, "04_old", "04", "old", "sealed")
 	replacing := packageWith(t, root, "12_new", "12", "new", "draft")
-	editFile(t, filepath.Join(replacing, "prd.md"), `updated_at: "2026-09-08T09:00:00Z"`, `updated_at: "2000-01-01T00:00:00Z"`)
+	setUpdatedAt(t, replacing, "2000-01-01T00:00:00Z")
+	was := map[string]time.Time{}
+	for name, dir := range map[string]string{"the sealed package": pkgDir(root, "03_a"), "the superseded package": pkgDir(root, "04_old"), "the replacing package": replacing} {
+		was[name] = updatedAtIn(t, dir)
+	}
 
 	succeeds(t, root, "03_a", "--status", "sealed")
-	succeeds(t, root, "04_old", "--status", "superseded", "--by", "12_new")
+	_, r := succeeds(t, root, "04_old", "--status", "superseded", "--by", "12_new")
 	for name, dir := range map[string]string{"the sealed package": pkgDir(root, "03_a"), "the superseded package": pkgDir(root, "archive/04_old"), "the replacing package": replacing} {
-		if got := updatedAtIn(t, dir); got.Before(start) {
-			t.Errorf("%s: updated_at %s is before the call began (%s)", name, got.Format(time.RFC3339), start.Format(time.RFC3339))
+		if got := updatedAtIn(t, dir); !got.Equal(was[name]) {
+			t.Errorf("%s: updated_at %s; want %s, as it was", name, got.Format(time.RFC3339), was[name].Format(time.RFC3339))
 		}
+	}
+	if r.UpdatedAt != was["the superseded package"].Format(time.RFC3339) {
+		t.Errorf("the result's updated_at %q; want the package's, %s", r.UpdatedAt, was["the superseded package"].Format(time.RFC3339))
 	}
 }
 
@@ -467,7 +475,7 @@ func TestStatus_ALifecycleOrIntentErrorAtTheWriteIsARefusal(t *testing.T) {
 	} {
 		t.Run(name+" at the status", func(t *testing.T) {
 			root := newRepo(t)
-			activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+			activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
 			failWith(t, &transitionSpec, func(*afspec.Spec, string, string) (*afspec.Spec, error) { return nil, writeErr })
 
 			if e := refusedAt(t, root, "status", envelope.CategoryLifecycle, "03_a", "--status", "sealed"); e != nil {
@@ -584,7 +592,7 @@ func TestStatus_AMoveOnlyCallWhoseMoveFailsIsResumableToo(t *testing.T) {
 // holds when the read-back after a failed move fails too.
 func TestStatus_AReadBackFailureKeepsTheChanges(t *testing.T) {
 	root := newRepo(t)
-	dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	dir := activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
 	failWith(t, &loadWritten, func(string) (*afspec.Spec, error) { return nil, errors.New("the disk went away") })
 
 	env, code, _ := run(t, "--dir", root, "03_a", "--status", "sealed")
@@ -674,8 +682,8 @@ func TestStatus_ADryRunIsTheRealCallWithoutTheWrites(t *testing.T) {
 			if !d.DryRun || r.DryRun {
 				t.Errorf("dry_run is %v under --dry-run and %v without", d.DryRun, r.DryRun)
 			}
-			// All but when it was written, and whether it was.
-			d.UpdatedAt, r.UpdatedAt, d.DryRun, r.DryRun = "", "", false, false
+			// All but whether it was written.
+			d.DryRun, r.DryRun = false, false
 			if !reflect.DeepEqual(d, r) {
 				t.Errorf("the result under --dry-run is %+v; without it %+v", d, r)
 			}
@@ -713,7 +721,9 @@ func TestStatus_Summary(t *testing.T) {
 		want  string
 	}{
 		"activating": {func(*testing.T, string) {}, []string{"09", "--status", "active"}, "speca: activated 09_agent_mode"},
-		"sealing": {func(t *testing.T, root string) { activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)) },
+		"sealing": {func(t *testing.T, root string) {
+			activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
+		},
 			[]string{"03_a", "--status", "sealed"}, "speca: sealed 03_a"},
 		"archiving": {func(t *testing.T, root string) { packageWith(t, root, "04_s", "04", "s", "sealed") },
 			[]string{"04_s", "--status", "archived"}, "speca: archived 04_s, moved to .specs/archive/04_s"},
@@ -756,13 +766,15 @@ func TestStatus_Next(t *testing.T) {
 		setup func(t *testing.T, root string)
 		argv  []string
 	}{
-		// The plans do not validate, which is not what is looked at here.
 		"activating, the next task in progress": {func(t *testing.T, root string) {
 			setTasks(t, pkgDir(root, "09_agent_mode"), planTask(1, "in_progress", nil))
-		}, []string{"09", "--status", "active", "--force"}},
+		}, []string{"09", "--status", "active"}},
+		// A plan with no task does not validate, which is not what is looked at here.
 		"activating, no task": {func(t *testing.T, root string) { setTasks(t, pkgDir(root, "09_agent_mode")) },
 			[]string{"09", "--status", "active", "--force"}},
-		"sealing":   {func(t *testing.T, root string) { activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil)) }, []string{"03_a", "--status", "sealed"}},
+		"sealing": {func(t *testing.T, root string) {
+			activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
+		}, []string{"03_a", "--status", "sealed"}},
 		"archiving": {func(t *testing.T, root string) { packageWith(t, root, "04_s", "04", "s", "sealed") }, []string{"04_s", "--status", "archived"}},
 		"superseding": {func(t *testing.T, root string) {
 			packageWith(t, root, "05_old", "05", "old", "sealed")
@@ -782,7 +794,7 @@ func TestStatus_Next(t *testing.T) {
 // keeping --force and --by.
 func TestStatus_ADryRunSuggestsTheSameCallWithoutDryRun(t *testing.T) {
 	root := newRepo(t)
-	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil))
+	activePackage(t, root, "03_a", "03", "a", planTask(1, "done", nil), integrationTask("done"))
 	packageWith(t, root, "05_old", "05", "old", "sealed")
 	packageWith(t, root, "12_new", "12", "new", "draft")
 

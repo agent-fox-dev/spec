@@ -28,11 +28,11 @@ var lineReferenceRe = regexp.MustCompile(`(?i)(\b[\w./-]+\.[A-Za-z0-9]+:\d+(?:-\
 // line references in the steps and touches of a tasks artifact.
 func generatorHints(step afspec.GenerationStep, artifact any) []afspec.ValidationEntry {
 	switch a := artifact.(type) {
-	case *afspec.RequirementsV2Json:
+	case *afspec.RequirementsV3Json:
 		if step == afspec.StepRequirements {
 			return vagueWordHints(a)
 		}
-	case *afspec.TasksV2Json:
+	case *afspec.TasksV3Json:
 		if step == afspec.StepTasks {
 			return lineReferenceHints(a)
 		}
@@ -44,18 +44,15 @@ func hint(check, artifact, entity, msg string) afspec.ValidationEntry {
 	return afspec.ValidationEntry{Category: "warning", Check: check, Artifact: artifact, EntityID: entity, Message: msg}
 }
 
-// vagueWordHints names each vague word in a criterion's condition, guard and
-// action, in that order of fields.
-func vagueWordHints(r *afspec.RequirementsV2Json) []afspec.ValidationEntry {
+// vagueWordHints names each vague word in a criterion's action and
+// condition, in that order of fields.
+func vagueWordHints(r *afspec.RequirementsV3Json) []afspec.ValidationEntry {
 	var out []afspec.ValidationEntry
 	for _, req := range r.Requirements {
 		for _, c := range req.Criteria {
 			fields := []struct{ name, text string }{{"action", c.Action}}
 			if c.Condition != nil {
 				fields = append(fields, struct{ name, text string }{"condition", *c.Condition})
-			}
-			if c.Guard != nil {
-				fields = append(fields, struct{ name, text string }{"guard", *c.Guard})
 			}
 			for _, f := range fields {
 				for _, match := range vagueWordsRe.FindAllString(f.text, -1) {
@@ -70,7 +67,7 @@ func vagueWordHints(r *afspec.RequirementsV2Json) []afspec.ValidationEntry {
 
 // lineReferenceHints names each step and touches entry of a task that points
 // at a line of a file, which is wrong after the first commit that moves it.
-func lineReferenceHints(t *afspec.TasksV2Json) []afspec.ValidationEntry {
+func lineReferenceHints(t *afspec.TasksV3Json) []afspec.ValidationEntry {
 	var out []afspec.ValidationEntry
 	for _, task := range t.Tasks {
 		id := fmt.Sprint(task.Id)

@@ -207,7 +207,7 @@ func (e *runEnv) actorsNow(specID string) []specActors {
 
 // actorsOf are the actors of the execution paths, each once whatever its case
 // (the rule ignores it), in alphabetical order.
-func actorsOf(r *afspec.RequirementsV2Json) []string {
+func actorsOf(r *afspec.RequirementsV3Json) []string {
 	if r == nil {
 		return nil
 	}

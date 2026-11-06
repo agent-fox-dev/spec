@@ -11,11 +11,12 @@ written once and read at every step that needs it.
 - **Conventions.** The test framework and where tests live, how errors are
   handled, how packages are wired, what the linter enforces, what the
   Makefile does. Read a neighbouring test file rather than guessing a style.
-- **Where the tests go.** For each test the spec names, the production area it
-  exercises and that area's existing test file, or where one would be created;
-  the existing tests that already assert part of what it asks for, by file and
-  name; and the repository's shared test helpers, which the steering file may
-  name, so that no task copies one.
+- **Where the checks go.** For each check the spec carries — a criterion's
+  own check, a path's smoke check — the production area it exercises and that
+  area's existing test file, or where one would be created; the existing tests
+  that already assert part of what it asks for, by file and name, starting
+  from the ones its `pseudocode` names; and the repository's shared test
+  helpers, which the steering file may name, so that no task copies one.
 - **Drift.** Every place the spec's assumptions and the code disagree: what
   the spec assumes, what the code does, and the decision, numbered `D-1`,
   `D-2`, … and written in the past tense as it will read in the pull request

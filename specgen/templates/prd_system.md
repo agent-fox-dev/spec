@@ -29,6 +29,8 @@ Write plainly. No marketing voice, no restating the same requirement in three se
 
 When the task says the PRD is **one scope of a split**, the split has already been decided: write that scope alone, under the name given, building on the packages of the split that already exist, and do not report a `recommended_split`.
 
+8. **Choose the profile.** A package is `full` unless the work is small: at most three requirements, and no flow that crosses components end to end and would be worth a smoke check (a flag on one command, a message, a field). Such a change is a `lite` package: no execution path, no smoke check, no integration task, and the requirements phase is held to those three requirements. Report `profile: "lite"` for it and nothing for a full package; when in doubt, the package is full.
+
 ## Reporting what you are unsure of
 
 `open_questions` is where you flag the decisions you would most like a human to check. Put a decision there when a different answer would change the shape of the work — not for cosmetic choices, and not for questions you answered confidently from the code.

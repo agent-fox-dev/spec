@@ -292,7 +292,7 @@ func TestMain_AClampedEffortIsWarnedOncePerModel(t *testing.T) {
 		t.Errorf("effort = %q, want high", seen.Models.Default.Effort)
 	}
 	clamps := warningsOf(env.Warnings, WarnEffortClamped)
-	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, prd_review, prd_revision, requirements, test_spec, tasks, plan_review, plan_revision, architecture") {
+	if len(clamps) != 1 || !strings.Contains(clamps[0].Message, "prd, prd_review, prd_revision, requirements, tasks, plan_review, plan_revision, architecture") {
 		t.Errorf("clamp warnings = %+v", clamps)
 	}
 }

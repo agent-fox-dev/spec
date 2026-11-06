@@ -32,13 +32,13 @@ var wantTaskStates = []string{"pending", "in_progress", "done", "dropped"}
 // fixture is a package under afspec/testdata.
 func fixture(name string) string { return filepath.Join("..", "..", "afspec", "testdata", name) }
 
-// newRepo lays out a repository with two packages under .specs: the v2
+// newRepo lays out a repository with two packages under .specs: the v3
 // example as 09_agent_mode, and the fixture with an architecture.md as
 // 01_test_feature. It returns the repository root.
 func newRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	copyDir(t, fixture("v2_example"), pkgDir(root, "09_agent_mode"))
+	copyDir(t, fixture("v3_example"), pkgDir(root, "09_agent_mode"))
 	copyDir(t, fixture("valid_spec_with_arch"), pkgDir(root, "01_test_feature"))
 	return root
 }
@@ -77,20 +77,23 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// addPackage copies the v2 example into .specs/dirName (which may be under
-// archive/) under the given id and name. The copy loads, and validates only
-// when it keeps the example's id and name; the tests that add siblings care how
-// they load, not that they validate.
+// addPackage copies the v3 example into .specs/dirName (which may be under
+// archive/) under the given id and name, in every artifact, and without the
+// example's dependency on spec 08, so that the copy validates on its own.
 func addPackage(t *testing.T, root, dirName, id, name string) string {
 	t.Helper()
 	dir := pkgDir(root, dirName)
-	copyDir(t, fixture("v2_example"), dir)
+	copyDir(t, fixture("v3_example"), dir)
 	editFile(t, filepath.Join(dir, "prd.md"), `spec_id: "09"`, `spec_id: "`+id+`"`)
 	editFile(t, filepath.Join(dir, "prd.md"), `spec_name: "agent_mode"`, `spec_name: "`+name+`"`)
-	editJSON(t, filepath.Join(dir, "tasks.json"), func(m map[string]any) {
-		m["spec_id"], m["spec_name"] = id, name
-		m["dependencies"] = []any{}
-	})
+	for _, f := range []string{afspec.RequirementsFileName, afspec.TasksFileName, afspec.ProgressFileName} {
+		editJSON(t, filepath.Join(dir, f), func(m map[string]any) {
+			m["spec_id"], m["spec_name"] = id, name
+			if f == afspec.TasksFileName {
+				m["dependencies"] = []any{}
+			}
+		})
+	}
 	return dir
 }
 
@@ -117,15 +120,37 @@ func activePackage(t *testing.T, root, dirName, id, name string, tasks ...map[st
 	return dir
 }
 
-// addLegacyPackage adds a package in format version 1 as 07_legacy: the v2
-// example with its frontmatter's version set back and a v1 task plan, whose
-// task_groups the v2 types do not read.
+// addV2Package copies the v2 example, the worked example of format version 2
+// with its test_spec.json, into .specs/dirName under the given id and name,
+// the ids of its requirements, paths and tests renamed with it, so that the
+// copy converts to a version 3 package that validates on its own. It is what
+// the migrate form converts, and what every other form refuses to change.
+func addV2Package(t *testing.T, root, dirName, id, name string) string {
+	t.Helper()
+	dir := pkgDir(root, dirName)
+	copyDir(t, fixture("v2_example"), dir)
+	for _, f := range []string{"prd.md", afspec.RequirementsFileName, afspec.TasksFileName, afspec.TestSpecFileName} {
+		replaceAll(t, filepath.Join(dir, f),
+			`spec_id: "09"`, `spec_id: "`+id+`"`, `spec_name: "agent_mode"`, `spec_name: "`+name+`"`,
+			`"spec_id": "09"`, `"spec_id": "`+id+`"`, `"spec_name": "agent_mode"`, `"spec_name": "`+name+`"`,
+			`"09-`, `"`+id+`-`, `TS-09-`, `TS-`+id+`-`)
+	}
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) { m["dependencies"] = []any{} })
+	return dir
+}
+
+// addLegacyPackage adds a package in format version 2 as 07_legacy, whose
+// task states and tests the version 3 types do not read.
 func addLegacyPackage(t *testing.T, root string) {
 	t.Helper()
-	legacy := addPackage(t, root, "07_legacy", "07", "legacy")
-	editFile(t, filepath.Join(legacy, "prd.md"), "schema_version: 2", "schema_version: 1")
-	writeFile(t, filepath.Join(legacy, "tasks.json"), `{"spec_id": "07", "spec_name": "legacy", "schema_version": 1,
-  "task_groups": [{"id": 1, "kind": "tests", "title": "Write tests", "subtasks": [{"id": "1.1", "title": "Write a test", "state": "done"}]}]}`)
+	addV2Package(t, root, "07_legacy", "07", "legacy")
+}
+
+// breakV2Package gives a version 2 package a gap the conversion refuses: a
+// criterion no test verifies, which format v2 forbade.
+func breakV2Package(t *testing.T, dir, id string) {
+	t.Helper()
+	editFile(t, filepath.Join(dir, afspec.TestSpecFileName), `"`+id+`-REQ-2.2"`, `"`+id+`-REQ-2.1"`)
 }
 
 // editFile replaces the one occurrence of old in path with new.
@@ -139,6 +164,17 @@ func editFile(t *testing.T, path, old, new string) {
 		t.Fatalf("%s does not contain %q", path, old)
 	}
 	writeFile(t, path, strings.Replace(string(b), old, new, 1))
+}
+
+// replaceAll replaces every occurrence of each old with its new in path, in
+// order; a pair that matches nothing is no error.
+func replaceAll(t *testing.T, path string, pairs ...string) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, strings.NewReplacer(pairs...).Replace(string(b)))
 }
 
 // editJSON reads the JSON object in path, applies edit to it and writes it back.
@@ -183,47 +219,94 @@ func setActors(t *testing.T, dir, actor string) {
 	})
 }
 
-// setGlossaryTerm defines a term in the package's glossary.
-func setGlossaryTerm(t *testing.T, dir, term, definition string) {
-	t.Helper()
-	editJSON(t, filepath.Join(dir, "requirements.json"), func(m map[string]any) {
-		m["glossary"].(map[string]any)[term] = definition
-	})
-}
-
-// planTask is one task of a plan written by setTasks. A nil deps leaves
-// depends_on out, which format v2 §8.3 reads as the previous task.
+// planTask is one task of a plan written by setTasks: a task of tasks.json
+// that owns every criterion of the example, and its state, which setTasks
+// writes to progress.json. A nil deps leaves depends_on out, which format v3
+// §8.2 reads as the previous task.
 func planTask(id int, state string, deps []int) map[string]any {
-	task := map[string]any{"id": id, "kind": "implement", "title": fmt.Sprintf("Task %d", id),
-		"criteria": []any{}, "tests": []any{}, "steps": []any{}, "state": state}
+	task := map[string]any{"id": id, "title": fmt.Sprintf("Task %d", id),
+		"criteria": []any{"REQ-1", "REQ-2"}, "steps": []any{fmt.Sprintf("Build task %d", id)}, "state": state}
 	if deps != nil {
 		task["depends_on"] = deps
 	}
 	return task
 }
 
-// planWithOpenTasks is a plan with a pending task and an optional one in progress.
-func planWithOpenTasks() []map[string]any {
-	optional := planTask(2, "in_progress", []int{})
-	optional["optional"] = true
-	return []map[string]any{planTask(1, "pending", nil), optional}
+// integrationTask is the state of the derived integration task, for setTasks
+// and plan: the plan derives the task itself (format v3 §8.4), and only its
+// state is stored. Without it the task is pending.
+func integrationTask(state string) map[string]any {
+	return map[string]any{"integration": true, "state": state}
 }
 
-// setTasks replaces the package's plan.
+// planWithOpenTasks is a plan with a pending task and one in progress.
+func planWithOpenTasks() []map[string]any {
+	return []map[string]any{planTask(1, "pending", nil), planTask(2, "in_progress", []int{})}
+}
+
+// setTasks replaces the package's plan: the tasks of tasks.json, and in
+// progress.json the state of each of them and of the integration task, which
+// is one past the highest id (pending unless integrationTask says otherwise).
+// A plan with no tasks has no integration task.
 func setTasks(t *testing.T, dir string, tasks ...map[string]any) {
 	t.Helper()
-	editJSON(t, filepath.Join(dir, "tasks.json"), func(m map[string]any) {
+	stored, states, integration := splitPlan(tasks)
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
 		plan := []any{}
-		for _, task := range tasks {
+		for _, task := range stored {
+			task = maps.Clone(task)
+			delete(task, "state")
 			plan = append(plan, task)
 		}
 		m["tasks"] = plan
 	})
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) {
+		entries := []any{}
+		for _, task := range stored {
+			entries = append(entries, map[string]any{"id": task["id"], "state": states[task["id"].(int)]})
+		}
+		if id, ok := integrationIDOf(stored); ok {
+			entries = append(entries, map[string]any{"id": id, "state": integration})
+		}
+		m["tasks"] = entries
+	})
+}
+
+// splitPlan tells the stored tasks of a plan from the integration task's
+// state, and maps each stored id to its state.
+func splitPlan(tasks []map[string]any) (stored []map[string]any, states map[int]string, integration string) {
+	states = map[int]string{}
+	integration = "pending"
+	for _, task := range tasks {
+		if task["integration"] == true {
+			integration = task["state"].(string)
+			continue
+		}
+		stored = append(stored, task)
+		states[task["id"].(int)] = task["state"].(string)
+	}
+	return stored, states, integration
+}
+
+// integrationIDOf is the id of the integration task of a plan with these
+// stored tasks: one past the highest id, and none for an empty plan.
+func integrationIDOf(stored []map[string]any) (int, bool) {
+	highest := 0
+	for _, task := range stored {
+		highest = max(highest, task["id"].(int))
+	}
+	return highest + 1, len(stored) > 0
 }
 
 func setStatus(t *testing.T, dir, status string) {
 	t.Helper()
 	editFile(t, filepath.Join(dir, "prd.md"), `status: "draft"`, `status: "`+status+`"`)
+}
+
+// setUpdatedAt sets the updated_at of the package's progress.json.
+func setUpdatedAt(t *testing.T, dir, ts string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) { m["updated_at"] = ts })
 }
 
 // activate moves the package to active through the library, which records the
@@ -253,25 +336,33 @@ func removeIntent(t *testing.T, dir string) {
 }
 
 // breakValidity makes the example fail validation without touching its intent:
-// a test the plan names is not in the test specification, which breaks the
-// cross-file rules C6, C7 and C9.
+// a task claims a criterion the package does not have, which breaks the
+// cross-file rule C4, and the criterion it claimed no longer is owned, which
+// breaks C5.
 func breakValidity(t *testing.T, dir string) {
 	t.Helper()
-	editFile(t, filepath.Join(dir, "tasks.json"), `"TS-09-6"`, `"TS-09-99"`)
+	editFile(t, filepath.Join(dir, "tasks.json"), `"REQ-2.2"`, `"REQ-99"`)
 }
 
 // withFrontmatterKey adds a key of its own to the frontmatter of prd.md, which
 // the schema does not allow and a write would drop.
 func withFrontmatterKey(t *testing.T, dir string) {
 	t.Helper()
-	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 2", "schema_version: 2\nbadkey: \"x\"")
+	editFile(t, filepath.Join(dir, "prd.md"), "schema_version: 3", "schema_version: 3\nbadkey: \"x\"")
 }
 
 // addUnknownKey gives tasks.json a key the schema does not allow, as a leaked
-// version 1 traceability or a newer format's field would be.
+// version 2 traceability or a newer format's field would be.
 func addUnknownKey(t *testing.T, dir string) {
 	t.Helper()
 	editJSON(t, filepath.Join(dir, "tasks.json"), func(m map[string]any) { m["traceability"] = []any{} })
+}
+
+// addProgressKey gives progress.json a key the schema does not allow, which
+// a task move, the one write of that file, would drop.
+func addProgressKey(t *testing.T, dir string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) { m["stale"] = 1 })
 }
 
 // run runs speca and decodes the one JSON object it printed with the public
@@ -646,18 +737,19 @@ func statusOnDisk(t *testing.T, dir string) string { t.Helper(); return loadSpec
 // supersedesOf is the supersedes list of the package, read from disk.
 func supersedesOf(t *testing.T, dir string) []string { t.Helper(); return loadSpec(t, dir).Supersedes }
 
-// onDisk loads the package and returns the state of each of its tasks, by id.
+// onDisk loads the package and returns the state of each task of its plan, the
+// integration task included, by id.
 func onDisk(t *testing.T, dir string) map[int]string {
 	t.Helper()
 	out := map[int]string{}
-	for _, task := range loadSpec(t, dir).Tasks.Tasks {
+	for _, task := range loadSpec(t, dir).Plan() {
 		out[task.Id] = string(task.State)
 	}
 	return out
 }
 
-// updatedAtIn is the updated_at of the prd.md in dir, which must be a UTC time
-// in RFC 3339.
+// updatedAtIn is the updated_at of the progress.json in dir, which must be a
+// UTC time in RFC 3339.
 func updatedAtIn(t *testing.T, dir string) time.Time {
 	t.Helper()
 	raw := loadSpec(t, dir).UpdatedAt
@@ -668,23 +760,43 @@ func updatedAtIn(t *testing.T, dir string) time.Time {
 	return ts
 }
 
-// plan is a plan in memory, from tasks made by planTask.
-func plan(tasks ...map[string]any) *afspec.TasksV2Json {
-	p := &afspec.TasksV2Json{}
-	for _, m := range tasks {
-		task := afspec.Task{Id: m["id"].(int), State: afspec.TaskState(m["state"].(string)), Title: m["title"].(string)}
+// plan is a package in memory with a plan from tasks made by planTask: the
+// tasks in tasks.json, their states and the integration task's in
+// progress.json. The package is full, so it has an integration task, one past
+// the highest id, when it has a task.
+func plan(tasks ...map[string]any) *afspec.Spec {
+	stored, states, integration := splitPlan(tasks)
+	s := &afspec.Spec{Tasks: &afspec.TasksV3Json{}, Progress: &afspec.ProgressV3Json{}}
+	for _, m := range stored {
+		task := afspec.Task{Id: m["id"].(int), Title: m["title"].(string)}
 		if d, ok := m["depends_on"]; ok {
 			task.DependsOn = d.([]int)
 		}
-		p.Tasks = append(p.Tasks, task)
+		s.Tasks.Tasks = append(s.Tasks.Tasks, task)
+		s.Progress.Tasks = append(s.Progress.Tasks, afspec.TaskProgress{Id: task.Id, State: afspec.TaskState(states[task.Id])})
 	}
-	return p
+	if id, ok := integrationIDOf(stored); ok {
+		s.Progress.Tasks = append(s.Progress.Tasks, afspec.TaskProgress{Id: id, State: afspec.TaskState(integration)})
+	}
+	return s
 }
 
 func ids(moves []move) []int {
 	var out []int
 	for _, m := range moves {
 		out = append(out, m.id)
+	}
+	return out
+}
+
+// statesOf is the state of each task of a progress, by id.
+func statesOf(p *afspec.ProgressV3Json) map[int]afspec.TaskState {
+	out := map[int]afspec.TaskState{}
+	if p == nil {
+		return out
+	}
+	for _, e := range p.Tasks {
+		out[e.Id] = e.State
 	}
 	return out
 }
@@ -843,6 +955,18 @@ func verdictOf(dir string, rules ...string) *Result {
 	}
 	return &Result{AdminResult: envelope.AdminResult{SpecDir: dir, Valid: ptr(v.Valid), Validation: v}}
 }
+
+// migrateOutcomes is each entry of a migrate result as "spec_dir migrated".
+func migrateOutcomes(entries []envelope.MigratedInfo) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.SpecDir+" "+e.Migrated)
+	}
+	return out
+}
+
+// versionOnDisk is the schema_version the package's prd.md declares.
+func versionOnDisk(t *testing.T, dir string) int { t.Helper(); return loadSpec(t, dir).SchemaVersion }
 
 // envelopeSummary is the summary of the envelope the run builds around r.
 func envelopeSummary(r *Result) string {

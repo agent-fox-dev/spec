@@ -11,30 +11,35 @@ import (
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
-// next and all are resolved against the plan, an explicit id is moved as named,
-// and the ids come out in plan order.
+// next and all are resolved against the plan, the derived integration task
+// included, an explicit id is moved as named, and the ids come out in plan
+// order.
 func TestResolveTasks(t *testing.T) {
-	// Plan order is not id order: 4 comes first.
+	// Plan order is not id order: 4 comes first. The integration task is 6.
 	p := plan(
 		planTask(4, "done", nil), planTask(2, "in_progress", []int{4}), planTask(3, "dropped", nil),
 		planTask(1, "pending", []int{2}), planTask(5, "in_progress", nil),
 	)
-	finished := plan(planTask(1, "done", nil), planTask(2, "dropped", nil))
+	finished := plan(planTask(1, "done", nil), planTask(2, "dropped", nil), integrationTask("done"))
 	for name, tc := range map[string]struct {
-		plan   *afspec.TasksV2Json
+		plan   *afspec.Spec
 		wanted taskSpec
 		target afspec.TaskState
 		want   []int
 	}{
 		"next is NextTask: the first task in progress": {p, taskSpec{keyword: "next"}, afspec.TaskStateDone, []int{2}},
-		// Task 1 is pending, not done and not dropped: all names it, and the machine then refuses it.
-		"all skips the target state and dropped":        {p, taskSpec{keyword: "all"}, afspec.TaskStateDone, []int{2, 1, 5}},
+		// Task 1 is pending, not done and not dropped: all names it, and the
+		// machine then refuses it. So is the integration task.
+		"all skips the target state and dropped":        {p, taskSpec{keyword: "all"}, afspec.TaskStateDone, []int{2, 1, 5, 6}},
 		"all to pending skips only pending and dropped": {p, taskSpec{keyword: "all"}, afspec.TaskStatePending, []int{4, 2, 5}},
 		"explicit ids come out in plan order":           {p, taskSpec{ids: []int{5, 1, 4}}, afspec.TaskStateInProgress, []int{4, 1, 5}},
 		"an explicit id already in the target stays":    {p, taskSpec{ids: []int{4}}, afspec.TaskStateDone, []int{4}},
 		"an explicit dropped id stays":                  {p, taskSpec{ids: []int{3}}, afspec.TaskStateDone, []int{3}},
+		"the integration task by id":                    {p, taskSpec{ids: []int{6}}, afspec.TaskStateInProgress, []int{6}},
 		"all on a finished plan":                        {finished, taskSpec{keyword: "all"}, afspec.TaskStateDone, nil},
-		"no plan":                                       {nil, taskSpec{keyword: "all"}, afspec.TaskStateDone, nil},
+		"next on a plan whose tasks are done": {plan(planTask(1, "done", nil), planTask(2, "dropped", nil)),
+			taskSpec{keyword: "next"}, afspec.TaskStateInProgress, []int{3}},
+		"no plan": {nil, taskSpec{keyword: "all"}, afspec.TaskStateDone, nil},
 	} {
 		if got := resolveTasks(tc.plan, tc.wanted, tc.target); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: resolved %v; want %v", name, got, tc.want)
@@ -42,8 +47,8 @@ func TestResolveTasks(t *testing.T) {
 	}
 }
 
-// The allowed moves are applied in plan order, each on the copy the one before
-// returned, and the plan that was loaded is left as it was.
+// The allowed moves are applied in plan order, each on the progress the one
+// before returned, and the package that was loaded is left as it was.
 func TestPlanMoves_AppliesTheMovesInPlanOrderOnACopy(t *testing.T) {
 	p := plan(planTask(1, "pending", nil), planTask(2, "in_progress", nil), planTask(3, "pending", nil))
 	got, refusal := planMoves("pkg", p, taskSpec{ids: []int{3, 1}}, afspec.TaskStateInProgress, false)
@@ -58,16 +63,12 @@ func TestPlanMoves_AppliesTheMovesInPlanOrderOnACopy(t *testing.T) {
 			t.Errorf("move %+v; want pending to in_progress", m)
 		}
 	}
-	if got.after == nil || len(got.after.Tasks) != 3 {
-		t.Fatalf("after = %+v; want the plan with the moves applied", got.after)
+	want := map[int]afspec.TaskState{1: afspec.TaskStateInProgress, 2: afspec.TaskStateInProgress, 3: afspec.TaskStateInProgress, 4: afspec.TaskStatePending}
+	if after := statesOf(got.after); !maps.Equal(after, want) {
+		t.Errorf("after = %v; want the plan with the moves applied and the integration task 4 as it was, %v", after, want)
 	}
-	for _, task := range got.after.Tasks {
-		if task.State != afspec.TaskStateInProgress {
-			t.Errorf("after: task %d is %s; want in_progress", task.Id, task.State)
-		}
-	}
-	if p.Tasks[0].State != afspec.TaskStatePending || p.Tasks[2].State != afspec.TaskStatePending {
-		t.Error("planning changed the plan that was loaded")
+	if p.TaskState(1) != afspec.TaskStatePending || p.TaskState(3) != afspec.TaskStatePending {
+		t.Error("planning changed the package that was loaded")
 	}
 }
 
@@ -78,7 +79,7 @@ func TestPlanMoves_AppliesTheMovesInPlanOrderOnACopy(t *testing.T) {
 // dropped, and the message says so.
 func TestPlanMoves_RefusesAMoveTheMachineRefuses(t *testing.T) {
 	for name, tc := range map[string]struct {
-		plan   *afspec.TasksV2Json
+		plan   *afspec.Spec
 		ids    []int
 		target afspec.TaskState
 		force  bool
@@ -87,7 +88,7 @@ func TestPlanMoves_RefusesAMoveTheMachineRefuses(t *testing.T) {
 		hint   []string
 	}{
 		"several, one allowed": {plan(planTask(1, "pending", nil), planTask(2, "in_progress", nil), planTask(3, "done", nil)), []int{1, 2, 3}, afspec.TaskStateDone, false,
-			[]string{"pkg", "§8.3.1", "these moves",
+			[]string{"pkg", "§8.1", "these moves",
 				"task 1 is pending and cannot move to done (it may move to in_progress or dropped)",
 				"task 3 is done and cannot move to done (it is already there; it may move to pending)"},
 			[]string{"task 2 is", "--force"}, []string{"in_progress", "dropped"}},
@@ -95,6 +96,8 @@ func TestPlanMoves_RefusesAMoveTheMachineRefuses(t *testing.T) {
 			[]string{"this move", "task 1 is in_progress and cannot move to in_progress (it is already there"}, nil, []string{"pending", "done"}},
 		"a dropped task": {plan(planTask(1, "done", nil), planTask(3, "dropped", nil)), []int{3}, afspec.TaskStateInProgress, false,
 			[]string{"task 3 is dropped", "(a dropped task has no move)", "--force with done or pending is the only way out"}, nil, nil},
+		"the integration task, not pending": {plan(planTask(1, "done", nil), integrationTask("done")), []int{2}, afspec.TaskStateInProgress, false,
+			[]string{"this move", "task 2 is done and cannot move to in_progress (it may move to pending)"}, nil, []string{"pending"}},
 		"--force to in_progress": {plan(planTask(1, "done", nil)), []int{1}, afspec.TaskStateInProgress, true,
 			[]string{"--force cannot set in_progress or dropped"}, nil, []string{"pending"}},
 		"--force to dropped": {plan(planTask(2, "dropped", nil)), []int{2}, afspec.TaskStateDropped, true,
@@ -123,19 +126,22 @@ func TestPlanMoves_RefusesAMoveTheMachineRefuses(t *testing.T) {
 
 // A claim of a task that is not ready goes ahead, with a low warning naming the
 // dependencies that are not done, judged on the plan before the call: the ids
-// in depends_on, or the task before it where it states none.
+// in depends_on, or the task before it where it states none; for the
+// integration task, every task not done or dropped.
 func TestPlanMoves_WarnsOfAClaimOfATaskThatIsNotReady(t *testing.T) {
 	for name, tc := range map[string]struct {
-		plan *afspec.TasksV2Json
+		plan *afspec.Spec
 		ids  []int
 		want []string
 	}{
-		"a stated dependency":  {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{1})), []int{2}, []string{"task 2 moves to in_progress though it is not ready: task 1 is not done"}},
-		"the task before":      {plan(planTask(1, "pending", nil), planTask(2, "pending", nil)), []int{2}, []string{"task 2 moves to in_progress though it is not ready: task 1 is not done"}},
-		"claimed together":     {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{1})), []int{1, 2}, []string{"task 2 moves to in_progress though it is not ready: task 1 is not done"}},
-		"several dependencies": {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{}), planTask(3, "pending", []int{1, 2})), []int{3}, []string{"task 3 moves to in_progress though it is not ready: tasks 1, 2 are not done"}},
-		"one not in the plan":  {plan(planTask(1, "done", nil), planTask(2, "pending", []int{1, 99})), []int{2}, []string{"task 2 moves to in_progress though it is not ready: task 99 is not done"}},
-		"a ready task":         {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{1})), []int{1}, nil},
+		"a stated dependency":                            {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{1})), []int{2}, []string{"task 2 moves to in_progress though it is not ready: task 1 is not done"}},
+		"the task before":                                {plan(planTask(1, "pending", nil), planTask(2, "pending", nil)), []int{2}, []string{"task 2 moves to in_progress though it is not ready: task 1 is not done"}},
+		"claimed together":                               {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{1})), []int{1, 2}, []string{"task 2 moves to in_progress though it is not ready: task 1 is not done"}},
+		"several dependencies":                           {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{}), planTask(3, "pending", []int{1, 2})), []int{3}, []string{"task 3 moves to in_progress though it is not ready: tasks 1, 2 are not done"}},
+		"one not in the plan":                            {plan(planTask(1, "done", nil), planTask(2, "pending", []int{1, 99})), []int{2}, []string{"task 2 moves to in_progress though it is not ready: task 99 is not done"}},
+		"the integration task":                           {plan(planTask(1, "done", nil), planTask(2, "pending", []int{}), planTask(3, "in_progress", []int{})), []int{4}, []string{"task 4 moves to in_progress though it is not ready: tasks 2, 3 are not done"}},
+		"the integration task, the rest dropped or done": {plan(planTask(1, "done", nil), planTask(2, "dropped", []int{})), []int{3}, nil},
+		"a ready task":                                   {plan(planTask(1, "pending", nil), planTask(2, "pending", []int{1})), []int{1}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, refusal := planMoves("pkg", tc.plan, taskSpec{ids: tc.ids}, afspec.TaskStateInProgress, false)
@@ -173,7 +179,7 @@ func TestTask_ClaimsATaskThatIsNotReadyWithAWarning(t *testing.T) {
 // --force makes a move the machine refuses with the library's bypass, and a
 // move it allows with the machine. Each task set through a bypass has a forced
 // change and a high warning of its own, which the summary counts; a task already
-// in the target state has neither.
+// in the target state has neither. The integration task takes a bypass too.
 func TestTask_ForceUsesTheBypassesOnlyForRefusedMoves(t *testing.T) {
 	for name, tc := range map[string]struct {
 		tasks   []map[string]any
@@ -181,12 +187,13 @@ func TestTask_ForceUsesTheBypassesOnlyForRefusedMoves(t *testing.T) {
 		target  string
 		forced  []int
 		plain   []int
+		want    []int // the changes, in plan order
 		summary string
 	}{
-		"reset to pending": {[]map[string]any{planTask(1, "pending", nil), planTask(2, "dropped", nil), planTask(3, "dropped", nil)}, "1,2,3", "pending",
-			[]int{2, 3}, nil, "speca: 09_agent_mode tasks 2, 3 → pending; 2 high-severity warnings"},
-		"complete": {[]map[string]any{planTask(3, "pending", nil), planTask(4, "in_progress", []int{3})}, "3,4", "done",
-			[]int{3}, []int{4}, "speca: 09_agent_mode tasks 3, 4 → done; 1 high-severity warning"},
+		"reset to pending": {[]map[string]any{planTask(1, "pending", nil), planTask(2, "dropped", nil), planTask(3, "dropped", nil), integrationTask("pending")}, "1,2,3,4", "pending",
+			[]int{2, 3}, nil, []int{2, 3}, "speca: 09_agent_mode tasks 2, 3 → pending; 2 high-severity warnings"},
+		"complete": {[]map[string]any{planTask(3, "pending", nil), planTask(4, "in_progress", []int{3})}, "3,4,5", "done",
+			[]int{3, 5}, []int{4}, []int{3, 4, 5}, "speca: 09_agent_mode tasks 3, 4, 5 → done; 2 high-severity warnings"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := newRepo(t)
@@ -202,8 +209,8 @@ func TestTask_ForceUsesTheBypassesOnlyForRefusedMoves(t *testing.T) {
 					t.Errorf("task %d is %s on disk; want %s", id, state, tc.target)
 				}
 			}
-			if want := append(slices.Clone(tc.forced), tc.plain...); !slices.Equal(changed(r), want) {
-				t.Errorf("changes %+v; want %v, in plan order", r.Changes, want)
+			if !slices.Equal(changed(r), tc.want) {
+				t.Errorf("changes %+v; want %v, in plan order", r.Changes, tc.want)
 			}
 			ws := warningsOf(env, "task_state_forced")
 			if len(ws) != len(tc.forced) {
