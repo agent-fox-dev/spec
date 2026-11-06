@@ -47,13 +47,15 @@ func TestSummaryView_KeepsWhatACallerActsOn(t *testing.T) {
 			FixedCount: 1, ContestedCount: 1, DeclinedCount: 1, UnansweredCount: 1,
 			Rounds: []ReviewRound{{Round: 1, Findings: []Finding{{ID: "R1-F1"}}}, {Round: 2, Findings: []Finding{}}}},
 	}
+	r.PlanReview = &Review{RoundsRun: 1, RoundsAllowed: 1, StopReason: "rounds_exhausted", FindingsCount: 1, FixedCount: 1,
+		Rounds: []ReviewRound{{Round: 1, Findings: []Finding{{ID: "R1-F1"}}}}}
 	r.FollowOnSpecs = []Package{{SpecDir: ".specs/13_other"}}
 	r.Split = []ScopeReport{{Name: "scope-a", Status: ScopeDone}}
 	r.SplitPlan = "plan text"
 	r.Stage, r.Preflight, r.Estimate = "preflight", []cli.PreflightCheck{{Check: "schemas_valid", OK: true}}, &cli.Estimate{Phases: 4}
 
 	m := summaryKeys(t, r.SummaryView())
-	if got, want := keysOf(m), []string{"artifacts", "detail", "estimate", "open_questions", "preflight", "review", "spec_dir",
+	if got, want := keysOf(m), []string{"artifacts", "detail", "estimate", "open_questions", "plan_review", "preflight", "review", "spec_dir",
 		"spec_id", "spec_name", "split", "stage", "status", "traceability", "validation"}; !slices.Equal(got, want) {
 		t.Errorf("keys = %v, want %v", got, want)
 	}
@@ -66,6 +68,9 @@ func TestSummaryView_KeepsWhatACallerActsOn(t *testing.T) {
 	}
 	if got := keysOf(m["review"].(map[string]any)); slices.Contains(got, "rounds") || !slices.Contains(got, "unanswered_count") {
 		t.Errorf("review keys = %v; want the counts without the rounds", got)
+	}
+	if got := keysOf(m["plan_review"].(map[string]any)); slices.Contains(got, "rounds") || !slices.Contains(got, "fixed_count") {
+		t.Errorf("plan_review keys = %v; want the counts without the rounds", got)
 	}
 	if m["detail"] != "summary" {
 		t.Errorf("detail = %v", m["detail"])

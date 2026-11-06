@@ -1229,6 +1229,14 @@ func TestResult_Summary(t *testing.T) {
 			Package:       Package{SpecDir: dir, Review: reviewWithSteering(2, 3, 2, 1)},
 			FollowOnSpecs: []Package{{SpecDir: ".specs/08_b", Review: reviewWithSteering(1, 2, 1, 2)}, {SpecDir: ".specs/09_c"}}}},
 			"spec: wrote .specs/07_widget_cache (+2 follow-on packages); review: 3 rounds, 5 findings (3 steering), 3 fixed"},
+		{"a plan review", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, PlanReview: reviewOf(2, 5, 4)}}},
+			"spec: wrote .specs/07_widget_cache; plan review: 2 rounds, 5 findings, 4 fixed"},
+		{"both reviews", Result{SpecResult: envelope.SpecResult{Package: Package{SpecDir: dir, Review: reviewOf(1, 2, 2), PlanReview: reviewOf(2, 5, 4)}}},
+			"spec: wrote .specs/07_widget_cache; review: 1 round, 2 findings, 2 fixed; plan review: 2 rounds, 5 findings, 4 fixed"},
+		{"plan reviews totalled over the packages", Result{SpecResult: envelope.SpecResult{
+			Package:       Package{SpecDir: dir, PlanReview: reviewOf(2, 3, 2)},
+			FollowOnSpecs: []Package{{SpecDir: ".specs/08_b", PlanReview: reviewOf(1, 2, 1)}, {SpecDir: ".specs/09_c", PlanReview: reviewOf(1, 0, 0)}}}},
+			"spec: wrote .specs/07_widget_cache (+2 follow-on packages); plan review: 4 rounds, 5 findings, 3 fixed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.r.Summary(); got != tc.want {
@@ -1714,4 +1722,74 @@ func TestRun_AFailedPlanPhaseDoesNotFailTheRun(t *testing.T) {
 			t.Errorf("err = %v; want aborted at plan_review", err)
 		}
 	})
+}
+
+// The plan reviewer is given the steering and told to check the plan against
+// it, and a steering finding is recorded beside the others; with a steering
+// that says nothing there is nothing to check.
+func TestRun_ChecksThePlanAgainstTheSteeringOnlyWhenItSaysSomething(t *testing.T) {
+	for _, tc := range []struct {
+		name, steering string
+		block          bool
+	}{
+		{"a steering that says something", "# Steering\n\nDIRECTIVE: use make check.\n", true},
+		{"no steering", "", false},
+		{"a bare heading", "# Steering\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome := reviewOutcome{severities: []string{"major", "major"}, rubrics: []string{"zero_decision", "steering"}}
+			if !tc.block {
+				outcome = reviewOutcome{severities: []string{"major"}}
+			}
+			rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{outcome}, planRevisions: []revisionOutcome{{}}}
+			o := planOptions(t, newAuthor(t, "01", "test_feature"), rv, 1)
+			if tc.steering != "" {
+				writeFiles(t, o.Workspace.Root(), map[string]string{".specs/steering.md": tc.steering})
+			}
+			got, err := Run(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			req := rv.planReviewReqs[0]
+			prompt := planReviewSystemPrompt() + runContextBlock(req.Profile.LanguageBlock(), req.Steering, req.SteeringVersion, req.RepoMap)
+			if has := strings.Contains(prompt, "DIRECTIVE: use make check."); has != tc.block {
+				t.Errorf("the plan review prompt carries the steering %v; want %v", has, tc.block)
+			}
+			if !strings.Contains(prompt, "check the plan against every directive") {
+				t.Error("the plan reviewer is not told to check the plan against the directives")
+			}
+			var rubrics []string
+			for _, f := range got.PlanReview.Rounds[0].Findings {
+				rubrics = append(rubrics, f.Rubric)
+			}
+			if has := slices.Contains(rubrics, "steering"); has != tc.block {
+				t.Errorf("rubrics %v; a steering finding recorded %v, want %v", rubrics, has, tc.block)
+			}
+		})
+	}
+}
+
+// Every package of a run with the plan review carries its record, with the
+// fields of the PRD review's.
+func TestRun_EveryPackageCarriesItsPlanReview(t *testing.T) {
+	rv := &scriptedReviewer{t: t, planReviews: []reviewOutcome{{severities: []string{"major"}}, {}, {}}, planRevisions: []revisionOutcome{{}}}
+	o := fileOptions(newWorkspace(t), splitAuthor(t))
+	o.AdversarialPlan, o.reviewer = true, rv
+	got, err := Run(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, p := range append([]Package{got.Package}, got.FollowOnSpecs...) {
+		r := p.PlanReview
+		if r == nil || r.RoundsAllowed != 1 || r.StopReason != envelope.ReviewStopRoundsExhausted || len(r.Rounds) != 1 {
+			t.Errorf("%s: plan review %+v", p.SpecDir, r)
+			continue
+		}
+		if sum := r.FixedCount + r.ContestedCount + r.EscalatedCount + r.DeclinedCount + r.UnansweredCount; sum != r.FindingsCount {
+			t.Errorf("%s: the counts sum to %d of %d findings", p.SpecDir, sum, r.FindingsCount)
+		}
+	}
+	if !strings.Contains(got.Summary(), "plan review: 3 rounds, 1 finding, 1 fixed") {
+		t.Errorf("summary %q", got.Summary())
+	}
 }

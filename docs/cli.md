@@ -277,6 +277,38 @@ computes the **grounding facts**: for every path in every task's `touches`,
 whether it exists in the repository as a file or a directory, resolved inside
 the repository and looked at on the file system, not judged by a model.
 
+The reviewer applies two written rubrics, carried in its prompt as their
+questions, plus the steering, and every finding names its `rubric` and its
+place in the plan by id in `section` (a task by its number, a test, criterion
+or execution path id; anything else is turned back):
+
+- `zero_decision` — a coder holding the package and the code would have to
+  make a design choice the plan does not make: where the code goes; a name,
+  signature, error, message, format or order a test asserts or another task
+  relies on; a library, algorithm or data structure left open where the
+  choice shows; a step that leaves the work open; two coders who could both
+  follow a task and disagree on a test;
+- `grounding` — the plan names what is not there: a path in `touches` that
+  does not exist and nothing creates (its evidence is the grounding fact, and
+  a finding naming a path the facts do not list is turned back), a symbol
+  that does not exist, a claim about the code that does not hold, or a test
+  command that does not run a test;
+- `steering` — a contradiction of a directive, quoting it verbatim and the
+  text of the plan, `critical` or `major`, never declined. With no steering
+  there is nothing to check.
+
+For a plan, `critical` is a plan that builds the wrong thing or whose tests
+contradict its criteria; `major` a choice left to the coder that a test or
+another task depends on, a path or symbol that does not exist and nothing
+creates, or a contradicted directive; `minor` a choice no test or task sees,
+or the wording.
+
+The reviser submits the three artifacts whole. It may not change the PRD, the
+spec id or name of any artifact, a task's `state`, or the actors of the
+execution paths (compared ignoring case), and its plan must pass the schemas
+and C1 to C11; a revision that breaks either is turned back with each change
+or broken rule named, until it passes.
+
 The rounds are the PRD review's, applied to the plan unchanged: the same
 `R<round>-F<n>` ids, the four dispositions and their checks, the repeat rules,
 convergence on two consecutive clean rounds, the six totals, and
@@ -497,6 +529,8 @@ also counts the reviews of every package, after the open questions:
 `spec: wrote .specs/07_widget_cache; 2 open questions; review: 2 rounds, 9 findings (1 steering), 7 fixed`
 (`review: 1 round, 0 findings` when nothing was found; the parenthesis counts
 the findings with the rubric `steering`, and is left out when there are none).
+With `--adversarial-plan` a clause counts the plan reviews the same way, after
+it: `plan review: 2 rounds, 5 findings, 4 fixed`.
 
 `usage.input_tokens` is net of the prompt cache; the cache figures are what
 make it agree with `cost_usd`. Each phase in `usage.phases[]` carries the same
@@ -613,6 +647,10 @@ the package's render, which every save writes beside them; a dry run lists no
   answer carries: `reason` and `counter_evidence` for a contest; `question`,
   `options`, `decision` and `reason` for an escalation; `reason` for a decline;
   none for `fixed` or `unanswered`. Absent without `--adversarial`
+- `plan_review` — with `--adversarial-plan`: the plan's review, in the same
+  shape as `review`, its findings' `rubric` being `zero_decision`,
+  `grounding` or `steering`. Absent without `--adversarial-plan`, and from a
+  package whose plan did not validate and so was not reviewed
 
 When the input was more than one spec's worth of work: `follow_on_specs` (the
 further packages, each with the same fields), `split` (every scope with its

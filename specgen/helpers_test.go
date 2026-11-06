@@ -389,6 +389,9 @@ type reviewOutcome struct {
 	cost float64
 	// mark, when set, is written into every finding's flaw and evidence.
 	mark string
+	// rubrics give a finding, by position, its rubric; the others take the
+	// stage's first.
+	rubrics []string
 }
 
 // revisionOutcome is what one scripted revision does: fail, or accept every
@@ -503,7 +506,11 @@ func (s *scriptedReviewer) ReviewPlan(_ context.Context, req planReviewRequest) 
 	}
 	findings := make([]Finding, len(out.severities))
 	for n, sev := range out.severities {
-		findings[n] = Finding{ID: fmt.Sprintf("R%d-F%d", req.Round, n+1), Severity: sev, Rubric: "zero_decision",
+		rubric := "zero_decision"
+		if n < len(out.rubrics) {
+			rubric = out.rubrics[n]
+		}
+		findings[n] = Finding{ID: fmt.Sprintf("R%d-F%d", req.Round, n+1), Severity: sev, Rubric: rubric,
 			Section: "task 1", Flaw: fmt.Sprintf("plan flaw %d.%d%s", req.Round, n+1, out.mark), Evidence: "e" + out.mark, Remedy: "r"}
 	}
 	return findings, res, nil

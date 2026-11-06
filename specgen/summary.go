@@ -39,8 +39,10 @@ type summaryResult struct {
 	OpenQuestions []OpenQuestion    `json:"open_questions,omitempty"`
 	// Review is the first package's review without its rounds: whether the
 	// review finished and how much it changed, at a glance.
-	Review *Review       `json:"review,omitempty"`
-	Split  []ScopeReport `json:"split,omitempty"`
+	Review *Review `json:"review,omitempty"`
+	// PlanReview is the first package's plan review without its rounds.
+	PlanReview *Review       `json:"plan_review,omitempty"`
+	Split      []ScopeReport `json:"split,omitempty"`
 	// Stage, Preflight and Estimate are the whole point of a --preflight
 	// run, so the default view keeps them. They are absent on every
 	// ordinary run.
@@ -74,6 +76,7 @@ func (r *Result) SummaryView() any {
 		},
 		OpenQuestions: r.OpenQuestions,
 		Review:        reviewCounts(r.Review),
+		PlanReview:    reviewCounts(r.PlanReview),
 		Split:         r.Split,
 		Stage:         r.Stage,
 		Preflight:     r.Preflight,
