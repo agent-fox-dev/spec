@@ -2,9 +2,9 @@
 spec_id: "17"
 spec_name: "review_triage_convergence"
 title: "Triage every review finding four ways and converge on two clean rounds"
-status: "sealed"
+status: "archived"
 created_at: "2026-11-06T12:57:04Z"
-updated_at: "2026-11-06T15:38:02Z"
+updated_at: "2026-11-06T15:41:21Z"
 intent_hash: "d7b0f3b9d381d79052350b654463f92554e3477b0779d1dc2f183ef362e35109"
 schema_version: 2
 source: "docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md"

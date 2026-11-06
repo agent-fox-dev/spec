@@ -4,10 +4,10 @@
 
 - **Spec:** `18_adversarial_plan_review` (id `18`, name `adversarial_plan_review`)
 - **Title:** Review the plan adversarially before the package is written
-- **Status:** sealed
+- **Status:** archived
 - **Schema version:** 2
 - **Created:** 2026-11-06T13:31:22Z
-- **Updated:** 2026-11-06T15:38:02Z
+- **Updated:** 2026-11-06T15:41:21Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `b1db94b720174adaf9eeb59cc214d7c6fee1339dd3bb235c1f9f284c703ac691`
 

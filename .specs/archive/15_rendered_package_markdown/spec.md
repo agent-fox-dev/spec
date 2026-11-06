@@ -4,10 +4,10 @@
 
 - **Spec:** `15_rendered_package_markdown` (id `15`, name `rendered_package_markdown`)
 - **Title:** Commit the rendered package beside its JSON
-- **Status:** sealed
+- **Status:** archived
 - **Schema version:** 2
 - **Created:** 2026-11-06T12:17:17Z
-- **Updated:** 2026-11-06T15:38:02Z
+- **Updated:** 2026-11-06T15:41:21Z
 - **Source:** docs/prd/04-review-the-plan-commit-the-render-and-version-the-steering.md
 - **Intent hash:** `940185862cce1a404a2ed345c4b0d24c4a8aa7bfb64715c2c53ea223aa361561`
 

@@ -2,9 +2,9 @@
 spec_id: "09"
 spec_name: "adversarial_prd_review"
 title: "Review the PRD adversarially before generating the package"
-status: "active"
+status: "archived"
 created_at: "2026-10-21T13:59:29.966011Z"
-updated_at: "2026-10-21T13:59:29.966011Z"
+updated_at: "2026-11-06T15:39:56Z"
 intent_hash: "5ed88d651afae618b44d3ffc0310d5b3a618e56b8d827c0e410bc1d66ba2a0a2"
 schema_version: 2
 source: "docs/prd/01-review-the-prd-adversarially.md"

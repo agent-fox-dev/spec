@@ -4,10 +4,10 @@
 
 - **Spec:** `13_state_command_cross_links` (id `13`, name `state_command_cross_links`)
 - **Title:** Make spec, specr and speca point at one another
-- **Status:** active
+- **Status:** archived
 - **Schema version:** 2
 - **Created:** 2026-10-22T07:45:48.451036Z
-- **Updated:** 2026-10-22T07:45:48.451036Z
+- **Updated:** 2026-11-06T15:39:57Z
 - **Source:** docs/prd/02-change-the-state-of-a-package-with-its-own-command.md
 - **Intent hash:** `a476ea09d5610fc30f80a29f167924f82c4dc496597eb74bb57fe470c261c3c7`
 
