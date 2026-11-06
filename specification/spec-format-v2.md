@@ -628,6 +628,21 @@ path (error, unchanged from v1). An actor matches by name, ignoring case.
 `speca <spec> --validate` applies them to a package, and `spec` applies them to
 every package it writes, so a package they reject is left in `draft`.
 
+### 10.5 Steering version
+
+Rule `steering_version` reads the spec root's `steering.md`, so it runs beside
+the cross-spec rules and not in a package's own validation. It is a warning,
+never an error, on `prd.md`, and applies to a `draft` or `active` package whose
+frontmatter records `steering_version` (§4.1), when the steering is versioned:
+it opens with well-formed frontmatter holding a `version` and a newest-first
+record of `amendments`, each with a version, a date and a change. Equal
+versions raise nothing. A package written under an older version is told both
+versions and every amendment since, newest first, and, when one of them raised
+the MAJOR number, that a directive it was written under has been removed or
+changed. A package version newer than the steering's, or one no amendment
+holds, is told so. The rule never refuses a package: a person who has checked
+it clears the warning by changing the field.
+
 ---
 
 ## 11. Rendering
