@@ -76,6 +76,38 @@ every phase as the project's directives.
 |---|---|---|
 | `AGENTKIT_UPDATE` | `1` | the targets that compile (`build`, `test`, `test-fast`, `coverage`, `vet`, `lint`, `doc`) first run `make update-agentkit`, which moves the agentkit-go pin in `go.mod` to the latest `main` ([ADR 06](adr/06-build-against-the-latest-agentkit-go.md)); `0` builds the committed pin, e.g. offline |
 
+## The skills
+
+`make skills`, `make skills-check`, `make install-skills` and
+`make uninstall-skills` read these. None of them makes a network call or reads
+a credential.
+
+| Make variable | Default | Effect |
+|---|---|---|
+| `AGENT` | `claude` | the agent to render and install for: `claude`, `codex`, `cursor` or `copilot`. Any other value is refused, and nothing is written |
+| `PROJECT` | *(unset)* | install into this repository's own skill directory instead of the user's. A path that is not an existing directory is refused, and nothing is written |
+| `SKILLS_DIR` | *(unset)* | install into this directory, whatever the agent. It overrides `AGENT`'s directory and `PROJECT` |
+| `SKILLS_SRC` | `skills` | the source tree to read |
+| `SKILLS_OUT` | `build/skills` | where `make skills` writes. It is replaced whole on every run, so `.`, `/` and `SKILLS_SRC` itself are refused |
+
+The directory each agent loads from, which `AGENT` and `PROJECT` select
+together:
+
+| Agent | User directory | Project directory |
+|---|---|---|
+| `claude` | `~/.claude/skills` | `<PROJECT>/.claude/skills` |
+| `codex` | `$CODEX_HOME/skills`, else `~/.codex/skills` | `<PROJECT>/.agents/skills` |
+| `cursor` | `~/.cursor/skills` | `<PROJECT>/.cursor/skills` |
+| `copilot` | `~/.copilot/skills` | `<PROJECT>/.github/skills` |
+
+| Environment variable | Effect |
+|---|---|
+| `CODEX_HOME` | with `AGENT=codex` and no `PROJECT`, the user install goes to `$CODEX_HOME/skills` instead of `~/.codex/skills`. It does not reach a project install, which is the repository's directory and not the user's |
+
+Each row of both tables is recorded, with the date it was confirmed against
+that vendor's documentation, in
+[ADR 12](adr/12-render-the-skills-for-every-agent-from-one-source.md).
+
 ## Limits
 
 | Limit | Value |

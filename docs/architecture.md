@@ -22,12 +22,17 @@ cmd/specr/                  # The specr command: a package rendered as Markdown
 cmd/speca/                  # The speca command: a package's state, its verdict, the list
 specgen/                    # The generation pipeline: phases, prompts, review, split
   templates/                #   The prompts, as Markdown, embedded
+skills/                     # The af-* skills, one source for four agents
+  af-prd/SKILL.md           #   A skill: the frontmatter and the body
+  af-prd/references/        #   The files only that skill links
+  _shared/references/       #   The files more than one skill links
 internal/
   agentrun/                 #   One model phase on the AgentKit driver
   cli/                      #   The shell: input, envelope, flags, progress
   issuex/                   #   GitHub and GitLab: read an issue, post a comment
   project/                  #   Language detection, the test-command audit, steering
   repomap/                  #   The token-budgeted repository map
+  skillgen/                 #   The skill render behind the make targets
   specpkg/                  #   What the commands share about a package on disk
 examples/                   # Programs using afspec: create, validate, work through tasks
 docs/                       # Repository documentation
@@ -330,6 +335,78 @@ that claims a task or records it done, but only for a package that can take it, 
 package whose intent has not drifted, `IntentDrift`). `speca` accepts a write and
 suggests a claim by it, `specr` suggests a call of `speca` by it, and it keeps the answer
 in a field of its result that is never written.
+
+## The skill render
+
+`skills/` is one source tree that renders to the three skills for each of four
+coding agents — Claude Code, Codex, Cursor and GitHub Copilot — all of which
+load a skill from a directory holding a `SKILL.md`. The decision and the agent
+tables are [ADR 12](adr/12-render-the-skills-for-every-agent-from-one-source.md).
+
+### The source
+
+A skill is a directory directly under `skills/` whose name does not begin with
+`_`, holding a `SKILL.md` — YAML frontmatter between two `---` lines, then the
+body — and optionally its own `references/`. Files more than one skill links
+are in `skills/_shared/references/`, which is not a skill because of the
+underscore.
+
+A skill links a reference file with a Markdown link whose target is
+`references/<file>.md`, and **the link is the inclusion**: a file is rendered
+into a skill when that skill's `SKILL.md` links it, or when a file already
+included links it. A link resolves in the skill's own `references/` first and
+in the shared pool second, and a name present in both is an error.
+
+### The render
+
+`internal/skillgen` is a `package main` that `make` runs with
+`go run ./internal/skillgen`. It is not a command — `cmd/` is what `make build`
+installs from — and it imports only the standard library and
+`github.com/goccy/go-yaml`, so no target of it moves the agentkit-go pin,
+reaches the network or reads a credential.
+
+```
+main.go      # the flags, the order of the run, the exit codes
+agents.go    # the four agents: their keys, their invocation prefix, their directories
+source.go    # reading a skills tree from an fs.FS, and resolving the links
+render.go    # the frontmatter filter, the token, the name and description rules, the ceiling
+check.go     # the warnings about a reference file nothing links
+write.go     # writing the output tree
+install.go   # resolving an agent's directory, installing and uninstalling
+```
+
+Reading a tree takes an `fs.FS`, so the tests drive it with `testing/fstest`
+and only the behaviours that need a real directory use one. Everything it finds
+is reported as `<source path>: <problem>` on stderr, every problem of a run in
+one pass rather than the first, and it exits 1 and writes nothing when any
+problem stands.
+
+For each agent the render keeps only the frontmatter keys that agent reads, in
+the source's order and with each key's own text: the frontmatter is filtered
+line by line, because re-marshalling a parsed mapping would lose both. It
+replaces `{{invoke <name>}}` with that agent's invocation syntax and changes no
+other byte. A rendered body — the bytes after the line closing the frontmatter
+— may be at most 24,576 bytes; a reference file has no limit.
+
+`make skills` writes `build/skills/<agent>/<name>/SKILL.md` and that skill's
+`references/`, replacing the output whole once every check has passed, in a
+fixed order and with fixed modes, so a rerun over an unchanged source writes
+the same bytes. `make skills-check` runs the checks and writes nothing, and
+`make check` runs it after `test`.
+
+### The install
+
+`make install-skills` renders for one agent and replaces `<dir>/<name>/` whole
+for each skill, touching no other entry under `<dir>`, so nothing stale is left
+and a skill somebody else installed survives. `AGENT` picks the agent and
+defaults to `claude`, `PROJECT` installs into a repository's own directory
+instead of the user's, and `SKILLS_DIR` overrides both;
+[configuration.md](configuration.md) has the directory of each agent. Where the
+agent also loads another of its directories and that directory already holds a
+skill of the same name, the install says it will see the skill twice and goes
+ahead. `make uninstall-skills` resolves the same directory and removes the
+source tree's own skill names, reading no `SKILL.md` so that it works when one
+no longer parses.
 
 ## Consumers
 

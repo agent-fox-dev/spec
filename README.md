@@ -191,8 +191,8 @@ makes no model or network call and reads no credential. Everything is in
 
 ## Agent Skills
 
-`skills/` holds three Claude Code skills that put the three commands to work
-in a person's own session, one for each step around `spec`:
+`skills/` holds three skills that put the three commands to work in a person's
+own session, one for each step around `spec`:
 
 | Skill | Step | What it does |
 | --- | --- | --- |
@@ -200,8 +200,37 @@ in a person's own session, one for each step around `spec`:
 | `af-spec` | instead of `spec` | writes the package itself, in the session: the four artifacts in the pipeline's own order, `speca --validate` after each one, and activation only on a clean verdict |
 | `af-impl` | after `spec` | implements a package task by task on one branch, claiming and finishing each task with `speca`, rendering it with `specr`, and opening a pull request, with an issue for each item it leaves open (through aflib's `issue` command) |
 
-`make install-skills` copies each one to `~/.claude/skills/<name>/SKILL.md`;
-`make uninstall-skills` removes them.
+### One source, four agents
+
+Each skill is a directory holding a `SKILL.md` — the frontmatter and the body —
+with the reference files it links in `references/` beside it, and the files more
+than one skill links in `skills/_shared/references/`. The body carries the order
+of the run, its gates and its refusals; a reference file is read at the step
+that links it, so a step loads only what it needs. No rendered body is over
+24,576 bytes, which `make check` enforces.
+
+`make skills` renders every skill for every agent into `build/skills/<agent>/`.
+`make install-skills` installs them, keeping only the frontmatter keys that
+agent reads and writing an invocation of another skill in that agent's syntax:
+
+```bash
+make install-skills                      # Claude Code, into ~/.claude/skills
+make install-skills AGENT=codex          # Codex, into $CODEX_HOME/skills
+make install-skills AGENT=cursor         # Cursor, into ~/.cursor/skills
+make install-skills AGENT=copilot        # Copilot, into ~/.copilot/skills
+```
+
+`PROJECT=<path>` installs into that repository instead, so a team can commit
+the skills for an agent that reads only repository skills, such as Copilot's
+cloud agent; `SKILLS_DIR=<dir>` overrides both. `make uninstall-skills` takes
+the same variables and removes what it installed. All of it is documented in
+[docs/configuration.md](docs/configuration.md), and the directory of each agent
+is recorded, with the date it was confirmed, in
+[ADR 12](docs/adr/12-render-the-skills-for-every-agent-from-one-source.md).
+
+A Claude Code install already reaches Copilot, which reads `~/.claude/skills`
+too, so installing for Copilot as well makes it load each skill twice; the
+install says so and goes ahead.
 
 ## Installation
 
@@ -238,7 +267,7 @@ and no API key: the command's tests run against a scripted model.
 | Command | What it does |
 | --- | --- |
 | `make help` | List all targets |
-| `make check` | `make fmt`, `vet`, `lint` and `test` |
+| `make check` | `make fmt`, `vet`, `lint`, `test` and `skills-check` |
 | `make build` | Install the `spec`, `specr` and `speca` commands, stamped with the version |
 | `make test` | `go test ./... -count=1` |
 | `make test-fast` | The tests with `-short` |
@@ -250,8 +279,10 @@ and no API key: the command's tests run against a scripted model.
 | `make update-agentkit` | Point `go.mod` at the latest agentkit-go `main` (the targets that compile run it first; `AGENTKIT_UPDATE=0` skips it) |
 | `make tidy` | `go mod tidy` |
 | `make clean` | Remove `build/` and the coverage profile |
+| `make skills` | Render the skills under `skills/` for every agent into `build/skills` |
+| `make skills-check` | Check the skills against every render rule (part of `make check`) |
 | `make json-gen` | Regenerate the Go artifact types from `afspec/schemas/` |
-| `make install-skills`, `make uninstall-skills` | Install the skills under `skills/` into `~/.claude/skills`, or remove them |
+| `make install-skills`, `make uninstall-skills` | Install the skills for one agent, or remove them (`AGENT`, `PROJECT`, `SKILLS_DIR`) |
 
 ## Documentation
 
