@@ -321,7 +321,7 @@ speca <package> --task <N> --state done
 `speca` writes through the library's `Spec.Save`, which writes every
 artifact of the package again and sets `updated_at` in the frontmatter of
 `prd.md`. Check what it wrote with `git diff -- <package>`: across the
-claim and this call, the task's `state` and `updated_at`, and nothing else.
+claim and this call, the task's `state`, `updated_at` and `spec.md`, and nothing else.
 A package `spec` wrote is already in the library's encoding, so that is the
 whole diff. If other lines changed, the package was not in that encoding;
 when the content is the same, commit it with the first task and name it in

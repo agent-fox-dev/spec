@@ -1,8 +1,8 @@
 {
   "tool": "speca",
-  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and saves the package through the library, which rewrites all of its artifacts. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
+  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and saves the package through the library, which rewrites all of its artifacts. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
   "input": {
-    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list.",
+    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render for every package.",
     "examples": [
       ".specs/16_indexed_code_search",
       "16",
@@ -17,7 +17,7 @@
       "all": {
         "type": "boolean",
         "default": false,
-        "description": "with --list, also list the packages under archive/, marked archived"
+        "description": "with --list, also list the packages under archive/, marked archived; with --render and no input, also render them"
       },
       "by": {
         "type": "string",
@@ -32,7 +32,7 @@
       "dry-run": {
         "type": "boolean",
         "default": false,
-        "description": "with the task form or the status form (--status), run every check and report what would change, and write nothing"
+        "description": "with the task form, the status form (--status) or the render form (--render), run every check and report what would change, and write nothing"
       },
       "force": {
         "type": "boolean",
@@ -43,6 +43,11 @@
         "type": "boolean",
         "default": false,
         "description": "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input"
+      },
+      "render": {
+        "type": "boolean",
+        "default": false,
+        "description": "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed"
       },
       "specs-dir": {
         "type": "string",
@@ -681,6 +686,47 @@
                 "spec_dir"
               ]
             }
+          },
+          "rendered": {
+            "type": "array",
+            "description": "what --render did to each package's spec.md: the one package named, or with no reference every package under the spec root in number order, then with --all those under archive/; [] when the spec root holds none; with --dry-run, what it would have done; --render only",
+            "items": {
+              "type": "object",
+              "properties": {
+                "spec_dir": {
+                  "type": "string",
+                  "description": "the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca"
+                },
+                "spec_id": {
+                  "type": "string",
+                  "description": "the spec id, from the PRD frontmatter; absent when the package did not load"
+                },
+                "spec_name": {
+                  "type": "string",
+                  "description": "the spec name, from the PRD frontmatter; absent when the package did not load"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "the package's lifecycle status; absent when the package did not load"
+                },
+                "rendered": {
+                  "type": "string",
+                  "description": "written (spec.md was absent or differed from the render, and was written), unchanged (it was the render already, and was left alone) or failed (the package could not be loaded, or spec.md could not be written: reason says why); under --dry-run, what would have happened"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "why the package failed, in the library's or the file system's words; present exactly when rendered is failed"
+                },
+                "archived": {
+                  "type": "boolean",
+                  "description": "true for a package rendered from archive/ with --all; absent otherwise"
+                }
+              },
+              "required": [
+                "spec_dir",
+                "rendered"
+              ]
+            }
           }
         },
         "required": []
@@ -785,8 +831,8 @@
     ]
   },
   "exit_codes": {
-    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, or the status changed",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable",
+    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, or what --render did to spec.md",
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the spec root the sweep reads could not be read",
     "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written"
   }
 }

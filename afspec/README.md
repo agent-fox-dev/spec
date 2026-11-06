@@ -159,6 +159,8 @@ The cross-file rules, all errors:
 | `(*Spec).RenderCombined(opts…) string` | One concatenated Markdown document |
 | `(*Spec).RenderIndividual(opts…) map[string]string` | Per-artifact Markdown |
 | `(*Spec).RenderIndividualScoped(taskID, opts…)` | Scoped to one task; what a coder receives |
+| `(*Spec).RenderedBytes() []byte` | What `spec.md` holds: `RenderedHeader`, a blank line and the whole `RenderCombined()`; every save writes it |
+| `RenderedFileName`, `RenderedHeader` | `spec.md`, the file every save writes beside the artifacts, and its first line |
 | `WithMaxTokens(n) RenderOption` | Cap the estimated size, truncating progressively |
 | `(Criterion).RenderEARSSentence() string` | The EARS sentence |
 | `(Criterion).RenderEARS() string` | The sentence plus `→ contract` when there is one |

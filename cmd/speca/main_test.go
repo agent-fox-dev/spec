@@ -154,6 +154,17 @@ func TestUsageErrors(t *testing.T) {
 		"--by names a file of the package": {[]string{in, "--status", "superseded", "--by", ".specs/09_agent_mode/prd.md"},
 			[]string{"--by", "itself"}, nil},
 		"--by has the same spec_id": {[]string{in, "--status", "superseded", "--by", "09_twin"}, []string{"--by", "spec_id 09"}, nil},
+
+		// The render form.
+		"--render --validate": {[]string{in, "--render", "--validate"}, []string{"--render", "--validate", "two operations"}, nil},
+		"--render --list":     {[]string{"--render", "--list"}, []string{"--render", "--list", "two operations"}, nil},
+		"--render, the task form": {[]string{in, "--render", "--task", "1", "--state", "done"},
+			[]string{"--render", "--task", "two operations"}, nil},
+		"--render, the status form": {[]string{in, "--render", "--status", "active"}, []string{"--render", "--status", "two operations"}, nil},
+		"--render --by":             {[]string{in, "--render", "--by", "02"}, []string{"--render", "--by", "two operations"}, nil},
+		"--render --force":          {[]string{in, "--render", "--force"}, []string{"--force has no effect with --render"}, nil},
+		"--render --all, one package": {[]string{in, "--render", "--all"},
+			[]string{"--all adds the archive to the sweep", "means nothing for one package"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := refusedAsUsage(t, root, append([]string{"--dir", root}, tc.argv...), tc.want...)
@@ -206,10 +217,18 @@ func TestUsageErrors_AcceptEveryWellFormedTaskCall(t *testing.T) {
 		"flags after":   {"--task", "1", "--state", "in_progress", "--force", "09"},
 		"pending":       {"09", "--task", "1", "--state", "pending"},
 		"dropped":       {"09", "--task", "1", "--state", "dropped"},
+		"render":        {"09", "--render"},
 	} {
 		env, _, _ := run(t, append([]string{"--dir", root, "--dry-run"}, flags...)...)
 		if env.Error != nil && env.Error.Stage == "usage" {
 			t.Errorf("%s: refused as a usage error: %s", name, env.Error.Message)
+		}
+	}
+	// The render form takes --dry-run, and --all without a package, which
+	// every other form refuses.
+	for _, flags := range [][]string{{"--render", "--dry-run"}, {"--render", "--all"}, {"--render", "--all", "--dry-run"}} {
+		if env, code, _ := run(t, append([]string{"--dir", root}, flags...)...); code != cli.ExitOK {
+			t.Errorf("%v: code %d: %+v", flags, code, env.Error)
 		}
 	}
 }

@@ -33,6 +33,9 @@ type Result struct {
 	// taskForm marks the result of the task form, whose summary names the
 	// changes.
 	taskForm bool
+	// renderForm marks the result of the render form, whose summary names what
+	// it did to spec.md and which suggests nothing.
+	renderForm bool
 	// callNext, where nextSet, is the next of a dry run: the one call that makes
 	// the changes, or none. It replaces what the report would suggest, since the
 	// result is that of a package that has not changed.
@@ -70,6 +73,8 @@ func (r *Result) Summary() string {
 		return r.sentence
 	case r.taskForm:
 		return r.taskSummary()
+	case r.renderForm:
+		return r.renderSummary()
 	case r.Packages != nil:
 		return r.listSummary()
 	case r.Validation != nil:
@@ -146,6 +151,22 @@ func (r *Result) taskSummary() string {
 	return s
 }
 
+// renderSummary counts what the render form did to the packages' spec.md:
+// how many were written, how many were unchanged and how many failed, which add
+// up to the entries; and, under --dry-run, that nothing was written.
+func (r *Result) renderSummary() string {
+	counts := map[string]int{}
+	for _, e := range r.Rendered {
+		counts[e.Rendered]++
+	}
+	s := fmt.Sprintf("%s: %d %s, %d %s, %d %s", tool, counts[renderedWritten], renderedWritten,
+		counts[renderedUnchanged], renderedUnchanged, counts[renderedFailed], renderedFailed)
+	if r.DryRun {
+		s += " (dry run, nothing written)"
+	}
+	return s
+}
+
 // refused is the result of a call that was refused or failed after the package
 // was read: the report of the package as it is, so that the caller sees its
 // tasks without another call. It has no sentence of its own, so the envelope's
@@ -193,6 +214,8 @@ func (r *Result) Next() []cli.Next {
 	switch {
 	case r.nextSet:
 		return r.callNext
+	case r.renderForm:
+		return nil
 	case r.Packages != nil:
 		return r.listNext()
 	case r.Validation != nil:

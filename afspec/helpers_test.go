@@ -498,3 +498,22 @@ func leaves(t *testing.T, v any, skip map[string]bool) map[string]string {
 func unescape(render string) string {
 	return strings.NewReplacer(`\|`, "|", "<br>", "\n").Replace(render)
 }
+
+// activeInto activates the package in dir through the library, and returns dir.
+func activeInto(t *testing.T, dir string) string {
+	t.Helper()
+	if _, err := loadFixture(t, dir).Transition("active", dir); err != nil {
+		t.Fatalf("Transition(active) = %v", err)
+	}
+	return dir
+}
+
+// withRender writes the render of the package in dir to its RenderedFileName,
+// as a save would, and returns dir.
+func withRender(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, RenderedFileName), loadFixture(t, dir).RenderedBytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}

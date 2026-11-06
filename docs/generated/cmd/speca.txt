@@ -6,17 +6,21 @@ state of its tasks, and moves the package through its lifecycle.
     speca --list [--all]
     speca <spec> --task T --state S [--force] [--dry-run]
     speca <spec> --status S [--by <spec>] [--force] [--dry-run]
+    speca <spec> --render [--dry-run]
+    speca --render [--all] [--dry-run]
 
 It takes one input, a reference to a spec package, and writes exactly one JSON
 object to stdout: the package's state, its verdict under --validate, with --list
 and no input, every package under the spec root, or, in the task and status
-forms, the package's state after the change and the changes made. The report,
---validate and --list read the packages and change nothing: they write no file.
-The task form and the status form write the package through the library,
-which rewrites every artifact of it, and the status form moves an archived or
-superseded package under archive/. No form makes a model or network call or
-reads a credential. Its siblings are spec, which writes a package from an idea,
-and specr, which renders one as Markdown.
+forms, the package's state after the change and the changes made, and under
+--render what it did to the package's spec.md. The report, --validate and --list
+read the packages and change nothing: they write no file. The task form and the
+status form write the package through the library, which rewrites every artifact
+of it and its spec.md, and the status form moves an archived or superseded
+package under archive/. The render form writes spec.md, the package's render,
+and no other file. No form makes a model or network call or reads a credential.
+Its siblings are spec, which writes a package from an idea, and specr, which
+renders one as Markdown.
 
 FUNCTIONS
 

@@ -87,6 +87,7 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 	for name, typ := range map[string]string{
 		"validate": "boolean", "list": "boolean", "all": "boolean", "specs-dir": "string", "dir": "string",
 		"task": "", "state": "string", "force": "boolean", "dry-run": "boolean", "status": "string", "by": "string",
+		"render": "boolean",
 	} {
 		if flags[name].Description == "" || typ != "" && flags[name].Type != typ {
 			t.Errorf("flag %s = %+v; want a described %s", name, flags[name], typ)
@@ -114,6 +115,20 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 		"next_task", "allowed_status", "depends_on", "dependents", "validation", "traceability", "packages", "changes", "dry_run"} {
 		if d, _ := result[name]["description"].(string); d == "" {
 			t.Errorf("result.%s is not described", name)
+		}
+	}
+	if d := flags["render"].Description; !strings.Contains(d, "spec.md") {
+		t.Errorf("--render is described as %q, which does not say it writes spec.md", d)
+	}
+	rendered := doc.Result.Properties["result"].Properties["rendered"]
+	if d, _ := rendered["description"].(string); d == "" {
+		t.Error("result.rendered is not described")
+	}
+	items, _ := rendered["items"].(map[string]any)
+	entry, _ := items["properties"].(map[string]any)
+	for _, name := range []string{"spec_dir", "rendered", "reason"} {
+		if _, ok := entry[name]; !ok {
+			t.Errorf("an entry of result.rendered has no %s: %v", name, items)
 		}
 	}
 	for _, name := range []string{"model", "usage", "input", "side_effects"} {

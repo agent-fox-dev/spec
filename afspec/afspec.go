@@ -57,6 +57,12 @@ type Spec struct {
 	// are recorded here for ValidateSchema to report.
 	unknown map[string][]string
 
+	// fromDisk is true for a package LoadSpec read, and for the copies a
+	// lifecycle move makes of one. Only such a package is held to the
+	// RenderedFileName in its directory: a generation run's dry run sets Dir
+	// on a package it never wrote.
+	fromDisk bool
+
 	// loaded holds an immutable snapshot of identity fields captured at load
 	// time (or at activation via Transition). Non-nil when the spec was loaded
 	// in an active state or transitioned to active, enabling Save to reject
@@ -152,6 +158,7 @@ func LoadSpec(dir string) (*Spec, error) {
 		Architecture:  architecture,
 		Dir:           dir,
 		unknown:       unknown,
+		fromDisk:      true,
 	}
 
 	// Capture immutable snapshot for active specs so Save can detect mutations
@@ -199,9 +206,9 @@ func loadJSONArtifact(path string, target interface{}, unknown map[string][]stri
 	return nil
 }
 
-// Save atomically writes all spec artifacts to the given directory.
-// Each artifact is written to a temporary file first, then renamed
-// to its final name. Returns a LifecycleError if the spec is sealed,
+// Save atomically writes all spec artifacts to the given directory, and the
+// package's render beside them as RenderedFileName. Each file is written to a
+// temporary file first, then renamed to its final name. Returns a LifecycleError if the spec is sealed,
 // superseded, or archived.
 //
 // For active specs with a stored IntentHash, Save recomputes the hash from
@@ -333,6 +340,9 @@ func (s *Spec) saveToDisk(dir string) error {
 	if s.Architecture != "" {
 		artifacts = append(artifacts, artifact{name: "architecture.md", data: []byte(s.Architecture)})
 	}
+	// The render goes through the same two phases, so it never falls behind
+	// the artifacts it is derived from (ADR 14).
+	artifacts = append(artifacts, artifact{name: RenderedFileName, data: s.RenderedBytes()})
 
 	// tmpPaths accumulates paths of temp files that need cleanup on failure.
 	// The deferred function removes any paths still in the slice, so callers

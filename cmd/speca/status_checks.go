@@ -80,6 +80,9 @@ func (sc *statusCall) checkActivation() *cli.ErrorInfo {
 	if len(keys) > 0 {
 		dropped = "; the write drops these keys: " + strings.Join(keys, ", ")
 	}
+	if slices.Contains(rules, "rendered") {
+		dropped += fmt.Sprintf("; its %s is not its render, which `speca %s --render` writes", afspec.RenderedFileName, sc.name)
+	}
 	if !sc.opts.force {
 		return &cli.ErrorInfo{Stage: "validate", Category: envelope.CategoryInvalidSpec, FixHint: forceHint,
 			Message: fmt.Sprintf("%s does not validate (%s), and an active package is one that does: fix it (`speca %s --validate` lists the findings), "+

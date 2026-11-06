@@ -2,8 +2,8 @@
 
 The two commands of the `spec` repository that do a package's bookkeeping.
 Each writes exactly one JSON object to stdout, reads the spec root, and —
-except in the forms that change a task's state or the package's status —
-writes nothing. Read their JSON; do not work out a package's state, scope or
+except in the forms that change a task's state or the package's status, or
+write its `spec.md` — writes nothing. Read their JSON; do not work out a package's state, scope or
 verdict by reading its four files by hand while the commands are there to ask.
 
 ## Installing them
@@ -39,6 +39,9 @@ Both commands use the same three:
 - `speca <package> --task N --state S [--dry-run]` — moves one task through
   the state machine. `result.changes` lists what changed.
 - `speca <package> --status S` — moves the package through its lifecycle.
+- `speca <package> --render [--dry-run]` — writes `spec.md`, the package's
+  render, and no other file; `speca --render [--all]` does it for every
+  package. `result.rendered` says `written`, `unchanged` or `failed`.
 - The envelope's `next` suggests the calls that usually follow.
 
 ## `specr`
@@ -82,9 +85,10 @@ the format itself was taken.
 ## What a `speca` write does to the package
 
 The task form and the status form write through the library's `Spec.Save`,
-which rewrites **every** artifact of the package and sets `updated_at` in the
-frontmatter of `prd.md`. So after a claim and a `done`, `git diff -- <package>`
-should hold the task's `state` and `updated_at`, and nothing else. A package
+which rewrites **every** artifact of the package, writes `spec.md`, its render,
+beside them, and sets `updated_at` in the frontmatter of `prd.md`. So after a
+claim and a `done`, `git diff -- <package>` should hold the task's `state`,
+`updated_at` and the same change in `spec.md`, and nothing else. A package
 `spec` itself wrote is already in the library's encoding, so that is the whole
 diff; if other lines changed, the package was not in that encoding, and when
 the content is the same it can be committed with the first task and named in
@@ -109,6 +113,10 @@ entry resolves; every criterion has a test and every test has a task; every
 criterion is covered by an `implement` task; the last task is the one
 `integration` task and owns every `smoke` test; and every `unwanted` criterion
 has a `contract`.
+
+Rule `rendered` compares `spec.md` with the package's render: missing is a
+warning; different is an error for a draft or active package and a warning
+for a sealed one. `speca <package> --render` fixes it.
 
 The rules across packages are: a dependency on a package that does not exist,
 a dependency cycle, a dependency whose execution paths share no actor with this

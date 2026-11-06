@@ -2,6 +2,7 @@ package afspec
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -320,7 +321,7 @@ func TestValidate_ReportsAnUnknownKeyOnDisk(t *testing.T) {
 
 func TestValidateStructured_ShapesEachKindOfEntry(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
-		out := loadFixture(t, fixtureValidSpec).ValidateStructured()
+		out := loadFixture(t, withRender(t, copyFixture(t, fixtureValidSpec))).ValidateStructured()
 		if valid, _ := out["valid"].(bool); !valid {
 			t.Fatalf("valid = false on the canonical fixture: %v", out["errors"])
 		}
@@ -444,4 +445,168 @@ func TestValidateCrossSpec_WarnsOnAGlossaryConflict(t *testing.T) {
 	if !hasWarningContaining(result, "defined differently") {
 		t.Errorf("no glossary conflict warning: %v", result.Warnings)
 	}
+}
+
+// renderedFindings returns the errors and the warnings the rendered rule
+// raised.
+func renderedFindings(result ValidationResult) (errs, warns []ValidationEntry) {
+	for _, e := range result.Errors {
+		if e.Check == "rendered" {
+			errs = append(errs, e)
+		}
+	}
+	for _, w := range result.Warnings {
+		if w.Check == "rendered" {
+			warns = append(warns, w)
+		}
+	}
+	return errs, warns
+}
+
+var everyStatus = []string{"draft", "active", "sealed", "superseded", "archived"}
+
+// A package read from disk with no spec.md is warned, in every status; one
+// whose spec.md is its render gets nothing under the rule.
+func TestValidate_WarnsAboutAMissingRenderAndPassesACurrentOne(t *testing.T) {
+	for _, status := range everyStatus {
+		t.Run(status+"/missing", func(t *testing.T) {
+			dir := withRender(t, packageIn(t, t.TempDir(), "01_test_feature", status))
+			if err := os.Remove(filepath.Join(dir, RenderedFileName)); err != nil {
+				t.Fatal(err)
+			}
+			result := loadFixture(t, dir).Validate()
+			errs, warns := renderedFindings(result)
+			if len(errs) != 0 || len(warns) != 1 {
+				t.Fatalf("rendered errors %v, warnings %v; want one warning", errs, warns)
+			}
+			w := warns[0]
+			if w.Artifact != RenderedFileName || !strings.Contains(w.Message, "spec.md is missing") ||
+				!strings.Contains(w.Message, "speca 01_test_feature --render") {
+				t.Errorf("warning = %+v; want it on spec.md, saying it is missing and naming the call that renders it", w)
+			}
+			if !result.Valid {
+				t.Errorf("a missing render made the package invalid: %v", result.Errors)
+			}
+		})
+		t.Run(status+"/current", func(t *testing.T) {
+			dir := withRender(t, packageIn(t, t.TempDir(), "01_test_feature", status))
+			result := loadFixture(t, dir).Validate()
+			if errs, warns := renderedFindings(result); len(errs)+len(warns) != 0 {
+				t.Errorf("a current render was reported: errors %v, warnings %v", errs, warns)
+			}
+		})
+	}
+}
+
+// A render that differs from the package is an error while the package can
+// be saved, and a warning once it is history.
+func TestValidate_ReportsAStaleRenderByStatus(t *testing.T) {
+	for _, status := range everyStatus {
+		t.Run(status, func(t *testing.T) {
+			dir := withRender(t, packageIn(t, t.TempDir(), "01_test_feature", status))
+			path := filepath.Join(dir, RenderedFileName)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(string(data), "\n")
+			const changed = 7
+			lines[changed-1] = "an edited line"
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			result := loadFixture(t, dir).Validate()
+			errs, warns := renderedFindings(result)
+			editable := status == "draft" || status == "active"
+			var found []ValidationEntry
+			if editable {
+				found = errs
+				if len(warns) != 0 || result.Valid {
+					t.Errorf("valid %v, rendered warnings %v; want an error and an invalid package", result.Valid, warns)
+				}
+			} else {
+				found = warns
+				if len(errs) != 0 || !result.Valid {
+					t.Errorf("valid %v, rendered errors %v; want a warning and a valid package", result.Valid, errs)
+				}
+			}
+			if len(found) != 1 {
+				t.Fatalf("rendered findings = %v; want exactly one", found)
+			}
+			if f := found[0]; f.Artifact != RenderedFileName || !strings.Contains(f.Message, fmt.Sprintf("line %d", changed)) ||
+				!strings.Contains(f.Message, "speca 01_test_feature --render") {
+				t.Errorf("finding = %+v; want it to name line %d and the call that renders it", f, changed)
+			}
+		})
+	}
+}
+
+// A package the library did not load is not held to a file on disk, wherever
+// its Dir points: a dry run sets Dir on a package it never wrote.
+func TestValidate_SaysNothingOfTheRenderOfAPackageNotReadFromDisk(t *testing.T) {
+	other := packageIn(t, t.TempDir(), "01_test_feature", "draft")
+	if err := os.WriteFile(filepath.Join(other, RenderedFileName), []byte("another package's render\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, dir string }{
+		{"a directory that does not exist", filepath.Join(t.TempDir(), "missing")},
+		{"an empty directory", t.TempDir()},
+		{"a directory holding another package's spec.md", other},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := inMemory(t)
+			want := spec.Validate()
+			spec.Dir = tc.dir
+			got := spec.Validate()
+			if errs, warns := renderedFindings(got); len(errs)+len(warns) != 0 {
+				t.Errorf("a package held in memory was reported: errors %v, warnings %v", errs, warns)
+			}
+			if len(got.Errors) != len(want.Errors) || len(got.Warnings) != len(want.Warnings) {
+				t.Errorf("the other findings changed: %d errors, %d warnings; want %d and %d",
+					len(got.Errors), len(got.Warnings), len(want.Errors), len(want.Warnings))
+			}
+		})
+	}
+}
+
+// A spec.md that is there and cannot be read is a difference, with the
+// reason, not a missing file.
+func TestValidate_ReportsAnUnreadableRenderAsADifference(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("a file without read permission is readable as root")
+	}
+	for _, status := range []string{"draft", "sealed"} {
+		t.Run(status, func(t *testing.T) {
+			dir := withRender(t, packageIn(t, t.TempDir(), "01_test_feature", status))
+			path := filepath.Join(dir, RenderedFileName)
+			if err := os.Chmod(path, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+			errs, warns := renderedFindings(loadFixture(t, dir).Validate())
+			found := warns
+			if status == "draft" {
+				found = errs
+			}
+			if len(errs)+len(warns) != 1 || len(found) != 1 {
+				t.Fatalf("rendered errors %v, warnings %v; want one %s", errs, warns, map[bool]string{true: "error", false: "warning"}[status == "draft"])
+			}
+			if m := found[0].Message; !strings.Contains(m, "permission denied") || strings.Contains(m, "missing") {
+				t.Errorf("message = %q; want the reason the read failed, and not that the file is missing", m)
+			}
+		})
+	}
+}
+
+// inMemory is the valid fixture built in memory, as a generation run builds a
+// package, rather than loaded by the library.
+func inMemory(t *testing.T) *Spec {
+	t.Helper()
+	loaded := loadFixture(t, fixtureValidSpec)
+	s := CreateSpec(loaded.SpecID, loaded.SpecName)
+	s.Title, s.CreatedAt, s.UpdatedAt, s.PRDBody = loaded.Title, loaded.CreatedAt, loaded.UpdatedAt, loaded.PRDBody
+	s.Requirements, s.TestSpec, s.Tasks = loaded.Requirements, loaded.TestSpec, loaded.Tasks
+	return s
 }

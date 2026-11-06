@@ -21,24 +21,43 @@ import (
 // must still be listed, with the reason. A package that does not load is an
 // entry, not a failure of the call.
 func list(c *call) (*Result, *cli.ErrorInfo) {
+	dirs, failure := c.packageDirs("listed")
+	if failure != nil {
+		return nil, failure
+	}
+	packages := []envelope.PackageInfo{}
+	writable := map[string]bool{}
+	for _, d := range dirs {
+		info, canWrite := c.entry(d.path, d.archived)
+		packages = append(packages, info)
+		writable[info.SpecDir] = canWrite
+	}
+	return &Result{AdminResult: envelope.AdminResult{Packages: packages}, writableDirs: writable}, nil
+}
+
+// packageDir is a package directory a form over the spec root goes through,
+// and whether it is under archive/.
+type packageDir struct {
+	path     string
+	archived bool
+}
+
+// packageDirs is every package directory of the spec root in number order,
+// then, with --all, those under archive/. A spec root that cannot be read fails
+// the call, since an empty list would hide a mistyped --specs-dir; an archive
+// that cannot be read is left out with a warning, saying the form left its
+// packages unprocessed (what: "listed", "rendered").
+func (c *call) packageDirs(what string) ([]packageDir, *cli.ErrorInfo) {
 	names, err := specpkg.List(c.specsDir)
 	if err != nil {
-		// An empty list would hide a mistyped --specs-dir.
 		return nil, &cli.ErrorInfo{Stage: "load", Category: "input",
 			Message: fmt.Sprintf("the spec root %s could not be read: %v", specpkg.Display(c.specsDir, c.root), err),
 			FixHint: &cli.FixHint{Flag: "--specs-dir", Env: []string{afspec.SpecDirEnv}}}
 	}
-	packages := []envelope.PackageInfo{}
-	writable := map[string]bool{}
-	add := func(path string, archived bool) {
-		info, canWrite := c.entry(path, archived)
-		packages = append(packages, info)
-		writable[info.SpecDir] = canWrite
-	}
+	var dirs []packageDir
 	for _, name := range names {
-		add(filepath.Join(c.specsDir, name), false)
+		dirs = append(dirs, packageDir{filepath.Join(c.specsDir, name), false})
 	}
-
 	if c.opts.all {
 		archive := filepath.Join(c.specsDir, "archive")
 		archived, err := specpkg.List(archive)
@@ -46,14 +65,14 @@ func list(c *call) (*Result, *cli.ErrorInfo) {
 		case errors.Is(err, fs.ErrNotExist):
 			// A root without an archive is the usual one.
 		case err != nil:
-			c.warnUnreadable("the archive", archive, err, "the packages under archive/ are not listed")
+			c.warnUnreadable("the archive", archive, err, "the packages under archive/ are not "+what)
 		default:
 			for _, name := range archived {
-				add(filepath.Join(archive, name), true)
+				dirs = append(dirs, packageDir{filepath.Join(archive, name), true})
 			}
 		}
 	}
-	return &Result{AdminResult: envelope.AdminResult{Packages: packages}, writableDirs: writable}, nil
+	return dirs, nil
 }
 
 // entry describes the package in path, and says whether it can take a write,

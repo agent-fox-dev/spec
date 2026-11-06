@@ -886,6 +886,9 @@ func (e *runEnv) buildPackage(ctx context.Context, prd PRD, label string, sl slo
 			return pkg, wrap(err)
 		}
 		written = true
+		// The save writes the render beside the artifacts, and a run lists
+		// the files it wrote; a dry run wrote none.
+		pkg.Artifacts = append(pkg.Artifacts, afspec.RenderedFileName)
 		o.Progress.Step("write", "%swrote %s", prefixed(label), specPath)
 		if onWritten != nil {
 			onWritten(specID, dirName)

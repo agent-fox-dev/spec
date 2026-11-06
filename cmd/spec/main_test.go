@@ -414,7 +414,7 @@ func TestSpec_WritesAValidPackageFromAnIdea(t *testing.T) {
 	if r.SpecID != "01" || r.SpecDir != filepath.Join(".specs", "01_test_feature") || r.Status != "active" || !r.Validation.Valid {
 		t.Errorf("result = %+v", r)
 	}
-	if strings.Join(r.Artifacts, ",") != "prd.md,requirements.json,test_spec.json,tasks.json" {
+	if strings.Join(r.Artifacts, ",") != "prd.md,requirements.json,test_spec.json,tasks.json,spec.md" {
 		t.Errorf("artifacts = %v", r.Artifacts)
 	}
 	if r.Requirements == 0 || r.Tests == 0 || len(r.OpenQuestions) != 1 {
