@@ -68,27 +68,9 @@ libraries — API signatures in specs may be unverified assumptions.
 
 ## Quality Commands
 
-The Go version is **1.27** (`go 1.27` in every `go.mod`).
-
-| Command | What it does |
-|---------|-------------|
-| `make help` | List all targets |
-| `make build` | Build the project's packages and commands |
-| `make test` | Run all tests (`go test ./... -count=1`) |
-| `make coverage` | Run all tests with a coverage report |
-| `make fmt` | `gofmt` all source files in place |
-| `make vet` | `go vet ./...` |
-| `make lint` | `golangci-lint` if installed (config in `.golangci.yml`) |
-| `make check` | `fmt`, `vet`, `lint` and `test` — use before committing |
-| `make doc` | Regenerate the Go package docs in `docs/generated/` (committed) |
-| `make tidy` | `go mod tidy` |
-| `make clean` | Remove build output |
-
-Run the full quality suite before committing:
-
-```
-make check
-```
+The Go version is **1.27** (`go 1.27` in every `go.mod`). `make help` lists
+every target. Run `make check` (fmt, vet, lint, test and skills-check) before
+committing; `make doc` regenerates the committed docs in `docs/generated/`.
 
 ## Git Workflow
 

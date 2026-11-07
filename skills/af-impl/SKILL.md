@@ -247,8 +247,9 @@ must all be `done` first):
    survey's notes on them. Paths in the spec are what the author expected;
    confirm them against the code.
 4. **Test first.** Read
-   [references/test-first.md](references/test-first.md) in full before writing
-   a line of test code. It says how a task's checks become the project's own
+   [references/test-first.md](references/test-first.md) in full once, before
+   the first task's tests, and work from it for every later task without
+   reading it again. It says how a task's checks become the project's own
    tests — at the level where the behaviour lives, named for the behaviour,
    in the test file of the area they exercise — and what each check kind
    asserts.
@@ -350,9 +351,9 @@ its `result.next_task` name. When there is no `next_task` and no task is
 **The integration task** is last, task N+1: `speca` claims and records it
 like any other, and `specr <package> --task N+1` renders every path with its
 smoke check and a `## Contracts` section. It exists to catch the wiring gaps
-component tests cannot see. Read
-[references/test-first.md](references/test-first.md) for what it writes,
-traces and searches. A path that is not live in production code fails this
+component tests cannot see. Its section of
+[references/test-first.md](references/test-first.md), already read in step 4,
+says what it writes, traces and searches. A path that is not live in production code fails this
 task, and a recorded decision or a deferral does not satisfy it. A `lite`
 package has none.
 
