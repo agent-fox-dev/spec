@@ -113,3 +113,6 @@ workflow, conventional commits, what a finished session looks like — are in
 `spec` command read are in `.specs/steering.md`. Decisions are recorded as
 ADRs under [adr/](adr/), and every divergence between a spec and its
 implementation as an erratum under [errata/](errata/).
+
+Project-agnostic versions of `AGENTS.md` and `.specs/steering.md`, to paste
+into a new project as a starting point, are in [templates/](templates/README.md).
