@@ -1,0 +1,135 @@
+# Agent Instructions
+
+Instructions for coding agents (Cursor, Claude Code, Codex, etc.) working on
+this repository. Treat this file as mandatory policy for every coding session.
+Only the **Repository Layout** and **Quality Commands** sections are specific
+to this repository; everything else is shared policy.
+
+## Understand Before You Code (MANDATORY)
+
+Before making any changes, orient yourself:
+
+1. **Read `README.md`** for project overview and quick-start.
+2. **Read `.specs/steering.md`** if it exists — project-level directives that
+   apply to all agents and skills. Follow any instructions found there.
+3. **Read ADRs and errata** in `docs/` for architectural context.
+4. **Explore the codebase** using the Repository Layout below.
+5. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
+
+**Important:** Read all documents and code in depth — don't skim.
+
+**Important:** Only read files tracked by git. Skip anything matched by
+`.gitignore`. When in doubt, run `git ls-files` to see what's tracked.
+
+Do not implement anything before completing these steps.
+
+## Repository Layout
+
+<!-- Replace this tree with the real layout of the repository: one line per
+     top-level directory (and any notable subdirectory), with what it holds. -->
+
+```
+src/                    # <the production code>
+tests/                  # <tests, if they do not live next to the code>
+cmd/                    # <entry points / commands, if any>
+docs/                   # Documentation
+docs/adr/               # Architecture Decision Records
+docs/errata/            # Divergences between a spec and its implementation
+docs/prd/               # Product Requirements Documents
+.specs/                 # Specs to be implemented
+.specs/archive/         # Old specs
+```
+
+<!-- Say where tests and their fixtures live, e.g. "Tests live next to the
+     code as `*_test.go`, their fixtures in `testdata/`." -->
+
+## Spec-Driven Workflow
+
+This project uses spec-driven development. Specifications live in
+`.specs/NN_name/` (numbered by creation order) and contain:
+
+- `prd.md` — product requirements, goals, tech stack, high-level design
+- `requirements.json` — EARS-syntax acceptance criteria, each with its check, execution paths, each with its smoke check, external API contracts
+- `tasks.json` — implementation plan: implement tasks owning criteria, with steps, test commands and cross-spec dependencies; the integration task is derived from it
+- `progress.json` — the state of every task, the integration task included; written by the tools (`speca`), never by hand
+- `architecture.md` — (optional) detailed architecture
+
+`.specs/archive/` holds old specs. Ignore them for coding tasks, except for
+reference.
+
+Cross-reference `external_apis` in `requirements.json` against installed
+libraries — API signatures in specs may be unverified assumptions.
+
+## Quality Commands
+
+<!-- Fill in the language and toolchain version, and adjust the table to the
+     targets the project's build file really has. Keep `make check` (or its
+     equivalent) as the single command that must pass before every commit. -->
+
+The <language> version is **<version>**.
+
+| Command | What it does |
+|---------|-------------|
+| `make help` | List all targets |
+| `make build` | Build the project |
+| `make test` | Run all tests |
+| `make coverage` | Run all tests with a coverage report |
+| `make fmt` | Format all source files in place |
+| `make vet` | Static analysis |
+| `make lint` | Run the linter |
+| `make check` | `fmt`, `vet`, `lint` and `test` — use before committing |
+| `make doc` | Regenerate the API docs in `docs/generated/` (committed) |
+| `make clean` | Remove build output |
+
+Run the full quality suite before committing:
+
+```
+make check
+```
+
+## Git Workflow
+
+- **Branch from `main`:** `feature/<descriptive-name>`.
+- **Never commit directly** to `main`.
+- **Conventional commits:** `<type>: <description>` (e.g. `feat:`, `fix:`,
+  `refactor:`, `docs:`, `test:`, `chore:`).
+- **Commit discipline:** only commit files relevant to the current change.
+- **Never add `Co-Authored-By` lines.** No AI attribution in commits — ever.
+- **Feature branches are pushed to origin** — push and create a pull request, then switch back to main.
+
+## Scope Discipline
+
+- Focus on one coherent change per session.
+- Do not include unrelated "while here" fixes.
+- Priority: fix broken behavior before adding new behavior.
+
+## Documentation
+
+- **PRDs** live in `docs/prd/NN-imperative-verb-phrase.md`. To choose NN,
+  list existing files, find the max numeric prefix, and use the next number
+  zero-padded to two digits for consistency (three digits once past 99).
+- **ADRs** live in `docs/adr/NN-imperative-verb-phrase.md`. To choose NN,
+  list existing files, find the max numeric prefix, and use the next number
+  zero-padded to two digits for consistency (three digits once past 99).
+- **Errata** live in `docs/errata/NN_snake_case_topic.md` — for spec
+  divergences. NN is the spec number the erratum relates to (e.g.
+  `28_github_issue_rest_api.md` for spec 28). For project-wide errata not
+  tied to a specific spec, omit the numeric prefix.
+- **Generated API docs** live in `docs/generated` (generated by `make doc` and
+  committed; see the Generated Docs section of `.specs/steering.md`).
+- **Reference docs** live in `docs/`: `api.md`, `cli.md`, `configuration.md`
+  and `architecture.md`. Every repository has these four; see
+  `.specs/steering.md` for when each one must be updated.
+- **Other docs** live in `docs/{topic}.md`.
+- When you add or change user-facing behavior, public APIs, configuration, or
+  architecture, update the relevant documentation in the same session.
+
+## Session Completion
+
+A session is not complete until:
+
+1. `make check` passes (no regressions).
+2. Changes are committed with a clear conventional commit message.
+3. Changes are pushed to origin as a pull request.
+4. `git status` shows a clean working tree.
+5. You provide a brief handoff note summarizing what was done and what remains.
