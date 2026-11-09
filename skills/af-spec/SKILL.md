@@ -48,7 +48,8 @@ and commits; where they say nothing, the defaults below apply.
 
 One direction: input, orientation, the number, the size, the PRD, the two
 JSON artifacts in order, the verdict, activation, the report. You stop for the
-person's answers in §1 and §4 and for nothing else. Do not ask whether to
+person's answers in §1 and §4, and for an escalated finding of a review, and
+for nothing else. Do not ask whether to
 start an artifact, whether a requirement reads well, or whether to go on to
 the next file. Show each artifact as you write it; the person steers by
 answering and interrupting.
@@ -338,6 +339,12 @@ a criterion that reads as two behaviours, a task with no steps a stranger could
 follow, or a check that restates another becomes obvious. Fix what you find
 and validate again. Say in the report which warnings you left, and why.
 
+**The review, when the person asks for one**: `spec --adversarial-plan` in
+the session. On a clean verdict and before §10, a fresh subagent reviews the
+plan and you answer every finding. Read
+[references/review.md](references/review.md) in full first. With no fresh
+subagent, skip it and say so: a review in your own context is not this step.
+
 ## 10. Activate
 
 A package that validates is activated; one that does not stays in `draft`
@@ -415,6 +422,7 @@ files uncommitted and say so.
 - **The counts**: requirements, criteria, checks by kind and the ones shared
   with `same_as`, execution paths, tasks, and the criteria and paths covered,
   from `speca`'s `traceability`.
+- **The review**, when one ran: rounds, findings, answers (references/review.md §6).
 - **The verdict**: `valid`, and where it is false every error by its rule.
   Then the warnings you left, each with why.
 - **The decisions** this run made that the PRD had left open, the profile
