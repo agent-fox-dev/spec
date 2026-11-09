@@ -51,10 +51,23 @@ Fix, ask again, and do not go on until `valid` is true. Then read the
 warnings: they never block, and both are worth acting on anyway.
 `missing_contract` names a criterion that describes an error outcome and has
 no contract; give it one. `scope_limit` means the work wanted a split (§4).
-Say in the report which warnings you left, and why. The verdict matches no
-words: read your criteria for the vague words of
-[prd-shape.md](../../_shared/references/prd-shape.md) yourself, and your steps
-for a line of a file (`store.go:88`), which belongs nowhere in a plan.
+Say in the report which warnings you left, and why.
+
+The verdict matches no words, so `speca` reports the checks `spec` makes as it
+generates a package beside the verdict, in `result.hints`, never in it. Each
+one names its `check`, `artifact`, `entity` and `message`:
+
+- `vague_language`: a vague word in a criterion. Say what it stands for, or
+  keep it where it is precise in context.
+- `line_reference`: a step or `touches` entry naming a line of a file
+  (`store.go:88`), which is wrong after the first commit that moves it. Say
+  the behaviour, and name the file alone in `touches`.
+- `foreign_test_command`: a `test_commands` entry from an ecosystem the
+  repository does not have. Use the project's own command the message names.
+  This one is always a mistake, and `spec` refuses it.
+
+Act on each one, as `spec`'s phases are made to, or keep it and say in the
+report why. A hint never blocks activation.
 
 Then read the package back as a coder will receive it:
 

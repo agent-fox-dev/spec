@@ -113,14 +113,23 @@ func (r *Result) reportSummary() string {
 func (r *Result) verdictSummary() string {
 	s := fmt.Sprintf("%s: %s", tool, r.dirName())
 	if r.Validation.Valid && r.Validation.ErrorCount == 0 {
-		return s + " validates"
+		s += " validates"
+	} else {
+		noun := "errors"
+		if r.Validation.ErrorCount == 1 {
+			noun = "error"
+		}
+		s += fmt.Sprintf(" does not validate (%d %s: %s)", r.Validation.ErrorCount, noun,
+			strings.Join(specpkg.Rules(entriesOf(r.Validation.Errors)), ", "))
 	}
-	noun := "errors"
-	if r.Validation.ErrorCount == 1 {
-		noun = "error"
+	switch n := len(r.Hints); n {
+	case 0:
+	case 1:
+		s += "; 1 authoring hint"
+	default:
+		s += fmt.Sprintf("; %d authoring hints", n)
 	}
-	return s + fmt.Sprintf(" does not validate (%d %s: %s)", r.Validation.ErrorCount, noun,
-		strings.Join(specpkg.Rules(entriesOf(r.Validation.Errors)), ", "))
+	return s
 }
 
 // entriesOf turns reported findings back into the entries Rules reads.

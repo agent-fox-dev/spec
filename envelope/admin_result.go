@@ -32,6 +32,7 @@ type AdminResult struct {
 
 	Validation   *ValidationReport `json:"validation,omitempty" description:"the format's verdict: valid, error_count, warning_count, and every error and warning with its check (the rule), artifact, entity and message; the package's own findings first, then the cross-spec findings that concern it; --validate only"`
 	Traceability *TraceReport      `json:"traceability,omitempty" description:"the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and criteria_unowned; --validate only"`
+	Hints        []ValidationItem  `json:"hints,omitzero" description:"the authoring hints, which are not the format's rules and never change valid: a vague word in a criterion (vague_language), a step or touches entry naming a line of a file (line_reference), and a test command from an ecosystem the repository does not have (foreign_test_command), each with its check, artifact, entity and message; [] when there are none; --validate only"`
 
 	Changes []Change `json:"changes,omitempty" description:"what the call changed, each with its kind, what it left and what it entered: the tasks in plan order for the task form; status, then supersedes, then moved for the status form, in the order they were written; with --dry-run, what it would have changed; absent when nothing changed; the task and status forms only"`
 	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task and status forms only"`

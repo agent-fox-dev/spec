@@ -317,7 +317,8 @@ This is the format's whole verdict: the three schemas, the cross-file rules
 C1–C8, and the rules across packages. Read
 [references/verdict.md](references/verdict.md) in full for its four stages, the
 order to work in and why the stages gate each other, the two warnings worth
-acting on, and how to validate without `speca`.
+acting on, the authoring hints in `result.hints`, and how to validate without
+`speca`.
 
 `result.valid` is the answer. Fix, ask again, and **do not go on until `valid`
 is true**. Exit code 0 reports a verdict, valid or not; exit 1 means the
@@ -416,7 +417,7 @@ files uncommitted and say so.
   with `same_as`, execution paths, tasks, and the criteria and paths covered,
   from `speca`'s `traceability`.
 - **The verdict**: `valid`, and where it is false every error by its rule.
-  Then the warnings you left, each with why.
+  Then the warnings and the hints you left, each with why.
 - **The decisions** this run made that the PRD had left open, the profile
   among them, and anything the person settled.
 - **The dependencies**: each package named, with its status, and any that is

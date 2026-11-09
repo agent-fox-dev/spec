@@ -247,3 +247,52 @@ func TestVerdict_WarnsOnceAboutAMalformedSteeringRecord(t *testing.T) {
 		t.Errorf("the report raised steering_malformed: %v", warningCodes(report))
 	}
 }
+
+// The verdict reports the authoring hints beside the format's verdict: an
+// empty list for a clean package, and a vague word, a line reference and a
+// foreign test command for a package that has them, none of which changes
+// valid.
+func TestVerdict_ReportsTheAuthoringHintsWithoutChangingValid(t *testing.T) {
+	root := newRepo(t)
+	pkg := pkgDir(root, "09_agent_mode")
+	setDependencies(t, pkg)
+
+	env, raw := rawRun(t, "--dir", root, "--validate", "09")
+	if got := string(raw["hints"]); got != "[]" {
+		t.Errorf("a clean package's hints = %s, want []", got)
+	}
+	if strings.Contains(env.Summary, "hint") {
+		t.Errorf("summary %q names hints that are not there", env.Summary)
+	}
+
+	// The repository is now a Python project, so the example's go commands
+	// are foreign; one criterion and one step get a word and a line each.
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"x\"\n")
+	editJSON(t, filepath.Join(pkg, "requirements.json"), func(m map[string]any) {
+		c := m["requirements"].([]any)[0].(map[string]any)["criteria"].([]any)[0].(map[string]any)
+		c["action"] = c["action"].(string) + " as needed"
+	})
+	editJSON(t, filepath.Join(pkg, "tasks.json"), func(m map[string]any) {
+		task := m["tasks"].([]any)[0].(map[string]any)
+		task["steps"] = append(task["steps"].([]any), "Change the flag parsing at cmd/spec/main.go:40")
+	})
+	succeeds(t, root, "09", "--render")
+
+	env, _ = rawRun(t, "--dir", root, "--validate", "09")
+	r := result(t, env)
+	if r.Valid == nil || !*r.Valid || r.Validation.WarningCount != 0 {
+		t.Fatalf("the hints changed the verdict: valid %v, %+v", r.Valid, r.Validation)
+	}
+	want := []string{"vague_language", "line_reference", "foreign_test_command", "foreign_test_command", "foreign_test_command"}
+	if got := checks(r.Hints); !slices.Equal(got, want) {
+		t.Fatalf("hint checks = %v, want %v", got, want)
+	}
+	for _, h := range r.Hints {
+		if h.Artifact == "" || h.Entity == "" || h.Message == "" {
+			t.Errorf("hint %+v lacks an artifact, an entity or a message", h)
+		}
+	}
+	if !strings.Contains(env.Summary, "validates; 5 authoring hints") {
+		t.Errorf("summary %q", env.Summary)
+	}
+}

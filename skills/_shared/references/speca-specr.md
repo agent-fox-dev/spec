@@ -35,7 +35,10 @@ Both commands use the same three:
   `result.validation.errors`, each naming its `check`, `artifact` and
   `entity`, `result.validation.warnings` in the same shape, and
   `result.traceability` with the criteria and paths covered and the criteria
-  no task owns. `result.valid` is the answer.
+  no task owns. `result.valid` is the answer. Beside the verdict,
+  `result.hints` lists the authoring hints in the same shape:
+  `vague_language`, `line_reference` and `foreign_test_command`. They never
+  change `valid`.
 - `speca --list [--all]` — every package under the spec root in number order,
   with its status, verdict, task counts and next task. `--all` includes the
   archived ones.

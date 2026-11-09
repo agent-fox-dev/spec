@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/agent-fox-dev/spec/envelope"
+	"github.com/agent-fox-dev/spec/internal/authoring"
 	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/internal/project"
 	"github.com/agent-fox-dev/spec/internal/specpkg"
@@ -12,6 +14,10 @@ import (
 // which only a run over the whole spec root can apply, and which spec applies
 // to every package it writes (specpkg.Verdict). A package that does not
 // validate is a successful call: the answer is in valid.
+//
+// Beside the verdict it reports the authoring hints (internal/authoring):
+// the checks spec makes on a package as it generates one, which are not the
+// format's rules and so never change valid (ADR 20).
 func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	spec, failure := c.loadPackage(dir)
 	if failure != nil {
@@ -38,5 +44,9 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	r.Valid = &valid
 	traceability := specpkg.TraceOf(spec)
 	r.Traceability = &traceability
+	r.Hints = []envelope.ValidationItem{}
+	for _, h := range authoring.Hints(spec, project.DetectProfile(c.root)) {
+		r.Hints = append(r.Hints, specpkg.ItemOf(h))
+	}
 	return r, nil
 }

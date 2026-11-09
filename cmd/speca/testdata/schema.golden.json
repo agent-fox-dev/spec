@@ -519,6 +519,32 @@
               "paths_covered"
             ]
           },
+          "hints": {
+            "type": "array",
+            "description": "the authoring hints, which are not the format's rules and never change valid: a vague word in a criterion (vague_language), a step or touches entry naming a line of a file (line_reference), and a test command from an ecosystem the repository does not have (foreign_test_command), each with its check, artifact, entity and message; [] when there are none; --validate only",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check": {
+                  "type": "string"
+                },
+                "artifact": {
+                  "type": "string"
+                },
+                "entity": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "check",
+                "artifact",
+                "message"
+              ]
+            }
+          },
           "changes": {
             "type": "array",
             "description": "what the call changed, each with its kind, what it left and what it entered: the tasks in plan order for the task form; status, then supersedes, then moved for the status form, in the order they were written; with --dry-run, what it would have changed; absent when nothing changed; the task and status forms only",

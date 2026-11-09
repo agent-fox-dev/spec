@@ -14,15 +14,16 @@ func ReportOf(v afspec.ValidationResult) envelope.ValidationReport {
 		WarningCount: len(v.Warnings),
 	}
 	for _, e := range v.Errors {
-		out.Errors = append(out.Errors, itemOf(e))
+		out.Errors = append(out.Errors, ItemOf(e))
 	}
 	for _, w := range v.Warnings {
-		out.Warnings = append(out.Warnings, itemOf(w))
+		out.Warnings = append(out.Warnings, ItemOf(w))
 	}
 	return out
 }
 
-func itemOf(e afspec.ValidationEntry) envelope.ValidationItem {
+// ItemOf is one finding as JSON reports it.
+func ItemOf(e afspec.ValidationEntry) envelope.ValidationItem {
 	return envelope.ValidationItem{
 		Check:    e.Check,
 		Artifact: e.Artifact,
