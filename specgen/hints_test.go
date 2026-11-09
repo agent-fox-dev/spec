@@ -111,26 +111,6 @@ func TestSubmitTasks_SendsLineReferencesBackOnce(t *testing.T) {
 	}
 }
 
-func TestLineReferenceRe_FindsALineOfAFile(t *testing.T) {
-	for _, tc := range []struct {
-		text string
-		want []string
-	}{
-		{"edit afspec/afspec.go:88 to add it", []string{"afspec/afspec.go:88"}},
-		{"see render.go:12-30", []string{"render.go:12-30"}},
-		{"around line 40 of the file", []string{"line 40"}},
-		{"Lines 3 to 9", []string{"Lines 3"}},
-		{"add RenderedBytes to afspec/render.go", nil},
-		{"listen on localhost:8080", nil},
-		{"REQ-1.4 shares the check of REQ-1.2", nil},
-		{"a timeout of 30s", nil},
-	} {
-		if got := lineReferenceRe.FindAllString(tc.text, -1); !slices.Equal(got, tc.want) {
-			t.Errorf("%q: found %q, want %q", tc.text, got, tc.want)
-		}
-	}
-}
-
 // The requirements phase still hears about a vague word once, from the
 // generator: the package's validation no longer warns on it.
 func TestGeneratorHints_NameEachVagueWordOfACriterion(t *testing.T) {

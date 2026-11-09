@@ -215,28 +215,23 @@ func makeTarget(makefile, name string) bool {
 // The returned error is read by the model, so it names both what was
 // submitted and what the project actually uses.
 func (p Profile) AuditTasks(content map[string]any) error {
-	if !p.Known() {
-		return nil
-	}
-	commands, ok := content["test_commands"].(map[string]any)
+	raw, ok := content["test_commands"].(map[string]any)
 	if !ok {
 		return nil
 	}
-	var problems []string
-	for _, field := range []string{"all_tests", "linter", "spec_tests"} {
-		cmd, _ := commands[field].(string)
-		if strings.TrimSpace(cmd) == "" {
-			continue
+	commands := map[string]string{}
+	for field, v := range raw {
+		if s, ok := v.(string); ok {
+			commands[field] = s
 		}
-		family, known := familyOf(cmd)
-		if !known || p.hasEcosystem(family) {
-			continue
-		}
-		problems = append(problems, fmt.Sprintf(
-			"test_commands.%s is %q, which is a %s command", field, cmd, family))
 	}
-	if len(problems) == 0 {
+	foreign := p.ForeignCommands(commands)
+	if len(foreign) == 0 {
 		return nil
+	}
+	problems := make([]string, len(foreign))
+	for i, f := range foreign {
+		problems[i] = f.String()
 	}
 	sort.Strings(problems)
 	return fmt.Errorf(
@@ -247,6 +242,48 @@ func (p Profile) AuditTasks(content map[string]any) error {
 			"layout, and a stub marker here is %s.",
 		p.Language, p.Manifest, strings.Join(problems, "; "),
 		p.AllTests, p.Linter, p.Language, p.StubMarker)
+}
+
+// ForeignCommand is one test command whose program belongs to an ecosystem
+// the project does not have.
+type ForeignCommand struct {
+	// Field is the test_commands field: all_tests, linter or spec_tests.
+	Field   string
+	Command string
+	// Family is the ecosystem the command's program belongs to.
+	Family string
+}
+
+func (f ForeignCommand) String() string {
+	return fmt.Sprintf("test_commands.%s is %q, which is a %s command", f.Field, f.Command, f.Family)
+}
+
+// testCommandFields are the fields of test_commands, in the order of the
+// tasks schema.
+var testCommandFields = []string{"all_tests", "linter", "spec_tests"}
+
+// ForeignCommands names, in the order of the tasks schema's fields, each test
+// command whose program belongs to a known ecosystem the project does not
+// have. It is the narrow check AuditTasks refuses on: a blank command, a
+// program in no known ecosystem and a project of no detected language give
+// nothing.
+func (p Profile) ForeignCommands(commands map[string]string) []ForeignCommand {
+	if !p.Known() {
+		return nil
+	}
+	var out []ForeignCommand
+	for _, field := range testCommandFields {
+		cmd := commands[field]
+		if strings.TrimSpace(cmd) == "" {
+			continue
+		}
+		family, known := familyOf(cmd)
+		if !known || p.hasEcosystem(family) {
+			continue
+		}
+		out = append(out, ForeignCommand{Field: field, Command: cmd, Family: family})
+	}
+	return out
 }
 
 // LanguageBlock is the section of a generation prompt that tells the model

@@ -110,7 +110,8 @@ back once with them: from the validator, an error outcome without a `contract`
 the generator's own checks, vague wording such as "properly" or "as needed" in
 a criterion (`vague_language`) and a step or `touches` entry that names a line
 of a file, such as `store.go:88` (`line_reference`). The generator's checks are
-not the format's rules: `speca --validate` reports neither. The model fixes what
+not the format's rules: `speca --validate` reports both, and the test-command
+audit below, as `hints` beside its verdict, never in it. The model fixes what
 it agrees with, or keeps the artifact with a patch of no operations; the next
 submission is accepted with whatever warnings remain.
 

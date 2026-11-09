@@ -32,6 +32,7 @@ internal/
   cli/                      #   The shell: input, envelope, flags, progress
   issuex/                   #   GitHub and GitLab: read an issue, post a comment
   project/                  #   Language detection, the test-command audit, steering
+  authoring/                #   The authoring hints: vague words, line references, foreign test commands
   repomap/                  #   The token-budgeted repository map
   skillgen/                 #   The skill render behind the make targets
   specpkg/                  #   What the commands share about a package on disk
@@ -115,7 +116,7 @@ cut-down AgentKit, is [ADR 01](adr/01-run-the-spec-command-on-the-agentkit-drive
 cmd/spec ──> internal/cli ──> internal/agentrun ──> agentkit-go (driver, workspace,
    │              │                                  tools, catalog, codesearch,
    │              └──> internal/issuex                provider/anthropic)
-   └──> specgen ──> afspec, internal/{agentrun, cli, issuex, project, repomap, specpkg}
+   └──> specgen ──> afspec, internal/{agentrun, authoring, cli, issuex, project, repomap, specpkg}
 ```
 
 Nothing under `internal/` imports `specgen`, and `afspec` imports nothing
@@ -300,12 +301,14 @@ which describe a flag set and a Go type by reflection, reading each field's
 ```
 cmd/speca ──> afspec
     ├───────> envelope        (its result: AdminResult)
-    ├───────> internal/project (the steering, for steering_malformed)
+    ├───────> internal/project (the steering, for steering_malformed; the profile, for the hints)
+    ├───────> internal/authoring (the hints of --validate)
     ├───────> internal/specpkg
     └───────> internal/cli    (the Run, SplitArgs, the --schema generator)
 
 cmd/specr ──> internal/specpkg
-specgen   ──> internal/specpkg
+specgen   ──> internal/specpkg, internal/authoring
+internal/authoring ──> afspec, internal/project
 internal/specpkg ──> afspec, envelope, internal/cli   (for the usage error)
 ```
 
@@ -328,7 +331,7 @@ chosen by the flags in `forms.go`:
 | Form | File | Reads | Writes |
 |---|---|---|---|
 | the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` | nothing |
-| the verdict, `speca <spec> --validate` | `verdict.go`, through `specpkg.Verdict` | the package and every package of the spec root, for the cross-spec rules | nothing |
+| the verdict, `speca <spec> --validate` | `verdict.go`, through `specpkg.Verdict`, and `authoring.Hints` for the hints | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
 | the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | `progress.json` alone, through `Spec.SaveProgress`; the content that changes is the task states and its `updated_at` |
 | the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package (`progress.json` and `spec.md` included), through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |

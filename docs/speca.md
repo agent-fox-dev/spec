@@ -102,7 +102,7 @@ Every one of these messages begins with `speca`.
 | Flags | What `result` holds |
 |---|---|
 | none | the report on the package: its identity, whether it validates, its tasks, the next task, the lifecycle moves allowed, and its dependencies and dependents |
-| `--validate` | the format's full verdict on the package: the same identity, then `valid`, `validation` and `traceability` |
+| `--validate` | the format's full verdict on the package: the same identity, then `valid`, `validation` and `traceability`, and beside them the authoring `hints` |
 | `--list` | one entry for every package under the spec root, in the order of their numbers |
 | `--list --all` | the same, then the packages under `archive/` |
 | `--task T --state S` | the report on the package after the change, with `changes`: the tasks moved, and where |
@@ -180,6 +180,7 @@ are the answer.
 | `valid` | the combined verdict: `true` exactly when no error was kept from the package's own validation or from the cross-spec rules. It equals `validation.valid` |
 | `validation` | `valid`, `error_count`, `warning_count`, and `errors` and `warnings`, each finding with its `check` (the rule), `artifact`, `entity` and `message`. The package's own findings come first, then the cross-spec findings that concern it. The library names no artifact for the dependency cycle; `speca` reports it in `tasks.json` |
 | `traceability` | the derived coverage, in the shape `spec` reports: `criteria_covered`, `criteria_uncovered`, `paths_covered`, `paths_uncovered` and `criteria_unowned` |
+| `hints` | the authoring hints (below), each with its `check`, `artifact`, `entity` and `message`; `[]` when there are none. They are not the format's rules and never change `valid` |
 
 The fields that are specific to the report (`tasks`, `task_counts`,
 `next_task`, `allowed_status`, `depends_on`, `dependents`, `failing_rules`) are
@@ -241,6 +242,26 @@ package's own validation, the report's `valid`, each `--list` entry's `valid`
 and the status form's activation check see it too: a draft whose `spec.md` is
 stale is not activated until `speca <spec> --render` writes it again (or
 `--force` activates it with a high `spec_invalid` warning naming `rendered`).
+
+### The authoring hints
+
+`result.hints` holds the checks `spec` makes on a package while it generates
+one, which a package written by hand or in a session would otherwise never
+meet ([ADR 20](adr/20-report-the-authoring-hints-beside-the-verdict.md)). They
+come from `internal/authoring`, the same code `spec` runs, in this order:
+
+| `check` | `artifact` | `entity` | What it names |
+|---|---|---|---|
+| `vague_language` | `requirements.json` | the criterion id | each vague word (`appropriate`, `properly`, `correctly`, `reasonable`, `relevant`, `adequate`, `suitable`, `as needed`, `if necessary`, `etc`) in a criterion's `action`, then its `condition` |
+| `line_reference` | `tasks.json` | the task id | each step or `touches` entry that names a line of a file (`store.go:88`, `render.go:12-30`, `line 40`) |
+| `foreign_test_command` | `tasks.json` | `test_commands.<field>` | each of `all_tests`, `linter` and `spec_tests` whose program belongs to a known ecosystem the repository under `--dir` does not have, with the repository's own command where it has one. A program in no known ecosystem (`./scripts/ci.sh`, `make check`) and a repository of no detected language give nothing |
+
+The format's validation matches no words (format v3 §0, rule 3; [ADR
+18](adr/18-allow-extension-keys-and-move-word-checks-out-of-the-validator.md)),
+so a hint is never an error or a warning of `validation`: a package with hints
+validates, activates and is implemented as one without. `spec` refuses a
+foreign test command and sends the other two back to the model once; `speca`
+only reports them.
 
 **A package that does not validate is a successful call:** exit 0, `valid`
 `false`. Exit 1 is for a call that could not do its job.
@@ -845,7 +866,7 @@ One sentence per form, which the shell caps at 200 characters:
 | Form | Shape |
 |---|---|
 | report | `speca: <directory> <status>, <done> of <total> tasks done`, then `; next task N` when there is one, then `; does not validate (<rules>)` when `valid` is `false` |
-| `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)`; `1 error` for one |
+| `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)`; `1 error` for one; then `; <n> authoring hints` when there are any, `1 authoring hint` for one |
 | `--list` | `speca: <n> packages` (`1 package` for one), then, when there is anything to count, ` (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
 | status form | `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <path>`, `speca: superseded <name> by <spec_id>, moved to <path>`, and `speca: moved <name> to <path>` for a call that only moves the package; `<name>` is the package's directory name, `<path>` where it went, as `spec_dir` shows it. An archive or a supersede that needs no move has no `, moved to` clause. Under `--dry-run` the sentence ends ` (dry run; nothing written)` (the task form's has a comma). After a move under `archive/` that failed, it says the status was written and the move was not. A refusal has no result, so its `summary` is the refusal's message |
 | render form | `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep; ` (dry run, nothing written)` is added under `--dry-run` |
