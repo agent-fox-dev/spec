@@ -285,7 +285,8 @@ before the architecture phase and the write, so
 `architecture.md` is written from the revised plan. It is independent of
 `--adversarial`: either, both or neither may be given, and a run with neither
 runs the phases it always ran. A dry run reviews the plan too and writes
-nothing.
+nothing. The `af-spec` skill runs the same review in a session, on request,
+with a fresh subagent as the reviewer ([ADR 21](adr/21-review-the-plan-in-a-session-with-a-fresh-subagent.md)).
 
 Before the first round the plan is validated in memory against the schemas
 and C1 to C7. A plan that does not validate is not reviewed: a `high`

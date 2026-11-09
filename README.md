@@ -103,7 +103,8 @@ Three steps, and a command or skill for each.
    where every criterion carries its check and every path its smoke check,
    and `tasks.json`, the flat list of tasks that own the criteria. Each file
    is validated before it is written, and the package is activated only on a
-   clean verdict. The `af-spec` skill does the same inside a session.
+   clean verdict. The `af-spec` skill does the same inside a session, and on
+   request has a fresh subagent review the plan before activation.
 3. **Implement it, task by task.** The `af-impl` skill claims a task with
    `speca`, reads it with `specr --task N`, writes the task's checks as
    failing tests, makes them pass, records the task done, and opens a pull
