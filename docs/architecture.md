@@ -325,7 +325,7 @@ afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 breaks (`Rules`). It is a package of its own because `envelope` must stay
 standard-library only and `internal/cli` does not import `afspec`.
 
-`cmd/speca` has seven forms, each in a file of its own (the status form in three),
+`cmd/speca` has eight forms, each in a file of its own (the status form in three),
 chosen by the flags in `forms.go`:
 
 | Form | File | Reads | Writes |
@@ -333,6 +333,7 @@ chosen by the flags in `forms.go`:
 | the report, `speca <spec>` | `report.go` | the package, and the spec root's dependency graph for `dependents` | nothing |
 | the verdict, `speca <spec> --validate` | `verdict.go`, through `specpkg.Verdict`, and `authoring.Hints` for the hints | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
+| the next package, `speca --next` | `next.go`; it goes through the spec root with `list.go`'s `packageDirs` and `archiveDirs` | every package of the spec root, ordered by the dependencies of their `tasks.json`, and the spec ids of `archive/` | nothing |
 | the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | `progress.json` alone, through `Spec.SaveProgress`; the content that changes is the task states and its `updated_at` |
 | the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package (`progress.json` and `spec.md` included), through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |
 | the render form, `speca <spec> --render`, and the sweep, `speca --render [--all]` | `render.go`; the sweep goes through the spec root with `list.go`'s `packageDirs` | the package, or every package of the spec root (and `archive/` with `--all`) | `spec.md` alone, through `cli.WriteAtomic`, when it is not the render already; never an artifact ([ADR 14](adr/14-commit-the-rendered-package-beside-its-json.md)) |

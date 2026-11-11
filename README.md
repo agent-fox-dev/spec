@@ -116,6 +116,7 @@ specr 16 --task 3                             # task 3 in full, the rest by id
 speca 16 --task 3 --state in_progress         # claim it; refused if another agent has it
 speca 16 --task 3 --state done                # record it; progress.json is the only file that changes
 speca 16 --validate                           # the format's full verdict, rule by rule
+speca --next                                  # the package to implement next, in dependency order
 ```
 
 Every command writes one JSON object to stdout, with a `next` field naming

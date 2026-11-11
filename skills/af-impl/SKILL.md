@@ -113,10 +113,12 @@ lifecycle call, `speca <package> --status active` or `--status sealed`. Those
 moves belong to the spec's owner, not to this run (see *Never*); the task calls
 in `next` are the ones you follow.
 
-With no argument, run `speca --list`: every package under the spec root, in
-number order, with its status, verdict, task counts and next task. Show it and
-ask which package to implement. That is the one question the run asks, and it
-comes before the run begins.
+With no argument, run `speca --next`: `result.next_spec` is the package to
+implement, the first open one in dependency order whose dependencies are
+finished; say which and go on. `result.all_done` true means every package is
+done; a missing `next_spec` otherwise means each open package waits, and
+`result.waiting` says on what; a failure at stage `graph` is a dependency
+cycle. Report any of these and stop.
 
 Render the package with `specr` and read the rendering; do not read the JSON
 files and scope them by hand. `specr` gathers a task's criteria, their checks

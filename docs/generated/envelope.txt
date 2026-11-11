@@ -262,6 +262,10 @@ type AdminResult struct {
 	Rendered []RenderedInfo `json:"rendered,omitzero" description:"what --render did to each package's spec.md: the one package named, or with no reference every package under the spec root in number order, then with --all those under archive/; [] when the spec root holds none; with --dry-run, what it would have done; --render only"`
 
 	Migrated []MigratedInfo `json:"migrated,omitzero" description:"what --migrate did to each package: the one package named, or with no reference every package under the spec root in number order, then with --all those under archive/; [] when the spec root holds none; with --dry-run, what it would have done; --migrate only"`
+
+	NextSpec *PackageInfo  `json:"next_spec,omitempty" description:"the package to implement now: of the packages under the spec root that are open (draft or active, with a task pending or in progress), the first in dependency order, ties broken by number, whose every dependency is finished; an entry as --list writes it; absent when there is none; --next only"`
+	AllDone  *bool         `json:"all_done,omitempty" description:"true when there is nothing left to implement: no package under the spec root is open and every one of them loads as version 3; when it is false and next_spec is absent, every open package waits on something, and waiting says on what; always written under --next"`
+	Waiting  []WaitingInfo `json:"waiting,omitzero" description:"the packages under the spec root that are open but cannot start yet, or cannot be judged, in number order, each with why; [] when there are none; --next only"`
 }
     AdminResult is speca's result, for every form of the command: the report
     on one package, the verdict on one package (--validate), the list of every
@@ -806,6 +810,15 @@ type ValidationReport struct {
 	Warnings     []ValidationItem `json:"warnings,omitempty"`
 }
     ValidationReport is afspec's verdict, flattened for JSON.
+
+type WaitingInfo struct {
+	SpecDir string   `json:"spec_dir" description:"the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca"`
+	SpecID  string   `json:"spec_id,omitempty" description:"the spec id, from the PRD frontmatter; absent when the package did not load"`
+	WaitsOn []string `json:"waits_on,omitempty" description:"the spec ids of its dependencies that are not finished, or that no package under the spec root or archive/ has, in the order its tasks.json names them; absent when it waits on nothing but itself (it does not load, or is in another format version)"`
+	Reason  string   `json:"reason" description:"why it cannot start, in words: the dependencies it waits on, or that it does not load, or that it is in another format version"`
+}
+    WaitingInfo is one entry of AdminResult.Waiting: a package under the spec
+    root that speca --next did not choose, and why it could not.
 
 type WarnCode string
     WarnCode identifies one warning cause. It is an open set: a decoder must
