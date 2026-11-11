@@ -34,28 +34,17 @@ libraries — API signatures in specs may be unverified assumptions.
 
 ## Quality Commands
 
-| Command | What it does |
-|---------|-------------|
-| `make help` | List all targets |
-| `make build` | Build the project |
-| `make test` | Run all tests |
-| `make coverage` | Run all tests with a coverage report |
-| `make fmt` | Format all source files in place |
-| `make vet` | Static analysis |
-| `make lint` | Run the linter |
-| `make check` | `fmt`, `vet`, `lint` and `test` — use before committing |
-| `make doc` | Regenerate the API docs in `docs/generated/` (committed) |
-| `make clean` | Remove build output |
+The baseline is what the spec packages define: every task in a spec's
+`tasks.json` lists its `test_commands`. Run those for the task you are
+working on, and they must pass.
 
-There is no `Makefile` yet, so none of these targets runs. Until one lands,
-use what the spec packages' `test_commands` use: `go test ./... -count=1` and
-`golangci-lint run ./...`.
+If the repository has a `Makefile` (or another task runner), look at its
+targets (`make help`, or read it). Where a target such as `check` or `test`
+is more thorough than the `test_commands` — for example `make check` running
+formatting, static analysis and linting on top of the tests — run that target
+instead. Where it is not, stay with the `test_commands`.
 
-Run the full quality suite before committing:
-
-```
-make check
-```
+Before committing, run the most thorough quality suite the repository offers.
 
 ## Git Workflow
 
@@ -101,7 +90,7 @@ When implementing a spec or any other feature:
 
 A session is not complete until:
 
-1. `make check` passes (no regressions).
+1. The quality suite (see Quality Commands) passes (no regressions).
 2. Changes are committed with a clear conventional commit message.
 3. The feature branch is pushed to origin and merged into `main`, and `main`
    is pushed.
