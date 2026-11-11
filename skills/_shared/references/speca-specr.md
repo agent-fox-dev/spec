@@ -42,6 +42,14 @@ Both commands use the same three:
 - `speca --list [--all]` — every package under the spec root in number order,
   with its status, verdict, task counts and next task. `--all` includes the
   archived ones.
+- `speca --next` — the package to implement now: `result.next_spec`, the
+  first open package (draft or active, with a task pending or in progress) in
+  the order of the cross-spec `dependencies`, ties broken by number, whose
+  every dependency is finished (sealed, under `archive/`, or with no task
+  open). `result.all_done` is true when nothing is left to implement;
+  otherwise, with no `next_spec`, every open package waits, and
+  `result.waiting` gives each with its `waits_on` and `reason`. A dependency
+  cycle fails the call at stage `graph`, exit `1`, naming the cycle.
 - `speca <package> --task N --state S [--dry-run]` — moves one task through
   the state machine, the integration task included. `result.changes` lists
   what changed.

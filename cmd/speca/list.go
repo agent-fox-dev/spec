@@ -59,20 +59,29 @@ func (c *call) packageDirs(what string) ([]packageDir, *cli.ErrorInfo) {
 		dirs = append(dirs, packageDir{filepath.Join(c.specsDir, name), false})
 	}
 	if c.opts.all {
-		archive := filepath.Join(c.specsDir, "archive")
-		archived, err := specpkg.List(archive)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			// A root without an archive is the usual one.
-		case err != nil:
-			c.warnUnreadable("the archive", archive, err, "the packages under archive/ are not "+what)
-		default:
-			for _, name := range archived {
-				dirs = append(dirs, packageDir{filepath.Join(archive, name), true})
-			}
-		}
+		dirs = append(dirs, c.archiveDirs(what)...)
 	}
 	return dirs, nil
+}
+
+// archiveDirs is every package directory under archive/ in number order. An
+// archive that cannot be read is left out with a warning, saying the form left
+// its packages unprocessed (what); a root without one is the usual root.
+func (c *call) archiveDirs(what string) []packageDir {
+	archive := filepath.Join(c.specsDir, "archive")
+	archived, err := specpkg.List(archive)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		c.warnUnreadable("the archive", archive, err, "the packages under archive/ are not "+what)
+		return nil
+	}
+	dirs := make([]packageDir, 0, len(archived))
+	for _, name := range archived {
+		dirs = append(dirs, packageDir{filepath.Join(archive, name), true})
+	}
+	return dirs
 }
 
 // entry describes the package in path, and says whether it can take a write,
@@ -86,6 +95,12 @@ func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, wri
 		info.LoadError = err.Error()
 		return info, false
 	}
+	return packageInfo(info.SpecDir, spec, archived), specpkg.Writable(spec)
+}
+
+// packageInfo is the entry of a package that loaded, shown as dir.
+func packageInfo(dir string, spec *afspec.Spec, archived bool) envelope.PackageInfo {
+	info := envelope.PackageInfo{SpecDir: dir}
 	valid := spec.Validate().Valid
 	info.SpecID, info.SpecName, info.Title, info.Status = spec.SpecID, spec.SpecName, spec.Title, spec.Status
 	info.Valid = &valid
@@ -95,5 +110,5 @@ func (c *call) entry(path string, archived bool) (info envelope.PackageInfo, wri
 		info.NextTask = &task
 	}
 	info.Archived = archived
-	return info, specpkg.Writable(spec)
+	return info
 }

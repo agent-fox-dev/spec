@@ -38,6 +38,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if o.list {
 		return list(c)
 	}
+	if o.next {
+		return nextSpec(c)
+	}
 	if o.render && ref == "" {
 		return renderAll(c)
 	}

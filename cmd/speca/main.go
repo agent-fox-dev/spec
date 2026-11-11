@@ -5,6 +5,7 @@
 //	speca [flags] <spec>
 //	speca <spec> --validate
 //	speca --list [--all]
+//	speca --next
 //	speca <spec> --task T --state S [--force] [--dry-run]
 //	speca <spec> --status S [--by <spec>] [--force] [--dry-run]
 //	speca <spec> --render [--dry-run]
@@ -14,11 +15,12 @@
 //
 // It takes one input, a reference to a spec package, and writes exactly one
 // JSON object to stdout: the package's state, its verdict under --validate,
-// with --list and no input, every package under the spec root, or, in the task
+// with --list and no input, every package under the spec root, with --next the
+// package to implement now, or, in the task
 // and status forms, the package's state after the change and the changes made,
 // under --render what it did to the package's spec.md, and under --migrate
 // what it did to the package's format version.
-// The report, --validate and --list read the packages and change nothing: they
+// The report, --validate, --list and --next read the packages and change nothing: they
 // write no file. The task form writes progress.json and no other file. The
 // status form writes the package through the library, which rewrites every
 // artifact of it and its spec.md, and moves an archived or superseded package
@@ -52,7 +54,8 @@ const description = "Reports the state of a specification package: its lifecycle
 	"validates, every task with its state and whether it is ready, the next task to work on, the " +
 	"lifecycle moves allowed from its status, and the packages it depends on and that depend on it. " +
 	"With --validate, the format's full verdict on the package; with --list, every package under the " +
-	"spec root. With --task and --state it moves one or more tasks through the task state machine, " +
+	"spec root; with --next, the package to implement now, the first open package in dependency order " +
+	"whose dependencies are finished, or that every package is done. With --task and --state it moves one or more tasks through the task state machine, " +
 	"every one or none, and writes the package's progress.json and no other file. With --status it " +
 	"moves the package through its lifecycle: activates, seals, archives " +
 	"or supersedes it (with --by, the package that replaces it), and moves an archived or superseded " +
@@ -63,7 +66,7 @@ const description = "Reports the state of a specification package: its lifecycle
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
 	"inside it, or a directory name, spec number or spec name under the spec root " +
-	"(16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render or --migrate for every package."
+	"(16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package."
 
 const usage = `speca — report the state of a specification package
 
@@ -72,6 +75,7 @@ const usage = `speca — report the state of a specification package
 Usage:
   speca [flags] <spec>
   speca --list [--all] [flags]
+  speca --next [flags]
   speca <spec> --task T --state S [flags]
   speca <spec> --status S [--by <spec>] [flags]
   speca <spec> --render [--dry-run] [flags]
@@ -98,6 +102,18 @@ Forms:
   speca --list             every package under the spec root, in number order,
                            each with its status, whether it validates, its task
                            counts and its next task; --all adds archive/
+  speca --next             the package to implement now: the packages under
+                           the spec root are ordered by the dependencies their
+                           tasks.json declare, ties broken by number, and the
+                           first that is open (draft or active, with a task
+                           pending or in progress) and whose every dependency
+                           is finished (sealed, under archive/, or with no task
+                           open) is next_spec. all_done is true when nothing is
+                           left to implement; waiting lists the open packages
+                           that cannot start yet, and those that do not load
+                           or are in another format version, each with why. A
+                           cycle among the dependencies fails the call (stage
+                           graph) and names it
   speca <spec> --task T --state S
                            the task form: move tasks T to state S. T is a task
                            id, several ids (--task 1,2 or --task 1 --task 2),
@@ -168,7 +184,7 @@ Forms:
 Output is one JSON object on stdout; next names the call to make after this
 one. --schema prints the flags and the shape of the output as JSON Schema.
 
-The report, --validate and --list change nothing. The task form changes the
+The report, --validate, --list and --next change nothing. The task form changes the
 state of the tasks and writes progress.json, with its updated_at, and no other
 file. The status form changes the lifecycle status and saves the package
 through the library, which rewrites every artifact of it (prd.md,
@@ -202,6 +218,9 @@ Exit codes:
      fails when the package cannot be loaded (stage load) or its spec.md cannot
      be written (stage write), and the sweep when the spec root cannot be read
      (stage load); a package the sweep cannot render is an entry, not a failure.
+     --next fails when the spec root cannot be read (stage load) or the
+     dependencies of its packages form a cycle (stage graph); a package that
+     cannot start, or does not load, is an entry of waiting, not a failure
      The migrate form fails when the package cannot be read, has a gap the
      conversion refuses or cannot be written (stage migrate), and the sweep
      when the spec root cannot be read (stage load); a package the sweep
@@ -216,6 +235,7 @@ Examples:
   speca .specs/16_indexed_code_search --validate
   speca --list
   speca --list --all
+  speca --next
   speca 16 --task next --state in_progress
   speca 16 --task 4 --state done
   speca 16 --task 1,2 --state in_progress --dry-run
@@ -236,6 +256,7 @@ type options struct {
 	specsDir string
 	validate bool
 	list     bool
+	next     bool
 	all      bool
 	tasks    taskFlag
 	state    string
@@ -260,6 +281,7 @@ func (o *options) statusForm() bool { return o.status.given || o.by.given }
 func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
 	fs.BoolVar(&o.list, "list", false, "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input")
+	fs.BoolVar(&o.next, "next", false, "name the package to implement now: the first package under the spec root, in dependency order with ties broken by number, that is open (draft or active, with a task pending or in progress) and whose every dependency is finished; all_done says when nothing is left, waiting what cannot start and why; a dependency cycle fails the call; takes no input")
 	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived; with --render or --migrate and no input, also render or migrate them")
 	fs.Var(&o.tasks, "task", "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)")
 	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped")
@@ -285,6 +307,9 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	}
 	if o.validate && o.list {
 		errs = append(errs, errors.New("--validate and --list are two operations: give one"))
+	}
+	if o.next {
+		errs = append(errs, o.nextErrors(ref)...)
 	}
 	if o.render {
 		errs = append(errs, o.sweepErrors("--render", "the render form writes one derived file in any status and refuses nothing", ref)...)
@@ -341,6 +366,27 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		return nil
 	}
 	return usageInfo(errors.Join(errs...), hint)
+}
+
+// nextErrors are the faults of a call that asks for --next: it takes no input
+// and is the only operation of the call.
+func (o *options) nextErrors(ref string) []error {
+	var errs []error
+	if ref != "" {
+		errs = append(errs, fmt.Errorf("--next takes no input, got %q: it chooses among every package under the spec root", ref))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--next and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
 }
 
 // sweepErrors are the faults of a call that asks for the render form or the
@@ -456,7 +502,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.render && !o.migrate {
+	if ref == "" && !o.list && !o.next && !o.render && !o.migrate {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage
@@ -479,7 +525,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	return emit(stdout, run, code, result, failure)
 }
 
-const noInputMessage = "no input: give a spec package's directory, a file inside it, or its number or name under the spec root, or --list"
+const noInputMessage = "no input: give a spec package's directory, a file inside it, or its number or name under the spec root, or --list or --next"
 
 func usageInfo(err error, hint *cli.FixHint) *cli.ErrorInfo {
 	return &cli.ErrorInfo{Stage: "usage", Category: "usage", Message: err.Error(), FixHint: hint}
@@ -528,8 +574,8 @@ func describe(fs *flag.FlagSet) selfDescription {
 		// classified input, so those envelope fields never appear.
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
-			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read",
+			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle",
 			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written",
 		},
 	}

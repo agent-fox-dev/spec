@@ -3,6 +3,7 @@
 ```
 speca [flags] <spec>                     a specification package → its state
 speca --list [--all]                     every package under the spec root → one entry each
+speca --next                             the package to implement now, in dependency order
 speca <spec> --task T --state S          change the state of tasks of a package
 speca <spec> --status S [--by <spec>]    change the lifecycle status of a package
 speca <spec> --render                    write the package's spec.md, its render
@@ -19,7 +20,7 @@ task to work on next, the lifecycle moves allowed from where it is, and the
 packages it depends on and that depend on it. It is built for an
 agent to call — from a prompt, or from a skill's instructions — and follows the
 same interface as `spec` and `specr`: **exactly one positional input**
-(none with `--list`, or with `--render` or `--migrate` for every package), **exactly one JSON object** on stdout on every
+(none with `--list` or `--next`, or with `--render` or `--migrate` for every package), **exactly one JSON object** on stdout on every
 program-driven path, the help on stderr, and one exit-code table. The forms are
 flags, not subcommands.
 
@@ -27,7 +28,7 @@ flags, not subcommands.
 changes its state. Each command's help and each `--schema` description say so,
 in the sentence `cli.SiblingCommands`.
 
-The report, `--validate` and `--list` read the packages and change nothing.
+The report, `--validate`, `--list` and `--next` read the packages and change nothing.
 The task form, the status form, the render form and the migrate form write.
 The task form moves tasks through the library's task state machine and
 writes `progress.json`, with its `updated_at`, through the library's
@@ -54,6 +55,7 @@ speca .specs/16_indexed_code_search     # the same, by path
 speca 16 --validate                     # the format's full verdict on it
 speca --list                            # every package under the spec root
 speca --list --all                      # and those under archive/
+speca --next                            # the package to implement now
 speca 16 --task next --state in_progress   # claim the task to work on now
 speca 16 --task 4 --state done             # finish task 4
 speca 16 --task 1,2 --state in_progress --dry-run   # see what that would do
@@ -73,8 +75,8 @@ the build set them, from the variables in `version.go`), and `-h`/`--help` or a
 bare invocation prints the help to stderr. `--help` exits 0 and writes nothing
 to stdout. A bare invocation exits 2; when stdout is not a terminal it also
 writes a usage envelope, so a program still gets one object to parse. An
-invocation that names flags but no input, and is not `--list`, `--render` or
-`--migrate`, is a bare invocation.
+invocation that names flags but no input, and is not `--list`, `--next`,
+`--render` or `--migrate`, is a bare invocation.
 
 ## The input
 
@@ -105,6 +107,7 @@ Every one of these messages begins with `speca`.
 | `--validate` | the format's full verdict on the package: the same identity, then `valid`, `validation` and `traceability`, and beside them the authoring `hints` |
 | `--list` | one entry for every package under the spec root, in the order of their numbers |
 | `--list --all` | the same, then the packages under `archive/` |
+| `--next` | `next_spec`: the package to implement now; `all_done`: whether nothing is left; `waiting`: the open packages that cannot start, and why |
 | `--task T --state S` | the report on the package after the change, with `changes`: the tasks moved, and where |
 | `--task T --state S --dry-run` | the same, for a change that was not made: `dry_run` is true |
 | `--status S` (`--by R` with `superseded`) | the report on the package after the change, read back from where it is now, with `changes`: the status, the record in the replacing package, and the move under `archive/`, in the order they were written |
@@ -119,7 +122,8 @@ Every one of these messages begins with `speca`.
 | `--migrate --all` with no input | the same, then the packages under `archive/` |
 
 A call names one operation. `--validate` with `--list`, the task form or the
-status form with either of them or with each other, `--render` or `--migrate`
+status form with either of them or with each other, `--next` with any other
+operation or with an input, `--render` or `--migrate`
 with any of them or with each other, a positional input with `--list`, and
 `--all` without `--list` (or without `--render` or `--migrate` and with no
 input) are usage errors. `--force` with `--render` or `--migrate` is one too:
@@ -294,6 +298,54 @@ A spec root that does not exist, is not a directory, or cannot be read fails
 the call at stage `load` with `fix_hint.flag` `--specs-dir`: an empty list
 would hide a mistyped flag. A root that exists and holds no package is an empty
 `packages` list and exit 0.
+
+## The next package: `speca --next`
+
+`--next` answers "which package do I implement now?" for an agent, or a
+script, that works through a spec root one package at a time. It reads every
+`NN_name` directory under the spec root as `--list` does, and the packages
+under `archive/` for their spec ids alone.
+
+A package is **open** when it loads as version 3, is a `draft` or `active`,
+and has a task, the integration task included, that is `pending` or
+`in_progress`. A package is **finished** when it is `sealed`, `superseded` or
+`archived`, or when it is version 3 and none of its tasks is `pending` or
+`in_progress`. A dependency — a spec id in a package's `tasks.json`
+`dependencies` — is finished when every package under the spec root with that
+id is finished, or, when none has it, when a package under `archive/` does: an
+archived package is history, and nothing more will be done in it.
+
+The packages under the spec root are put in **dependency order**: each after
+every package it depends on, and of the packages that could come next, the
+first in number order. `next_spec` is the first open package in that order
+whose every dependency is finished. So the next package is not always the
+lowest-numbered open one: `01` that depends on `03` comes after `03`.
+
+| Field | Meaning |
+|---|---|
+| `next_spec` | the package to implement now, as an entry of `--list` (`spec_dir`, `spec_id`, `spec_name`, `title`, `status`, `valid`, `task_counts`, `next_task`); absent when there is none. It is chosen whether or not it validates: `valid` is there to say |
+| `all_done` | `true` when nothing is left to implement: no package under the spec root is open, and every one of them loads as version 3. Always written. `false` with no `next_spec` means every open package waits on something |
+| `waiting` | in number order, every package under the spec root that is open but has a dependency that is not finished, every one that does not load, and every one in another format version that is not finished, each with `spec_dir`, `spec_id` (absent when it did not load), `waits_on` (the ids of its dependencies that are not finished, in the order its `tasks.json` names them) and `reason`, which says of each such id whether its package is open or missing from the spec root and `archive/` altogether. `[]` when there are none |
+
+There are three outcomes, all exit 0: a `next_spec`; `all_done` true; or
+neither, and `waiting` says what holds every open package. A package that does
+not load, or is version 2, is never chosen and keeps `all_done` false, but it
+blocks only the packages that depend on its id.
+
+The dependencies of the packages under the spec root must not form a cycle — a
+package that depends on itself included, and whatever the state of the
+packages in it. A cycle fails the call at stage `graph`, exit 1, with no
+result; the message names the packages of one cycle in order, each depending
+on the one after it (`.specs/02_b → .specs/03_c → .specs/02_b`). A dependency
+on an id no package has is no edge of the graph, and so no cycle; it leaves its
+package waiting.
+
+A spec root that cannot be read fails the call at stage `load`, as for
+`--list`; an `archive/` that cannot be read raises a `specs_dir_unreadable`
+warning, and a dependency on a package there is then not finished.
+
+`scripts/impl-specs.sh` runs `af-impl` once for each package `--next` names,
+until `all_done`, and stops when no package can start or the call fails.
 
 ## The task form: `speca <spec> --task T --state S`
 
@@ -868,6 +920,7 @@ One sentence per form, which the shell caps at 200 characters:
 | report | `speca: <directory> <status>, <done> of <total> tasks done`, then `; next task N` when there is one, then `; does not validate (<rules>)` when `valid` is `false` |
 | `--validate` | `speca: <directory> validates`, or `speca: <directory> does not validate (<n> errors: <rules>)`; `1 error` for one; then `; <n> authoring hints` when there are any, `1 authoring hint` for one |
 | `--list` | `speca: <n> packages` (`1 package` for one), then, when there is anything to count, ` (` the non-zero counts per status in lifecycle order, then `<n> unreadable`, `)` |
+| `--next` | `speca: next is <spec_dir>`, then `; <n> more waiting` when `waiting` is not empty; `speca: every package is done; nothing is left to implement`; or `speca: no package can start; <n> waiting` |
 | status form | `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <path>`, `speca: superseded <name> by <spec_id>, moved to <path>`, and `speca: moved <name> to <path>` for a call that only moves the package; `<name>` is the package's directory name, `<path>` where it went, as `spec_dir` shows it. An archive or a supersede that needs no move has no `, moved to` clause. Under `--dry-run` the sentence ends ` (dry run; nothing written)` (the task form's has a comma). After a move under `archive/` that failed, it says the status was written and the move was not. A refusal has no result, so its `summary` is the refusal's message |
 | render form | `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep; ` (dry run, nothing written)` is added under `--dry-run` |
 | migrate form | the same shape: `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep, with the dry-run clause |
@@ -903,6 +956,8 @@ if env.Result.NextTask != nil {
   is a ready pending one and the package can take a write (a draft, or an active
   package whose intent has not drifted), the claim comes first:
   `speca <spec_dir> --task N --state in_progress`;
+- after `--next` with a `next_spec`: `speca <spec_dir>`, the report on it, which
+  names the task to start with;
 - after `--list`: the claim and the render for the first active package, in list
   order and not under `archive/`, that has no task in progress, has a ready task
   N and whose intent has not drifted;
@@ -935,17 +990,18 @@ if env.Result.NextTask != nil {
 
 | `stage` | `category` | When |
 |---|---|---|
-| `usage` | `usage` | more than one input; an input with `--list`; `--validate` with `--list`; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task` or `--status`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 3 (the message names `speca <package> --migrate`). For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
-| `load` | `input` | `afspec.LoadSpec` refused the package (a missing artifact, malformed JSON or YAML), naming the directory and the library's reason; or `--list`, `--render` or `--migrate` with no input on a spec root that cannot be read, with `fix_hint.flag` `--specs-dir`. The status form: also the `--by` package (the message names `--by`), a package in a format version other than 3 (the message names `speca <package> --migrate`), and a package that was written but cannot be read back (its `result` carries the changes) |
+| `usage` | `usage` | more than one input; an input with `--list` or `--next`; `--validate` with `--list`; `--next` with any other operation; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task` or `--status`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 3 (the message names `speca <package> --migrate`). For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
+| `load` | `input` | `afspec.LoadSpec` refused the package (a missing artifact, malformed JSON or YAML), naming the directory and the library's reason; or `--list`, `--next`, `--render` or `--migrate` with no input on a spec root that cannot be read, with `fix_hint.flag` `--specs-dir`. The status form: also the `--by` package (the message names `--by`), a package in a format version other than 3 (the message names `speca <package> --migrate`), and a package that was written but cannot be read back (its `result` carries the changes) |
 | `status` | `lifecycle` | the task form on a package that cannot take a write: sealed, superseded or archived, or active with a drifted `## Intent`; or `Save` refused it as such. No `fix_hint`; `--force` and `--dry-run` change nothing. The status form: a move the lifecycle does not allow (`fix_hint` is `{flag: "--status", valid: [the moves allowed]}`, none when there are none); an activation with no `## Intent`; sealing a package whose intent drifted (no `fix_hint`) or that has a task open (`fix_hint.flag` `--force`); a replacing package that is superseded or archived (`fix_hint.flag` `--by`); keys the schema does not allow (`fix_hint.flag` `--force`); or a lifecycle or intent error that reached the write. `--force` reaches only the ones with a `fix_hint.flag` of `--force` |
 | `task` | `lifecycle` | the task state machine does not allow a named move. The message names every refused task with its state and the target, cites format v3 §8.1 and says where each may go; `fix_hint` is `{flag: "--state", valid: [the first refused task's targets]}`, none when that task is `dropped`, and the message then says `--force` with `done` or `pending` is the only way out. Nothing was changed |
 | `validate` | `invalid_spec` | the task form: the write would delete keys of `progress.json` the schema does not allow, and `--force` was not given. The message lists each key; no `fix_hint`. The status form: an activation of a package that does not validate (the message names the failing rules; `fix_hint.flag` `--force`) |
 | `write` | `disk` | `SaveProgress` could not write `progress.json`. Not retryable; see "The write" above. The status form: `Transition` or `Supersede` could not, with the library's message and no `result`. The render form: `spec.md` could not be written |
 | `archive` | `disk` | the status form: the archive destination is taken, before anything was written (no `result`, not resumable); or the move under `archive/` failed after the status was written (**resumable**, with a `result` and a `next`) |
 | `migrate` | `input` | the migrate form on one package: it could not be read as version 2 or 3, it has a gap the conversion refuses (a criterion no test verifies, a path no smoke test verifies), or it could not be written; the message is the library's reason, and nothing was written. The sweep never fails this way: such a package is an entry |
+| `graph` | `input` | `--next`: the dependencies of the packages under the spec root form a cycle, which the message names; no `result` |
 | `schema` | `internal` | the `--schema` document could not be encoded |
 
-`result` is absent from the usage, `load` and `schema` errors. The task form's
+`result` is absent from the usage, `load`, `graph` and `schema` errors. The task form's
 `status`, `task`, `validate` and `write` failures carry the report of the package
 as it is on disk, without `changes` and without `next`. The status form's
 refusals and its `write` failure carry no `result`; the two failures that follow a
@@ -959,15 +1015,15 @@ else.
 
 | Code | `status` | Meaning |
 |---|---|---|
-| `0` | `done` | reported — including a package that does not validate; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already |
-| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep reads could not be read (stage `load`) |
+| `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already |
+| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`) |
 | `2` | `usage` | usage error — nothing was written |
 
 ### Warning codes
 
 | Code | Severity | Stage | When |
 |---|---|---|---|
-| `specs_dir_unreadable` | low | preflight | the spec root (or, for `--list --all`, `archive/`) could not be read. The report goes without `dependents`, the verdict without the cross-spec rules, the list without the archived packages |
+| `specs_dir_unreadable` | low | preflight | the spec root (or, for `--list --all` and `--next`, `archive/`) could not be read. The report goes without `dependents`, the verdict without the cross-spec rules, the list without the archived packages, and `--next` takes no dependency to be finished for being under `archive/` |
 | `steering_malformed` | high | preflight | `--validate` only: the spec root's `steering.md` opens with frontmatter that breaks one of its rules ([configuration.md](configuration.md#the-steering)), each named in the message. The verdict is the one an unversioned steering gives |
 | `spec_invalid` | high | validate | the package is in a format version other than 3: its progress and tasks are not read, and the warning names `speca <package> --migrate`. For the task form: `--force` writes over keys of `progress.json` the schema does not allow, which the warning names |
 | `spec_invalid` | low | validate | the task form went ahead on a package that does not validate, which the warning names by rule. A call raises at most one `spec_invalid` |
@@ -988,6 +1044,7 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 |---|---|---|
 | `--validate` | off | give the format's full verdict on the package |
 | `--list` | off | list every package under the spec root; takes no input |
+| `--next` | off | name the package to implement now, in dependency order; takes no input |
 | `--all` | off | with `--list`, also list the packages under `archive/`, marked archived; with `--render` or `--migrate` and no input, also render or convert them |
 | `--task` | | the task form: the tasks to move, once or repeated, each value a comma-separated list of ids, `next` or `all` |
 | `--state` | | the task form: the state to move them to: `pending`, `in_progress`, `done` or `dropped` |
@@ -1044,7 +1101,8 @@ step:
 intent was edited after activation, and `next_task` is the task to work on —
 the one in progress, else the first ready one. `result.tasks` lists the plan
 with each task's state and readiness. `next` names the `specr` call that
-renders that task. `speca --list` shows every package at once.
+renders that task. `speca --list` shows every package at once, and
+`speca --next` names the package to implement next.
 ```
 
 The same skill's "one task at a time" step claims the task before it renders it

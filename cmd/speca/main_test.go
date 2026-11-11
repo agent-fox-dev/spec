@@ -121,6 +121,17 @@ func TestUsageErrors(t *testing.T) {
 		"--validate --force": {[]string{in, "--validate", "--force"}, []string{"--force"}, nil},
 		"--list --dry-run":   {[]string{"--list", "--dry-run"}, []string{"--dry-run"}, nil},
 
+		// --next.
+		"input with --next": {[]string{"--next", "01"}, []string{"--next takes no input"}, nil},
+		"--next --list":     {[]string{"--next", "--list"}, []string{"--next", "--list", "two operations"}, nil},
+		"--next --validate": {[]string{"--next", "--validate"}, []string{"--next", "--validate", "two operations"}, nil},
+		"--next --render":   {[]string{"--next", "--render"}, []string{"--next", "--render", "two operations"}, nil},
+		"--next --migrate":  {[]string{"--next", "--migrate"}, []string{"--next", "--migrate", "two operations"}, nil},
+		"--next, task form": {[]string{"--next", "--task", "1", "--state", "done"}, []string{"--next", "--task", "two operations"}, nil},
+		"--next, status":    {[]string{"--next", "--status", "sealed"}, []string{"--next", "--status", "two operations"}, nil},
+		"--next --all":      {[]string{"--next", "--all"}, []string{"--all"}, nil},
+		"--next --dry-run":  {[]string{"--next", "--dry-run"}, []string{"--dry-run"}, nil},
+
 		// The task form.
 		"--task without --state": {[]string{in, "--task", "1"}, []string{"--task", "--state"}, nil},
 		"--state without --task": {[]string{in, "--state", "done"}, []string{"--state", "--task"}, nil},
@@ -261,6 +272,7 @@ func TestEveryFormWritesOneSpecaEnvelope(t *testing.T) {
 		"verdict, flag last":  {"--dir", root, "09", "--validate"},
 		"list":                {"--dir", root, "--list"},
 		"list with archive":   {"--dir", root, "--list", "--all"},
+		"next":                {"--dir", root, "--next"},
 		"specs-dir given":     {"--dir", root, "--specs-dir", ".specs", "09"},
 	} {
 		var stdout, stderr bytes.Buffer
@@ -289,7 +301,7 @@ func TestEveryFormWritesOneSpecaEnvelope(t *testing.T) {
 	same([]string{"--dir", root, "09"}, []string{"09", "--dir", root, "--specs-dir", ".specs"})
 }
 
-// The report, the verdict, the list and --schema write nothing and reach no
+// The report, the verdict, the list, --next and --schema write nothing and reach no
 // network, and the credentials and models in the environment change nothing
 // they say.
 func TestReadingFormsWriteNothingAndReadNoCredential(t *testing.T) {
@@ -300,6 +312,7 @@ func TestReadingFormsWriteNothingAndReadNoCredential(t *testing.T) {
 		"report":  {"--dir", root, "09"},
 		"verdict": {"--dir", root, "09", "--validate"},
 		"list":    {"--dir", root, "--list", "--all"},
+		"next":    {"--dir", root, "--next"},
 		"schema":  {"--schema"},
 	}
 	outputs := func() map[string]string {

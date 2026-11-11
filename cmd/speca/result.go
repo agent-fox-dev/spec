@@ -39,6 +39,8 @@ type Result struct {
 	// migrateForm marks the result of the migrate form, whose summary counts
 	// what it did to the packages and which suggests nothing.
 	migrateForm bool
+	// nextForm marks the result of --next, whose summary says what it chose.
+	nextForm bool
 	// callNext, where nextSet, is the next of a dry run: the one call that makes
 	// the changes, or none. It replaces what the report would suggest, since the
 	// result is that of a package that has not changed.
@@ -80,6 +82,8 @@ func (r *Result) Summary() string {
 		return r.renderSummary()
 	case r.migrateForm:
 		return r.migrateSummary()
+	case r.nextForm:
+		return r.nextSummary()
 	case r.Packages != nil:
 		return r.listSummary()
 	case r.Validation != nil:
@@ -247,6 +251,8 @@ func (r *Result) Next() []cli.Next {
 		return r.callNext
 	case r.renderForm, r.migrateForm:
 		return nil
+	case r.nextForm:
+		return r.nextNext()
 	case r.Packages != nil:
 		return r.listNext()
 	case r.Validation != nil:

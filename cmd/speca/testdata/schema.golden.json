@@ -1,8 +1,8 @@
 {
   "tool": "speca",
-  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root. With --task and --state it moves one or more tasks through the task state machine, every one or none, and writes the package's progress.json and no other file. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. With --migrate it converts a version 2 package to version 3 in place. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
+  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root; with --next, the package to implement now, the first open package in dependency order whose dependencies are finished, or that every package is done. With --task and --state it moves one or more tasks through the task state machine, every one or none, and writes the package's progress.json and no other file. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. With --migrate it converts a version 2 package to version 3 in place. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
   "input": {
-    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list, and none with --render or --migrate for every package.",
+    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package.",
     "examples": [
       ".specs/16_indexed_code_search",
       "16",
@@ -48,6 +48,11 @@
         "type": "boolean",
         "default": false,
         "description": "the migrate form: convert a version 2 package to version 3 in place, whatever its status, by the rules of format v3 §13; a version 3 package is left alone; each package is reported written, unchanged or failed"
+      },
+      "next": {
+        "type": "boolean",
+        "default": false,
+        "description": "name the package to implement now: the first package under the spec root, in dependency order with ties broken by number, that is open (draft or active, with a task pending or in progress) and whose every dependency is finished; all_done says when nothing is left, waiting what cannot start and why; a dependency cycle fails the call; takes no input"
       },
       "render": {
         "type": "boolean",
@@ -788,6 +793,155 @@
                 "migrated"
               ]
             }
+          },
+          "next_spec": {
+            "type": "object",
+            "description": "the package to implement now: of the packages under the spec root that are open (draft or active, with a task pending or in progress), the first in dependency order, ties broken by number, whose every dependency is finished; an entry as --list writes it; absent when there is none; --next only",
+            "properties": {
+              "spec_dir": {
+                "type": "string",
+                "description": "the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca"
+              },
+              "spec_id": {
+                "type": "string",
+                "description": "the spec id, from the PRD frontmatter; absent when the package did not load"
+              },
+              "spec_name": {
+                "type": "string",
+                "description": "the spec name, from the PRD frontmatter; absent when the package did not load"
+              },
+              "title": {
+                "type": "string",
+                "description": "the spec title, from the PRD frontmatter; absent when the package did not load"
+              },
+              "status": {
+                "type": "string",
+                "description": "the package's lifecycle status; absent when the package did not load"
+              },
+              "valid": {
+                "type": "boolean",
+                "description": "whether the package validates on its own rules; absent when the package did not load"
+              },
+              "task_counts": {
+                "type": "object",
+                "description": "the tasks counted by state, the integration task among them; absent when the package did not load",
+                "properties": {
+                  "pending": {
+                    "type": "integer",
+                    "description": "the tasks that are pending"
+                  },
+                  "in_progress": {
+                    "type": "integer",
+                    "description": "the tasks that are in progress"
+                  },
+                  "done": {
+                    "type": "integer",
+                    "description": "the tasks that are done"
+                  },
+                  "dropped": {
+                    "type": "integer",
+                    "description": "the tasks that are dropped"
+                  },
+                  "total": {
+                    "type": "integer",
+                    "description": "every task of the plan: the four counts added"
+                  }
+                },
+                "required": [
+                  "pending",
+                  "in_progress",
+                  "done",
+                  "dropped",
+                  "total"
+                ]
+              },
+              "next_task": {
+                "type": "object",
+                "description": "the task to work on now: the first in_progress task, else the first ready one; absent when there is none",
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "description": "the task id, as --task takes it"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "the task title"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "description": "implement for a task of tasks.json, or integration for the derived last task of a full package"
+                  },
+                  "state": {
+                    "type": "string",
+                    "description": "pending, in_progress, done or dropped, from progress.json"
+                  },
+                  "depends_on": {
+                    "type": "array",
+                    "description": "the tasks that must be done first",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "ready": {
+                    "type": "boolean",
+                    "description": "true for a pending task whose dependencies are all done; absent otherwise"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "kind",
+                  "state"
+                ]
+              },
+              "archived": {
+                "type": "boolean",
+                "description": "true for a package listed from archive/, whatever its status (a superseded package there is archived: true with status superseded); absent otherwise"
+              },
+              "load_error": {
+                "type": "string",
+                "description": "why the package did not load, in the library's words; present exactly when it did not, and then the only field besides spec_dir"
+              }
+            },
+            "required": [
+              "spec_dir"
+            ]
+          },
+          "all_done": {
+            "type": "boolean",
+            "description": "true when there is nothing left to implement: no package under the spec root is open and every one of them loads as version 3; when it is false and next_spec is absent, every open package waits on something, and waiting says on what; always written under --next"
+          },
+          "waiting": {
+            "type": "array",
+            "description": "the packages under the spec root that are open but cannot start yet, or cannot be judged, in number order, each with why; [] when there are none; --next only",
+            "items": {
+              "type": "object",
+              "properties": {
+                "spec_dir": {
+                  "type": "string",
+                  "description": "the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca"
+                },
+                "spec_id": {
+                  "type": "string",
+                  "description": "the spec id, from the PRD frontmatter; absent when the package did not load"
+                },
+                "waits_on": {
+                  "type": "array",
+                  "description": "the spec ids of its dependencies that are not finished, or that no package under the spec root or archive/ has, in the order its tasks.json names them; absent when it waits on nothing but itself (it does not load, or is in another format version)",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "why it cannot start, in words: the dependencies it waits on, or that it does not load, or that it is in another format version"
+                }
+              },
+              "required": [
+                "spec_dir",
+                "reason"
+              ]
+            }
           }
         },
         "required": []
@@ -892,8 +1046,8 @@
     ]
   },
   "exit_codes": {
-    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read",
+    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle",
     "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written"
   }
 }

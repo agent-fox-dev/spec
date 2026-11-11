@@ -5,6 +5,7 @@ version 2 package to version 3.
     speca [flags] <spec>
     speca <spec> --validate
     speca --list [--all]
+    speca --next
     speca <spec> --task T --state S [--force] [--dry-run]
     speca <spec> --status S [--by <spec>] [--force] [--dry-run]
     speca <spec> --render [--dry-run]
@@ -12,20 +13,21 @@ version 2 package to version 3.
     speca <spec> --migrate [--dry-run]
     speca --migrate [--all] [--dry-run]
 
-It takes one input, a reference to a spec package, and writes exactly one
-JSON object to stdout: the package's state, its verdict under --validate,
-with --list and no input, every package under the spec root, or, in the task
-and status forms, the package's state after the change and the changes made,
-under --render what it did to the package's spec.md, and under --migrate what
-it did to the package's format version. The report, --validate and --list
-read the packages and change nothing: they write no file. The task form writes
-progress.json and no other file. The status form writes the package through
-the library, which rewrites every artifact of it and its spec.md, and moves an
-archived or superseded package under archive/. The render form writes spec.md,
-the package's render, and no other file. The migrate form rewrites a version
-2 package as version 3 and removes its test_spec.json. No form makes a model
-or network call or reads a credential. Its siblings are spec, which writes a
-package from an idea, and specr, which renders one as Markdown.
+It takes one input, a reference to a spec package, and writes exactly one JSON
+object to stdout: the package's state, its verdict under --validate, with
+--list and no input, every package under the spec root, with --next the package
+to implement now, or, in the task and status forms, the package's state after
+the change and the changes made, under --render what it did to the package's
+spec.md, and under --migrate what it did to the package's format version. The
+report, --validate, --list and --next read the packages and change nothing: they
+write no file. The task form writes progress.json and no other file. The status
+form writes the package through the library, which rewrites every artifact of
+it and its spec.md, and moves an archived or superseded package under archive/.
+The render form writes spec.md, the package's render, and no other file.
+The migrate form rewrites a version 2 package as version 3 and removes its
+test_spec.json. No form makes a model or network call or reads a credential.
+Its siblings are spec, which writes a package from an idea, and specr, which
+renders one as Markdown.
 
 FUNCTIONS
 
