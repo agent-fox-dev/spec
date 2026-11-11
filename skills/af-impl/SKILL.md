@@ -1,8 +1,8 @@
 ---
 name: af-impl
-description: Implement a version 3 specification package with the user watching. Reads the spec's three artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the pull request on its own, without waiting to be told to continue. Opens an issue for every open item the pull request lists, linked both ways, with the issue command. Never edits the spec and never merges its own work.
+description: Implement a version 3 specification package with the user watching. Reads the spec's three artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the merge into the base branch on its own, without waiting to be told to continue. Opens an issue for every open item the merge leaves, linked both ways, with the issue command. Never edits the spec, and merges only on checks that pass on the merged tree.
 argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search]"
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # af-impl
@@ -24,7 +24,8 @@ says what they returned. **Tests by behaviour, traceability in the report**:
 the spec's checks are behaviours to cover, written into the test files of the
 code they exercise and named for what they check; which test covers which
 criterion is written in the task's commit, never in the code. **One
-landing**: the branch goes up for someone else to merge.
+landing**: the branch is merged into the base branch once, at the end, and
+only on checks that pass on the merged tree.
 
 Two commands of the `spec` repository do the package's bookkeeping — `speca`
 reports where a package stands, gives the format's verdict and moves its tasks
@@ -40,7 +41,7 @@ landing; where they say nothing, the defaults below apply.
 ## Run to the end
 
 This is one run, not a conversation: read the package, survey, every task,
-conformance, the pull request, the report. Nobody has to say "continue". The
+conformance, the merge, the report. Nobody has to say "continue". The
 person watching reads what you write as it appears and may interrupt; you do
 not wait for them. If their request asks for a stop (after the survey, after
 task N), stop there and say which command continues; otherwise go to the end.
@@ -201,8 +202,8 @@ Everything smaller is drift with a resolution.
 
 ## 4. Branch
 
-`impl/<NN>-<slug>` from the base branch, where `NN` is the `spec_id` and the
-slug is the `spec_name`. When that branch already exists, check it out and
+`feature/<NN>-<slug>` from the base branch, where `NN` is the `spec_id` and
+the slug is the `spec_name`. When that branch already exists, check it out and
 **continue**: a `wip:` commit at the tip is dropped so the task starts again
 from the last landed commit, and then `speca <package>`, run on the branch,
 says where the plan stands. Tasks whose `state` is `done` are skipped, and
@@ -342,7 +343,7 @@ returned. The gate that passed after task N is the baseline for task N+1, so
 "regressed" always means "this task broke it".
 
 **Next.** §7 is assembled from `git log`, not from what you remember, so the
-commit body carries what the pull request will need: the test verdicts, the
+commit body carries what the merge commit will need: the test verdicts, the
 test each criterion maps to, any test-first deviation. Then write one progress line
 and, in the same turn, begin the next task, which the `done` call's `next` and
 its `result.next_task` name. When there is no `next_task` and no task is
@@ -359,7 +360,7 @@ package has none.
 
 ## 6. Conformance
 
-Every task was verified by the checks; before anything is pushed, ask what the
+Every task was verified by the checks; before anything is merged, ask what the
 checks cannot: does the finished branch do what the spec says? Read
 [references/conformance.md](references/conformance.md) in full before
 measuring, and measure the whole diff from the base branch — its structure, its
@@ -376,32 +377,35 @@ out of scope can only be fixed.
 What remains is the `unmet` list: every **open item**, meaning what the branch
 does not do that the spec asks, and what the run could not show. Each is one
 entry, with what is missing, why, the ids it concerns and its evidence. §7
-opens an issue for each, and the pull request must say the work is not complete
+opens an issue for each, and the merge commit must say the work is not complete
 while the list is non-empty.
 
 ## 7. Land
 
 Read [references/landing.md](references/landing.md) in full before pushing. It
-gives the pull request's body section by section, the issue every open item
-gets and how to look for one that exists already, and the fallbacks when
-`issue` is not installed.
+gives the issue every open item gets and how to look for one that exists
+already, the merge commit's message section by section, the merge itself, and
+the fallbacks when `issue` is not installed.
 
-- Push the branch and open a pull request against the base branch, unless the
-  repository's instructions or the user say the branch stays local. Every claim
-  in its body comes from something that ran.
-- **Track the open items.** Every entry under the one heading
-  `## Not complete: open items` gets an issue, so the gap is tracked after the
-  pull request is merged and not left in a description nobody reads again. Then
-  put each issue's link in the pull request body. An issue that cannot be
-  opened at all stops nothing: the entry stays in the pull request with
-  `(no issue: <the reason>)`, and the report gives the call that opens it.
-- **Do not merge it.** Do not seal the spec either, though `speca <package>`
-  now suggests `speca <package> --status sealed`: a review that rejects the
-  pull request may reopen a task, which a sealed spec cannot record. Name that
-  call in the pull request instead, for after the merge.
+- Push the branch to origin, unless the repository's instructions or the user
+  say the branch stays local.
+- **Track the open items.** Every entry of the `unmet` list gets an issue
+  before the merge, so the gap is tracked after it and the merge commit can
+  link each one. An issue that cannot be opened at all stops nothing: the
+  entry stays in the merge commit with `(no issue: <the reason>)`, and the
+  report gives the call that opens it.
+- **Merge** the branch into the up-to-date base branch with `--no-ff`, and
+  commit the merge only when `linter` and `all_tests` give a landable verdict
+  on the merged tree. Its message holds what the run measured, open items
+  first, and every claim in it comes from something that ran. A conflict or a
+  verdict that is not landable aborts the merge.
+- **Push the base branch**, unless the branch stays local, and stay on it.
+  Do not seal the spec, though `speca <package>` now suggests
+  `speca <package> --status sealed`: the lifecycle is the owner's. Name that
+  call in the report.
 
-If a push or the pull request fails, say exactly what failed and leave the
-branch and commits in place.
+If a push or the merge fails, say exactly what failed and leave the branch and
+commits in place.
 
 ## Never
 
@@ -422,8 +426,9 @@ branch and commits in place.
 - Start the next task before the current one has landed or been parked.
 - Stop between tasks, ask whether to go on, or end a turn for any reason
   *Run to the end* does not list.
-- Merge, squash or push to the base branch. Force-push, or rewrite a
-  landed commit.
+- Commit to the base branch anything but the one merge of §7, merge on a
+  verdict that is not landable, or squash. Force-push, or rewrite a landed
+  commit.
 - Stash, reset or otherwise change the user's uncommitted work.
 - Widen the change to things no task asked for.
 - Put a spec, requirement, criterion or path id in code, a test name, a test
@@ -436,7 +441,8 @@ branch and commits in place.
 
 - The spec: id, title, status, and tasks total, done, skipped, remaining,
   from a last `speca <package>` (`task_counts`).
-- Branch, commits, pull request URL (or what stopped it).
+- Branch, commits, the merge commit and whether the base branch was pushed
+  (or what stopped it).
 - Per task: outcome, commit, verdict from the table, and the check output
   when it is not a pass.
 - The survey's decisions, and the deviations declared with the ADRs that

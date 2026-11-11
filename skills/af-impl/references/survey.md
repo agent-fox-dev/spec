@@ -19,7 +19,7 @@ written once and read at every step that needs it.
   helpers, which the steering file may name, so that no task copies one.
 - **Drift.** Every place the spec's assumptions and the code disagree: what
   the spec assumes, what the code does, and the decision, numbered `D-1`,
-  `D-2`, … and written in the past tense as it will read in the pull request
+  `D-2`, … and written in the past tense as it will read in the merge commit
   ("Followed the code: …"). Prefer the code's reality when the spec is merely
   wrong about a detail; prefer the spec's intent when the code is what the
   spec changes.
