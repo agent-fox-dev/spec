@@ -1,10 +1,3 @@
----
-version: 1.0.0
-amendments:
-  - version: 1.0.0
-    date: 2026-11-07
-    change: The file was adopted from the agent-fox template.
----
 # Steering Directives
 
 Project-level directives for every agent and skill working on this repository.
@@ -43,19 +36,12 @@ session — not as a follow-up task.
 | Architecture, package layout, or data flow changed | `docs/architecture.md` and/or relevant ADR |
 | Setup, quickstart, or project overview changed | `README.md` |
 
-*Important:* Do NOT write tests for testing the presence or the content of the docs or PRDs.
+Do not write tests that check whether a doc or PRD exists or what it says.
 
-**Instructions:**
-
-1. Review the spec you just implemented and identify every user-facing or
-   developer-facing surface that changed (API routes, request/response
-   schemas, CLI parameters, environment variables, architectural decisions).
-2. Open each affected doc and update it to reflect the new state. Do not
-   leave placeholder text like "TODO" or "TBD" — write the actual content.
-3. If a doc file listed above does not exist yet, create it with the correct
-   content rather than skipping the update. A repository without a REST API or
-   CLI keeps the file anyway and says in one line that it has none.
-4. Run `make check` after doc updates to ensure nothing is broken.
+Write the actual content, never "TODO" or "TBD". A doc listed above that does
+not exist yet is created, not skipped; a repository without a REST API or CLI
+keeps the file anyway and says in one line that it has none. Run `make check`
+after the doc updates.
 
 ## Tests and Spec Traceability
 
@@ -110,13 +96,4 @@ grepping for declarations.
 
 ## Repository Specifics
 
-<!-- Replace this section with what is true of this repository only:
-
-- What the project is (a library, a service, a command) and which of the
-  reference docs (`api.md`, `cli.md`, `configuration.md`, `architecture.md`)
-  carry real content and which say in one line that the surface does not exist.
-- Any source of truth that is generated from (schemas, IDL, migrations) and
-  the target that regenerates it.
-- What the tests need (network, credentials, services) — ideally nothing.
-- The shared test helpers and fixtures, by path, that the Tests section above
-  refers to. -->
+<!-- TBD -->

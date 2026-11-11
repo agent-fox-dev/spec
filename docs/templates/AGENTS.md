@@ -1,47 +1,20 @@
 # Agent Instructions
 
-Instructions for coding agents (Cursor, Claude Code, Codex, etc.) working on
-this repository. Treat this file as mandatory policy for every coding session.
-Only the **Repository Layout** and **Quality Commands** sections are specific
-to this repository; everything else is shared policy.
-
-## Understand Before You Code (MANDATORY)
+## Before You Code
 
 Before making any changes, orient yourself:
 
-1. **Read `README.md`** for project overview and quick-start.
-2. **Read `.specs/steering.md`** if it exists — project-level directives that
-   apply to all agents and skills. Follow any instructions found there.
-3. **Read ADRs and errata** in `docs/` for architectural context.
-4. **Explore the codebase** using the Repository Layout below.
-5. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
+Read `.specs/steering.md`, the project's steering directives:
 
-**Important:** Read all documents and code in depth — don't skim.
+@.specs/steering.md
 
-**Important:** Only read files tracked by git. Skip anything matched by
-`.gitignore`. When in doubt, run `git ls-files` to see what's tracked.
+1. **Read ADRs and errata** in `docs/` for architectural context.
+2. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
+
+Only read files tracked by git (`git ls-files`): what `.gitignore` excludes
+is private notes and local secrets, not project material.
 
 Do not implement anything before completing these steps.
-
-## Repository Layout
-
-<!-- Replace this tree with the real layout of the repository: one line per
-     top-level directory (and any notable subdirectory), with what it holds. -->
-
-```
-src/                    # <the production code>
-tests/                  # <tests, if they do not live next to the code>
-cmd/                    # <entry points / commands, if any>
-docs/                   # Documentation
-docs/adr/               # Architecture Decision Records
-docs/errata/            # Divergences between a spec and its implementation
-docs/prd/               # Product Requirements Documents
-.specs/                 # Specs to be implemented
-.specs/archive/         # Old specs
-```
-
-<!-- Say where tests and their fixtures live, e.g. "Tests live next to the
-     code as `*_test.go`, their fixtures in `testdata/`." -->
 
 ## Spec-Driven Workflow
 
@@ -54,19 +27,12 @@ This project uses spec-driven development. Specifications live in
 - `progress.json` — the state of every task, the integration task included; written by the tools (`speca`), never by hand
 - `architecture.md` — (optional) detailed architecture
 
-`.specs/archive/` holds old specs. Ignore them for coding tasks, except for
-reference.
+`.specs/archive/` holds old specs. Ignore them for coding tasks, except for reference.
 
 Cross-reference `external_apis` in `requirements.json` against installed
 libraries — API signatures in specs may be unverified assumptions.
 
 ## Quality Commands
-
-<!-- Fill in the language and toolchain version, and adjust the table to the
-     targets the project's build file really has. Keep `make check` (or its
-     equivalent) as the single command that must pass before every commit. -->
-
-The <language> version is **<version>**.
 
 | Command | What it does |
 |---------|-------------|
@@ -81,6 +47,10 @@ The <language> version is **<version>**.
 | `make doc` | Regenerate the API docs in `docs/generated/` (committed) |
 | `make clean` | Remove build output |
 
+There is no `Makefile` yet, so none of these targets runs. Until one lands,
+use what the spec packages' `test_commands` use: `go test ./... -count=1` and
+`golangci-lint run ./...`.
+
 Run the full quality suite before committing:
 
 ```
@@ -89,13 +59,15 @@ make check
 
 ## Git Workflow
 
+When implementing a spec or any other feature:
+
 - **Branch from `main`:** `feature/<descriptive-name>`.
 - **Never commit directly** to `main`.
 - **Conventional commits:** `<type>: <description>` (e.g. `feat:`, `fix:`,
   `refactor:`, `docs:`, `test:`, `chore:`).
 - **Commit discipline:** only commit files relevant to the current change.
 - **Never add `Co-Authored-By` lines.** No AI attribution in commits — ever.
-- **Feature branches are pushed to origin** — push and create a pull request, then switch back to main.
+- **Feature branches are pushed to origin** — push to origin, then merge into main and then switch back to main for the next task.
 
 ## Scope Discipline
 
@@ -105,9 +77,10 @@ make check
 
 ## Documentation
 
-- **PRDs** live in `docs/prd/NN-imperative-verb-phrase.md`. To choose NN,
-  list existing files, find the max numeric prefix, and use the next number
-  zero-padded to two digits for consistency (three digits once past 99).
+- **PRDs** live in `docs/prd/`. The Parley PRD is split there per section as
+  `NN_snake_case_topic.md` (`00_overview.md` to `17_sequencing_and_decisions.md`)
+  plus `appendix_*.md`. Where a new, separate PRD goes is not settled yet:
+  ask before creating one.
 - **ADRs** live in `docs/adr/NN-imperative-verb-phrase.md`. To choose NN,
   list existing files, find the max numeric prefix, and use the next number
   zero-padded to two digits for consistency (three digits once past 99).
@@ -118,8 +91,8 @@ make check
 - **Generated API docs** live in `docs/generated` (generated by `make doc` and
   committed; see the Generated Docs section of `.specs/steering.md`).
 - **Reference docs** live in `docs/`: `api.md`, `cli.md`, `configuration.md`
-  and `architecture.md`. Every repository has these four; see
-  `.specs/steering.md` for when each one must be updated.
+  and `architecture.md`. None exists yet; `.specs/steering.md` says when
+  each one is created and updated.
 - **Other docs** live in `docs/{topic}.md`.
 - When you add or change user-facing behavior, public APIs, configuration, or
   architecture, update the relevant documentation in the same session.
@@ -130,6 +103,7 @@ A session is not complete until:
 
 1. `make check` passes (no regressions).
 2. Changes are committed with a clear conventional commit message.
-3. Changes are pushed to origin as a pull request.
+3. The feature branch is pushed to origin and merged into `main`, and `main`
+   is pushed.
 4. `git status` shows a clean working tree.
 5. You provide a brief handoff note summarizing what was done and what remains.
