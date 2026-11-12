@@ -99,6 +99,10 @@ func wholeAboveZero(v any) (int, bool) {
 		if n > 0 {
 			return n, true
 		}
+	case float64:
+		if n > 0 && n == math.Trunc(n) && n <= math.MaxInt32 {
+			return int(n), true
+		}
 	}
 	return 0, false
 }

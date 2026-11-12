@@ -249,6 +249,7 @@ func TestReadSteering_ReadsTheGateBudget(t *testing.T) {
 		problem bool
 	}{
 		"90":     {"gate_budget_seconds: 90\n", 90, false},
+		"90.0":   {"gate_budget_seconds: 90.0\n", 90, false},
 		"absent": {"", 0, false},
 		"0":      {"gate_budget_seconds: 0\n", 0, true},
 		"-5":     {"gate_budget_seconds: -5\n", 0, true},

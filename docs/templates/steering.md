@@ -86,8 +86,10 @@ repository.
   mutable state between files.
 - **An expensive fixture is built once** per process (a migrated database, a
   repository, a key pair) and copied or cloned per test, not rebuilt.
-- **The full suite stays within the gate budget**, `gate_budget_seconds` in
-  this file's frontmatter (120 seconds when it sets none). A full gate over
+- **The full suite stays within the gate budget**, 120 seconds unless this
+  file's frontmatter sets `gate_budget_seconds`; a frontmatter holds a
+  `version` and its `amendments` with it, or it is malformed (see
+  `docs/configuration.md` of the spec tool). A full gate over
   the budget, or one that grew by more than half on a branch, is a test-cost
   finding: a minor defect that reaches someone.
 

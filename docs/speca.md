@@ -741,7 +741,10 @@ speca 16 --gate task --base 3f2a9c1     # the affected tests of the change since
   as before, and has no `base` whether or not `--base` was given. A `--base`
   that names no commit, a `--dir` outside a git work tree for a package with
   `affected_tests`, and `--base` with `--gate full` or without `--gate` are
-  usage errors, made before anything runs. The full level always runs
+  usage errors, made before anything runs; a `--base` is checked whenever it
+  is given, also for a package without `affected_tests`. An `affected_tests`
+  that does not hold `{base}` exactly once (a package that does not
+  validate) ends the gate with `not_run`. The full level always runs
   `all_tests`.
 
 - **No shell.** Each command string is split on white space, a stretch inside
@@ -799,7 +802,7 @@ speca 16 --gate task --base 3f2a9c1     # the affected tests of the change since
 | `seconds` | the sum of the commands' seconds; `0` when a pass was reused |
 | `slowest` | a full gate only: `{unit, seconds}`, at most five; `[]` when there are none |
 | `budget` | a full gate only, run or reused, whatever its verdict: `seconds` (`gate_budget_seconds` of the steering's frontmatter, else `120`), `exceeded` (more seconds than the budget; exactly the budget is not) and `over_by_seconds` (when exceeded); a reused gate is measured by its recorded run's seconds. A steering frontmatter that breaks a rule, a budget that is no whole number above zero among them, raises a high `steering_malformed` warning, and the default applies |
-| `growth` | a full gate only: `base_seconds`, the passing full gate recorded for the tree of the merge base of `HEAD` and the base branch with the same commands, directory and environment, and `grew_by`, the difference over `base_seconds` to four decimals (negative when faster); absent with no such record, no base branch or no git work tree |
+| `growth` | a full gate only: `base_seconds`, the passing full gate recorded for the tree of the merge base of `HEAD` and the base branch with the same commands, directory and environment, and `grew_by`, the difference over `base_seconds` to four decimals (negative when faster); absent with no such record, no base branch or no git work tree, and on that tree itself |
 
 A full gate that passed, from a repository whose `all_tests` prints two Go
 result lines (the samples are the command's output, with the temporary state

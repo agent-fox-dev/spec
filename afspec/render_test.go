@@ -505,6 +505,14 @@ func TestRenderedBytes_AreTheSameEveryTime(t *testing.T) {
 // and a package without one renders as it did.
 func TestRenderTasks_ListsTheAffectedTestsCommand(t *testing.T) {
 	s := loadFixture(t, fixtureValidSpec)
+	// The render of the fixture by the renderer before the field existed.
+	golden, err := os.ReadFile("testdata/valid_spec_tasks.golden.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.RenderTasks() != string(golden) {
+		t.Error("the render of a package without affected_tests is not what it was before the field")
+	}
 	before := s.RenderTasks()
 	affected := "make test-affected BASE={base}"
 	s.Tasks.TestCommands.AffectedTests = &affected

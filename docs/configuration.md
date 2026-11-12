@@ -96,7 +96,9 @@ The frontmatter is well formed when:
 - `gate_budget_seconds`, when present, is a whole number greater than zero:
   the seconds a full gate may take before `speca --gate full` reports it over
   budget and the gate report calls it a test-cost finding (default `120`). Any
-  other value is a broken rule, and the default applies;
+  other value is a broken rule, and the default applies. The key does not
+  stand alone: a frontmatter holds `version` and `amendments` with it, or it
+  breaks their rules (the budget still applies, with the warning);
 - `version` is `MAJOR.MINOR.PATCH`: three non-negative integers with no leading
   zeros, compared as numbers (`2.10.0` is newer than `2.9.0`);
 - `amendments` lists at least one amendment, each with a `version` in that

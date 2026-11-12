@@ -25,8 +25,8 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	}
 	r := &Result{AdminResult: c.identityOf(dir, spec)}
 
-	// The verdict is the form that reads the steering's version, so it is the
-	// one that says the steering's record is malformed.
+	// The verdict reads the steering's version, so it says when the steering's
+	// record is malformed; the full gate says so too, since it reads its budget.
 	if msg := project.ReadSteering(c.specsDir).Malformed(c.specsDir); msg != "" {
 		c.run.Warn(cli.WarnSteeringMalformed, "high", "%s", msg)
 	}

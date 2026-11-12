@@ -949,7 +949,9 @@ func TestGate_TakesTheDefaultForABudgetItCannotRead(t *testing.T) {
 func TestGate_MeasuresTheGrowthOverTheBaseBranch(t *testing.T) {
 	g := newGateRepo(t)
 	stepClock(t, 5) // 10 s on main
-	g.gate(t, "full")
+	if env, _ := g.gate(t, "full"); env.Result.Gate.Growth != nil {
+		t.Errorf("growth on main's own tree %+v; want none", env.Result.Gate.Growth)
+	}
 	git(t, g.root, "switch", "-q", "-c", "feature")
 	writeFile(t, filepath.Join(g.root, "f.txt"), "f")
 	g.commit(t, "F")
@@ -972,5 +974,19 @@ func TestGate_MeasuresTheGrowthOverTheBaseBranch(t *testing.T) {
 	other.commit(t, "F")
 	if env, members := other.gate(t, "full"); env.Result.Gate.Growth != nil || members["growth"] != nil {
 		t.Errorf("growth %s; want it absent when main's tree was never gated", members["growth"])
+	}
+}
+
+// A --base is checked whenever it is given, also for a package without
+// affected_tests; an affected_tests without exactly one {base} does not run.
+func TestGate_ChecksABaseEvenWhereItIsNotUsed(t *testing.T) {
+	g := newGateRepo(t)
+	env, code, _ := run(t, "--dir", g.root, "05", "--gate", "task", "--base", "nosuch")
+	if code != cli.ExitUsage || env.Error == nil || !strings.Contains(env.Error.Message, "nosuch") || len(g.runs(t)) != 0 {
+		t.Errorf("code %d, error %+v, ran %v; want a usage error and nothing run", code, env.Error, g.runs(t))
+	}
+	g.setAffected(t, "BASE={base} {base}")
+	if r := g.gateOf(t, "05", "task").Result.Gate; r.Verdict != "not_run" || !strings.Contains(r.Reason, "exactly one") || len(g.runs(t)) != 0 {
+		t.Errorf("gate %+v, ran %v; want not_run, nothing run", r, g.runs(t))
 	}
 }

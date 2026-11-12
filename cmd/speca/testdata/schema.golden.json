@@ -1068,7 +1068,7 @@
               },
               "budget": {
                 "type": "object",
-                "description": "a full gate only, run or reused: the gate's seconds against the budget, gate_budget_seconds in the steering's frontmatter, else 120; a reused gate is measured by the seconds of the run it came from; absent for a task gate",
+                "description": "a full gate only, run or reused: the gate's seconds against the budget, gate_budget_seconds in the steering's frontmatter, else 120; a reused gate is measured by the seconds of the run it came from; absent for a task gate and for a gate that did not run",
                 "properties": {
                   "seconds": {
                     "type": "integer",

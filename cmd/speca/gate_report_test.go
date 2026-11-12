@@ -259,6 +259,16 @@ func TestGateReport_SaysWhetherTheSuiteCostIsAFinding(t *testing.T) {
 			}
 		})
 	}
+	old := reportRepo(t)
+	top, _ := gate.Top(old.root)
+	store, _ := gate.OpenStore(top)
+	head := git(t, old.root, "rev-parse", "HEAD")
+	if err := store.AppendRun(gate.Run{SpecID: "05", At: "2026-11-12T10:00:00Z", Commit: head, Level: "full", Verdict: "pass", Seconds: 130}); err != nil {
+		t.Fatal(err)
+	}
+	if env, members := old.report(t, "05", "--since", head); env.Result.GateReport.TestCost == nil || !env.Result.GateReport.TestCost.Finding {
+		t.Errorf("a run logged without a budget: test_cost %s; want it measured against 120 s, a finding", members["test_cost"])
+	}
 	g := reportRepo(t)
 	if _, members := g.report(t, "05", "--since", git(t, g.root, "rev-parse", "HEAD")); members["test_cost"] != nil {
 		t.Errorf("test_cost %s; want it absent with no full run", members["test_cost"])

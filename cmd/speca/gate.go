@@ -57,14 +57,24 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	cmds := gateCommands(spec)
 	key := gate.Key{Level: c.opts.gate.value, Linter: cmds[0].Line, AllTests: cmds[1].Line, CleanEnv: c.opts.cleanEnv}
 	base := ""
-	if affected := affectedTests(spec); affected != "" && key.Level == envelope.GateLevelTask {
-		id, refusal := baseCommit(c)
+	affected := affectedTests(spec)
+	if useBase := affected != "" && key.Level == envelope.GateLevelTask; useBase || c.opts.base.given {
+		id, refusal := baseCommit(c, useBase)
 		if refusal != nil {
 			return nil, refusal
 		}
-		base = id
-		cmds[1] = gate.Command{Name: gate.AffectedTests, Line: strings.Replace(affected, afspec.AffectedTestsBase, id, 1)}
-		key.AllTests, key.AffectedTests = "", cmds[1].Line
+		if useBase {
+			if n := strings.Count(affected, afspec.AffectedTestsBase); n != 1 {
+				g := envelope.GateResult{Level: key.Level, Verdict: envelope.GateVerdictNotRun, Commands: []envelope.GateCommand{},
+					Reason: fmt.Sprintf("the affected_tests command %q holds %d %s placeholder(s), and exactly one is needed", affected, n, afspec.AffectedTestsBase)}
+				return &Result{AdminResult: envelope.AdminResult{
+					SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Status: spec.Status, Gate: &g,
+				}}, nil
+			}
+			base = id
+			cmds[1] = gate.Command{Name: gate.AffectedTests, Line: strings.Replace(affected, afspec.AffectedTestsBase, id, 1)}
+			key.AllTests, key.AffectedTests = "", cmds[1].Line
+		}
 	}
 
 	// The tree is read before anything runs: a command may change it.
@@ -205,7 +215,9 @@ func gateBudget(c *call, warn bool) int {
 // when there is no such record or no base branch.
 func baseGrowth(store *gate.Store, top string, key gate.Key, seconds float64) *envelope.GateGrowth {
 	tree, err := gate.BaseTree(top)
-	if err != nil || tree == "" {
+	// On the base branch's own tree the gate would be measured against
+	// itself.
+	if err != nil || tree == "" || tree == key.Tree {
 		return nil
 	}
 	key.Tree = tree
@@ -228,11 +240,15 @@ func affectedTests(spec *afspec.Spec) string {
 
 // baseCommit is the full id of the commit --base names, HEAD when it is not
 // given, in the git work tree of --dir; anything else is a usage error, made
-// before a command runs.
-func baseCommit(c *call) (string, *cli.ErrorInfo) {
+// before a command runs. A --base given is checked whether or not the gate
+// uses it (affected), so that a mistyped one is never silently ignored.
+func baseCommit(c *call, affected bool) (string, *cli.ErrorInfo) {
 	top, err := gate.Top(c.root)
 	if err != nil {
-		return "", usageInfo(fmt.Errorf("the package has affected_tests, which runs from a base commit, and %v", err), nil)
+		if affected {
+			return "", usageInfo(fmt.Errorf("the package has affected_tests, which runs from a base commit, and %v", err), nil)
+		}
+		return "", usageInfo(fmt.Errorf("--base names a commit, and %v", err), nil)
 	}
 	rev := "HEAD"
 	if c.opts.base.given {
