@@ -1,0 +1,98 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "21",
+  "spec_name": "open_item_labels",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "20",
+      "reason": "adds forge access, the label rules and the trailer fields to specrun's loop and ledger"
+    },
+    {
+      "spec": "19",
+      "reason": "the AF-Run trailer carries the counts of speca --gate-report"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Reach the forge, create the label scheme, and give every open item a kind and its labels",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the behaviours as tests and confirm they fail; add to the helpers of internal/specrun an in-memory implementation of issuex.Client that holds issues, labels and comments, records every call in order and can fail a named call",
+        "Use github.com/agent-fox-dev/aflib/issuex for every forge operation; cmd/specrun still imports nothing that depends on agentkit-go, and the module's internal/issuex is not used",
+        "At start make the client for the repository of the origin remote with the token the issue command reads; when none can be made refuse at stage preflight, naming the token variables or the remote. Under --dry-run warn forge_unavailable instead, go on, and make no forge write in any case",
+        "Before the first step create every label of the scheme with CreateLabel, treating a conflict as a label that exists: the four kinds, the four severities, af:accepted, af:rejected, af:repair-failed, and af:from-<NN> and af:awaits-<NN> for each package under the spec root and its archive",
+        "In skills/af-impl/references/conformance.md say that every entry of the unmet list gets exactly one kind, with the four definitions of the PRD's section 1, and that a defect gets one of the four severities",
+        "In skills/af-impl/references/landing.md file each issue with its labels through `issue --create --label`: af:<kind>, af:from-<NN>, af:awaits-<NN> for awaits and af:severity-<s> for a defect; create a label that is missing with `issue --create-label` first; keep the body's 'What closes it', which for awaits names the receiving package by id",
+        "Document the scheme and the refusal without a forge in docs/specrun.md and the token variables in docs/configuration.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main.go",
+        "go.mod",
+        "go.sum",
+        "skills/af-impl/references/conformance.md",
+        "skills/af-impl/references/landing.md",
+        "skills/af-impl/SKILL.md",
+        "docs/specrun.md",
+        "docs/configuration.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes",
+        "`go list -deps ./cmd/specrun` names no package of agentkit-go"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Check the labels of a landed package's issues",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the table of issues, the second application and the failing forge call as tests and confirm they fail",
+        "After the landing checks of a package pass, list its open issues: those labelled af:from-<NN> and those whose title starts with the package's directory name and a colon, following an incomplete listing to its end",
+        "For an issue that lacks a kind, lacks af:from-<NN>, is a defect without exactly one severity, is awaits without an af:awaits label, or carries two kinds: remove its other kind labels, add af:deviation and, when missing, af:from-<NN>, and add one comment naming the rule incomplete-labels, what was missing and the commit of the base branch",
+        "Make every label rule a function from the issues and the packages to a list of changes, applied afterwards, so that it is tested without a session and the dry run of a later package can print the list",
+        "A forge call that fails stops the loop after the package's ledger line is written, with the rule and the error in result.stopped; at the next start apply the rule for the last landed package again before choosing a step",
+        "Document the rule in docs/specrun.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "docs/specrun.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Write the AF-Run trailer and read it into the ledger",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the trailer cases to the ledger tests and confirm they fail",
+        "After a landing read the trailers of the merge commit at the tip of the base branch with git, take the value of AF-Run, and decode it as one JSON object; copy its gate and open_items objects into the ledger line unchanged and ignore its other keys",
+        "Add the full gate runs and seconds, the reused gates and the number of items opened to the short form printed on stderr; with no trailer, or one that is not a JSON object, warn trailer_missing with the commit and write the line without the two objects",
+        "In skills/af-impl/references/landing.md end the merge commit message with the trailer `AF-Run: <one line of JSON>` after the Spec trailer's block: gate copied from `speca <package> --gate-report --since <baseline commit>` (full and task with runs, seconds and reused, baseline_full_seconds, last_full_seconds) and open_items with opened, closed, passed_on and reclassified, each an object of counts keyed by kind, a defect as defect:<severity>; closed, passed_on and reclassified are empty objects until af-impl reads items back",
+        "In the same file and in §8 of skills/af-impl/SKILL.md add the counts of open items per kind and severity, with the issue links, to the merge commit's open-items section and to the report",
+        "Document the trailer's keys and the ledger's new fields in docs/specrun.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main_test.go",
+        "skills/af-impl/references/landing.md",
+        "skills/af-impl/SKILL.md",
+        "docs/specrun.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}

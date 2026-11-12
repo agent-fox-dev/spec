@@ -1,0 +1,43 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "27",
+  "spec_name": "unattended_mode",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Ask af-impl for the unattended mode",
+      "rationale": "The driver is the one caller that knows nobody is watching.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "`specrun` starts the session of an implement step",
+          "action": "give the session the prompt `/af-impl <spec_dir> --unattended`",
+          "contract": "the second argument of `claude -p` is exactly that string, with the package's `spec_dir` as `afspec` names it; every other argument and the environment are as before",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, in the existing test of the session's command line: assert the fake claude's recorded prompt == '/af-impl .specs/01_… --unattended' and that the other arguments are unchanged"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "ubiquitous",
+          "action": "for any step that is not an implement step, start its session with the prompt it had before",
+          "contract": "a reconcile's prompt starts `/af-impl --reconcile` and a repair's is `/af-impl --repair <issue number>`; neither holds `--unattended`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go and internal/specrun/repair_test.go, in the existing tests of those prompts: assert neither recorded prompt contains '--unattended'"
+          }
+        }
+      ]
+    }
+  ]
+}

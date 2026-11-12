@@ -1,0 +1,90 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "22",
+  "spec_name": "open_items_read_back",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "21",
+      "reason": "builds on its kinds, labels, forge client and label rules, and fills the trailer's closed, passed-on and reclassified counts"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Relabel items that await a finished package, and keep af-impl from filing or leaving one",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the table of awaiting issues and the second application as tests and confirm they fail",
+        "After the incomplete-labels rule of a landing, list the open issues labelled af:awaits; for each af:awaits-<NN> label read the package from afspec: finished means sealed, superseded, archived, under the archive, or with no task pending or in progress, the rule the choice of the next package already uses",
+        "For an issue whose awaited package is finished or does not exist: remove af:awaits and the af:awaits-<NN> label, add af:defect and af:severity-correctness, and comment with the rule awaits-finished, the package and the commit of the base branch. A forge failure stops the loop as the other label rule does",
+        "In skills/af-impl/references/landing.md: before filing an awaits item, ask `speca <NN>` about the receiving package; when it is sealed or its last task is done, file a defect of severity correctness with the note 'handoff to a package that has already landed' instead",
+        "In skills/af-impl/references/survey.md: make the same check for the spec's prose about wiring ('package N registers …'); prose that hands work to a landed package is a numbered survey decision, 'this package wires it' or 'filed as a defect'",
+        "In skills/af-impl/references/landing.md: after the merge is pushed, pass on every open af:awaits-<this package> item the branch did not resolve: relabel it to the later package that now owns it with `issue <ref> --edit --add-label/--remove-label` and a comment saying why, or relabel it af:defect with af:severity-correctness and a comment saying no package owns it",
+        "Document the rule in docs/specrun.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "skills/af-impl/references/landing.md",
+        "skills/af-impl/references/survey.md",
+        "docs/specrun.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Stop the loop after a package opened a serious defect",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the stop table, the restart cases and the --stop-on table as tests and confirm they fail",
+        "Add the flag --stop-on with its SPECRUN_STOP_ON default: a comma-separated list of the four severities, default security,data-loss, the empty string meaning none; refuse any other value as a usage error naming it",
+        "After a landing and its label rules, list the open issues labelled af:defect and af:from-<NN> of the package that landed; when one carries a severity in the list, write the ledger line with outcome landed and the issues, and stop with reason 'serious defect' and the issues in result.stopped",
+        "Record the last landed package in the state file; at the next start, after the label rules are applied again, make the same check for it before choosing a step",
+        "Document the flag, the stop and how a person gets past it in docs/specrun.md and docs/configuration.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "docs/specrun.md",
+        "docs/configuration.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Show the label changes in the dry run, and have af-impl read its open items back and close what it resolved",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the dry-run case as a test and confirm it fails",
+        "Under --dry-run, when a forge client can be made, compute the changes of every label rule for the packages as they stand and the issues the stop rule would name for the last landed package, and report them as result.would_change and result.would_stop, empty lists when there are none; apply nothing",
+        "In skills/af-impl/references/survey.md add the reading back: with `issue --list --state open --label`, list every item labelled af:awaits-<this package>, and every open af:defect and af:untested item whose evidence names a file this package's tasks touch. The brief gets a section 'Open items for this package': each awaits item mapped to the task that will satisfy it or recorded as a numbered decision with the reason it will not be; each defect in the touched area listed as a known fault the plan neither builds on nor copies around; an exported entry point an awaits item names is used, not re-implemented",
+        "In skills/af-impl/references/landing.md: before the merge decide for each listed item whether the branch closes it, with the production caller as file and line and the test that exercises it; after the merge is pushed close each resolved item with `issue <ref> --close --body`, the comment naming the merge commit, the evidence and this package",
+        "In the same file fill the trailer's and the report's counts of items closed, passed on and reclassified, per kind and severity, with the issue links",
+        "Change the last rule of *Never* in skills/af-impl/SKILL.md: af-impl may comment on, relabel and close an issue labelled af:* that awaited this package or whose closing condition this branch meets, and still never closes, edits or comments on any other issue; add the read-back to §3 and the closing to §7 in a sentence each, keeping the rendered body under the ceiling `make skills-check` enforces",
+        "Document the dry run's two new result fields in docs/specrun.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main_test.go",
+        "skills/af-impl/SKILL.md",
+        "skills/af-impl/references/survey.md",
+        "skills/af-impl/references/landing.md",
+        "docs/specrun.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}

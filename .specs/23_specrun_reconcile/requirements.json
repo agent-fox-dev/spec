@@ -1,0 +1,261 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "23",
+  "spec_name": "specrun_reconcile",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Run a reconcile every few packages and at the end",
+      "rationale": "A list that is only corrected at the end is out of date for the whole run.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "the number of packages landed since the last reconcile reaches `--reconcile-every`, 5 when the flag is absent",
+          "action": "run a reconcile step before the next package",
+          "contract": "the reconcile's session starts after that package's landing and before the next package's session; the count in the state file returns to 0",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go (new), a table over --reconcile-every {1, 2, 5} with five open packages: assert the order of the sessions started, by their prompts: with 2 -> 01, 02, reconcile, 03, 04, reconcile, 05, reconcile; with 5 -> five packages then one reconcile; with 1 -> a reconcile after each and none added at the end"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "every package is done and a package has landed since the last reconcile, or no reconcile is recorded in the ledger",
+          "action": "run one reconcile step before ending",
+          "contract": "the last session of the run is a reconcile; when the last step was a reconcile and no package landed since, no session starts and the run ends with `all_done`",
+          "check": {
+            "same_as": "REQ-1.1"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "optional",
+          "condition": "`--reconcile-every` is given",
+          "action": "take the number of packages between reconciles from it, `0` meaning only the reconcile at the end, with `SPECRUN_RECONCILE_EVERY` as its default when set",
+          "contract": "a negative number or a value that is no integer is a usage error with exit code 2 naming the flag or the variable; with `0` and five packages the only reconcile is the last session",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/flags_test.go, beside the existing flag tables: {absent -> 5; 3 -> 3; 0 -> 0; SPECRUN_RECONCILE_EVERY=2 -> 2; -1 -> exit code 2; 'often' -> exit code 2}; in internal/specrun/reconcile_test.go one case with 0 and five packages: the session order is the five packages, then reconcile"
+          }
+        },
+        {
+          "id": "REQ-1.4",
+          "pattern": "event_driven",
+          "condition": "`specrun` is started and its state records the count of packages since the last reconcile, or a reconcile step as running",
+          "action": "continue from that count, and run a reconcile recorded as running again",
+          "contract": "with `--reconcile-every 2`, one package landed before the restart and one after it, the reconcile follows the second; a running reconcile is the first session after the restart",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go: run --max 1 --reconcile-every 2, then run --max 1 --reconcile-every 2: assert the second run's sessions are [02, reconcile]; with a state file naming a reconcile as running: assert the first session's prompt starts '/af-impl --reconcile'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Hand the session the issues it may adopt, and nothing else",
+      "rationale": "A reconcile that could touch any issue would sooner or later relabel one a person opened.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "a reconcile step starts",
+          "action": "select the open issues that carry no label starting with `af:` and whose title starts with the directory name of a package under the spec root or its archive followed by a colon, write them to `<step>-adopt.json` in the log directory, and start the session",
+          "contract": "the file is a JSON array of `{number, title, url, package}`, `[]` when none is selected; the session's prompt is `/af-impl --reconcile <adopt file> --report <log dir>/<step>-report.md`, with the flags, the stall rule and the stream files of every session",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go, with packages 01_alpha, 02_beta and an archived 00_zero, a table over open issues: {'01_alpha: no caller', no label -> selected with package 01_alpha; '00_zero: gap', label bug -> selected; '01_alpha: x', label af:defect -> not; 'alpha: y' -> not; '01_alphabet: z' -> not; '09_none: q' -> not; 'Crash on start' -> not; a closed '02_beta: w' -> not}: assert the adopt file holds exactly the two selected entries; assert the fake claude's prompt names that file and a report path in the log directory; assert a .jsonl stream file exists for the step"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "the reconcile session ends and the base branch is not checked out, the working tree is not clean, or `HEAD` is not the commit it was before the step",
+          "action": "stop the loop",
+          "contract": "exit code 1; `result.stopped.reason` names the check; the ledger line has outcome `stopped`; no rule is applied to the forge and no further session starts",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go, a table over a fake reconcile session that {commits on main; leaves an untracked file; ends on another branch; writes no event until the stall time}: assert exit code 1, the reason of the case (the last is 'stalled'), outcome 'stopped' or 'stalled', and no forge write after the session"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "unwanted",
+          "condition": "the reconcile session ends and the report file does not exist",
+          "action": "warn and go on",
+          "contract": "`warnings` holds one `reconcile_report_missing` entry naming the path; the rules run and the ledger line has outcome `reconciled`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go: a fake reconcile session that writes no report: assert codes(warnings) == ['reconcile_report_missing'] and last(ledger).outcome == 'reconciled'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Settle by rule what needs no judgement, after the session",
+      "rationale": "Labels, the dependency graph and git decide these; a rule applies them the same way every time, at no model cost.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "a reconcile session has passed its checks and an issue from the adopt file is still open with no kind label",
+          "action": "add `af:deviation` and `af:from-<NN>` of the package its title names, and comment on it",
+          "contract": "the issue carries both labels and one comment naming the rule `adoption-unsettled` and the commit of the base branch; an adopted issue that has a kind is left to the other label rules",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go: a fake session that labels one of two adopt-file issues af:defect, af:severity-minor, af:from-01 and leaves the other: assert the other carries af:deviation and af:from-01 and a comment containing 'adoption-unsettled'; assert the first got no write from specrun"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "a reconcile session has passed its checks and an open issue carries `af:deviation` and `af:accepted` and not `af:rejected`",
+          "action": "close the issue with a comment naming the ADR the issue cites",
+          "contract": "the issue is closed; the comment names the rule `deviation-accepted`, the commit of the base branch and the first path `docs/adr/<file>.md` in the issue's body, or says that the issue cites no ADR",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go, a table over open issues at a reconcile: {af:deviation + af:accepted, body citing docs/adr/07-x.md -> closed, comment contains that path; the same with no ADR in the body -> closed, comment says none is cited; af:deviation + af:rejected -> open, labels af:defect and af:severity-correctness, neither af:deviation nor af:rejected, comment contains 'deviation-rejected'; af:deviation alone -> no write; af:deviation + af:accepted + af:rejected -> no write and a deviation_conflict warning naming it; af:defect + af:accepted -> no write}: assert the state, labels and comments of each"
+          }
+        },
+        {
+          "id": "REQ-3.3",
+          "pattern": "event_driven",
+          "condition": "a reconcile session has passed its checks and an open issue carries `af:deviation` and `af:rejected` and not `af:accepted`",
+          "action": "remove `af:deviation` and `af:rejected`, add `af:defect` and `af:severity-correctness`, and comment that a person rejected the deviation",
+          "contract": "the issue is open with `af:defect`, `af:severity-correctness` and its `af:from-<NN>`; the comment names the rule `deviation-rejected` and the commit of the base branch",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
+        },
+        {
+          "id": "REQ-3.4",
+          "pattern": "unwanted",
+          "condition": "an open issue carries `af:accepted` and `af:rejected` together",
+          "action": "leave the issue as it is and warn",
+          "contract": "the forge records no write for it; `warnings` holds one `deviation_conflict` entry naming the issue",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
+        },
+        {
+          "id": "REQ-3.5",
+          "pattern": "event_driven",
+          "condition": "the rules of a reconcile have been applied",
+          "action": "apply the label rules `incomplete-labels` and `awaits-finished` to every open `af:` issue, write the ledger line, and list the open deviations that carry neither `af:accepted` nor `af:rejected`, oldest first",
+          "contract": "the ledger line has kind `reconcile`, outcome `reconciled` and the numbers `adopted`, `closed` and `settled`: issues from the adopt file that now carry a kind, issues open before the step and closed after it, and deviations accepted or rejected; `result.open_deviations` lists number, title, URL and creation time, oldest first, and stderr prints the same",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go: a fake session that adopts two issues and closes one af:awaits issue, with one accepted deviation and three plain deviations created on different days, and one af:awaits issue toward a finished package: assert last(ledger) has kind 'reconcile', outcome 'reconciled', adopted 2, closed 2, settled 1; assert numbers(result.open_deviations) are in creation order; assert the af:awaits issue was relabelled by awaits-finished"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "title": "Show the reconcile in a dry run",
+      "rationale": "The reconcile writes to many issues at once; a person should be able to see the list first.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-4.1",
+          "pattern": "optional",
+          "condition": "`--dry-run` is given and a forge client can be made",
+          "action": "say when the next step is a reconcile, list the issues it would hand over for adoption, and add the deviation changes to what the label rules would change",
+          "contract": "`result.next_step.kind` is `reconcile` when one is due; `result.would_adopt` lists the selected issues; `result.would_change` holds an entry with rule `deviation-accepted` or `deviation-rejected` for each labelled deviation; the forge records no write and no file is written",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/reconcile_test.go: with a state file counting 5 packages since the last reconcile, one adoptable issue, one accepted and one rejected deviation: run --dry-run; assert next_step.kind == 'reconcile', len(would_adopt) == 1, the two rules among would_change, no forge write, no adopt file and no session"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "specrun reconciles after a package: an old issue is adopted, a resolved one closed, an accepted deviation settled",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "adds `af:accepted` to a deviation issue and runs `specrun --reconcile-every 1`"
+        },
+        {
+          "actor": "specrun",
+          "action": "runs the session for the next package and checks the landing"
+        },
+        {
+          "actor": "specrun",
+          "action": "starts a reconcile: selects the unlabelled issue titled after a package, writes the adopt file and starts the reconcile session"
+        },
+        {
+          "actor": "session",
+          "action": "labels the adopted issue with its kind and origin, closes an issue whose closing condition holds on the base branch, and writes the report"
+        },
+        {
+          "actor": "specrun",
+          "action": "checks that the repository is as it was, applies the label rules, closes the accepted deviation with a comment naming its ADR"
+        },
+        {
+          "actor": "specrun",
+          "action": "writes the reconcile's ledger line and lists the deviations still open"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process",
+          "the reconcile rules against the in-memory issuex client",
+          "the adopt file, the report and the ledger on disk"
+        ],
+        "setup": [
+          "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers",
+          "one open package; on the forge an unlabelled open issue '00_zero: no caller', an open af:awaits issue, an open af:deviation + af:accepted issue citing docs/adr/03-x.md, and an open af:deviation issue; a fake reconcile session that labels the first, closes the second and writes the report"
+        ],
+        "end_state": [
+          "the sessions started are the package, then a reconcile whose prompt names the adopt file and the report",
+          "the adopted issue carries the kind the session gave it and got no write from specrun",
+          "the accepted deviation is closed with a comment containing docs/adr/03-x.md",
+          "the ledger's last line is a reconcile with adopted 1, closed 2, settled 1",
+          "the result lists one open deviation and exit code is 0"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go, beside the existing end-to-end tests: code = Main(['--reconcile-every', '1']); assert code == 0; assert prompts == ['/af-impl .specs/01_…', '/af-impl --reconcile … --report …']; assert the adopt file lists one issue; assert state(accepted deviation) == 'closed'; l = last(ledger); assert l.kind == 'reconcile' and l.adopted == 1 and l.closed == 2 and l.settled == 1; assert len(env.result.open_deviations) == 1"
+      }
+    }
+  ]
+}

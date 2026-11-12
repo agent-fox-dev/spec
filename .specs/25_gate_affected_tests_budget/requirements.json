@@ -1,0 +1,222 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "25",
+  "spec_name": "gate_affected_tests_budget",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Name an affected-tests command in the plan",
+      "rationale": "Test impact is the project's knowledge; the format only has to carry the command.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "a package's `tasks.json` holds `test_commands.affected_tests` with the placeholder `{base}` exactly once",
+          "action": "accept the package, keep the command through a save and a load, and render it with the other test commands",
+          "contract": "`Validate` reports no error for it; `Save` followed by `LoadSpec` returns the same string; the render's test commands list a line for `affected_tests`; a package without the key validates, saves and renders as before",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/validate_test.go, beside the existing tests of the tasks schema, with the valid_spec fixture: set test_commands.affected_tests = 'make test-affected BASE={base}'; assert Validate().Valid; assert a Save and LoadSpec round trip keeps the string and the key order all_tests, linter, spec_tests, affected_tests; in afspec/render_test.go assert the rendered test commands contain the command; assert the unchanged fixture's render is byte-identical to before"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "unwanted",
+          "condition": "`test_commands.affected_tests` holds `{base}` no times or more than once, or is an empty string",
+          "action": "report the package as invalid",
+          "contract": "`valid` is false; one error has `check` `affected_tests_base`, `artifact` `tasks.json`, and a message that says how many `{base}` it found and that exactly one is needed; an empty string is a `json_schema` error",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/validate_test.go, a table over affected_tests {'make test-affected' -> 0 found; 'x {base} {base}' -> 2 found; 'x {BASE}' -> 0 found; '{base}' -> valid; '' -> json_schema}: assert Valid and the check and message of each"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --validate` is called for a package whose `affected_tests` names a program of an ecosystem the repository does not have",
+          "action": "report the authoring hint that the other test commands get",
+          "contract": "`result.hints` holds one `foreign_test_command` entry whose entity names `affected_tests`; `valid` is unchanged",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/authoring/authoring_test.go, beside the existing table of foreign test commands: a Go repository with affected_tests 'pytest --since {base}': assert one hint with check 'foreign_test_command' naming affected_tests; with 'make test-affected BASE={base}': no hint"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Run the affected tests in the task gate",
+      "rationale": "Ten to fourteen full-suite runs per package are what made the loop slow.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate task` is called for a package that has `affected_tests`",
+          "action": "run `linter`, then `affected_tests` with `{base}` replaced by the full id of the commit `--base` names, `HEAD` when the flag is absent, and not `all_tests`",
+          "contract": "`result.gate.commands` has the names `linter` and `affected_tests`; `result.gate.base` is the full commit id; the program receives the id where `{base}` stood, as one argument or inside one; `all_tests` was not started",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, beside the existing gate tests, with affected_tests '<script> BASE={base}': a table over {no --base, --base HEAD~1, --base <a branch name>, --base <an abbreviated id>}: env = run('NN', '--gate', 'task', ...); assert names(commands) == ['linter', 'affected_tests']; assert the script's recorded argument is 'BASE=' + the full id rev-parse gives; assert env.result.gate.base equals it; assert the all_tests script did not run"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate task` is called for a package that has no `affected_tests`",
+          "action": "run `linter`, then `all_tests`, as before",
+          "contract": "`result.gate.commands` has the names `linter` and `all_tests`; `result.gate.base` is absent, whether or not `--base` was given",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go: the existing table over the levels still passes for a package without affected_tests; one case adds --base HEAD: assert names(commands) == ['linter', 'all_tests'] and base is absent"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "ubiquitous",
+          "action": "for any two task gates on the same working tree whose `--base` commits differ, treat them as two keys",
+          "contract": "the second gate starts the commands and has no `reused`; the same tree with the same base is reused; the full level's key does not depend on `--base`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go: with two commits A and B behind HEAD: run task --base A (ran); task --base A (reused); task --base B (ran); task with no --base (ran); assert reused and the script's run count for each"
+          }
+        },
+        {
+          "id": "REQ-2.4",
+          "pattern": "unwanted",
+          "condition": "`--base` names no commit of the repository, `--dir` is not inside a git work tree and the package has `affected_tests`, or `--base` is given with `--gate full` or without `--gate`",
+          "action": "refuse the call",
+          "contract": "exit code 2 and `error.category` `usage`; the message names the value that is no commit, says the directory is not a git work tree, or says `--base` goes with `--gate task`; no command was started",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, a table over [--gate task --base nosuch], [--gate full --base HEAD], [--base HEAD], and a directory with no .git whose package has affected_tests with [--gate task]: assert exit code 2, error.category == 'usage' and that no script ran"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Hold the full gate to a budget and measure its growth",
+      "rationale": "A suite that grows a few seconds a package is never anyone's finding until it costs an hour.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "a full gate has run or was reused",
+          "action": "report the budget, which is the `gate_budget_seconds` of the steering's frontmatter and 120 when it sets none, whether the gate's seconds exceeded it and by how many",
+          "contract": "`result.gate.budget` holds `seconds`, `exceeded` and, when exceeded, `over_by_seconds`; a reused gate is measured by the seconds of the run it came from; a gate of exactly the budget is not exceeded; a task gate has no `budget`",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/gate/budget_test.go (new), a table over the gate's seconds and the budget: {119.9, 120 -> not exceeded; 120, 120 -> not exceeded; 120.5, 120 -> exceeded, over by 0.5; 30, 20 -> exceeded, over by 10}; in cmd/speca/gate_test.go with the runner's clock stubbed: a steering.md whose frontmatter sets gate_budget_seconds: 1 and a full gate of 2 s -> budget {seconds 1, exceeded true, over_by_seconds 1}; no steering -> budget.seconds == 120; the same gate reused -> the same budget object; --gate task -> budget absent"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "a full gate has run or was reused and a passing full gate is recorded for the tree of the merge base of `HEAD` and the base branch, with the same commands and environment",
+          "action": "report the growth of the gate's seconds over that gate's",
+          "contract": "`result.gate.growth` holds `base_seconds` and `grew_by`, the difference divided by `base_seconds` (0.5 for a gate half as long again, negative when it got faster); with no such record, no base branch or no git work tree, `growth` is absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, with the runner's clock stubbed so that the full gate takes 10 s on main's tree and 16 s on the branch's: on main run --gate full; on a feature branch with one commit run --gate full: assert growth.base_seconds == 10 and grew_by == 0.6; in a repository where main's tree was never gated: assert growth is absent; during `git merge --no-ff --no-commit` on main: assert growth compares with main's tree before the merge"
+          }
+        },
+        {
+          "id": "REQ-3.3",
+          "pattern": "unwanted",
+          "condition": "the steering's frontmatter sets `gate_budget_seconds` to something that is not a whole number greater than zero",
+          "action": "use the budget of 120 seconds and warn",
+          "contract": "`result.gate.budget.seconds` is 120; `warnings` holds one `steering_malformed` entry whose message names `gate_budget_seconds`",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/project/steering_test.go, beside the existing tests of the frontmatter's rules, a table over gate_budget_seconds {90 -> 90, no problem; absent -> 0 meaning unset, no problem; 0, -5, 1.5, 'fast' -> a problem naming the key}; in cmd/speca/gate_test.go one case with 'fast': budget.seconds == 120 and codes(warnings) == ['steering_malformed']"
+          }
+        },
+        {
+          "id": "REQ-3.4",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate-report` is called and a full run is counted",
+          "action": "report the budget and the growth of the last full gate, and whether they make a test-cost finding",
+          "contract": "`result.gate_report.test_cost` holds `budget_seconds`, `exceeded`, `grew_by` when a growth was measured, and `finding`, which is true when the last full gate exceeded the budget or `grew_by` is more than 0.5; with no full run counted, `test_cost` is absent",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_report_test.go, beside the existing report tests, a table over the last full gate with a budget of 120: {100 s, grew 0.2 -> finding false; 130 s, grew 0.1 -> true, exceeded; 100 s, grew 0.51 -> true; 100 s, grew exactly 0.5 -> false; 100 s, no growth measured -> false, grew_by absent}; with no full run: test_cost absent"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "An implementer gates a task on its affected tests and learns at the end that the suite is over budget",
+      "steps": [
+        {
+          "actor": "implementer",
+          "action": "finishes a task's work on a branch and runs `speca <package> --gate task --base <commit the task started from>`"
+        },
+        {
+          "actor": "speca",
+          "action": "reads `affected_tests` from the package, puts the commit's id where `{base}` stands and runs `linter`, then that command"
+        },
+        {
+          "actor": "implementer",
+          "action": "after the integration task runs `speca <package> --gate full`"
+        },
+        {
+          "actor": "speca",
+          "action": "runs the full suite, reads the budget from the steering and the full gate recorded for the base branch's tree, and reports that the budget is exceeded and by how much the gate grew"
+        },
+        {
+          "actor": "implementer",
+          "action": "runs `speca <package> --gate-report` in the conformance pass"
+        },
+        {
+          "actor": "speca",
+          "action": "reports a test-cost finding, which the implementer files as a minor defect"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "speca's Main",
+          "git",
+          "the gate's commands as real processes",
+          "the state directory on disk",
+          "the steering file"
+        ],
+        "setup": [
+          "the temporary git repository and script helpers of cmd/speca/gate_test.go; XDG_STATE_HOME set to an empty temporary directory",
+          "a repository whose package has linter, all_tests and affected_tests scripts that count their runs, a steering.md with gate_budget_seconds: 1 in its frontmatter, and an all_tests script that sleeps 1.2 s"
+        ],
+        "end_state": [
+          "the task gate ran the linter and the affected-tests script with the base commit's id, and not all_tests",
+          "the full gate ran all_tests and reports budget.exceeded true",
+          "the gate report's test_cost.finding is true",
+          "the repository holds no file the gates wrote"
+        ],
+        "pseudocode": "in cmd/speca/e2e_test.go, beside the existing gate end-to-end tests: base = rev-parse(HEAD); commit a change; t = run(pkg, '--gate', 'task', '--base', base); assert names(t.result.gate.commands) == ['linter', 'affected_tests'] and the script saw base; f = run(pkg, '--gate', 'full'); assert f.result.gate.budget.exceeded; r = run(pkg, '--gate-report', '--since', base); assert r.result.gate_report.test_cost.finding; assert the all_tests script ran once"
+      }
+    }
+  ]
+}

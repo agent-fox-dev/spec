@@ -1,0 +1,178 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "22",
+  "spec_name": "open_items_read_back",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Relabel an item that awaits a finished package",
+      "rationale": "An item that points at a package that is done will never be closed by anyone.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "a package has landed and an open issue labelled `af:awaits` carries an `af:awaits-<NN>` whose package is finished or is no package under the spec root or its archive",
+          "action": "remove `af:awaits` and `af:awaits-<NN>` from the issue, add `af:defect` and `af:severity-correctness`, and comment on it",
+          "contract": "after the step the issue carries `af:defect`, `af:severity-correctness` and its `af:from-<MM>`, and neither awaits label; one comment names the rule `awaits-finished`, the package it awaited and the commit of the base branch",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go, beside the label-check tests, a table over open issues after package 02 landed, with 01 archived, 02 just landed, 03 open and no package 09: {af:awaits + af:awaits-02 -> defect; af:awaits + af:awaits-01 -> defect; af:awaits + af:awaits-09 -> defect; af:awaits + af:awaits-03 -> no write; a closed issue with af:awaits-02 -> no write; af:defect with a stray af:awaits-02 and no af:awaits -> no write}: assert the labels afterwards and that each comment contains 'awaits-finished', the package id and rev-parse(main)"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "a package has landed and every open `af:awaits` issue names a package with a task still pending or in progress",
+          "action": "leave the issues as they are",
+          "contract": "the forge records no write for them",
+          "check": {
+            "same_as": "REQ-1.1"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "ubiquitous",
+          "action": "for any issue the rule has already relabelled, change nothing when the rule runs again",
+          "contract": "a second run records no forge write",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go: apply the rule twice to the table of REQ-1.1: assert the second application records no AddLabels, RemoveLabel or AddComment call"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Stop before building on a serious defect",
+      "rationale": "A later package silently builds on a lost write or a leaked secret.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "unwanted",
+          "condition": "a package has landed and, after the label rules, an open issue labelled `af:defect` and `af:from-<NN>` carries a severity in `--stop-on`, which is `security,data-loss` when the flag is absent",
+          "action": "stop the loop and start no further session",
+          "contract": "exit code 1; `result.stopped.reason` is `serious defect` and `result.stopped.issues` lists each such issue with its number, URL, title and severity; the package's ledger line has outcome `landed` and holds the same issues",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/stop_test.go (new), a table over the open issues the fake session leaves for 01 and the flag: {defect data-loss, default -> stop; defect security, default -> stop; defect correctness, default -> go on; defect minor, default -> go on; defect correctness, --stop-on correctness -> stop; untested, default -> go on; deviation, default -> go on; defect data-loss labelled af:from-00, default -> go on; a closed defect data-loss -> go on; an item relabelled to a correctness defect by awaits-finished, default -> go on}: assert the exit code, result.stopped.issues and whether 02's session started"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "event_driven",
+          "condition": "`specrun` is started and the last package that landed still has an open defect of a severity in `--stop-on`",
+          "action": "stop before choosing a step",
+          "contract": "exit code 1 with the same `result.stopped` as REQ-2.1; no session starts; once the issue is closed, loses the severity, or `--stop-on` no longer holds it, the next start goes on",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/stop_test.go: after a stop on a data-loss defect of 01: run again -> exit code 1 and no session; then a table of what the person does {close the issue; replace af:severity-data-loss by af:severity-minor; pass --stop-on security}: run again -> 02's session starts"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "optional",
+          "condition": "`--stop-on` is given",
+          "action": "take the severities to stop on from it, a comma-separated list of `security`, `data-loss`, `correctness` and `minor`, the empty string meaning never stop, with `SPECRUN_STOP_ON` as its default when set",
+          "contract": "a value outside the four is a usage error with exit code 2 that names it and lists the four; with `--stop-on ''` a package with an open security defect does not stop the loop",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/flags_test.go, beside the existing flag tables: {absent -> [security, data-loss]; 'minor' -> [minor]; 'security,correctness' -> both; '' -> []; SPECRUN_STOP_ON=minor with no flag -> [minor]; 'severe' -> exit code 2 naming 'severe'; 'security,' -> exit code 2}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Show in a dry run what the label rules would change",
+      "rationale": "A person should see what an unattended command will do to their issues before it does it.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "optional",
+          "condition": "`--dry-run` is given and a forge client can be made",
+          "action": "report every change the label rules would make as the labels now stand, and whether the stop rule would fire, and write nothing to the forge",
+          "contract": "`result.would_change` lists each change with the issue's number, the rule (`incomplete-labels`, `awaits-finished`), the labels it would add and remove; `result.would_stop` lists the issues the stop rule would name; both are `[]` when there are none; the forge records no write",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go: with one unlabelled issue of the last landed package, one af:awaits issue toward a finished package and one open data-loss defect of the last landed package: run --dry-run; assert result.would_change has two entries with the rules and labels of the contract; assert numbers(result.would_stop) == [the defect]; assert the in-memory forge recorded no write and no session started"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "A package lands on a data-loss defect and specrun does not start the next one",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "runs `specrun` over two open packages"
+        },
+        {
+          "actor": "specrun",
+          "action": "starts the session for the first package"
+        },
+        {
+          "actor": "session",
+          "action": "lands the package, files one data-loss defect and leaves one item awaiting a package that landed long ago"
+        },
+        {
+          "actor": "specrun",
+          "action": "checks the landing and the labels, and relabels the awaiting item as a correctness defect with a comment"
+        },
+        {
+          "actor": "specrun",
+          "action": "lists the package's open defects, finds the data-loss one, writes the ledger line and stops with exit code 1, naming the issue"
+        },
+        {
+          "actor": "operator",
+          "action": "closes the issue after fixing the defect and runs `specrun` again"
+        },
+        {
+          "actor": "specrun",
+          "action": "finds no serious defect left for the last landed package and starts the session for the second package"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process",
+          "the label and stop rules against the in-memory issuex client"
+        ],
+        "setup": [
+          "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers",
+          "a fake session that lands 01 and leaves on the forge an open issue with af:defect, af:severity-data-loss and af:from-01, and an open issue with af:awaits, af:awaits-00 and af:from-01, package 00 being archived"
+        ],
+        "end_state": [
+          "the first call exits 1 and names the data-loss issue",
+          "the awaiting issue carries af:defect and af:severity-correctness, no awaits label, and one comment",
+          "package 02 had no session in the first call",
+          "after the issue is closed the second call starts 02's session"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go, beside the existing end-to-end tests: a = Main([]); assert a == 1 and env.result.stopped.reason == 'serious defect' and len(env.result.stopped.issues) == 1; assert labels(awaiting issue) has af:defect and af:severity-correctness and no af:awaits; assert sessions started == ['01']; close the defect on the in-memory forge; b = Main(['--max', '1']); assert b == 0 and sessions started == ['01', '02']"
+      }
+    }
+  ]
+}
