@@ -10,7 +10,9 @@ is missing.
 - **Track the open items** before merging, so the merge commit can carry
   their links. Every entry of the `unmet` list gets an issue, so the gap is
   tracked after the merge, not left in a commit message nobody reads again.
-  For each:
+  Each outbound handoff of the package that its receiver does not take yet
+  is an `awaits` entry of its own, labelled `af:awaits-<to>`, filed here
+  without waiting for the conformance pass to find it. For each:
   0. For an `awaits` entry, ask `speca <MM>` about the receiving package
      first. When it is sealed, or its last task is `done`, the entry is not
      `awaits`: file it as a `defect` of severity `correctness`, with the

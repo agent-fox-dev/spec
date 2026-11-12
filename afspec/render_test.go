@@ -524,3 +524,27 @@ func TestRenderTasks_ListsTheAffectedTestsCommand(t *testing.T) {
 		t.Error("the render of a package without affected_tests changed")
 	}
 }
+
+// The whole render lists the package's own handoffs after its requirements
+// and each task's takes; a package with neither renders as it did.
+func TestRender_ListsThePackagesOwnHandoffs(t *testing.T) {
+	s := loadFixture(t, "testdata/v3_example")
+	golden, err := os.ReadFile("testdata/v3_example_combined.golden.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.RenderCombined() != string(golden) {
+		t.Error("the render of a package without handoffs is not what it was before them")
+	}
+	s.Requirements.Handoffs = []Handoff{{Id: "H-1", What: "after-landing hooks", To: "02", Criteria: []string{"REQ-1.1"}}}
+	s.Tasks.Tasks[0].TakesHandoffs = []string{"01:H-1"}
+	out := s.RenderCombined()
+	for _, want := range []string{"## Handoffs\n\n- **H-1:** after-landing hooks, to `02`; criteria REQ-1.1\n", "**Takes handoffs:** `01:H-1`\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the render lacks %q", want)
+		}
+	}
+	if strings.Index(out, "## Handoffs") < strings.Index(out, "## Requirements") {
+		t.Error("the handoffs come before the requirements")
+	}
+}

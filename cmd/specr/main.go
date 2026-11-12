@@ -280,7 +280,7 @@ func execute(ref string, o *options, run *cli.Run) (int, *Result, *cli.ErrorInfo
 			len(v.Errors), strings.Join(specpkg.Rules(v.Errors), ", "))
 	}
 
-	render(spec, renderOptions{task: o.task, sections: o.sections, maxTokens: o.maxTokens}, res, run)
+	render(spec, renderOptions{task: o.task, sections: o.sections, maxTokens: o.maxTokens, specsDir: specsDir}, res, run)
 
 	if o.markdownFile != "" {
 		path, err := filepath.Abs(o.markdownFile)

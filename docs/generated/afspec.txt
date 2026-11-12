@@ -593,6 +593,28 @@ type Handoff struct {
 	What string `json:"what" yaml:"what" mapstructure:"what"`
 }
 
+type InboundHandoff struct {
+	SenderDir  string
+	SenderID   string
+	Handoff    Handoff
+	Criteria   []string
+	Unreadable string
+}
+    InboundHandoff is a handoff another package of the spec root addresses to
+    a package, as a renderer reads it: the sending package's directory and id,
+    the handoff, and the sentences of the sender's criteria that depend on it.
+    Unreadable says why the sending package could not be read, when it could
+    not; the handoff then holds its id alone.
+
+func InboundHandoffs(specsDir string, s *Spec) []InboundHandoff
+    InboundHandoffs reads, from the packages under specsDir, every handoff
+    addressed to s, in the order of the packages and their handoffs. A package
+    a task of s takes a handoff from and that cannot be read is an entry of its
+    own, with why, so that a render can say so and go on.
+
+func (in InboundHandoff) Ref() string
+    Ref is the handoff as a task of the receiver names it in takes_handoffs.
+
 type IntentError struct {
 	Msg string
 	Err *SpecError
@@ -814,6 +836,13 @@ type ProgressV3Json struct {
 
 type RenderOption func(*renderConfig)
     RenderOption configures a render call.
+
+func WithInboundHandoffs(in []InboundHandoff) RenderOption
+    WithInboundHandoffs gives a scoped render the handoffs other packages of the
+    spec root address to the package, as InboundHandoffs reads them: a task that
+    takes one is rendered with the sender's text, and the integration task with
+    a step and a contract for each. A package's own render never reads another
+    package, so that its spec.md depends on its own files alone.
 
 func WithMaxTokens(n int) RenderOption
     WithMaxTokens caps the estimated token count of the rendered output.

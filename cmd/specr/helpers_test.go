@@ -431,3 +431,55 @@ func taskState(t *testing.T, root string, id int) string {
 	}
 	return string(spec.TaskState(id))
 }
+
+// handoffRepo lays out a repository with 01_one, 02_two depending on 01 and
+// 03_three depending on 02, each the v3 example; 01 hands H-1 (after-landing
+// hooks, on REQ-1.1) to 02, and 02 hands H-1 (the fork hook, on REQ-1.2) to
+// 03. edit, when given, changes 02's task 1 before the files are written.
+func handoffRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, p := range []struct{ id, name, dep, to, what, criterion string }{
+		{"01", "one", "", "02", "after-landing hooks", "REQ-1.1"},
+		{"02", "two", "01", "03", "the fork hook", "REQ-1.2"},
+		{"03", "three", "02", "", "", ""},
+	} {
+		dir := filepath.Join(root, ".specs", p.id+"_"+p.name)
+		copyDir(t, filepath.Join("..", "..", "afspec", "testdata", "v3_example"), dir)
+		prd := filepath.Join(dir, "prd.md")
+		b, _ := os.ReadFile(prd)
+		b = bytes.Replace(b, []byte(`spec_id: "09"`), []byte(`spec_id: "`+p.id+`"`), 1)
+		b = bytes.Replace(b, []byte(`spec_name: "agent_mode"`), []byte(`spec_name: "`+p.name+`"`), 1)
+		if err := os.WriteFile(prd, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"requirements.json", "tasks.json", "progress.json"} {
+			path := filepath.Join(dir, f)
+			var m map[string]any
+			b, _ := os.ReadFile(path)
+			if err := json.Unmarshal(b, &m); err != nil {
+				t.Fatal(err)
+			}
+			m["spec_id"], m["spec_name"] = p.id, p.name
+			switch f {
+			case "tasks.json":
+				m["dependencies"] = []any{}
+				if p.dep != "" {
+					m["dependencies"] = []any{map[string]any{"spec": p.dep, "reason": "needs " + p.dep}}
+				}
+				if p.id == "02" {
+					m["tasks"].([]any)[0].(map[string]any)["takes_handoffs"] = []any{"01:H-1"}
+				}
+			case "requirements.json":
+				if p.to != "" {
+					m["handoffs"] = []any{map[string]any{"id": "H-1", "what": p.what, "to": p.to, "criteria": []any{p.criterion}}}
+				}
+			}
+			out, _ := json.MarshalIndent(m, "", "  ")
+			if err := os.WriteFile(path, out, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return root
+}

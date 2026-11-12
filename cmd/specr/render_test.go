@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -300,5 +301,75 @@ func TestNext_SuggestsTheClaimAndTheNextRender(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A task that takes handoffs is rendered with each, the sending package's
+// what and the sentences of its criteria that depend on it; a sending package
+// that cannot be read is said to be unreadable.
+func TestRender_ShowsTheHandoffsATaskTakes(t *testing.T) {
+	root := handoffRepo(t)
+	env, code, _ := run(t, "--dir", root, "02", "--task", "1")
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	sender := load(t, root, "01_one")
+	var sentence string
+	for _, r := range sender.Requirements.Requirements {
+		for _, c := range r.Criteria {
+			if c.Id == "REQ-1.1" {
+				sentence = r.Resolve(c).RenderEARSSentence()
+			}
+		}
+	}
+	for _, want := range []string{"01_one", "H-1", "after-landing hooks", sentence} {
+		if !strings.Contains(env.Result.Markdown, want) {
+			t.Errorf("the render of task 1 lacks %q", want)
+		}
+	}
+	if env, _, _ := run(t, "--dir", root, "02", "--task", "2"); strings.Contains(env.Result.Markdown, "after-landing hooks") {
+		t.Error("task 2, which takes no handoff, is rendered with one")
+	}
+
+	if err := os.Chmod(filepath.Join(root, ".specs", "01_one", "requirements.json"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, ".specs", "01_one", "requirements.json"), 0o644) })
+	env, code, _ = run(t, "--dir", root, "02", "--task", "1")
+	if code != cli.ExitOK || !strings.Contains(env.Result.Markdown, "could not be read") {
+		t.Errorf("code %d; want the render to say the sending package could not be read", code)
+	}
+}
+
+// The integration task lists each inbound and outbound handoff with its
+// contracts, and gets one rendered step per inbound handoff, which the
+// package's spec.md does not hold.
+func TestRender_TheIntegrationTaskConfirmsTheHandoffs(t *testing.T) {
+	root := handoffRepo(t)
+	id := "3" // the plain example has two tasks, so its integration task is 3
+	env, code, _ := run(t, "--dir", root, "02", "--task", id)
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	md := env.Result.Markdown
+	contracts := md[strings.Index(md, "## Contracts"):]
+	contracts = contracts[:strings.Index(contracts[3:], "\n## ")+3]
+	for _, want := range []string{"Inbound", "`01_one` H-1", "after-landing hooks", "taken by task 1", "Outbound", "H-1", "the fork hook", "to `03`"} {
+		if !strings.Contains(contracts, want) {
+			t.Errorf("the contracts lack %q:\n%s", want, contracts)
+		}
+	}
+	steps := md[strings.Index(md, "**Steps:**"):]
+	if !strings.Contains(steps, "01") || !strings.Contains(steps, "H-1") || !strings.Contains(steps, "file:line") {
+		t.Errorf("no rendered step confirms 01's H-1 by file:line:\n%s", steps)
+	}
+	if strings.Contains(load(t, root, "02_two").RenderCombined(), "file:line that production code wires") {
+		t.Error("the package's own render holds the inbound step")
+	}
+
+	env, _, _ = run(t, "--dir", root, "01", "--task", id)
+	contracts = env.Result.Markdown[strings.Index(env.Result.Markdown, "## Contracts"):]
+	if strings.Contains(contracts[:strings.Index(contracts[3:], "\n## ")+3], "Inbound") {
+		t.Error("01, which nothing hands anything to, lists inbound handoffs")
 	}
 }
