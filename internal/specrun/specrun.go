@@ -75,8 +75,11 @@ type run struct {
 	specsDir string
 	base     string // the base branch
 	logDir   string
-	result   *Result
-	warnings []envelope.Warning
+	// statePath is the state file, and state what it holds.
+	statePath string
+	state     state
+	result    *Result
+	warnings  []envelope.Warning
 }
 
 // failure is a call that did not do its job: the stage, the category and the
@@ -112,6 +115,9 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	}
 	if opts.ledger {
 		return r.printLedger()
+	}
+	if opts.resetState {
+		return r.resetState()
 	}
 	return r.loop()
 }
@@ -188,6 +194,9 @@ func (r *run) loop() int {
 		return r.emit(envelope.ExitFailed, "", failure("preflight", "environment",
 			"claude is not on PATH: every session is a claude -p process"))
 	}
+	if f := r.loadState(); f != nil {
+		return r.emit(envelope.ExitFailed, "", f)
+	}
 	if code, f := r.prepareLogDir(); f != nil {
 		return r.emit(code, "", f)
 	}
@@ -203,9 +212,12 @@ func (r *run) loop() int {
 		if f != nil {
 			return r.emit(envelope.ExitFailed, "", f)
 		}
-		next, f := r.choose()
-		if f != nil {
-			return r.emit(envelope.ExitFailed, "", f)
+		next := r.resume()
+		if next == nil {
+			var f *envelope.ErrorInfo
+			if next, f = r.choose(); f != nil {
+				return r.emit(envelope.ExitFailed, "", f)
+			}
 		}
 		if next == nil {
 			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
@@ -278,6 +290,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	subject := filepath.Base(next.Dir)
 	step := stepName(len(earlier)+1, kindImplement, subject)
 	started := now().UTC().Truncate(time.Second)
+	r.startStep(kindImplement, next, before, started)
 
 	reason := ""
 	o, err := r.session(step).run(next.Dir)
@@ -305,9 +318,11 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
 	}
 	if reason != "" {
+		r.releaseStep()
 		fmt.Fprintf(r.stderr, "%s: %s %s in %.1f min: %s\n", tool, step, line.Outcome, line.WallMinutes, reason)
 		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
 	}
+	r.finishStep(kindImplement, subject)
 	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min\n", tool, step, line.WallMinutes)
 	if median, slow := slowerThanUsual(earlier, line.WallMinutes); slow {
 		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",

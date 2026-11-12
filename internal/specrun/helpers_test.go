@@ -359,3 +359,21 @@ func stubClock(t *testing.T, step time.Duration) {
 	now = func() time.Time { at = at.Add(step); return at }
 	t.Cleanup(func() { now = was })
 }
+
+// statePath is the fixture repository's state file.
+func (f *fixture) statePath() string {
+	return filepath.Join(f.state, "agent-fox", "specrun", filepath.Base(f.root)+".json")
+}
+
+// writeState writes the state file as specrun would have left it with the
+// package in specDir running since the commit head, by the process pid.
+func (f *fixture) writeState(t *testing.T, specDir, head string, pid int) {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"done": []any{}, "running": map[string]any{
+		"kind": "implement", "subject": filepath.Base(specDir), "spec_dir": specDir,
+		"started_at": "2026-11-12T08:00:00Z", "head": head, "pid": pid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, f.statePath(), string(b))
+}
