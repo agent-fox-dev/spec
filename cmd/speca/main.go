@@ -270,8 +270,11 @@ type options struct {
 	gate     givenFlag
 	cleanEnv bool
 	timeout  givenDuration
-	schema   bool
-	version  bool
+	// The gate report.
+	gateReport bool
+	since      givenFlag
+	schema     bool
+	version    bool
 }
 
 // taskForm reports whether the call asks for the form that changes tasks.
@@ -303,6 +306,8 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.cleanEnv, "clean-env", false, "with --gate, run every command with an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0, every other variable inherited; the directory is removed when the gate ends")
 	o.timeout.value = gate.DefaultTimeout
 	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails")
+	fs.BoolVar(&o.gateReport, "gate-report", false, "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing")
+	fs.Var(&o.since, "since", "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
 	fs.StringVar(&o.dir, "dir", ".", "the repository the spec root and a relative reference are resolved against")
 	fs.BoolVar(&o.schema, "schema", false, "print the flags, the input and the output's JSON Schema as one JSON object, and exit")
@@ -380,6 +385,11 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			}
 		}
 	}
+	if o.gateReport {
+		errs = append(errs, o.gateReportErrors(ref)...)
+	} else if o.since.given {
+		errs = append(errs, errors.New("--since goes with --gate-report: it names the commit the gate runs are counted from"))
+	}
 	if o.timeout.given && o.timeout.value <= 0 {
 		errs = append(errs, fmt.Errorf("--timeout %s: a command's time limit must be greater than zero", o.timeout.value))
 	}
@@ -439,12 +449,35 @@ func (o *options) gateErrors(ref string) ([]error, *cli.FixHint) {
 	}{
 		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
 		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+		{"--gate-report", o.gateReport},
 	} {
 		if f.given {
 			errs = append(errs, fmt.Errorf("--gate and %s are two operations: give one", f.name))
 		}
 	}
 	return errs, hint
+}
+
+// gateReportErrors are the faults of a call that asks for the gate report: it
+// needs a package and is the only operation of the call. Its clash with --gate
+// is named by gateErrors.
+func (o *options) gateReportErrors(ref string) []error {
+	var errs []error
+	if ref == "" {
+		errs = append(errs, errors.New("--gate-report needs a package: name the package whose gate runs to sum"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--gate-report and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
 }
 
 // sweepErrors are the faults of a call that asks for the render form or the
@@ -560,7 +593,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() {
+	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() && !o.gateReport {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage

@@ -49,6 +49,11 @@
         "default": "",
         "description": "the gate form: run the package's linter command, then its all_tests command, from its test_commands, in --dir, each started directly with no shell, and answer with one verdict, pass, fail or not_run; task or full, the gate's level, which is part of the answer; whatever the package's status, and writing nothing under --dir"
       },
+      "gate-report": {
+        "type": "boolean",
+        "default": false,
+        "description": "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing"
+      },
       "list": {
         "type": "boolean",
         "default": false,
@@ -68,6 +73,11 @@
         "type": "boolean",
         "default": false,
         "description": "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed"
+      },
+      "since": {
+        "type": "string",
+        "default": "",
+        "description": "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main"
       },
       "specs-dir": {
         "type": "string",
@@ -1071,6 +1081,97 @@
               "clean_env",
               "commands",
               "seconds"
+            ]
+          },
+          "gate_report": {
+            "type": "object",
+            "description": "the package's gate runs since a commit: the full and task runs with their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; --gate-report only",
+            "properties": {
+              "since": {
+                "type": "string",
+                "description": "the full id of the commit the runs are counted from: --since, or the merge base of HEAD and the base branch (the branch refs/remotes/origin/HEAD names, else main)"
+              },
+              "full": {
+                "type": "object",
+                "description": "the full gates counted",
+                "properties": {
+                  "runs": {
+                    "type": "integer",
+                    "description": "the gates counted, reused ones included"
+                  },
+                  "seconds": {
+                    "type": "number",
+                    "description": "the sum of the gates' own seconds, a reused gate adding 0"
+                  },
+                  "reused": {
+                    "type": "integer",
+                    "description": "how many of them were answered from a recorded pass"
+                  }
+                },
+                "required": [
+                  "runs",
+                  "seconds",
+                  "reused"
+                ]
+              },
+              "task": {
+                "type": "object",
+                "description": "the task gates counted",
+                "properties": {
+                  "runs": {
+                    "type": "integer",
+                    "description": "the gates counted, reused ones included"
+                  },
+                  "seconds": {
+                    "type": "number",
+                    "description": "the sum of the gates' own seconds, a reused gate adding 0"
+                  },
+                  "reused": {
+                    "type": "integer",
+                    "description": "how many of them were answered from a recorded pass"
+                  }
+                },
+                "required": [
+                  "runs",
+                  "seconds",
+                  "reused"
+                ]
+              },
+              "baseline_full_seconds": {
+                "type": "number",
+                "description": "the seconds of the earliest full gate counted, the baseline; a reused gate's are those of the run it came from; absent when no full gate is counted"
+              },
+              "last_full_seconds": {
+                "type": "number",
+                "description": "the seconds of the latest full gate counted, the last tree; a reused gate's are those of the run it came from; absent when no full gate is counted"
+              },
+              "slowest": {
+                "type": "array",
+                "description": "the slowest units of the latest full gate counted, as its verdict held them; [] when none is counted or it held none",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "type": "string",
+                      "description": "the unit's name: for Go, the import path of the test package"
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "the seconds the tool reported for it"
+                    }
+                  },
+                  "required": [
+                    "unit",
+                    "seconds"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "since",
+              "full",
+              "task",
+              "slowest"
             ]
           }
         },

@@ -48,6 +48,8 @@ type AdminResult struct {
 	Waiting  []WaitingInfo `json:"waiting,omitzero" description:"the packages under the spec root that are open but cannot start yet, or cannot be judged, in number order, each with why; [] when there are none; --next only"`
 
 	Gate *GateResult `json:"gate,omitempty" description:"the gate's verdict: its level, pass, fail or not_run, every command that ran with its exit code, seconds and log, a failing command's tail, a reused pass, and for a full gate the slowest units; --gate only"`
+
+	GateReport *GateReport `json:"gate_report,omitempty" description:"the package's gate runs since a commit: the full and task runs with their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; --gate-report only"`
 }
 
 // WaitingInfo is one entry of AdminResult.Waiting: a package under the spec

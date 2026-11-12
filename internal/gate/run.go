@@ -47,17 +47,28 @@ type Runner struct {
 	// LogDir is the existing directory each command's log is written to; with
 	// none, or where a log cannot be created, the command runs without one.
 	LogDir string
+	// Units names the command whose output is read for its slowest units, the
+	// all_tests of a full gate; empty reads none.
+	Units string
 }
 
 // Run runs the commands in order and stops at the first that does not exit 0:
 // a command that cannot start makes the verdict not_run, one that exits with
 // another code or runs past the timeout makes it fail. The result holds an
 // entry for every command that started, with its seconds, and the gate's total
-// as their sum; its level and clean_env are the caller's to set.
+// as their sum, and the slowest units of the Units command when it ran; its
+// level and clean_env are the caller's to set.
 func (r *Runner) Run(cmds []Command) envelope.GateResult {
 	g := envelope.GateResult{Verdict: envelope.GateVerdictPass, Commands: []envelope.GateCommand{}}
 	for _, c := range cmds {
-		entry, reason := r.runOne(c)
+		var u *units
+		if c.Name == r.Units {
+			u = &units{}
+		}
+		entry, reason := r.runOne(c, u)
+		if u != nil && reason == "" {
+			g.Slowest = u.Slowest()
+		}
 		if reason != "" {
 			g.Verdict, g.Reason = envelope.GateVerdictNotRun, reason
 			break
@@ -74,7 +85,7 @@ func (r *Runner) Run(cmds []Command) envelope.GateResult {
 
 // runOne runs one command. A command that cannot start returns the reason and
 // no entry.
-func (r *Runner) runOne(c Command) (envelope.GateCommand, string) {
+func (r *Runner) runOne(c Command, u *units) (envelope.GateCommand, string) {
 	entry := envelope.GateCommand{Name: c.Name}
 	if c.Line == "" {
 		return entry, fmt.Sprintf("the package's test_commands name no %s command", c.Name)
@@ -94,7 +105,7 @@ func (r *Runner) runOne(c Command) (envelope.GateCommand, string) {
 	isolate(cmd)
 	// None of a command's output reaches the caller's stdout: it goes to the
 	// command's log, and its last lines are kept for a failure.
-	out := &sink{}
+	out := &sink{units: u}
 	if r.LogDir != "" {
 		pattern := time.Now().UTC().Format("20060102T150405Z") + "-" + c.Name + "-*.log"
 		if f, err := os.CreateTemp(r.LogDir, pattern); err == nil {

@@ -687,3 +687,36 @@ func TestGate_RunsWhenTheStateDirectoryFailsIt(t *testing.T) {
 		}
 	})
 }
+
+// Both forms run for a package in every lifecycle status, and leave the
+// repository as it was.
+func TestGate_RunsInEveryStatusAndWritesNothingUnderTheRepository(t *testing.T) {
+	g := newGateDir(t)
+	refs := map[string]string{}
+	for i, status := range []string{"draft", "active", "sealed", "superseded", "archived"} {
+		id := strconv.Itoa(11 + i)
+		dirName := id + "_" + status
+		if status == "superseded" || status == "archived" {
+			dirName = "archive/" + dirName
+		}
+		dir := packageWith(t, g.root, dirName, id, status, status)
+		setCommandsOf(t, dir, filepath.Join(g.bin, "linter"), filepath.Join(g.bin, "all_tests"))
+		refs[status] = filepath.Join(".specs", dirName)
+	}
+	gitInit(t, g.root)
+	before := snapshot(t, g.root)
+	for status, ref := range refs {
+		t.Run(status, func(t *testing.T) {
+			a := g.gateOf(t, ref, "full")
+			b := g.gateOf(t, ref, "task")
+			c, _ := g.report(t, ref, "--since", "HEAD")
+			if a.Result.Gate.Verdict != "pass" || b.Result.Gate.Verdict != "pass" || c.Result.GateReport.Full.Runs != 1 {
+				t.Errorf("full %q, task %q, report %+v; want two passes and one full run", a.Result.Gate.Verdict,
+					b.Result.Gate.Verdict, c.Result.GateReport)
+			}
+		})
+	}
+	if !maps.Equal(before, snapshot(t, g.root)) {
+		t.Error("a form changed the repository")
+	}
+}

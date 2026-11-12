@@ -22,7 +22,7 @@ type call struct {
 }
 
 // execute resolves where the call works, then runs the form the flags name:
-// the list, the gate form, the render form, the migrate form, the status form, the task form,
+// the list, the gate form, the gate report, the render form, the migrate form, the status form, the task form,
 // the verdict on one package, or the report on it. A form returns a result or a failure, never both, except where
 // a form says otherwise.
 func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
@@ -53,6 +53,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	}
 	if o.gateForm() {
 		return executeGate(c, dir)
+	}
+	if o.gateReport {
+		return gateReport(c, dir)
 	}
 	if o.render {
 		return renderOne(c, dir)

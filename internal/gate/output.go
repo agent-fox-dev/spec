@@ -10,11 +10,13 @@ import (
 const TailLines = 40
 
 // sink is where a command's stdout and stderr go together: its log file, when
-// there is one, and the tail. It never fails a write, so that a log that
-// cannot be written does not end the command.
+// there is one, the tail, and the units reader, when its units are read. It
+// never fails a write, so that a log that cannot be written does not end the
+// command.
 type sink struct {
-	log  *os.File
-	tail tail
+	log   *os.File
+	tail  tail
+	units *units
 }
 
 func (s *sink) Write(p []byte) (int, error) {
@@ -24,6 +26,9 @@ func (s *sink) Write(p []byte) (int, error) {
 		}
 	}
 	s.tail.Write(p)
+	if s.units != nil {
+		s.units.Write(p)
+	}
 	return len(p), nil
 }
 

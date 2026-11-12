@@ -47,3 +47,22 @@ type GateUnit struct {
 	Unit    string  `json:"unit" description:"the unit's name: for Go, the import path of the test package"`
 	Seconds float64 `json:"seconds" description:"the seconds the tool reported for it"`
 }
+
+// GateReport is the result of speca's gate report (--gate-report): the gate
+// runs recorded for one package since a commit, summed for the merge commit.
+type GateReport struct {
+	Since               string     `json:"since" description:"the full id of the commit the runs are counted from: --since, or the merge base of HEAD and the base branch (the branch refs/remotes/origin/HEAD names, else main)"`
+	Full                GateRuns   `json:"full" description:"the full gates counted"`
+	Task                GateRuns   `json:"task" description:"the task gates counted"`
+	BaselineFullSeconds *float64   `json:"baseline_full_seconds,omitempty" description:"the seconds of the earliest full gate counted, the baseline; a reused gate's are those of the run it came from; absent when no full gate is counted"`
+	LastFullSeconds     *float64   `json:"last_full_seconds,omitempty" description:"the seconds of the latest full gate counted, the last tree; a reused gate's are those of the run it came from; absent when no full gate is counted"`
+	Slowest             []GateUnit `json:"slowest" description:"the slowest units of the latest full gate counted, as its verdict held them; [] when none is counted or it held none"`
+}
+
+// GateRuns counts the gates of one level a report counted: the runs at the
+// commit and at its descendants on the branch, that ended in pass or fail.
+type GateRuns struct {
+	Runs    int     `json:"runs" description:"the gates counted, reused ones included"`
+	Seconds float64 `json:"seconds" description:"the sum of the gates' own seconds, a reused gate adding 0"`
+	Reused  int     `json:"reused" description:"how many of them were answered from a recorded pass"`
+}

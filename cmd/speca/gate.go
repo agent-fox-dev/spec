@@ -68,6 +68,7 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	recording := storeErr == nil && treeErr == nil
 
 	var g envelope.GateResult
+	at := time.Now().UTC()
 	if p, ok := lookup(store, key, recording); ok {
 		g = reusedPass(p)
 	} else {
@@ -75,7 +76,9 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		if store != nil {
 			runner.LogDir = store.LogDir()
 		}
-		at := time.Now().UTC()
+		if key.Level == envelope.GateLevelFull {
+			runner.Units = gate.AllTests
+		}
 		g = runGate(runner, cmds, c.opts.cleanEnv)
 		if key.Level == envelope.GateLevelFull && g.Slowest == nil {
 			g.Slowest = []envelope.GateUnit{}
@@ -90,6 +93,13 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	g.Level, g.CleanEnv = key.Level, key.CleanEnv
 	if key.Level != envelope.GateLevelFull {
 		g.Slowest = nil
+	}
+	if recording && g.Verdict != envelope.GateVerdictNotRun {
+		r := gate.Run{SpecID: spec.SpecID, At: at.Format(time.RFC3339), Commit: tree.Commit, Level: g.Level, CleanEnv: g.CleanEnv,
+			Verdict: g.Verdict, Seconds: g.Seconds, Reused: g.Reused, Slowest: g.Slowest}
+		if err := store.AppendRun(r); err != nil {
+			c.run.Warn(cli.WarnGateNotRecorded, "low", "the run could not be added to the run log under %s (%v): the gate report will not count it", store.Dir, err)
+		}
 	}
 	return &Result{AdminResult: envelope.AdminResult{
 		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Status: spec.Status, Gate: &g,

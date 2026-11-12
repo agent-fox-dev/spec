@@ -1060,9 +1060,49 @@ func (g *gateRepo) script(t *testing.T, name, body string) string {
 // setCommands names the package's linter and all_tests commands.
 func (g *gateRepo) setCommands(t *testing.T, linter, allTests string) {
 	t.Helper()
-	editJSON(t, filepath.Join(g.dir, afspec.TasksFileName), func(m map[string]any) {
+	setCommandsOf(t, g.dir, linter, allTests)
+}
+
+// setCommandsOf names the linter and all_tests commands of the package in dir.
+func setCommandsOf(t *testing.T, dir, linter, allTests string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
 		m["test_commands"] = map[string]any{"linter": linter, "all_tests": allTests}
 	})
+}
+
+// gateOf runs speca's gate form on the package ref of the repository.
+func (g *gateRepo) gateOf(t *testing.T, ref string, args ...string) envelope.AdminEnvelope {
+	t.Helper()
+	env, code, _ := run(t, append([]string{"--dir", g.root, ref, "--gate"}, args...)...)
+	if code != cli.ExitOK || env.Result == nil || env.Result.Gate == nil {
+		t.Fatalf("%s --gate %v: code %d, error %+v", ref, args, code, env.Error)
+	}
+	return env
+}
+
+// report runs speca's gate report on the package ref of the repository and
+// returns the envelope and the members of gate_report as they were written.
+func (g *gateRepo) report(t *testing.T, ref string, args ...string) (envelope.AdminEnvelope, map[string]json.RawMessage) {
+	t.Helper()
+	env, raw, code, _ := runRaw(t, append([]string{"--dir", g.root, ref, "--gate-report"}, args...)...)
+	if code != cli.ExitOK || env.Result == nil || env.Result.GateReport == nil {
+		t.Fatalf("%s --gate-report %v: code %d, error %+v", ref, args, code, env.Error)
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw["gate_report"], &members); err != nil {
+		t.Fatal(err)
+	}
+	return env, members
+}
+
+// commit commits everything in the repository with the message, and returns
+// the commit.
+func (g *gateRepo) commit(t *testing.T, message string) string {
+	t.Helper()
+	git(t, g.root, "add", "-A")
+	git(t, g.root, "commit", "-q", "-m", message)
+	return git(t, g.root, "rev-parse", "HEAD")
 }
 
 // gate runs speca's gate form on the package with the flags after --gate, and
