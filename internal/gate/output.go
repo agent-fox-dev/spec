@@ -32,27 +32,35 @@ func (s *sink) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// lineSplitter cuts an output into lines as it is written: each whole line
+// goes to emit, and the line being written is kept in partial.
+type lineSplitter struct {
+	partial []byte
+}
+
+func (l *lineSplitter) split(p []byte, emit func(string)) {
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			l.partial = append(l.partial, p...)
+			return
+		}
+		emit(string(append(l.partial, p[:i]...)))
+		l.partial = l.partial[:0]
+		p = p[i+1:]
+	}
+}
+
 // tail keeps the last TailLines lines of an output as it is written, without
 // the output ever being read back: a ring of whole lines and the line being
 // written.
 type tail struct {
-	lines   []string
-	next    int // where the next whole line goes once the ring is full
-	partial []byte
+	lineSplitter
+	lines []string
+	next  int // where the next whole line goes once the ring is full
 }
 
-func (t *tail) Write(p []byte) {
-	for len(p) > 0 {
-		i := bytes.IndexByte(p, '\n')
-		if i < 0 {
-			t.partial = append(t.partial, p...)
-			return
-		}
-		t.push(string(append(t.partial, p[:i]...)))
-		t.partial = t.partial[:0]
-		p = p[i+1:]
-	}
-}
+func (t *tail) Write(p []byte) { t.split(p, t.push) }
 
 func (t *tail) push(line string) {
 	if len(t.lines) < TailLines {

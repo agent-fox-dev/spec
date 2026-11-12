@@ -31,8 +31,8 @@ Read a failure from the failing command's `tail`, its last 40 lines. Open its
 `log` only when the tail does not explain the failure, and quote what explains
 it, not the log.
 
-A gate whose tree, level, commands and environment match a recorded pass
-answers `pass` with `reused` and runs nothing. It is a pass. Report it as
+A gate whose tree, directory, level, commands and environment match a
+recorded pass answers `pass` with `reused` and runs nothing. It is a pass. Report it as
 "reused the gate of `<commit>`, `<date>`", from `reused.commit` (short) and
 `reused.at`. A `gate_not_recorded` warning means the verdict is true and only
 the reuse and the report miss this run; say so in the report.

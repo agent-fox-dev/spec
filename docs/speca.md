@@ -737,10 +737,13 @@ speca 16 --gate task --timeout 10m      # end a command still running after 10 m
   `reason` names the command and why: its program is not found, its string
   is empty or has an unterminated quote, or `test_commands` names no such
   command. A command that could not start has no entry in `commands`.
-- **The timeout.** Each command runs in a process group of its own. One still
-  running when `--timeout` (a Go duration, default `20m`) has passed is ended
-  together with every process it started, its entry has `timed_out` and no
-  `exit_code`, and the gate ends with `fail`.
+- **The timeout.** On Linux and macOS each command runs in a process group of
+  its own (elsewhere the timeout ends the command's own process only). One
+  still running when `--timeout` (a Go duration, default `20m`) has passed is
+  ended together with every process it started, its entry has `timed_out` and
+  no `exit_code`, and the gate ends with `fail`. A process a command left
+  running when it exited is ended too; if it held the command's output open,
+  `speca` waits two seconds for it, and the command's own exit code stands.
 - **The output.** Each command's stdout and stderr go together to a log file
   of its own under the state directory, named in its `log`. None of it reaches
   `speca`'s stdout, which stays one JSON object. A command that fails or times
@@ -840,6 +843,9 @@ returns `pass` with `reused`. The key is:
   a temporary object directory, then `git write-tree --missing-ok`. The user's
   index, the staged changes and everything under `.git`, the modification
   times of the objects included, are left as they were;
+- the **directory** the commands run in (`--dir`), as a path under the work
+  tree's top level, so that two directories of one repository run gates of
+  their own;
 - the **level**;
 - the exact `linter` and `all_tests` **command strings**;
 - whether the environment was **clean**.
@@ -939,7 +945,8 @@ The `summary` is `speca: <directory> gate report: <n> full, <m> task, <k> reused
 `next` is empty. A `--since` that names no commit, no `--since` with neither
 `refs/remotes/origin/HEAD` nor a branch `main`, and a `--dir` outside a git work
 tree are usage errors with no result; a package or a run log that cannot be
-read fails the call (exit 1).
+read fails the call (exit 1, stage `load`), and so does a `git rev-list` that
+fails (stage `git`, category `internal`).
 
 ## The output
 
@@ -1268,7 +1275,7 @@ else.
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already; or the gate ran or was reused, whatever its verdict (`pass`, `fail` or `not_run`); or the gate report summed the runs |
-| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`); or the package the gate form or the gate report reads could not be loaded (stage `load`), or the gate report's run log could not be read (stage `load`) |
+| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`); or the package the gate form or the gate report reads could not be loaded (stage `load`), or the gate report's run log could not be read (stage `load`), or the commits since `--since` could not be listed (stage `git`) |
 | `2` | `usage` | usage error — nothing was written. Among them: a `--gate` other than `task` or `full`, a `--timeout` that is not a duration greater than zero, a `--since` that names no commit, no `--since` and no base branch, and a `--gate-report` outside a git work tree |
 
 ### Warning codes
@@ -1284,7 +1291,7 @@ else.
 | `supersedes_not_recorded` | low | status | superseding went through, but the old `spec_id` was not added to the replacing package's `supersedes`: it is sealed, its intent drifted, it holds keys the schema does not allow, or its save failed. The warning names the replacing package's directory, the id and the reason |
 | `task_not_ready` | low | task | a task moved to `in_progress` has a dependency that is not `done`, judged on the plan before the call. The warning names the task and the dependencies |
 | `task_state_forced` | high | task | `--force` set a state the machine would have refused. One for each such task, naming it and its two states |
-| `gate_not_recorded` | low | gate | the gate ran and answered, but its result is not recorded for reuse: there is no tree id (`--dir` is not in a git work tree, or git is not installed), or the state directory cannot be written (the message names the path, and the commands ran without a `log`), or the pass or the run could not be written |
+| `gate_not_recorded` | low | gate | the gate ran and answered, but its result is not recorded for reuse: there is no tree id (`--dir` is not in a git work tree, or git is not installed), or the state directory cannot be written (the message names the path, or says that neither `$XDG_STATE_HOME` nor the home directory is set; the commands ran without a `log`), or the pass or the run could not be written |
 
 The warnings of the task and status forms are raised when the call goes ahead: a
 refusal, or a write that fails, raises none, since they would speak of changes

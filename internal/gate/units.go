@@ -1,7 +1,6 @@
 package gate
 
 import (
-	"bytes"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,22 +17,11 @@ const SlowestUnits = 5
 // [no test files], [build failed]) is not a unit, and the output of any other
 // tool holds none.
 type units struct {
-	read    []envelope.GateUnit
-	partial []byte
+	lineSplitter
+	read []envelope.GateUnit
 }
 
-func (u *units) Write(p []byte) {
-	for len(p) > 0 {
-		i := bytes.IndexByte(p, '\n')
-		if i < 0 {
-			u.partial = append(u.partial, p...)
-			return
-		}
-		u.line(string(append(u.partial, p[:i]...)))
-		u.partial = u.partial[:0]
-		p = p[i+1:]
-	}
-}
+func (u *units) Write(p []byte) { u.split(p, u.line) }
 
 func (u *units) line(line string) {
 	f := strings.Fields(line)

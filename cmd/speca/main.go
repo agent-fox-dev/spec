@@ -188,8 +188,9 @@ Forms:
                            could not start); a failing command's last 40
                            lines are in tail, its whole output in its log.
                            A pass is recorded under the tree id of the working
-                           tree (untracked files in, ignored ones out), the
-                           level, the two command strings and --clean-env, and
+                           tree (untracked files in, ignored ones out), --dir
+                           within it, the level, the two command strings and
+                           --clean-env, and
                            the same gate is then answered from it, reused,
                            running nothing; a failure is never reused. A full
                            gate keeps the five slowest Go test packages. The
@@ -278,7 +279,8 @@ Exit codes:
      cannot convert is an entry, not a failure
      The gate form exits 0 whatever its verdict (pass, fail or not_run), and
      fails only when the package cannot be loaded; the gate report fails when
-     the package or the run log cannot be read
+     the package or the run log cannot be read (stage load), or the commits
+     since --since cannot be listed (stage git)
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have; --status
      draft, or a --by that names the package itself, no package or one with
@@ -726,7 +728,7 @@ func describe(fs *flag.FlagSet) selfDescription {
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
 			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, what --migrate did to the package, the gate's verdict whatever it is (pass, fail or not_run), or the gate report",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read, or the commits since --since could not be listed (stage git)",
 			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree; nothing was written",
 		},
 	}

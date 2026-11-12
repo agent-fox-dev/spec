@@ -1138,6 +1138,19 @@ func numbered(n int) string {
 	return `i=1; while [ $i -le ` + strconv.Itoa(n) + ` ]; do echo "line $i"; i=$((i+1)); done`
 }
 
+// homeGitConfig makes git read its global configuration from $HOME for the
+// rest of the test, whatever the environment the tests run in says: a clean
+// environment points GIT_CONFIG_GLOBAL at the null device.
+func homeGitConfig(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"} {
+		t.Setenv(name, "") // restores the value when the test ends
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // commandNames lists the name of each command of a gate.
 func commandNames(cmds []envelope.GateCommand) []string {
 	var out []string

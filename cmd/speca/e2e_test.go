@@ -266,8 +266,9 @@ func TestAnImplementerGatesABranchThroughItsMergeAndReadsTheReport(t *testing.T)
 	gitInit(t, g.root)
 	base := git(t, g.root, "rev-parse", "main")
 
-	if v := g.gateOf(t, "05", "full").Result.Gate.Verdict; v != "pass" {
-		t.Fatalf("the baseline: %q", v)
+	baseline := g.gateOf(t, "05", "full").Result.Gate
+	if baseline.Verdict != "pass" {
+		t.Fatalf("the baseline: %q", baseline.Verdict)
 	}
 	git(t, g.root, "switch", "-q", "-c", "feature")
 	writeFile(t, filepath.Join(g.root, "feature.txt"), "feature")
@@ -290,8 +291,9 @@ func TestAnImplementerGatesABranchThroughItsMergeAndReadsTheReport(t *testing.T)
 
 	env, _ := g.report(t, "05", "--since", base)
 	r := env.Result.GateReport
-	if r.Full.Runs != 3 || r.Full.Reused != 1 || r.Task.Runs != 1 || len(r.Slowest) != 2 || r.BaselineFullSeconds == nil {
-		t.Errorf("report %+v; want 3 full runs with one reused, one task run, two slowest units and the baseline's seconds", r)
+	if r.Full.Runs != 3 || r.Full.Reused != 1 || r.Task.Runs != 1 || len(r.Slowest) != 2 ||
+		r.BaselineFullSeconds == nil || *r.BaselineFullSeconds != baseline.Seconds {
+		t.Errorf("report %+v; want 3 full runs with one reused, one task run, two slowest units and the baseline's %v seconds", r, baseline.Seconds)
 	}
 	if status := git(t, g.root, "status", "--porcelain"); status != "A  feature.txt" {
 		t.Errorf("status %q; want the merge's own change alone", status)
@@ -309,6 +311,7 @@ func TestAConformancePassFindsATestThatNeedsThisMachinesConfiguration(t *testing
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Gate Probe\n")
 	t.Setenv("HOME", home)
+	homeGitConfig(t)
 	g := newGateDir(t)
 	seen := filepath.Join(g.bin, "home")
 	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", `echo "$HOME" > '`+seen+`'

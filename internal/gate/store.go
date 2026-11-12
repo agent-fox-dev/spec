@@ -10,10 +10,12 @@ import (
 	"github.com/agent-fox-dev/spec/envelope"
 )
 
-// Key is what makes two gates the same gate: the same tree, level, commands
-// and environment. A pass is reused by tree, never by commit (ADR 22).
+// Key is what makes two gates the same gate: the same tree, the same
+// directory of it the commands run in, the same level, commands and
+// environment. A pass is reused by tree, never by commit (ADR 22).
 type Key struct {
 	Tree     string `json:"tree"`
+	Dir      string `json:"dir"`
 	Level    string `json:"level"`
 	Linter   string `json:"linter"`
 	AllTests string `json:"all_tests"`

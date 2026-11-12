@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -54,7 +55,7 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	repo := c.root
 	tree, treeErr := gate.ReadTree(c.root)
 	if treeErr == nil {
-		repo, key.Tree = tree.Top, tree.ID
+		repo, key.Tree, key.Dir = tree.Top, tree.ID, dirIn(tree.Top, c.root)
 	}
 	store, storeErr := gate.OpenStore(repo)
 	switch {
@@ -104,6 +105,22 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	return &Result{AdminResult: envelope.AdminResult{
 		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Status: spec.Status, Gate: &g,
 	}}, nil
+}
+
+// dirIn is dir as a path under the work tree's top level, "." for the top
+// itself: two directories of one repository run different gates.
+func dirIn(top, dir string) string {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	if realTop, err := filepath.EvalSymlinks(top); err == nil {
+		top = realTop
+	}
+	rel, err := filepath.Rel(top, dir)
+	if err != nil {
+		return dir
+	}
+	return filepath.ToSlash(rel)
 }
 
 // lookup is the pass recorded under key, when the gate can be recorded at all.

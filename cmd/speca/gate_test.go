@@ -374,6 +374,7 @@ func TestGate_RunsTheCommandsInACleanEnvironmentOnRequest(t *testing.T) {
 			home := t.TempDir()
 			writeFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Gate Probe\n")
 			t.Setenv("HOME", home)
+			homeGitConfig(t)
 			t.Setenv("GATE_PROBE", "1")
 			t.Setenv("GIT_TERMINAL_PROMPT", "")
 			probe := filepath.Join(g.bin, "probe")
@@ -695,7 +696,9 @@ func TestGate_RunsInEveryStatusAndWritesNothingUnderTheRepository(t *testing.T) 
 			dirName = "archive/" + dirName
 		}
 		dir := packageWith(t, g.root, dirName, id, status, status)
-		setCommandsOf(t, dir, filepath.Join(g.bin, "linter"), filepath.Join(g.bin, "all_tests"))
+		// A command string of its own, so that no package's gate is
+		// answered from another's pass.
+		setCommandsOf(t, dir, filepath.Join(g.bin, "linter"), filepath.Join(g.bin, "all_tests")+" "+status)
 		refs[status] = filepath.Join(".specs", dirName)
 	}
 	gitInit(t, g.root)
@@ -713,5 +716,61 @@ func TestGate_RunsInEveryStatusAndWritesNothingUnderTheRepository(t *testing.T) 
 	}
 	if !maps.Equal(before, snapshot(t, g.root)) {
 		t.Error("a form changed the repository")
+	}
+	if n := g.allTestsRuns(t); n != 10 {
+		t.Errorf("all_tests ran %d times; want a full and a task gate for each of the five", n)
+	}
+}
+
+// A command that exits 0 passes even when a process it left behind holds its
+// output open, and that process does not outlive the gate.
+func TestGate_PassesACommandThatLeavesAProcessBehind(t *testing.T) {
+	g := newGateRepo(t)
+	pid := filepath.Join(g.bin, "pid")
+	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", `sleep 60 & echo $! > '`+pid+`'; exit 0`))
+	env, _ := g.gate(t, "full")
+	r := env.Result.Gate
+	if r.Verdict != "pass" || len(r.Commands) != 2 || r.Commands[1].ExitCode == nil || *r.Commands[1].ExitCode != 0 {
+		t.Fatalf("gate %+v; want a pass with all_tests exiting 0", r)
+	}
+	b, err := os.ReadFile(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alive := func() bool { return !errors.Is(syscall.Kill(n, 0), syscall.ESRCH) }
+	for deadline := time.Now().Add(5 * time.Second); alive() && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if alive() {
+		_ = syscall.Kill(n, syscall.SIGKILL)
+		t.Error("the process the command left behind is still running")
+	}
+}
+
+// Two directories of one repository run two gates: a pass in one is not
+// reused for the other, though tree and commands are the same.
+func TestGate_KeepsTheGatesOfTwoDirectoriesOfARepositoryApart(t *testing.T) {
+	g := newGateDir(t)
+	linter, allTests := filepath.Join(g.bin, "linter"), filepath.Join(g.bin, "all_tests")
+	for _, sub := range []string{"a", "b"} {
+		dir := addPackage(t, filepath.Join(g.root, "svc", sub), "05_gate", "05", "gate")
+		setCommandsOf(t, dir, linter, allTests)
+	}
+	gitInit(t, g.root)
+	for i, sub := range []string{"a", "b", "a"} {
+		env, code, _ := run(t, "--dir", filepath.Join(g.root, "svc", sub), "05", "--gate", "full")
+		if code != 0 || env.Result == nil || env.Result.Gate == nil {
+			t.Fatalf("svc/%s: code %d, error %+v", sub, code, env.Error)
+		}
+		if reused := env.Result.Gate.Reused != nil; reused != (i == 2) {
+			t.Errorf("gate %d, svc/%s: reused %v; want %v", i+1, sub, reused, i == 2)
+		}
+	}
+	if n := g.allTestsRuns(t); n != 2 {
+		t.Errorf("all_tests ran %d times; want once in each directory", n)
 	}
 }

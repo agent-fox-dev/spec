@@ -121,10 +121,15 @@ func (r *Runner) runOne(c Command, u *units) (envelope.GateCommand, string) {
 	}
 	start := now()
 	if err := cmd.Start(); err != nil {
+		if out.log != nil {
+			_ = os.Remove(out.log.Name())
+		}
 		return entry, fmt.Sprintf("the %s command %q could not start: %v", c.Name, c.Line, err)
 	}
 	err = cmd.Wait()
 	entry.Seconds = roundMillis(now().Sub(start).Seconds())
+	// What the command left running dies with it: the gate is over.
+	endGroup(cmd)
 
 	var exit *exec.ExitError
 	switch {
@@ -134,6 +139,11 @@ func (r *Runner) runOne(c Command, u *units) (envelope.GateCommand, string) {
 		entry.ExitCode = new(int)
 	case errors.As(err, &exit):
 		code := exit.ExitCode()
+		entry.ExitCode = &code
+	case errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil:
+		// The command exited, and a process it left behind held its output
+		// open past waitDelay: its exit code is the answer.
+		code := cmd.ProcessState.ExitCode()
 		entry.ExitCode = &code
 	default:
 		// The command ran, but waiting for it failed (its output could not

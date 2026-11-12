@@ -32,9 +32,12 @@ repository's most thorough target (`make check`).
   more would be a shell.
 - **A pass is reused by tree id, never by commit.** Two commits with the same
   tree are the same code. The key is the tree id of the working tree (tracked
-  and untracked files, ignored ones left out), the level, the two command
-  strings and whether the environment was clean, so a clean-environment run is
-  never answered by a normal one. **Only passes are recorded**: a failure is
+  and untracked files, ignored ones left out), the directory the commands run
+  in as a path under the top level, the level, the two command strings and
+  whether the environment was clean, so a clean-environment run is never
+  answered by a normal one. The directory is beyond the four parts the spec
+  named: without it, the same commands run in two directories of one
+  repository would answer the second from the first's pass. **Only passes are recorded**: a failure is
   cheap to run again and must be seen.
 - **The tree id is worked out without touching the repository**: a copy of
   the index in a temporary file, objects written to a temporary object
@@ -49,7 +52,8 @@ repository's most thorough target (`make check`).
   and answers, with a `gate_not_recorded` warning: the verdict is still true.
 - **A command times out after 20 minutes by default**, below the 30 minutes a
   driver waits for an event, and is ended with every process it started (a
-  process group of its own on Unix).
+  process group of its own on Unix). What a command leaves running when it
+  exits is ended as well, and the command's own exit code stands.
 - **The report selects runs by ancestry, not by time**: a run counts when the
   commit checked out at it is `--since` or a descendant of it that `HEAD`
   reaches, or `MERGE_HEAD` while a merge is uncommitted, since the gate on the

@@ -65,8 +65,8 @@ Both commands use the same three:
   the package's `linter`, then its `all_tests`, with no shell, and answers in
   `result.gate`: `verdict` (`pass`, `fail` or `not_run`, with `reason`), each
   command that ran with its `exit_code`, `seconds`, `log` and, when it failed,
-  `tail` (its last 40 lines), and for a full gate `slowest`. A tree that
-  already passed the same gate is answered from the record, with `reused`
+  `tail` (its last 40 lines), and for a full gate `slowest`. A tree (and
+  directory) that already passed the same gate is answered from the record, with `reused`
   (`commit`, `at`, `seconds`), and runs nothing. Exit code 0 carries every
   verdict. It writes nothing in the repository; a `gate_not_recorded` warning
   says the result was not recorded for reuse.
