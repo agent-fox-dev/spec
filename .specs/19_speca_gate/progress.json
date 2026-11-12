@@ -3,7 +3,7 @@
   "spec_id": "19",
   "spec_name": "speca_gate",
   "schema_version": 3,
-  "updated_at": "2026-11-12T17:03:55Z",
+  "updated_at": "2026-11-12T17:06:02Z",
   "tasks": [
     {
       "id": 1,
@@ -27,7 +27,7 @@
     },
     {
       "id": 6,
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

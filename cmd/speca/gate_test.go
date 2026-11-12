@@ -214,11 +214,6 @@ func TestGate_EndsACommandAndItsProcessesAtTheTimeout(t *testing.T) {
 	}
 }
 
-// numbered is a shell loop that prints n numbered lines, "line 1" to "line n".
-func numbered(n int) string {
-	return `i=1; while [ $i -le ` + strconv.Itoa(n) + ` ]; do echo "line $i"; i=$((i+1)); done`
-}
-
 // Each command's output, stdout and stderr together, goes to a log of its own
 // under the state directory, outside the repository, named in its entry.
 func TestGate_KeepsEachCommandsOutputInALogOfItsOwn(t *testing.T) {

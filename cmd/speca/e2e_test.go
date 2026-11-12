@@ -2,9 +2,12 @@ package main
 
 import (
 	"maps"
+	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -245,4 +248,97 @@ func withoutPRD(tree map[string]string) map[string]string {
 	out := withoutRender(tree)
 	delete(out, "prd.md")
 	return out
+}
+
+// An implementer gates the base branch, gates a change on a branch, merges it
+// with --no-ff and gates the merged tree before committing the merge, and
+// reads the report for the merge commit. The merged tree is the branch tip's,
+// so its gate is answered from the tip's pass and runs nothing; the report
+// counts what ran and what was reused; the repository holds nothing the gates
+// wrote.
+func TestAnImplementerGatesABranchThroughItsMergeAndReadsTheReport(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate's test commands are shell scripts")
+	}
+	g := newGateDir(t)
+	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests",
+		`printf 'ok  \tpkg/slow\t0.200s\nok  \tpkg/fast\t0.100s\n'`))
+	gitInit(t, g.root)
+	base := git(t, g.root, "rev-parse", "main")
+
+	if v := g.gateOf(t, "05", "full").Result.Gate.Verdict; v != "pass" {
+		t.Fatalf("the baseline: %q", v)
+	}
+	git(t, g.root, "switch", "-q", "-c", "feature")
+	writeFile(t, filepath.Join(g.root, "feature.txt"), "feature")
+	tip := g.commit(t, "the feature")
+	g.gateOf(t, "05", "task")
+	g.gateOf(t, "05", "full")
+	if n := g.allTestsRuns(t); n != 3 {
+		t.Fatalf("all_tests ran %d times before the merge; want 3", n)
+	}
+
+	git(t, g.root, "switch", "-q", "main")
+	git(t, g.root, "merge", "-q", "--no-ff", "--no-commit", "feature")
+	merged := g.gateOf(t, "05", "full").Result.Gate
+	if merged.Verdict != "pass" || merged.Reused == nil || merged.Reused.Commit != tip {
+		t.Fatalf("the merged tree's gate %+v; want a pass reused from %s", merged, tip)
+	}
+	if n := g.allTestsRuns(t); n != 3 {
+		t.Errorf("all_tests ran for the merged tree (%d runs)", n)
+	}
+
+	env, _ := g.report(t, "05", "--since", base)
+	r := env.Result.GateReport
+	if r.Full.Runs != 3 || r.Full.Reused != 1 || r.Task.Runs != 1 || len(r.Slowest) != 2 || r.BaselineFullSeconds == nil {
+		t.Errorf("report %+v; want 3 full runs with one reused, one task run, two slowest units and the baseline's seconds", r)
+	}
+	if status := git(t, g.root, "status", "--porcelain"); status != "A  feature.txt" {
+		t.Errorf("status %q; want the merge's own change alone", status)
+	}
+}
+
+// A conformance pass runs the gate in a clean environment on a branch whose
+// tests pass only with this machine's git identity: the clean gate is not
+// answered by the normal pass, fails, and carries the last 40 lines of the
+// failure; it runs again when called again, and its HOME is gone.
+func TestAConformancePassFindsATestThatNeedsThisMachinesConfiguration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate's test commands are shell scripts")
+	}
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Gate Probe\n")
+	t.Setenv("HOME", home)
+	g := newGateDir(t)
+	seen := filepath.Join(g.bin, "home")
+	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", `echo "$HOME" > '`+seen+`'
+if [ -n "$(git config --global user.name)" ]; then exit 0; fi
+`+numbered(60)+`; exit 1`))
+	gitInit(t, g.root)
+
+	if v := g.gateOf(t, "05", "full").Result.Gate.Verdict; v != "pass" {
+		t.Fatalf("the gate on this machine: %q", v)
+	}
+	clean := g.gateOf(t, "05", "full", "--clean-env").Result.Gate
+	if clean.Reused != nil || clean.Verdict != "fail" || !clean.CleanEnv || len(clean.Commands) != 2 || clean.Commands[1].Tail == nil {
+		t.Fatalf("the clean gate %+v; want a failure that ran, with a tail", clean)
+	}
+	var want []string
+	for i := 21; i <= 60; i++ {
+		want = append(want, "line "+strconv.Itoa(i))
+	}
+	if got := strings.Split(*clean.Commands[1].Tail, "\n"); !slices.Equal(got, want) {
+		t.Errorf("tail %q; want lines 21 to 60", got)
+	}
+	again := g.gateOf(t, "05", "full", "--clean-env").Result.Gate
+	if again.Reused != nil || g.allTestsRuns(t) != 3 {
+		t.Errorf("the second clean gate: reused %+v, all_tests ran %d times; want it run again", again.Reused, g.allTestsRuns(t))
+	}
+	b, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := strings.TrimSpace(string(b)); h == home || exists(h) {
+		t.Errorf("the clean HOME %q is still there, or was the test's", h)
+	}
 }

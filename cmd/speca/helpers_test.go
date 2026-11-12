@@ -1133,6 +1133,11 @@ func (g *gateRepo) runs(t *testing.T) []string {
 	return strings.Fields(string(b))
 }
 
+// numbered is a shell loop that prints n numbered lines, "line 1" to "line n".
+func numbered(n int) string {
+	return `i=1; while [ $i -le ` + strconv.Itoa(n) + ` ]; do echo "line $i"; i=$((i+1)); done`
+}
+
 // commandNames lists the name of each command of a gate.
 func commandNames(cmds []envelope.GateCommand) []string {
 	var out []string
