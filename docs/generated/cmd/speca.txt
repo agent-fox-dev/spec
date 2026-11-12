@@ -12,7 +12,7 @@ state of its tasks, moves the package through its lifecycle, converts a version
     speca --render [--all] [--dry-run]
     speca <spec> --migrate [--dry-run]
     speca --migrate [--all] [--dry-run]
-    speca <spec> --gate task|full [--clean-env] [--timeout <duration>]
+    speca <spec> --gate task|full [--base <commit>] [--clean-env] [--timeout <duration>]
     speca <spec> --gate-report [--since <commit>]
 
 It takes one input, a reference to a spec package, and writes exactly one JSON

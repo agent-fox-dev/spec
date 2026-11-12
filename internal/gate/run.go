@@ -13,9 +13,12 @@ import (
 )
 
 // The names of the gate's two commands, in the order they run.
+// AffectedTests runs in place of AllTests at the task level of a package
+// that names it.
 const (
-	Linter   = "linter"
-	AllTests = "all_tests"
+	Linter        = "linter"
+	AllTests      = "all_tests"
+	AffectedTests = "affected_tests"
 )
 
 // DefaultTimeout is how long one command may run when the caller sets no

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -50,6 +51,16 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	}
 	cmds := gateCommands(spec)
 	key := gate.Key{Level: c.opts.gate.value, Linter: cmds[0].Line, AllTests: cmds[1].Line, CleanEnv: c.opts.cleanEnv}
+	base := ""
+	if affected := affectedTests(spec); affected != "" && key.Level == envelope.GateLevelTask {
+		id, refusal := baseCommit(c)
+		if refusal != nil {
+			return nil, refusal
+		}
+		base = id
+		cmds[1] = gate.Command{Name: gate.AffectedTests, Line: strings.Replace(affected, afspec.AffectedTestsBase, id, 1)}
+		key.AllTests, key.AffectedTests = "", cmds[1].Line
+	}
 
 	// The tree is read before anything runs: a command may change it.
 	repo := c.root
@@ -91,7 +102,7 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 			}
 		}
 	}
-	g.Level, g.CleanEnv = key.Level, key.CleanEnv
+	g.Level, g.CleanEnv, g.Base = key.Level, key.CleanEnv, base
 	if key.Level != envelope.GateLevelFull {
 		g.Slowest = nil
 	}
@@ -155,6 +166,34 @@ func runGate(runner gate.Runner, cmds []gate.Command, clean bool) envelope.GateR
 		runner.Env = gate.CleanEnv(os.Environ(), home)
 	}
 	return runner.Run(cmds)
+}
+
+// affectedTests is the package's affected_tests command, "" when it names
+// none.
+func affectedTests(spec *afspec.Spec) string {
+	if spec.Tasks == nil || spec.Tasks.TestCommands.AffectedTests == nil {
+		return ""
+	}
+	return *spec.Tasks.TestCommands.AffectedTests
+}
+
+// baseCommit is the full id of the commit --base names, HEAD when it is not
+// given, in the git work tree of --dir; anything else is a usage error, made
+// before a command runs.
+func baseCommit(c *call) (string, *cli.ErrorInfo) {
+	top, err := gate.Top(c.root)
+	if err != nil {
+		return "", usageInfo(fmt.Errorf("the package has affected_tests, which runs from a base commit, and %v", err), nil)
+	}
+	rev := "HEAD"
+	if c.opts.base.given {
+		rev = c.opts.base.value
+	}
+	id, err := gate.Commit(top, rev)
+	if err != nil {
+		return "", usageInfo(fmt.Errorf("--base %v", err), nil)
+	}
+	return id, nil
 }
 
 // gateCommands are the package's linter and all_tests commands, in the order

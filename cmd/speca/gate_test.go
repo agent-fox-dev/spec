@@ -17,6 +17,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/agent-fox-dev/spec/afspec"
+	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
 // Both levels run linter, then all_tests, each once, and pass when both exit 0.
@@ -772,5 +775,122 @@ func TestGate_KeepsTheGatesOfTwoDirectoriesOfARepositoryApart(t *testing.T) {
 	}
 	if n := g.allTestsRuns(t); n != 2 {
 		t.Errorf("all_tests ran %d times; want once in each directory", n)
+	}
+}
+
+// setAffected names the package's affected_tests command: a script that
+// records its arguments in the scripts directory, with argument after it.
+func (g *gateRepo) setAffected(t *testing.T, argument string) {
+	t.Helper()
+	script := g.script(t, "affected_tests", `printf '%s' "$*" > '`+filepath.Join(g.bin, "affected-args")+`'`)
+	editJSON(t, filepath.Join(g.dir, afspec.TasksFileName), func(m map[string]any) {
+		m["test_commands"].(map[string]any)["affected_tests"] = script + " " + argument
+	})
+}
+
+// affectedArgs is what the affected_tests script was last given.
+func (g *gateRepo) affectedArgs(t *testing.T) string {
+	t.Helper()
+	b, _ := os.ReadFile(filepath.Join(g.bin, "affected-args"))
+	return string(b)
+}
+
+// With affected_tests, the task gate runs the linter, then that command with
+// the full id of the base commit in place of {base}, and not all_tests.
+func TestGate_RunsTheAffectedTestsFromABaseCommit(t *testing.T) {
+	for name, tc := range map[string]struct {
+		base func(g *gateRepo, t *testing.T) []string
+		rev  string
+	}{
+		"no --base":     {func(*gateRepo, *testing.T) []string { return nil }, "HEAD"},
+		"HEAD~1":        {func(*gateRepo, *testing.T) []string { return []string{"--base", "HEAD~1"} }, "HEAD~1"},
+		"a branch name": {func(*gateRepo, *testing.T) []string { return []string{"--base", "older"} }, "older"},
+		"an abbreviated id": {func(g *gateRepo, t *testing.T) []string {
+			return []string{"--base", git(t, g.root, "rev-parse", "--short", "HEAD~1")}
+		}, "HEAD~1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateRepo(t)
+			g.setAffected(t, "BASE={base}")
+			g.commit(t, "affected tests")
+			git(t, g.root, "branch", "older", "HEAD~1")
+			env, _ := g.gate(t, append([]string{"task"}, tc.base(g, t)...)...)
+			want := git(t, g.root, "rev-parse", tc.rev)
+			r := env.Result.Gate
+			if got := commandNames(r.Commands); !slices.Equal(got, []string{"linter", "affected_tests"}) {
+				t.Fatalf("commands %v; want linter, then affected_tests", got)
+			}
+			if r.Base != want || g.affectedArgs(t) != "BASE="+want {
+				t.Errorf("base %q, the script got %q; want %s", r.Base, g.affectedArgs(t), want)
+			}
+			if g.allTestsRuns(t) != 0 {
+				t.Errorf("all_tests ran")
+			}
+		})
+	}
+}
+
+// Without affected_tests the task gate runs all_tests as before, and has no
+// base, whether or not --base was given.
+func TestGate_RunsAllTestsWithoutAnAffectedTestsCommand(t *testing.T) {
+	g := newGateRepo(t)
+	env, members := g.gate(t, "task", "--base", "HEAD")
+	if got := commandNames(env.Result.Gate.Commands); !slices.Equal(got, []string{"linter", "all_tests"}) {
+		t.Errorf("commands %v; want linter, then all_tests", got)
+	}
+	if _, ok := members["base"]; ok {
+		t.Errorf("base = %s; want it absent", members["base"])
+	}
+}
+
+// Two task gates of one tree with different bases are two keys; the same
+// base is reused.
+func TestGate_TakesEachBaseAsAKeyOfItsOwn(t *testing.T) {
+	g := newGateRepo(t)
+	g.setAffected(t, "BASE={base}")
+	a := g.commit(t, "A")
+	writeFile(t, filepath.Join(g.root, "b.txt"), "b")
+	b := g.commit(t, "B")
+	writeFile(t, filepath.Join(g.root, "c.txt"), "c")
+	g.commit(t, "C")
+	for i, step := range []struct {
+		base   []string
+		reused bool
+	}{{[]string{"--base", a}, false}, {[]string{"--base", a}, true}, {[]string{"--base", b}, false}, {nil, false}} {
+		before := len(g.runs(t))
+		env, _ := g.gate(t, append([]string{"task"}, step.base...)...)
+		ran := len(g.runs(t)) > before
+		if (env.Result.Gate.Reused != nil) != step.reused || ran == step.reused {
+			t.Errorf("gate %d %v: reused %v, ran %v; want reused %v", i+1, step.base, env.Result.Gate.Reused != nil, ran, step.reused)
+		}
+	}
+}
+
+// A --base that cannot be used is refused before anything runs.
+func TestGate_RefusesABaseItCannotUse(t *testing.T) {
+	for name, tc := range map[string]struct {
+		git  bool
+		args []string
+		says string
+	}{
+		"a base that names no commit": {true, []string{"--gate", "task", "--base", "nosuch"}, "nosuch"},
+		"--base with the full level":  {true, []string{"--gate", "full", "--base", "HEAD"}, "--gate task"},
+		"--base without --gate":       {true, []string{"--base", "HEAD"}, "--gate task"},
+		"no git work tree":            {false, []string{"--gate", "task"}, "not in a git work tree"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateDir(t)
+			if tc.git {
+				gitInit(t, g.root)
+			}
+			g.setAffected(t, "BASE={base}")
+			env, code, _ := run(t, append([]string{"--dir", g.root, "05"}, tc.args...)...)
+			if code != cli.ExitUsage || env.Error == nil || env.Error.Category != "usage" || !strings.Contains(env.Error.Message, tc.says) {
+				t.Errorf("code %d, error %+v; want a usage error saying %q", code, env.Error, tc.says)
+			}
+			if len(g.runs(t)) != 0 {
+				t.Errorf("the scripts ran %v; want none", g.runs(t))
+			}
+		})
 	}
 }

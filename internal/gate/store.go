@@ -20,6 +20,10 @@ type Key struct {
 	Linter   string `json:"linter"`
 	AllTests string `json:"all_tests"`
 	CleanEnv bool   `json:"clean_env"`
+	// AffectedTests is the affected-tests command as it ran, its base in
+	// place, so that two bases are two keys; empty, and left out of the
+	// record's name, for a gate that ran all_tests.
+	AffectedTests string `json:"affected_tests,omitempty"`
 }
 
 // name is the file name of the key's record.

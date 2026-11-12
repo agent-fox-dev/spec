@@ -19,6 +19,11 @@
         "default": false,
         "description": "with --list, also list the packages under archive/, marked archived; with --render or --migrate and no input, also render or migrate them"
       },
+      "base": {
+        "type": "string",
+        "default": "",
+        "description": "with --gate task, the commit the task's change started from, which replaces {base} in the package's affected_tests command (default HEAD)"
+      },
       "by": {
         "type": "string",
         "default": "",
@@ -979,7 +984,7 @@
             "properties": {
               "level": {
                 "type": "string",
-                "description": "the gate's level: task (the gate after an implement task) or full (the baseline, after the integration task, after the conformance fixes and on the merged tree); both run linter, then all_tests"
+                "description": "the gate's level: task (the gate after an implement task) or full (the baseline, after the integration task, after the conformance fixes and on the merged tree); both run linter, then all_tests, except that the task level of a package with affected_tests runs that command in place of all_tests"
               },
               "verdict": {
                 "type": "string",
@@ -989,13 +994,17 @@
                 "type": "boolean",
                 "description": "true when the commands ran with --clean-env: an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0"
               },
+              "base": {
+                "type": "string",
+                "description": "a task gate of a package with affected_tests only: the full id of the commit --base named (HEAD when it was not given), which replaced {base} in the affected_tests command; absent otherwise"
+              },
               "reason": {
                 "type": "string",
                 "description": "why the gate is not_run: the command that could not start and why; present exactly when verdict is not_run"
               },
               "reused": {
                 "type": "object",
-                "description": "the recorded pass this gate returned without running anything, because the tree, the directory of it the commands run in, the level, the two command strings and the clean environment matched it; absent when the commands ran",
+                "description": "the recorded pass this gate returned without running anything, because the tree, the directory of it the commands run in, the level, the two command strings (the affected_tests command as it ran, for a task gate that ran it) and the clean environment matched it; absent when the commands ran",
                 "properties": {
                   "commit": {
                     "type": "string",
@@ -1018,13 +1027,13 @@
               },
               "commands": {
                 "type": "array",
-                "description": "one entry per command that ran, in run order: linter, then all_tests; the gate stops at the first that does not exit 0, and a command that could not start has no entry; [] when a recorded pass was reused",
+                "description": "one entry per command that ran, in run order: linter, then all_tests or affected_tests; the gate stops at the first that does not exit 0, and a command that could not start has no entry; [] when a recorded pass was reused",
                 "items": {
                   "type": "object",
                   "properties": {
                     "name": {
                       "type": "string",
-                      "description": "which command it is: linter or all_tests"
+                      "description": "which command it is: linter, all_tests, or affected_tests (a task gate of a package that names it)"
                     },
                     "exit_code": {
                       "type": "integer",
@@ -1283,6 +1292,6 @@
   "exit_codes": {
     "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, what --migrate did to the package, the gate's verdict whatever it is (pass, fail or not_run), or the gate report",
     "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read, or the commits since --since could not be listed (stage git)",
-    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree; nothing was written"
+    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --base that names no commit or comes without --gate task, a package with affected_tests outside a git work tree at the task level, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree; nothing was written"
   }
 }

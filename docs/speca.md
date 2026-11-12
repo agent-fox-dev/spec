@@ -10,7 +10,7 @@ speca <spec> --render                    write the package's spec.md, its render
 speca --render [--all]                   write the spec.md of every package
 speca <spec> --migrate                   convert a version 2 package to version 3
 speca --migrate [--all]                  convert every version 2 package
-speca <spec> --gate task|full            run the package's linter and all_tests → one verdict
+speca <spec> --gate task|full            run the package's linter and all_tests (affected_tests at the task level, when named) → one verdict
 speca <spec> --gate-report               sum the package's gate runs since a commit
 ```
 
@@ -143,7 +143,7 @@ neither form refuses anything `--force` could override; and so is `--all` with
 either and an input, since `--all` adds `archive/` to the sweep and means
 nothing for one package. `--gate` and `--gate-report` take a package and go with
 no other operation, nor with each other; `--clean-env` and `--timeout` go with
-`--gate` and `--since` with `--gate-report`, and a `--gate` other than `task` or
+`--gate`, `--base` with `--gate task`, and `--since` with `--gate-report`, and a `--gate` other than `task` or
 `full` (case-sensitive, with `fix_hint.valid` `["task", "full"]`) or a
 `--timeout` that is not a duration greater than zero is refused.
 
@@ -274,7 +274,7 @@ come from `internal/authoring`, the same code `spec` runs, in this order:
 |---|---|---|---|
 | `vague_language` | `requirements.json` | the criterion id | each vague word (`appropriate`, `properly`, `correctly`, `reasonable`, `relevant`, `adequate`, `suitable`, `as needed`, `if necessary`, `etc`) in a criterion's `action`, then its `condition` |
 | `line_reference` | `tasks.json` | the task id | each step or `touches` entry that names a line of a file (`store.go:88`, `render.go:12-30`, `line 40`) |
-| `foreign_test_command` | `tasks.json` | `test_commands.<field>` | each of `all_tests`, `linter` and `spec_tests` whose program belongs to a known ecosystem the repository under `--dir` does not have, with the repository's own command where it has one. A program in no known ecosystem (`./scripts/ci.sh`, `make check`) and a repository of no detected language give nothing |
+| `foreign_test_command` | `tasks.json` | `test_commands.<field>` | each of `all_tests`, `linter`, `spec_tests` and `affected_tests` whose program belongs to a known ecosystem the repository under `--dir` does not have, with the repository's own command where it has one. A program in no known ecosystem (`./scripts/ci.sh`, `make check`) and a repository of no detected language give nothing |
 
 The format's validation matches no words (format v3 §0, rule 3; [ADR
 18](adr/18-allow-extension-keys-and-move-word-checks-out-of-the-validator.md)),
@@ -717,7 +717,9 @@ whatever the package's lifecycle status, and answers with one verdict in
 `result.gate`. The level, `task` (after an implement task) or `full` (the
 baseline, after the integration task, after the conformance fixes and on the
 merged tree), is part of the answer and of the key a pass is recorded under;
-both levels run the same two commands. The decision is
+both levels run the same two commands, except that a task gate of a package
+whose `test_commands` name `affected_tests` runs that one in place of
+`all_tests` (below). The decision is
 [ADR 22](adr/22-run-the-gate-with-speca.md).
 
 ```sh
@@ -725,7 +727,22 @@ speca 16 --gate full                    # the baseline, or the merged tree
 speca 16 --gate task                    # after an implement task
 speca 16 --gate full --clean-env        # the conformance pass's clean environment
 speca 16 --gate task --timeout 10m      # end a command still running after 10 minutes
+speca 16 --gate task --base 3f2a9c1     # the affected tests of the change since 3f2a9c1
 ```
+
+- **The affected tests.** At the task level, a package with
+  `test_commands.affected_tests` runs `linter`, then that command, named
+  `affected_tests`, and not `all_tests`: the tests the task's change can
+  affect, as the project's own tool decides. `{base}` in it is replaced by the
+  full id of the commit `--base` names, `HEAD` when it is not given, then the
+  string is split and run as every gate command; `result.gate.base` is that
+  id. The command as it ran is part of the key a pass is recorded under, so
+  two bases are two keys. A package without `affected_tests` runs `all_tests`
+  as before, and has no `base` whether or not `--base` was given. A `--base`
+  that names no commit, a `--dir` outside a git work tree for a package with
+  `affected_tests`, and `--base` with `--gate full` or without `--gate` are
+  usage errors, made before anything runs. The full level always runs
+  `all_tests`.
 
 - **No shell.** Each command string is split on white space, a stretch inside
   single or double quotes kept as one argument without its quotes, and the
@@ -775,9 +792,10 @@ speca 16 --gate task --timeout 10m      # end a command still running after 10 m
 | `level` | `task` or `full` |
 | `verdict` | `pass`, `fail` or `not_run` |
 | `clean_env` | `true` when the commands ran with `--clean-env`; always written |
+| `base` | a task gate that ran `affected_tests` only: the full id of the commit that replaced `{base}` |
 | `reason` | why the gate is `not_run`; present exactly then |
 | `reused` | the recorded pass the gate was answered from: `commit` (checked out when it ran), `at` (RFC 3339) and `seconds` (its total); absent when the commands ran |
-| `commands` | one entry per command that ran, in run order: `name` (`linter`, `all_tests`), `exit_code` (absent when it timed out), `seconds` (to the millisecond), `log` (absent when the file could not be written), `tail` (a failure only) and `timed_out`; `[]` when a pass was reused |
+| `commands` | one entry per command that ran, in run order: `name` (`linter`, `all_tests`, or `affected_tests` for a task gate that ran it), `exit_code` (absent when it timed out), `seconds` (to the millisecond), `log` (absent when the file could not be written), `tail` (a failure only) and `timed_out`; `[]` when a pass was reused |
 | `seconds` | the sum of the commands' seconds; `0` when a pass was reused |
 | `slowest` | a full gate only: `{unit, seconds}`, at most five; `[]` when there are none |
 
@@ -848,7 +866,8 @@ returns `pass` with `reused`. The key is:
   tree's top level, so that two directories of one repository run gates of
   their own;
 - the **level**;
-- the exact `linter` and `all_tests` **command strings**;
+- the exact `linter` and `all_tests` **command strings**, or, for a task gate
+  that ran it, the `affected_tests` string as it ran, its base in place;
 - whether the environment was **clean**.
 
 Two commits with the same tree are the same code, so committing the change a
@@ -1277,7 +1296,7 @@ else.
 |---|---|---|
 | `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already; or the gate ran or was reused, whatever its verdict (`pass`, `fail` or `not_run`); or the gate report summed the runs |
 | `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`); or the package the gate form or the gate report reads could not be loaded (stage `load`), or the gate report's run log could not be read (stage `load`), or the commits since `--since` could not be listed (stage `git`) |
-| `2` | `usage` | usage error — nothing was written. Among them: a `--gate` other than `task` or `full`, a `--timeout` that is not a duration greater than zero, a `--since` that names no commit, no `--since` and no base branch, and a `--gate-report` outside a git work tree |
+| `2` | `usage` | usage error — nothing was written. Among them: a `--gate` other than `task` or `full`, a `--timeout` that is not a duration greater than zero, a `--base` that names no commit or comes without `--gate task`, a package with `affected_tests` gated at the task level outside a git work tree, a `--since` that names no commit, no `--since` and no base branch, and a `--gate-report` outside a git work tree |
 
 ### Warning codes
 
@@ -1318,6 +1337,7 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 | `--gate` | | the gate form: `task` or `full`, the level of the gate to run |
 | `--clean-env` | off | with `--gate`: run the commands with an empty temporary `HOME`, no global or system git configuration and `GIT_TERMINAL_PROMPT=0` |
 | `--timeout` | `20m` | with `--gate`: how long one command may run, a Go duration greater than zero |
+| `--base` | `HEAD` | with `--gate task`: the commit a package's `affected_tests` runs from, in place of `{base}` |
 | `--gate-report` | off | the gate report: sum the package's gate runs since a commit |
 | `--since` | the merge base of `HEAD` and the base branch | with `--gate-report`: the commit the runs are counted from |
 | `--specs-dir` | `<dir>/.specs`, or `$AF_SPEC_DIR` | where `NN_name` packages live |
