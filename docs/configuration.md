@@ -162,6 +162,7 @@ variable sets ([specrun.md](specrun.md#configuration)):
 | `SPECRUN_REPAIR_ON` | `--repair-on` | `security,data-loss,correctness,minor,untested`: every severity and untested items; `''` queues nothing |
 | `SPECRUN_REPAIR_MAX` | `--repair-max` | `5` repairs after a reconcile; `0` none |
 | `SPECRUN_REPAIR_SECURITY` | `--repair-security` | off: a security defect is never repaired |
+| `SPECRUN_STRICT_HANDOFFS` | `--strict-handoffs` | off: a package is started without the strict handoff check |
 | `SPECRUN_STRICT_SKILLS` | `--strict-skills` | off |
 
 It also reads:

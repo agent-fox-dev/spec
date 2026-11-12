@@ -130,6 +130,14 @@ specs, and no later artifact can repair it: decide it here, with the actors
 you read in §2, and name a component the other package owns as that package
 names it.
 
+**`handoffs`** is optional. Write one wherever the PRD says that another
+package will call, register into or fill something this package offers:
+`{id: "H-N", what, to, criteria}`, `what` the extension point or entry point,
+`to` the spec id of the receiving package, which must depend on this one
+directly or transitively (a package that lands earlier leaves nothing to
+wire it, and `speca` refuses it), and `criteria` this package's criteria
+that depend on the handoff being wired.
+
 **`external_apis`** is optional and holds the signatures the work relies on:
 `{package, version, verified, symbols: [{name, import_path, signature}]}`.
 Set `verified` to `true` only for a symbol whose source you read in §2;

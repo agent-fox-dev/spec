@@ -47,7 +47,11 @@ packages and modules the task creates or changes, the test files it extends
 among them, each named once. `depends_on` is optional, references lower ids,
 and absent means "the previous task": leave it out when it would name only the
 task before, and use it to let independent tasks run in parallel.
-`done_when` is optional, for checks beyond the implicit ones. There is no
+`done_when` is optional, for checks beyond the implicit ones.
+`takes_handoffs` is optional: the handoffs another package addresses to this
+one that the task wires, each `"<spec id>:H-N"`. Every inbound handoff the
+packages you read in §2 address to this one is taken by a task, or the
+verdict with `--strict-handoffs` fails. There is no
 `kind`, no `tests`, no `state` and no `optional`: every stored task is an
 implement task, its tests are its criteria's checks, and its state lives in
 `progress.json`, which the tools write.

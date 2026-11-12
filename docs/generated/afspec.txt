@@ -1429,6 +1429,15 @@ type ValidationResult struct {
     ValidationResult holds the results of spec validation. Valid is true if and
     only if Errors is empty; warnings never block.
 
+func CrossSpecFindings(specs []*Spec, spec *Spec) ValidationResult
+    CrossSpecFindings runs the cross-spec rules over specs, the packages of
+    one spec root, spec among them, and keeps the findings that concern spec.
+    The graph is made of the dependencies the packages hold. The library tags
+    an unknown dependency, a missing shared actor and the handoff rules with
+    the package that decides them, so those are kept for it. The cycle names no
+    package, and a package with no edge cannot be on one, so it is kept for any
+    package with an edge. A warning tagged with the package's id is kept for it.
+
 func StrictHandoffs(v ValidationResult) ValidationResult
     StrictHandoffs is v with each handoff_not_taken warning made an error,
     as a caller that will not start a package leaving a handoff untaken asks.
@@ -1462,6 +1471,12 @@ func ValidateGenerationStepComplete(step GenerationStep, partial PartialSpec) Va
     so a repair loop learns of every problem in one pass instead of one class
     per regenerated artifact. The schema errors come first, each with Category
     "schema"; a rule error may restate a consequence of one of them.
+
+func ValidateInRoot(specsDir string, spec *Spec) (ValidationResult, error)
+    ValidateInRoot is spec's own validation and the cross-spec rules that
+    concern it, over the packages under specsDir that load (spec in place of
+    the one at its directory), for a caller that needs the verdict without the
+    commands that give it. It fails only when specsDir cannot be read.
 
 type WaitingPackage struct {
 	// Dir is the package directory, as the display function shows it.

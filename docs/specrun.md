@@ -438,6 +438,7 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--repair-on LIST` | `SPECRUN_REPAIR_ON` | `security,data-loss,correctness,minor,untested` | what a reconcile queues for repair: defects of these severities, and `untested` items, comma-separated; `''` queues nothing |
 | `--repair-max N` | `SPECRUN_REPAIR_MAX` | `5` | the most repairs after one reconcile, 0 or more; `0` repairs nothing after a reconcile (the repairs of `--repair` have no cap) |
 | `--repair-security` | `SPECRUN_REPAIR_SECURITY` | off | repair security defects too; off, a security defect is never repaired, and `--repair` stops on one as the stop rule does |
+| `--strict-handoffs` | `SPECRUN_STRICT_HANDOFFS` | off | before a package's session, validate it in process (`afspec.ValidateInRoot`: its own rules and the cross-spec rules) with every inbound handoff no task takes as an error (`afspec.StrictHandoffs`); a package that does not validate is not started, and the loop stops (exit 1, stage `validate`) with `result.stopped.reason` `package does not validate: ` and each failing rule with its message. A dry run lists such a package in `result.would_stop` as `{spec_dir, reason}` instead. Off, af-impl's own refusal of an invalid package is the only check |
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
 | `--ledger` | | | print the ledger as a table and start nothing |
