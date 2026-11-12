@@ -11,12 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
 // Both levels run linter, then all_tests, each once, and pass when both exit 0.
@@ -772,5 +775,218 @@ func TestGate_KeepsTheGatesOfTwoDirectoriesOfARepositoryApart(t *testing.T) {
 	}
 	if n := g.allTestsRuns(t); n != 2 {
 		t.Errorf("all_tests ran %d times; want once in each directory", n)
+	}
+}
+
+// With affected_tests, the task gate runs the linter, then that command with
+// the full id of the base commit in place of {base}, and not all_tests.
+func TestGate_RunsTheAffectedTestsFromABaseCommit(t *testing.T) {
+	for name, tc := range map[string]struct {
+		base func(g *gateRepo, t *testing.T) []string
+		rev  string
+	}{
+		"no --base":     {func(*gateRepo, *testing.T) []string { return nil }, "HEAD"},
+		"HEAD~1":        {func(*gateRepo, *testing.T) []string { return []string{"--base", "HEAD~1"} }, "HEAD~1"},
+		"a branch name": {func(*gateRepo, *testing.T) []string { return []string{"--base", "older"} }, "older"},
+		"an abbreviated id": {func(g *gateRepo, t *testing.T) []string {
+			return []string{"--base", git(t, g.root, "rev-parse", "--short", "HEAD~1")}
+		}, "HEAD~1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateRepo(t)
+			g.setAffected(t, "BASE={base}")
+			g.commit(t, "affected tests")
+			git(t, g.root, "branch", "older", "HEAD~1")
+			env, _ := g.gate(t, append([]string{"task"}, tc.base(g, t)...)...)
+			want := git(t, g.root, "rev-parse", tc.rev)
+			r := env.Result.Gate
+			if got := commandNames(r.Commands); !slices.Equal(got, []string{"linter", "affected_tests"}) {
+				t.Fatalf("commands %v; want linter, then affected_tests", got)
+			}
+			if r.Base != want || g.affectedArgs(t) != "BASE="+want {
+				t.Errorf("base %q, the script got %q; want %s", r.Base, g.affectedArgs(t), want)
+			}
+			if g.allTestsRuns(t) != 0 {
+				t.Errorf("all_tests ran")
+			}
+		})
+	}
+}
+
+// Without affected_tests the task gate runs all_tests as before, and has no
+// base, whether or not --base was given.
+func TestGate_RunsAllTestsWithoutAnAffectedTestsCommand(t *testing.T) {
+	g := newGateRepo(t)
+	env, members := g.gate(t, "task", "--base", "HEAD")
+	if got := commandNames(env.Result.Gate.Commands); !slices.Equal(got, []string{"linter", "all_tests"}) {
+		t.Errorf("commands %v; want linter, then all_tests", got)
+	}
+	if _, ok := members["base"]; ok {
+		t.Errorf("base = %s; want it absent", members["base"])
+	}
+}
+
+// Two task gates of one tree with different bases are two keys; the same
+// base is reused.
+func TestGate_TakesEachBaseAsAKeyOfItsOwn(t *testing.T) {
+	g := newGateRepo(t)
+	g.setAffected(t, "BASE={base}")
+	a := g.commit(t, "A")
+	writeFile(t, filepath.Join(g.root, "b.txt"), "b")
+	b := g.commit(t, "B")
+	writeFile(t, filepath.Join(g.root, "c.txt"), "c")
+	g.commit(t, "C")
+	for i, step := range []struct {
+		base   []string
+		reused bool
+	}{{[]string{"--base", a}, false}, {[]string{"--base", a}, true}, {[]string{"--base", b}, false}, {nil, false}} {
+		before := len(g.runs(t))
+		env, _ := g.gate(t, append([]string{"task"}, step.base...)...)
+		ran := len(g.runs(t)) > before
+		if (env.Result.Gate.Reused != nil) != step.reused || ran == step.reused {
+			t.Errorf("gate %d %v: reused %v, ran %v; want reused %v", i+1, step.base, env.Result.Gate.Reused != nil, ran, step.reused)
+		}
+	}
+}
+
+// A --base that cannot be used is refused before anything runs.
+func TestGate_RefusesABaseItCannotUse(t *testing.T) {
+	for name, tc := range map[string]struct {
+		git  bool
+		args []string
+		says string
+	}{
+		"a base that names no commit": {true, []string{"--gate", "task", "--base", "nosuch"}, "nosuch"},
+		"--base with the full level":  {true, []string{"--gate", "full", "--base", "HEAD"}, "--gate task"},
+		"--base without --gate":       {true, []string{"--base", "HEAD"}, "--gate task"},
+		"no git work tree":            {false, []string{"--gate", "task"}, "not in a git work tree"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateDir(t)
+			if tc.git {
+				gitInit(t, g.root)
+			}
+			g.setAffected(t, "BASE={base}")
+			env, code, _ := run(t, append([]string{"--dir", g.root, "05"}, tc.args...)...)
+			if code != cli.ExitUsage || env.Error == nil || env.Error.Category != "usage" || !strings.Contains(env.Error.Message, tc.says) {
+				t.Errorf("code %d, error %+v; want a usage error saying %q", code, env.Error, tc.says)
+			}
+			if len(g.runs(t)) != 0 {
+				t.Errorf("the scripts ran %v; want none", g.runs(t))
+			}
+		})
+	}
+}
+
+// stepClock makes every reading of the gate's clock step seconds after the
+// one before, so that each command takes step seconds.
+func stepClock(t *testing.T, step float64) {
+	t.Helper()
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	old := gateClock
+	gateClock = func() time.Time {
+		at = at.Add(time.Duration(step * float64(time.Second)))
+		return at
+	}
+	t.Cleanup(func() { gateClock = old })
+}
+
+// A full gate, run or reused, is measured against the steering's budget,
+// 120 seconds when it sets none; a task gate is not.
+func TestGate_MeasuresAFullGateAgainstTheBudget(t *testing.T) {
+	g := newGateRepo(t)
+	g.writeSteering(t, "gate_budget_seconds: 1\n")
+	g.commit(t, "steering")
+	stepClock(t, 0.5) // two commands of 0.5 s each: 1 s, the budget
+	env, _ := g.gate(t, "full")
+	if b := env.Result.Gate.Budget; b == nil || b.Seconds != 1 || b.Exceeded {
+		t.Errorf("budget %+v; want 1 s, not exceeded at exactly 1 s", b)
+	}
+	writeFile(t, filepath.Join(g.root, "x.txt"), "x")
+	stepClock(t, 1)
+	env, _ = g.gate(t, "full")
+	b := env.Result.Gate.Budget
+	if b == nil || b.Seconds != 1 || !b.Exceeded || b.OverBySeconds == nil || *b.OverBySeconds != 1 {
+		t.Fatalf("budget %+v; want 1 s, exceeded by 1", b)
+	}
+	if again, _ := g.gate(t, "full"); again.Result.Gate.Reused == nil || !reflect.DeepEqual(again.Result.Gate.Budget, b) {
+		t.Errorf("the reused gate's budget %+v; want %+v", again.Result.Gate.Budget, b)
+	}
+	if task, members := g.gate(t, "task"); task.Result.Gate.Budget != nil || members["budget"] != nil {
+		t.Errorf("a task gate has a budget: %s", members["budget"])
+	}
+
+	os.Remove(filepath.Join(g.root, ".specs", "steering.md"))
+	stepClock(t, 0.01)
+	if env, _ := g.gate(t, "full"); env.Result.Gate.Budget == nil || env.Result.Gate.Budget.Seconds != 120 {
+		t.Errorf("budget %+v; want 120 s without a steering", env.Result.Gate.Budget)
+	}
+}
+
+// A budget that is no whole number above zero is the default, with a
+// steering_malformed warning naming it.
+func TestGate_TakesTheDefaultForABudgetItCannotRead(t *testing.T) {
+	g := newGateRepo(t)
+	g.writeSteering(t, "gate_budget_seconds: fast\n")
+	env, _ := g.gate(t, "full")
+	if b := env.Result.Gate.Budget; b == nil || b.Seconds != 120 {
+		t.Errorf("budget %+v; want 120 s", b)
+	}
+	var codes []string
+	for _, w := range env.Warnings {
+		codes = append(codes, string(w.Code))
+		if w.Code == cli.WarnSteeringMalformed && !strings.Contains(w.Message, "gate_budget_seconds") {
+			t.Errorf("warning %q does not name gate_budget_seconds", w.Message)
+		}
+	}
+	if !slices.Equal(codes, []string{string(cli.WarnSteeringMalformed)}) {
+		t.Errorf("warnings %v; want one steering_malformed", codes)
+	}
+}
+
+// A full gate's growth is measured against the passing full gate recorded
+// for the tree of the merge base of HEAD and the base branch.
+func TestGate_MeasuresTheGrowthOverTheBaseBranch(t *testing.T) {
+	g := newGateRepo(t)
+	stepClock(t, 5) // 10 s on main
+	if env, _ := g.gate(t, "full"); env.Result.Gate.Growth != nil {
+		t.Errorf("growth on main's own tree %+v; want none", env.Result.Gate.Growth)
+	}
+	git(t, g.root, "switch", "-q", "-c", "feature")
+	writeFile(t, filepath.Join(g.root, "f.txt"), "f")
+	g.commit(t, "F")
+	stepClock(t, 8) // 16 s on the branch
+	env, _ := g.gate(t, "full")
+	if gr := env.Result.Gate.Growth; gr == nil || gr.BaseSeconds != 10 || gr.GrewBy != 0.6 {
+		t.Errorf("growth %+v; want base 10 s, grew by 0.6", gr)
+	}
+
+	// While a merge is uncommitted on main, main's tree before it is the base.
+	git(t, g.root, "switch", "-q", "main")
+	git(t, g.root, "merge", "-q", "--no-ff", "--no-commit", "feature")
+	if env, _ := g.gate(t, "full"); env.Result.Gate.Growth == nil || env.Result.Gate.Growth.BaseSeconds != 10 {
+		t.Errorf("growth during the merge %+v; want base 10 s", env.Result.Gate.Growth)
+	}
+
+	other := newGateRepo(t)
+	git(t, other.root, "switch", "-q", "-c", "feature")
+	writeFile(t, filepath.Join(other.root, "f.txt"), "f")
+	other.commit(t, "F")
+	if env, members := other.gate(t, "full"); env.Result.Gate.Growth != nil || members["growth"] != nil {
+		t.Errorf("growth %s; want it absent when main's tree was never gated", members["growth"])
+	}
+}
+
+// A --base is checked whenever it is given, also for a package without
+// affected_tests; an affected_tests without exactly one {base} does not run.
+func TestGate_ChecksABaseEvenWhereItIsNotUsed(t *testing.T) {
+	g := newGateRepo(t)
+	env, code, _ := run(t, "--dir", g.root, "05", "--gate", "task", "--base", "nosuch")
+	if code != cli.ExitUsage || env.Error == nil || !strings.Contains(env.Error.Message, "nosuch") || len(g.runs(t)) != 0 {
+		t.Errorf("code %d, error %+v, ran %v; want a usage error and nothing run", code, env.Error, g.runs(t))
+	}
+	g.setAffected(t, "BASE={base} {base}")
+	if r := g.gateOf(t, "05", "task").Result.Gate; r.Verdict != "not_run" || !strings.Contains(r.Reason, "exactly one") || len(g.runs(t)) != 0 {
+		t.Errorf("gate %+v, ran %v; want not_run, nothing run", r, g.runs(t))
 	}
 }

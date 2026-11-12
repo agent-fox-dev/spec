@@ -345,3 +345,43 @@ if [ -n "$(git config --global user.name)" ]; then exit 0; fi
 		t.Errorf("the clean HOME %q is still there, or was the test's", h)
 	}
 }
+
+// An implementer gates a task on the tests its change can affect, from the
+// commit it started from, and learns from the full gate and the report that
+// the suite is over the steering's budget.
+func TestAnImplementerGatesATaskOnItsAffectedTestsAndFindsTheSuiteOverBudget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate's test commands are shell scripts")
+	}
+	g := newGateDir(t)
+	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", "sleep 1.2"))
+	g.setAffected(t, "BASE={base}")
+	g.writeSteering(t, "gate_budget_seconds: 1\n")
+	gitInit(t, g.root)
+	base := git(t, g.root, "rev-parse", "HEAD")
+	writeFile(t, filepath.Join(g.root, "change.txt"), "the task's change")
+	g.commit(t, "the task")
+
+	task := g.gateOf(t, "05", "task", "--base", base).Result.Gate
+	if got := commandNames(task.Commands); !slices.Equal(got, []string{"linter", "affected_tests"}) || task.Verdict != "pass" {
+		t.Fatalf("the task gate ran %v, %s; want linter, then affected_tests, passing", got, task.Verdict)
+	}
+	if g.affectedArgs(t) != "BASE="+base || g.allTestsRuns(t) != 0 {
+		t.Errorf("the affected tests got %q and all_tests ran %d times; want BASE=%s and none", g.affectedArgs(t), g.allTestsRuns(t), base)
+	}
+
+	full := g.gateOf(t, "05", "full").Result.Gate
+	if full.Budget == nil || !full.Budget.Exceeded || full.Budget.Seconds != 1 {
+		t.Fatalf("the full gate's budget %+v; want 1 s, exceeded", full.Budget)
+	}
+	env, _ := g.report(t, "05", "--since", base)
+	if c := env.Result.GateReport.TestCost; c == nil || !c.Finding || !c.Exceeded {
+		t.Errorf("test_cost %+v; want a finding, the budget exceeded", c)
+	}
+	if n := g.allTestsRuns(t); n != 1 {
+		t.Errorf("all_tests ran %d times; want once, in the full gate", n)
+	}
+	if status := git(t, g.root, "status", "--porcelain"); status != "" {
+		t.Errorf("the gates wrote into the repository: %q", status)
+	}
+}

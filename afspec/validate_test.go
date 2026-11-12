@@ -737,3 +737,67 @@ func TestValidate_RefusesAnUnknownProfile(t *testing.T) {
 		t.Errorf("valid %v, errors %+v; want a json_schema error on prd.md naming profile", v.Valid, v.Errors)
 	}
 }
+
+// An affected-tests command holds the placeholder {base} exactly once; an
+// empty one is a schema error.
+func TestValidate_ChecksTheBaseOfTheAffectedTestsCommand(t *testing.T) {
+	for name, tc := range map[string]struct {
+		command string
+		check   string
+		found   string
+	}{
+		"none":        {"make test-affected", "affected_tests_base", "0"},
+		"twice":       {"x {base} {base}", "affected_tests_base", "2"},
+		"upper case":  {"x {BASE}", "affected_tests_base", "0"},
+		"exactly one": {"{base}", "", ""},
+		"in a word":   {"make test-affected BASE={base}", "", ""},
+		"empty":       {"", "json_schema", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := loadFixture(t, fixtureValidSpec)
+			s.Tasks.TestCommands.AffectedTests = &tc.command
+			v := s.Validate()
+			if tc.check == "" {
+				if !v.Valid {
+					t.Fatalf("errors %v; want valid", v.Errors)
+				}
+				return
+			}
+			if v.Valid {
+				t.Fatal("valid; want an error")
+			}
+			var e *ValidationEntry
+			for i := range v.Errors {
+				if v.Errors[i].Check == tc.check {
+					e = &v.Errors[i]
+				}
+			}
+			if e == nil || e.Artifact != TasksFileName {
+				t.Fatalf("errors %v; want one %s on %s", v.Errors, tc.check, TasksFileName)
+			}
+			if tc.found != "" && (!strings.Contains(e.Message, "found "+tc.found) || !strings.Contains(e.Message, "exactly one")) {
+				t.Errorf("message %q; want it to say it found %s and that exactly one is needed", e.Message, tc.found)
+			}
+		})
+	}
+}
+
+// A save keeps the affected-tests command, after the other test commands.
+func TestSave_KeepsTheAffectedTestsCommand(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	s := loadFixture(t, dir)
+	spec, affected := "go test ./afspec", "make test-affected BASE={base}"
+	s.Tasks.TestCommands.SpecTests, s.Tasks.TestCommands.AffectedTests = &spec, &affected
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	again := loadFixture(t, dir)
+	if got := again.Tasks.TestCommands.AffectedTests; got == nil || *got != affected {
+		t.Errorf("affected_tests after a round trip = %v; want %q", got, affected)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, TasksFileName))
+	at := func(k string) int { return strings.Index(string(b), `"`+k+`"`) }
+	if !(at("all_tests") < at("linter") && at("linter") < at("spec_tests") && at("spec_tests") < at("affected_tests")) {
+		t.Errorf("the test commands are out of order:\n%s", b)
+	}
+}

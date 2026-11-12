@@ -51,6 +51,10 @@ const (
 )
     Schema file names for the four v3 artifacts.
 
+const AffectedTestsBase = "{base}"
+    AffectedTestsBase is the placeholder the affected-tests command holds
+    exactly once, for the commit a change starts from.
+
 const DefaultSpecDirName = ".specs"
     DefaultSpecDirName is where spec packages live under the repository root.
 
@@ -1294,6 +1298,10 @@ func (t *TasksV3Json) Render() string
     the whole package, so it is in Spec.RenderTasks and not here.
 
 type TestCommands struct {
+	// The command that runs the tests a change can affect, with the placeholder
+	// {base} exactly once for the commit the change starts from.
+	AffectedTests *string `json:"affected_tests,omitempty,omitzero" yaml:"affected_tests,omitempty" mapstructure:"affected_tests,omitempty"`
+
 	// AllTests corresponds to the JSON schema field "all_tests".
 	AllTests string `json:"all_tests" yaml:"all_tests" mapstructure:"all_tests"`
 

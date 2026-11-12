@@ -297,8 +297,9 @@ must all be `done` first):
    the delivered behaviour. A gap you declare is reported as one; a gap you
    bury in notes is reported as a defect.
 
-Then the gate, `speca <package> --gate task` (`full` after the integration
-task), its verdict compared with the baseline:
+Then the gate, `speca <package> --gate task --base <commit the task started
+from>`: the linter and the tests the change can affect. `full`, after the
+integration task, catches the rest. Compare with the baseline:
 
 | Before | After | Verdict | Land? |
 |---|---|---|---|
@@ -319,8 +320,7 @@ failure is parked as a `wip: <subject>` commit with the task's state
 `in_progress`, which the claim already wrote; that ends the run, because every
 later task builds on it. Return to the base branch and report what failed
 with the check's own output. A test that still fails is
-reported as failed, with why; it is worth more than one claimed passed on a
-run that never happened. Never skip, delete or weaken a test to get green.
+reported as failed, with why. Never skip, delete or weaken a test to get green.
 
 **Record.** On a landable verdict, record the task done, through the state
 machine:

@@ -30,7 +30,8 @@
       "properties": {
         "all_tests": { "type": "string", "minLength": 1 },
         "linter": { "type": "string", "minLength": 1 },
-        "spec_tests": { "type": "string", "minLength": 1 }
+        "spec_tests": { "type": "string", "minLength": 1 },
+        "affected_tests": { "type": "string", "minLength": 1, "description": "The command that runs the tests a change can affect, with the placeholder {base} exactly once for the commit the change starts from." }
       },
       "required": ["all_tests", "linter"],
       "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },

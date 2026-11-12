@@ -401,7 +401,7 @@ and no integration task is stored (§8.4).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `test_commands` | object | yes | `all_tests` and `linter` required; `spec_tests` optional. Must use the project's real tooling. |
+| `test_commands` | object | yes | `all_tests` and `linter` required; `spec_tests` optional; `affected_tests` optional, the command that runs the tests a change can affect, holding the placeholder `{base}` (the commit the change starts from) exactly once (rule `affected_tests_base`). Must use the project's real tooling. |
 | `dependencies` | array | yes | Cross-spec dependencies, as v2 §8.2. May be empty. |
 | `tasks` | array | yes | Task objects (§7.2). At least one. |
 
@@ -608,6 +608,7 @@ All rules are errors.
 | C6 | Every `unwanted` criterion has a non-empty `contract`. | requirements |
 | C7 | A `full` package has at least one execution path; a `lite` package has no execution path and at most three requirements. | prd.md, requirements |
 | C8 | Every entry of `progress.json` names a task of the plan or the integration task, each at most once. | progress → tasks |
+| `affected_tests_base` | `test_commands.affected_tests`, when present, holds `{base}` exactly once. | tasks |
 
 Warnings (never block): scope limits (§6.5.4, §7.3.3), criteria without a
 `contract` whose action mentions an error outcome. Vague wording and line

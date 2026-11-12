@@ -260,7 +260,7 @@ func (f ForeignCommand) String() string {
 
 // testCommandFields are the fields of test_commands, in the order of the
 // tasks schema.
-var testCommandFields = []string{"all_tests", "linter", "spec_tests"}
+var testCommandFields = []string{"all_tests", "linter", "spec_tests", "affected_tests"}
 
 // ForeignCommands names, in the order of the tasks schema's fields, each test
 // command whose program belongs to a known ecosystem the project does not

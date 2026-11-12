@@ -10,11 +10,19 @@ is installed.
 | When | Call |
 |---|---|
 | the baseline (§2), on the unchanged base branch | `speca <package> --gate full` |
-| after every implement task (§5) | `speca <package> --gate task` |
+| after every implement task (§5) | `speca <package> --gate task --base <commit>` |
 | after the integration task (§5) | `speca <package> --gate full` |
 | the clean-environment run of the conformance pass (§6) | `speca <package> --gate full --clean-env` |
 | after the conformance fix commit, when there is one (§6) | `speca <package> --gate full` |
 | on the merged tree, before the merge is committed (§7) | `speca <package> --gate full` |
+
+`<commit>` is the commit the task started from: `git rev-parse HEAD` before
+its claim, the last task's commit. When the package's `test_commands` name
+`affected_tests`, the task gate runs the linter and that command from this
+commit, the tests the task's change can affect, and not `all_tests`; the full
+gate after the integration task runs the whole suite and catches a
+regression outside them before anything is merged. Without `affected_tests`
+the task gate runs `all_tests`, and `--base` changes nothing.
 
 Note the commit the baseline ran on (`git rev-parse HEAD` just before it): the
 gate report of §7 counts from it, and §4 does not change it when a branch is

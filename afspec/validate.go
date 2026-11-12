@@ -444,12 +444,33 @@ func (s *Spec) ValidateCrossFile() ValidationResult {
 	errors = append(errors, s.checkC6()...)
 	errors = append(errors, s.checkC7()...)
 	errors = append(errors, s.checkC8()...)
+	errors = append(errors, s.checkAffectedTestsBase()...)
 
 	return ValidationResult{
 		Valid:    len(errors) == 0,
 		Errors:   errors,
 		Warnings: s.crossFileWarnings(),
 	}
+}
+
+// AffectedTestsBase is the placeholder the affected-tests command holds
+// exactly once, for the commit a change starts from.
+const AffectedTestsBase = "{base}"
+
+// checkAffectedTestsBase: an affected-tests command holds {base} exactly
+// once. The schema cannot say "exactly once" readably, so the library does.
+func (s *Spec) checkAffectedTestsBase() []ValidationEntry {
+	c := s.Tasks.TestCommands.AffectedTests
+	if c == nil || *c == "" {
+		return nil
+	}
+	if n := strings.Count(*c, AffectedTestsBase); n != 1 {
+		return []ValidationEntry{{Category: "integrity", Check: "affected_tests_base", Artifact: TasksFileName,
+			EntityID: "test_commands.affected_tests",
+			Message: fmt.Sprintf("test_commands.affected_tests is %q: found %d %s placeholder(s), and exactly one is needed, where the commit the change starts from goes",
+				*c, n, AffectedTestsBase)}}
+	}
+	return nil
 }
 
 // checkC1: spec_id and spec_name agree across prd.md, the JSON files and the
