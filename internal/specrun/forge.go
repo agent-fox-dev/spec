@@ -2,8 +2,10 @@ package specrun
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -392,3 +394,43 @@ func (r *run) seriousDefects(specDir string) ([]StopIssue, error) {
 
 // reasonSeriousDefect is the reason of a stop on serious defects.
 const reasonSeriousDefect = "serious defect"
+
+// wouldDo is what a dry run with a forge client reports of the label rules:
+// what they would change as the labels now stand, for the last package that
+// landed and for every awaits issue, and the issues the stop rule would
+// name. It reads the state and writes nothing, to the forge or elsewhere.
+func (r *run) wouldDo() *envelope.ErrorInfo {
+	if r.forge == nil {
+		return nil
+	}
+	r.result.WouldChange, r.result.WouldStop = []labelChange{}, []StopIssue{}
+	var st state
+	if path, err := statePath(r.root); err == nil {
+		if b, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(b, &st)
+		}
+	}
+	var changes []labelChange
+	var err error
+	if st.LastLanded != "" {
+		changes, err = r.labelChanges(st.LastLanded)
+	} else {
+		var awaiting []issuex.Issue
+		if awaiting, err = r.listOpen([]string{"af:awaits"}); err == nil {
+			base, _ := gitOutput(r.root, "rev-parse", "HEAD")
+			changes = awaitsFinished(awaiting, r.knownPackages(), base)
+		}
+	}
+	if err != nil {
+		return failure("forge", "forge", "%v", err)
+	}
+	r.result.WouldChange = append(r.result.WouldChange, changes...)
+	if st.LastLanded != "" {
+		serious, err := r.seriousDefects(st.LastLanded)
+		if err != nil {
+			return failure("forge", "forge", "%v", err)
+		}
+		r.result.WouldStop = append(r.result.WouldStop, serious...)
+	}
+	return nil
+}

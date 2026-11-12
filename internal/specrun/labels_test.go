@@ -345,3 +345,37 @@ func TestLabels_TheAwaitsRuleChangesNothingTheSecondTime(t *testing.T) {
 		t.Errorf("the second run wrote %v", after[before:])
 	}
 }
+
+// A dry run reports what the label rules would change as the labels stand,
+// and what the stop rule would name, and writes nothing.
+func TestLabels_ADryRunShowsWhatTheRulesWouldChange(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "done")
+	f.addPackage(t, "02_b", "02", "pending")
+	writeFile(t, f.statePath(), `{"done":[],"last_landed":".specs/01_a"}`)
+	bare := f.forge.add("01_a: no caller", "open")
+	awaiting := f.forge.add("01_a: wire it", "open", "af:awaits", "af:awaits-01", "af:from-01")
+	defect := f.forge.add("01_a: lost write", "open", "af:defect", "af:severity-data-loss", "af:from-01")
+	env, code, stderr := runMain(t, "--dry-run")
+	r := env.Result
+	if code != 0 || r == nil {
+		t.Fatalf("code %d, error %+v\n%s", code, env.Error, stderr)
+	}
+	got := map[int]labelChange{}
+	for _, c := range r.WouldChange {
+		got[c.Issue] = c
+	}
+	if c := got[bare]; len(r.WouldChange) != 2 || c.Rule != "incomplete-labels" || strings.Join(c.Add, ",") != "af:deviation,af:from-01" {
+		t.Errorf("would_change %+v", r.WouldChange)
+	}
+	if c := got[awaiting]; c.Rule != "awaits-finished" || strings.Join(c.Add, ",") != "af:defect,af:severity-correctness" ||
+		strings.Join(c.Remove, ",") != "af:awaits,af:awaits-01" {
+		t.Errorf("the awaits change %+v", c)
+	}
+	if len(r.WouldStop) != 1 || r.WouldStop[0].Number != defect {
+		t.Errorf("would_stop %+v; want #%d", r.WouldStop, defect)
+	}
+	if w := f.forge.writes(); len(w) != 0 || len(f.starts(t)) != 0 {
+		t.Errorf("writes %v, %d sessions", w, len(f.starts(t)))
+	}
+}

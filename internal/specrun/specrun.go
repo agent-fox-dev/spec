@@ -44,6 +44,11 @@ type Result struct {
 	NextStep *NextStep `json:"next_step,omitempty"`
 	// Versions is what the run runs.
 	Versions *Versions `json:"versions,omitempty"`
+	// WouldChange and WouldStop are, under --dry-run with a forge, what the
+	// label rules would change as the labels now stand and the issues the
+	// stop rule would name.
+	WouldChange []labelChange `json:"would_change,omitzero"`
+	WouldStop   []StopIssue   `json:"would_stop,omitzero"`
 }
 
 // Waiting is an open package that cannot start, as speca --next words it.
@@ -197,6 +202,9 @@ func (r *run) choose() (*afspec.NextPackage, *envelope.ErrorInfo) {
 // dryRun reports the next step, or why there is none, and changes nothing.
 func (r *run) dryRun() int {
 	r.result.DryRun = true
+	if f := r.wouldDo(); f != nil {
+		return r.emit(envelope.ExitFailed, "", f)
+	}
 	next, f := r.choose()
 	if f != nil && f.Stage != "waiting" {
 		return r.emit(envelope.ExitFailed, "", f)

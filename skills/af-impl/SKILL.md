@@ -194,6 +194,9 @@ conventions, where each of the spec's checks goes, the drift between the spec
 and the code with a numbered decision for each, and what each task's `steps`
 and `touches` leave out.
 
+The survey also reads back the open items this package must take up or not
+build on, as [references/survey.md](references/survey.md) says.
+
 Show the brief, in full, before writing code, then go straight on to §4 in the
 same turn. The user can steer by interrupting; you do not wait for them to.
 
@@ -326,14 +329,10 @@ machine:
 speca <package> --task <N> --state done
 ```
 
-`speca` writes `progress.json` through the library's `Spec.SaveProgress` —
-the task's `state` and the file's `updated_at` — and no other file. Check
-what it wrote with `git status` and `git diff` on `<package>`: across the
-claim and this call, `progress.json` (new, on a package's first move) and
-nothing else. Any other file changed is a blocker: stop and report it. A refusal of the call is a blocker too, reported with `error.message`.
-Never retry with `--force`, and never set the state by hand while `speca` is
-there. Without `speca` (§1), change that one task's `state` entry in
-`progress.json` by hand, nothing else, and say so in the report.
+Check with `git status` and `git diff` on `<package>` that the claim and this
+call changed `progress.json` alone; another file changed, or a refusal, is a
+blocker: report it. Never retry with `--force` or set a state by hand while
+`speca` is there; without it, change that one `state` entry and say so.
 
 **Commit** the recorded state with the task's work as one `feat: <subject>`
 commit, its body ending in a `Spec: <NN_name>, task <N>` trailer and a
@@ -407,6 +406,9 @@ the fallbacks when `issue` is not installed.
   `speca <package> --status sealed`: the lifecycle is the owner's. Name that
   call in the report.
 
+After the push, close each listed item the branch resolved and pass on what
+awaited this package ([references/landing.md](references/landing.md)).
+
 If a push or the merge fails, say exactly what failed and leave the branch and
 commits in place.
 
@@ -436,9 +438,9 @@ commits in place.
 - Widen the change to things no task asked for.
 - Put a spec, requirement, criterion or path id in code, a test name, a test
   file name or a comment; the commit body is where they go.
-- Leave an open item without an issue or the reason it has none. Close,
-  edit or comment on an issue this run did not open, or open one for
-  anything but an open item.
+- Leave an open item without an issue or the reason it has none, or open one
+  for anything else. Comment on, relabel or close an issue that is not
+  `af:*`, or one that neither awaited this package nor is resolved by it.
 
 ## 8. Report
 

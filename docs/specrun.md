@@ -360,6 +360,14 @@ step and the package `afspec` would choose, or the waiting packages, and exits
 }
 ```
 
+With a forge client, a dry run also reports what the label rules would
+change as the labels now stand, for the last package that landed and for
+every `af:awaits` issue, and the issues the stop rule would name, writing
+nothing: `result.would_change` lists each change with `issue`, `rule`
+(`incomplete-labels`, `awaits-finished`), `add` and `remove`, and
+`result.would_stop` the defects as `result.stopped.issues` names them; both
+are `[]` when there are none, and absent without a forge.
+
 ## The output
 
 The run above ends with:

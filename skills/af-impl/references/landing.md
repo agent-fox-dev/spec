@@ -76,8 +76,9 @@ is missing.
   `baseline_full_seconds` and `last_full_seconds`. `open_items` holds
   `opened`, `closed`, `passed_on` and `reclassified`, each an object of
   counts keyed by kind, a defect as `defect:<severity>`; `closed`,
-  `passed_on` and `reclassified` are `{}` until af-impl reads open items
-  back.
+  `closed` counts the items this run closed, `passed_on` the `awaits` items
+  it relabelled to a later package, and `reclassified` the ones it made
+  defects; the open-items section lists each with its issue link.
 - **Merge.** Switch to the base branch and bring it up to date with
   `git pull --ff-only`. Then `git merge --no-ff --no-commit <branch>`. A
   conflict stops the landing: `git merge --abort`, stay on the base branch,
@@ -91,6 +92,12 @@ is missing.
   merge, with `git commit -F <message file>`; any other verdict is
   `git merge --abort` and a report of what the checks returned, with the
   branch left as it is.
+- **Close what the branch resolved.** Before the merge, decide for each item
+  the survey listed whether the branch closes it, with evidence: the
+  production caller (`file:line`) and the test that exercises it. After the
+  merge is pushed, close each resolved item with
+  `issue <ref> --close --body <comment>`, the comment naming the merge
+  commit, the evidence and this package.
 - **Pass on what awaited this package.** After the merge is pushed, every
   open item labelled `af:awaits-<this package>` that the branch did not
   resolve is passed on: relabelled to the later package that now owns it

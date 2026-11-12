@@ -26,5 +26,13 @@ written once and read at every step that needs it.
   registers …") is checked with `speca <N>`: when N is sealed or its last
   task is `done`, the handoff goes nowhere, and a numbered decision says
   either "this package wires it" or "filed as a defect".
+- **Open items for this package.** With `issue --list --state open --label`,
+  list every item labelled `af:awaits-<this package>`, and every open
+  `af:defect` and `af:untested` item whose evidence names a file this
+  package's tasks touch. Map each `awaits` item to the task that will satisfy
+  it, or record a numbered decision with the reason it will not be; list
+  each defect in the touched area as a known fault the plan neither builds
+  on nor copies the code around. An exported entry point an `awaits` item
+  names is used, not re-implemented.
 - **What the tasks do not say.** Per task, what a coder needs to know that
   `steps` and `touches` leave out.
