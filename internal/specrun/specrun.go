@@ -293,6 +293,12 @@ func (r *run) loop() int {
 		if stop := r.recheckDefects(); stop != nil {
 			return r.stop(stop)
 		}
+		// A reconcile already due, as after a restart, comes before any package.
+		if next == nil && r.reconcileDue(false) {
+			if stop := r.reconcile(); stop != nil {
+				return r.stop(stop)
+			}
+		}
 		if next == nil {
 			var f *envelope.ErrorInfo
 			if next, f = r.choose(); f != nil {
@@ -305,8 +311,6 @@ func (r *run) loop() int {
 		if stop := r.implement(next, before); stop != nil {
 			return r.stop(stop)
 		}
-		r.state.SinceReconcile++
-		r.saveState()
 		if r.reconcileDue(false) {
 			if stop := r.reconcile(); stop != nil {
 				return r.stop(stop)

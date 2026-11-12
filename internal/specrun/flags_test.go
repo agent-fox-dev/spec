@@ -223,3 +223,17 @@ func TestOptions_TakeTheReconcileInterval(t *testing.T) {
 		})
 	}
 }
+
+// Through Main a bad --reconcile-every is a usage error, exit code 2.
+func TestMain_RefusesABadReconcileInterval(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	for _, v := range []string{"-1", "often"} {
+		if env, code, _ := runMain(t, "--reconcile-every", v); code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "reconcile-every") {
+			t.Errorf("--reconcile-every %s: code %d, error %+v", v, code, env.Error)
+		}
+	}
+	if len(f.starts(t)) != 0 {
+		t.Error("a session started")
+	}
+}

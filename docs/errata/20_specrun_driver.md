@@ -10,7 +10,7 @@ package is done, one reconcile step "unless a reconcile was the last step and
 no package landed since". On a repository where every package is done and the
 ledger records no reconcile, the run therefore starts one session, the
 reconcile, before it ends with `all_done`; a second run starts none. A dry
-run there names the reconcile as its next step. A
+run there, with a forge client, names the reconcile as its next step. A
 repository where a reconcile was the last step behaves as REQ-1.4 says.
 
 **Why:** the two packages contradict each other for this one case, and the

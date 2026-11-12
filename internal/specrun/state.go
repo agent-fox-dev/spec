@@ -194,7 +194,6 @@ func (r *run) resume() *afspec.NextPackage {
 		fmt.Fprintf(r.stderr, "%s: %s %s landed before this run, as the repository shows\n", tool, run.Kind, run.Subject)
 		r.state.LabelCheck = run.SpecDir // its issues are checked like any landed package's
 		r.state.LastLanded = run.SpecDir
-		r.state.SinceReconcile++
 		r.finishStep(run.Kind, run.Subject)
 		return nil
 	}
@@ -224,7 +223,10 @@ func (r *run) startStep(kind string, next *afspec.NextPackage, head string, star
 func (r *run) finishStep(kind, subject string) {
 	r.state.Done = append(r.state.Done, doneStep{Kind: kind, Subject: subject, EndedAt: now().UTC().Format(time.RFC3339)})
 	if r.state.Running != nil && kind == kindImplement {
+		// A package that landed counts towards the next reconcile, whether
+		// or not a rule after it stops the loop.
 		r.state.LastLanded = r.state.Running.SpecDir
+		r.state.SinceReconcile++
 	}
 	r.state.Running = nil
 	r.saveState()

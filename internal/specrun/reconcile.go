@@ -40,7 +40,7 @@ func (r *run) reconcileDue(allDone bool) bool {
 func (r *run) reconciledEver() bool {
 	lines, _ := readLedger(r.logDir)
 	for _, l := range lines {
-		if l.Kind == kindReconcile {
+		if l.Kind == kindReconcile && l.Outcome == outcomeReconciled {
 			return true
 		}
 	}
@@ -116,6 +116,9 @@ func (r *run) reconcile() *Stopped {
 	earlier, _ := readLedger(r.logDir)
 	step := stepName(len(earlier)+1, kindReconcile, kindReconcile)
 	stop := func(reason string) *Stopped {
+		if r.ctx.Err() != nil {
+			reason = reasonInterrupted
+		}
 		return &Stopped{Step: step, Kind: kindReconcile, Subject: kindReconcile, Reason: reason}
 	}
 	adopt, err := r.adoptable()
@@ -319,6 +322,7 @@ type reconcileCounts struct {
 // deviations nobody has settled, oldest first.
 func (r *run) reconcileRules(adopt []adoptEntry, openBefore map[int]bool, base string) (reconcileCounts, error) {
 	var n reconcileCounts
+	r.result.OpenDeviations = nil // the list as this reconcile leaves it
 	all, err := r.forge.ListIssues(r.ctx, r.repo, issuex.IssueFilter{State: "all", Limit: 25600})
 	if err != nil {
 		return n, fmt.Errorf("reconcile: listing the issues: %w", err)

@@ -185,7 +185,6 @@ func TestReconcile_WarnsWhenTheReportIsMissing(t *testing.T) {
 	if last := lines[len(lines)-1]; last["outcome"] != "reconciled" {
 		t.Errorf("last ledger line %v", last)
 	}
-	_ = filepath.Join
 }
 
 // reconcilePlan writes a script whose package sessions land and whose
@@ -211,7 +210,7 @@ func TestReconcile_LabelsAnAdoptionTheSessionLeftUnsettled(t *testing.T) {
 	if got := strings.Join(f.forge.labelsOf(left), ","); got != "af:deviation,af:from-00" {
 		t.Errorf("the issue left: %s", got)
 	}
-	if c := f.forge.comments[left]; len(c) != 1 || !strings.Contains(c[0], "adoption-unsettled") {
+	if c := f.forge.comments[left]; len(c) != 1 || !strings.Contains(c[0], "adoption-unsettled") || !strings.Contains(c[0], git(t, f.root, "rev-parse", "main")) {
 		t.Errorf("comments %q", c)
 	}
 	for _, w := range f.forge.writes() {
@@ -249,7 +248,7 @@ func TestReconcile_SettlesTheDeviationsAPersonDecided(t *testing.T) {
 		t.Errorf("the accepted deviation citing none: %s, %q", is.State, f.forge.comments[plain])
 	}
 	if got := strings.Join(f.forge.labelsOf(rejected), ","); f.forge.issue(rejected).State != "open" || got != "af:defect,af:from-02,af:severity-correctness" ||
-		!strings.Contains(strings.Join(f.forge.comments[rejected], ""), "deviation-rejected") {
+		!strings.Contains(strings.Join(f.forge.comments[rejected], ""), "deviation-rejected") || !strings.Contains(strings.Join(f.forge.comments[rejected], ""), base) {
 		t.Errorf("the rejected deviation: %s, %q", got, f.forge.comments[rejected])
 	}
 	for _, n := range []int{open, both, defect} {
@@ -338,5 +337,74 @@ func TestReconcile_ADryRunShowsTheReconcile(t *testing.T) {
 	entries, _ := os.ReadDir(f.logDir())
 	if w := f.forge.writes(); len(w) != 0 || len(f.starts(t)) != 0 || len(entries) != 0 {
 		t.Errorf("writes %v, %d sessions, log files %v", w, len(f.starts(t)), entries)
+	}
+}
+
+// With nothing to adopt the adopt file is an empty array.
+func TestReconcile_WritesAnEmptyAdoptFileWhenThereIsNothingToAdopt(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.plan(t, land(0))
+	if _, code, stderr := runMain(t); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	files, _ := filepath.Glob(filepath.Join(f.logDir(), "*-adopt.json"))
+	if len(files) != 1 {
+		t.Fatalf("adopt files %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); strings.TrimSpace(string(b)) != "[]" {
+		t.Errorf("the adopt file holds %q; want []", b)
+	}
+}
+
+// A reconcile already due when a run starts, as after a restart, runs before
+// any package.
+func TestReconcile_ADueReconcileRunsBeforeTheNextPackage(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	writeFile(t, f.statePath(), `{"done":[],"since_reconcile":5}`)
+	f.plan(t, land(0))
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	if got := prompts(f.starts(t)); len(got) == 0 || got[0] != "reconcile" {
+		t.Errorf("sessions %v; want the due reconcile first", got)
+	}
+}
+
+// A package that landed and then stopped the loop is counted, so the
+// reconcile it makes due still runs.
+func TestReconcile_ALandedPackageThatStoppedTheLoopIsCounted(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	n := f.forge.add("01_a: leak", "open", "af:defect", "af:severity-security", "af:from-01")
+	// A reconcile ran before, so only the count can make the next one due.
+	writeFile(t, filepath.Join(f.logDir(), "ledger.jsonl"),
+		`{"kind":"reconcile","subject":"reconcile","started_at":"2026-11-12T08:00:00Z","ended_at":"2026-11-12T08:01:00Z","wall_minutes":1,"outcome":"reconciled"}`+"\n")
+	f.plan(t, land(0))
+	if _, code, _ := runMain(t, "--reconcile-every", "1"); code != 1 {
+		t.Fatalf("code %d; want the stop on the security defect", code)
+	}
+	f.forge.issue(n).State = "closed"
+	if _, code, stderr := runMain(t, "--reconcile-every", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	if got := prompts(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,reconcile" {
+		t.Errorf("sessions %v; want the reconcile the landing made due", got)
+	}
+}
+
+// Each reconcile lists the open deviations as they stand, not added to the
+// ones before.
+func TestReconcile_ListsEachOpenDeviationOnce(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.addPackage(t, "archive/00_zero", "00", "done")
+	f.forge.add("00_zero: kept", "open", "af:deviation", "af:from-00")
+	f.plan(t, land(0))
+	env, code, stderr := runMain(t, "--reconcile-every", "1")
+	if code != 0 || len(env.Result.OpenDeviations) != 1 {
+		t.Errorf("code %d, open deviations %+v; want one\n%s", code, env.Result.OpenDeviations, stderr)
 	}
 }
