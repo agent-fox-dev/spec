@@ -289,7 +289,7 @@ func (r *run) loop() int {
 		}
 		if run := r.state.Running; run != nil && run.Kind == kindRepair {
 			n, _ := strconv.Atoi(run.Subject)
-			if stop := r.repair(n); stop != nil {
+			if stop := r.rerunRepair(n); stop != nil {
 				return r.stop(stop)
 			}
 		}
@@ -387,7 +387,7 @@ func (r *run) recheckDefects() *Stopped {
 
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
-	if reason == reasonSeriousDefect {
+	if reason == reasonSeriousDefect || reason == reasonRepairFailed {
 		return "defect"
 	}
 	if strings.HasPrefix(reason, "serious defects:") {

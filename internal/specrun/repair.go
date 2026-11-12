@@ -1,6 +1,7 @@
 package specrun
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,7 +142,8 @@ func (r *run) repair(issue int) *Stopped {
 	r.state.Running = &runningStep{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), Head: head, PID: os.Getpid()}
 	r.saveState()
 
-	reason := ""
+	reason, outcome := "", outcomeFixed
+	var failedIssue *StopIssue
 	o, err := r.session(step).run(r.ctx, fmt.Sprintf("/af-impl --repair %d", issue))
 	switch {
 	case err != nil:
@@ -150,13 +152,15 @@ func (r *run) repair(issue int) *Stopped {
 		reason = reasonInterrupted
 	case o.stalled:
 		reason = reasonStalled
+	default:
+		outcome, failedIssue, reason = r.repairLeft(issue)
 	}
 	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
 	ended := now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), EndedAt: ended.Format(time.RFC3339),
-		WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeFixed}
+		WallMinutes: ended.Sub(started).Minutes(), Outcome: outcome}
 	switch reason {
-	case "":
+	case "", reasonRepairFailed:
 	case reasonStalled:
 		line.Outcome = outcomeStalled
 	default:
@@ -166,13 +170,111 @@ func (r *run) repair(issue int) *Stopped {
 		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
 	}
 	fmt.Fprintf(r.stderr, "%s: %s %s in %.1f min\n", tool, step, line.Outcome, line.WallMinutes)
-	if reason != "" {
+	if reason != "" && reason != reasonRepairFailed {
 		r.releaseStep()
 		return stop(reason)
 	}
 	r.finishStep(kindRepair, subject)
+	if reason == reasonRepairFailed {
+		s := stop(reason)
+		s.Issues = []StopIssue{*failedIssue}
+		return s
+	}
 	return nil
 }
 
-// The outcomes of a repair.
-const outcomeFixed = "fixed"
+// The outcomes of a repair, and the reasons a repair step stops the loop.
+const (
+	outcomeFixed        = "fixed"
+	outcomeAlreadyFixed = "already_fixed"
+	outcomeFailed       = "failed"
+	reasonRepairFailed  = "repair failed"
+	reasonIssueOpen     = "issue neither closed nor marked failed"
+)
+
+// repairLeft checks what a repair session left, from the repository and the
+// forge, not from the session's account: the base branch checked out and the
+// tree clean, then the issue closed (fixed, or already_fixed when the merge
+// commit's AF-Run trailer says so for this issue) or open and marked
+// af:repair-failed (failed, which stops the loop when its severity is in
+// --stop-on). Anything else is the reason the loop stops.
+func (r *run) repairLeft(issue int) (outcome string, failed *StopIssue, reason string) {
+	if branch, err := gitOutput(r.root, "branch", "--show-current"); err != nil || branch != r.base {
+		return outcomeStopped, nil, reasonNotOnBase
+	}
+	if status, err := gitOutput(r.root, "status", "--porcelain"); err != nil || strings.TrimSpace(status) != "" {
+		return outcomeStopped, nil, reasonDirty
+	}
+	is, err := r.findIssue(issue)
+	if err != nil {
+		return outcomeStopped, nil, err.Error()
+	}
+	switch {
+	case is.State != "open":
+		return r.repairOutcome(issue), nil, ""
+	case slices.Contains(is.Labels, "af:repair-failed"):
+		sev := ""
+		for _, l := range is.Labels {
+			if s, ok := strings.CutPrefix(l, "af:severity-"); ok {
+				sev = s
+			}
+		}
+		if sev != "" && slices.Contains(r.opts.stopOn, sev) {
+			return outcomeFailed, &StopIssue{Number: is.Number, URL: is.HTMLURL, Title: is.Title, Severity: sev}, reasonRepairFailed
+		}
+		return outcomeFailed, nil, ""
+	}
+	return outcomeStopped, nil, reasonIssueOpen
+}
+
+// findIssue reads one issue, open or closed, from the forge.
+func (r *run) findIssue(n int) (issuex.Issue, error) {
+	l, err := r.forge.ListIssues(r.ctx, r.repo, issuex.IssueFilter{State: "all", Limit: 25600})
+	if err != nil {
+		return issuex.Issue{}, fmt.Errorf("repair: reading issue #%d: %w", n, err)
+	}
+	for _, is := range l.Issues {
+		if is.Number == n {
+			return is, nil
+		}
+	}
+	return issuex.Issue{}, fmt.Errorf("repair: issue #%d is not on the forge", n)
+}
+
+// repairOutcome is already_fixed when the AF-Run trailer of the commit at the
+// tip of the base branch says so for this issue, else fixed.
+func (r *run) repairOutcome(issue int) string {
+	value, err := gitOutput(r.root, "log", "-1", "--format=%(trailers:key=AF-Run,valueonly,unfold)", "HEAD")
+	if err != nil {
+		return outcomeFixed
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(value), "\n")
+	var t struct {
+		Repair struct {
+			Issue   int    `json:"issue"`
+			Outcome string `json:"outcome"`
+		} `json:"repair"`
+	}
+	if json.Unmarshal([]byte(line), &t) == nil && t.Repair.Issue == issue && t.Repair.Outcome == outcomeAlreadyFixed {
+		return outcomeAlreadyFixed
+	}
+	return outcomeFixed
+}
+
+// rerunRepair is a repair recorded as running at start: done when its issue
+// is closed, with a ledger line of outcome fixed, and run again otherwise.
+func (r *run) rerunRepair(issue int) *Stopped {
+	if is, err := r.findIssue(issue); err == nil && is.State != "open" {
+		subject := strconv.Itoa(issue)
+		earlier, _ := readLedger(r.logDir)
+		ended := now().UTC().Truncate(time.Second)
+		if err := appendLedger(r.logDir, ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: r.state.Running.StartedAt,
+			EndedAt: ended.Format(time.RFC3339), Outcome: outcomeFixed}); err != nil {
+			fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
+		}
+		fmt.Fprintf(r.stderr, "%s: %s fixed before this run, as the forge shows\n", tool, stepName(len(earlier)+1, kindRepair, subject))
+		r.finishStep(kindRepair, subject)
+		return nil
+	}
+	return r.repair(issue)
+}
