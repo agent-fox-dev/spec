@@ -514,7 +514,9 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	r.startStep(kindImplement, next, before, started)
 
 	reason := ""
-	o, err := r.session(step).run(r.ctx, "/af-impl "+next.Dir)
+	// Nobody watches a package session, so af-impl gives each task a
+	// fresh context instead of one that grows with the package.
+	o, err := r.session(step).run(r.ctx, "/af-impl "+next.Dir+" --unattended")
 	switch {
 	case err != nil:
 		reason = reasonNoSession

@@ -107,7 +107,7 @@ func main() {
 	specDir := ""
 	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "/af-impl ") {
-			specDir = strings.TrimSpace(strings.TrimPrefix(a, "/af-impl "))
+			specDir = strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(a, "/af-impl ")), " --unattended")
 		}
 	}
 	trailer = r.Trailer

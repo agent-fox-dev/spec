@@ -196,7 +196,7 @@ func specDirs(starts []fakeStart) []string {
 	for _, s := range starts {
 		for _, a := range s.Argv {
 			if strings.HasPrefix(a, "/af-impl ") && !strings.HasPrefix(a, "/af-impl --") {
-				out = append(out, strings.TrimPrefix(a, "/af-impl "))
+				out = append(out, strings.TrimSuffix(strings.TrimPrefix(a, "/af-impl "), " --unattended"))
 			}
 		}
 	}
@@ -414,7 +414,7 @@ func prompts(starts []fakeStart) []string {
 			case strings.HasPrefix(a, "/af-impl --repair "):
 				out = append(out, "repair "+strings.TrimPrefix(a, "/af-impl --repair "))
 			case strings.HasPrefix(a, "/af-impl "):
-				out = append(out, strings.TrimPrefix(a, "/af-impl "))
+				out = append(out, strings.TrimSuffix(strings.TrimPrefix(a, "/af-impl "), " --unattended"))
 			}
 		}
 	}

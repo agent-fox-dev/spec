@@ -389,6 +389,8 @@ func TestRepair_StartsOneSessionForTheIssue(t *testing.T) {
 	for _, s := range f.starts(t) {
 		for i, a := range s.Argv {
 			switch {
+			case strings.Contains(a, "--unattended") && strings.Contains(a, "--repair"):
+				t.Errorf("the repair's prompt %q asks for the unattended mode", a)
 			case a == fmt.Sprintf("/af-impl --repair %d", issue):
 				rep = slices.Delete(slices.Clone(s.Argv), i, i+1)
 			case strings.HasPrefix(a, "/af-impl .specs/"):
