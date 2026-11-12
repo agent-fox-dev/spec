@@ -39,6 +39,9 @@ func TestHelp_GoesToStderrAndDescribesEveryForm(t *testing.T) {
 				// The render form and the migrate form.
 				"speca <spec> --render", "speca --render", "spec.md",
 				"speca <spec> --migrate", "speca --migrate", "version 2", "version 3", "test_spec.json", "C1 to C8",
+				// The gate form and the gate report.
+				"speca <spec> --gate task|full", "--clean-env", "--timeout", "not_run", "tree id", "gate_not_recorded",
+				"XDG_STATE_HOME", "speca <spec> --gate-report", "--since", "MERGE_HEAD",
 			} {
 				if !strings.Contains(help, want) {
 					t.Errorf("the help does not say %q", want)

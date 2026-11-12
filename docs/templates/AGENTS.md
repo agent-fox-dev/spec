@@ -34,17 +34,18 @@ libraries — API signatures in specs may be unverified assumptions.
 
 ## Quality Commands
 
-The baseline is what the spec packages define: every task in a spec's
-`tasks.json` lists its `test_commands`. Run those for the task you are
-working on, and they must pass.
+The gate between tasks is what the spec packages define: every spec's
+`tasks.json` lists its `test_commands`, and `speca <package> --gate task`
+runs its `linter`, then its `all_tests` (`--gate full` at the baseline, after
+the integration task and on the merged tree). They must pass. Do not
+substitute a more thorough target for them between tasks.
 
 If the repository has a `Makefile` (or another task runner), look at its
-targets (`make help`, or read it). Where a target such as `check` or `test`
-is more thorough than the `test_commands` — for example `make check` running
-formatting, static analysis and linting on top of the tests — run that target
-instead. Where it is not, stay with the `test_commands`.
-
-Before committing, run the most thorough quality suite the repository offers.
+targets (`make help`, or read it). Where a target such as `check` is more
+thorough than the `test_commands` — for example `make check` running
+formatting, static analysis and linting on top of the tests — run it once,
+before committing a merge, on the merged tree. Where there is none, the gate
+on the merged tree is the last check.
 
 ## Git Workflow
 

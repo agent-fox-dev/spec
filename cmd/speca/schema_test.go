@@ -88,6 +88,7 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 		"validate": "boolean", "list": "boolean", "all": "boolean", "specs-dir": "string", "dir": "string",
 		"task": "", "state": "string", "force": "boolean", "dry-run": "boolean", "status": "string", "by": "string",
 		"render": "boolean", "migrate": "boolean",
+		"gate": "string", "clean-env": "boolean", "timeout": "string", "gate-report": "boolean", "since": "string",
 	} {
 		if flags[name].Description == "" || typ != "" && flags[name].Type != typ {
 			t.Errorf("flag %s = %+v; want a described %s", name, flags[name], typ)
@@ -104,6 +105,9 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 	if got := flags["status"].Enum; !slices.Equal(got, wantStatusTargets) {
 		t.Errorf("--status enum = %v; want %v", got, wantStatusTargets)
 	}
+	if got := flags["gate"].Enum; !slices.Equal(got, []string{"task", "full"}) {
+		t.Errorf("--gate enum = %v; want task, full", got)
+	}
 	for _, name := range []string{"force", "dry-run"} {
 		if d := flags[name].Description; !strings.Contains(d, "--status") {
 			t.Errorf("--%s is described as %q, which does not say it applies to the status form", name, d)
@@ -116,6 +120,22 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 		if d, _ := result[name]["description"].(string); d == "" {
 			t.Errorf("result.%s is not described", name)
 		}
+	}
+	// The gate's verdict and the gate report, every field of each described.
+	for name, fields := range map[string][]string{
+		"gate":        {"level", "verdict", "clean_env", "reason", "reused", "commands", "seconds", "slowest"},
+		"gate_report": {"since", "full", "task", "baseline_full_seconds", "last_full_seconds", "slowest"},
+	} {
+		if d, _ := result[name]["description"].(string); d == "" {
+			t.Errorf("result.%s is not described", name)
+		}
+		props, _ := result[name]["properties"].(map[string]any)
+		for _, f := range fields {
+			if _, ok := props[f]; !ok {
+				t.Errorf("result.%s has no %s", name, f)
+			}
+		}
+		describedEverywhere(t, "result."+name, props)
 	}
 	if d := flags["render"].Description; !strings.Contains(d, "spec.md") {
 		t.Errorf("--render is described as %q, which does not say it writes spec.md", d)
@@ -156,5 +176,25 @@ func TestSchema_ThatCannotBeEncodedIsAnError(t *testing.T) {
 	env, code, _ := run(t, "--schema")
 	if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "schema" || env.Error.Category != "internal" || env.Result != nil {
 		t.Errorf("code %d: %+v", code, env.Error)
+	}
+}
+
+// describedEverywhere fails the test for every property under props, at any
+// depth, that has no description.
+func describedEverywhere(t *testing.T, path string, props map[string]any) {
+	t.Helper()
+	for name, v := range props {
+		p, _ := v.(map[string]any)
+		if d, _ := p["description"].(string); d == "" {
+			t.Errorf("%s.%s is not described", path, name)
+		}
+		if sub, ok := p["properties"].(map[string]any); ok {
+			describedEverywhere(t, path+"."+name, sub)
+		}
+		if items, ok := p["items"].(map[string]any); ok {
+			if sub, ok := items["properties"].(map[string]any); ok {
+				describedEverywhere(t, path+"."+name+"[]", sub)
+			}
+		}
 	}
 }

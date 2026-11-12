@@ -69,6 +69,19 @@ func TestSummary(t *testing.T) {
 		"a migration":            {migrateForm(false, "written", "unchanged", "unchanged", "failed"), "speca: 1 written, 2 unchanged, 1 failed"},
 		"a migration of nothing": {migrateForm(false), "speca: 0 written, 0 unchanged, 0 failed"},
 		"a migration, dry run":   {migrateForm(true, "written"), "speca: 1 written, 0 unchanged, 0 failed (dry run, nothing written)"},
+
+		// A gate says its level, its verdict and its seconds, or the commit a
+		// reused pass came from, or why it could not run; the report counts the
+		// runs.
+		"a full gate that passed": {gateOf(envelope.GateResult{Level: "full", Verdict: "pass", Seconds: 42.5}), "speca: 19_gate full gate pass in 42.5s"},
+		"a task gate that failed": {gateOf(envelope.GateResult{Level: "task", Verdict: "fail", Seconds: 3}), "speca: 19_gate task gate fail in 3s"},
+		"a reused full gate": {gateOf(envelope.GateResult{Level: "full", Verdict: "pass",
+			Reused: &envelope.GateReuse{Commit: "abc1234def5678abc1234def5678abc1234def56"}}), "speca: 19_gate full gate pass, reused from abc1234"},
+		"a full gate that did not run": {gateOf(envelope.GateResult{Level: "full", Verdict: "not_run", Reason: "the linter command could not start"}),
+			"speca: 19_gate full gate not_run: the linter command could not start"},
+		"a gate report": {&Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/19_gate", GateReport: &envelope.GateReport{
+			Full: envelope.GateRuns{Runs: 3, Reused: 1}, Task: envelope.GateRuns{Runs: 9, Reused: 1}}}},
+			"speca: 19_gate gate report: 3 full, 9 task, 2 reused"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := tc.r.Summary(); got != tc.want {
@@ -196,6 +209,26 @@ func TestNext_NoneWhenNothingWouldHelp(t *testing.T) {
 	} {
 		if got := r.Next(); len(got) != 0 {
 			t.Errorf("%s: Next = %+v; want none", name, got)
+		}
+	}
+}
+
+// gateOf is the result of the gate form with this verdict.
+func gateOf(g envelope.GateResult) *Result {
+	return &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/19_gate", SpecID: "19", Status: "active", Gate: &g}}
+}
+
+// Neither the gate nor the gate report suggests a call: what follows them is
+// the caller's decision.
+func TestNext_SuggestsNothingAfterTheGateOrTheReport(t *testing.T) {
+	gate := gateOf(envelope.GateResult{Level: "full", Verdict: "pass"})
+	gate.NextTask = &envelope.TaskInfo{ID: 2, State: "pending", Ready: true}
+	gate.writable = true
+	report := &Result{AdminResult: envelope.AdminResult{SpecDir: ".specs/19_gate", GateReport: &envelope.GateReport{},
+		NextTask: &envelope.TaskInfo{ID: 2, State: "pending", Ready: true}}, writable: true}
+	for name, r := range map[string]*Result{"gate": gate, "report": report} {
+		if got := r.Next(); len(got) != 0 {
+			t.Errorf("%s: Next = %+v; want nothing", name, got)
 		}
 	}
 }

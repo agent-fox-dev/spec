@@ -46,16 +46,24 @@ is missing.
   the tasks handled them, grouped by the survey's kinds; one entry per task
   with its commit, files changed, test verdicts, the test each of its
   criteria maps to, and any test-first deviation; the verification, before
-  and after, as measured; and the conformance findings and what was done
+  and after, as measured, with the gate report: the full gate's seconds at
+  the baseline and on the merged tree, the slowest units, and the full and
+  task runs with how many were reused, a reused gate written as "reused the
+  gate of `<commit>`, `<date>`"; and the conformance findings and what was done
   about each. Every claim in it comes from something that ran. It ends with
   a `Spec: <NN_name>` trailer.
 - **Merge.** Switch to the base branch and bring it up to date with
   `git pull --ff-only`. Then `git merge --no-ff --no-commit <branch>`. A
   conflict stops the landing: `git merge --abort`, stay on the base branch,
-  and report the conflicting files. Without a conflict, run `linter` and
-  `all_tests` on the merged tree. Only a landable verdict from the §5 table
-  commits the merge, with `git commit -F <message file>`; any other verdict
-  is `git merge --abort` and a report of what the checks returned, with the
+  and report the conflicting files. Without a conflict, run
+  `speca <package> --gate full` on the merged tree (often `reused` from the
+  branch tip's full gate), then the repository's thorough target, such as
+  `make check`, where it has one ([gate.md](gate.md)). Then
+  `speca <package> --gate-report --since <baseline commit>`, and put its
+  numbers in the message's verification section. Only a landable verdict
+  from the §5 table, for the gate and the thorough target, commits the
+  merge, with `git commit -F <message file>`; any other verdict is
+  `git merge --abort` and a report of what the checks returned, with the
   branch left as it is.
 - **Push the base branch** (`git push origin <base>`), unless the branch
   stays local. A rejected push is never forced: leave the merge commit in

@@ -61,7 +61,21 @@ Both commands use the same three:
   version 3 in place; `speca --migrate [--all]` does it for every package.
   A package in another format version is reported with one `schema_version`
   error naming this call, and nothing else of it is read.
-- The envelope's `next` suggests the calls that usually follow.
+- `speca <package> --gate task|full [--clean-env] [--timeout <d>]` — runs
+  the package's `linter`, then its `all_tests`, with no shell, and answers in
+  `result.gate`: `verdict` (`pass`, `fail` or `not_run`, with `reason`), each
+  command that ran with its `exit_code`, `seconds`, `log` and, when it failed,
+  `tail` (its last 40 lines), and for a full gate `slowest`. A tree that
+  already passed the same gate is answered from the record, with `reused`
+  (`commit`, `at`, `seconds`), and runs nothing. Exit code 0 carries every
+  verdict. It writes nothing in the repository; a `gate_not_recorded` warning
+  says the result was not recorded for reuse.
+- `speca <package> --gate-report [--since <commit>]` — sums the package's
+  gates since the commit in `result.gate_report`: `full` and `task` (`runs`,
+  `seconds`, `reused`), `baseline_full_seconds`, `last_full_seconds` and
+  `slowest`. It writes nothing.
+- The envelope's `next` suggests the calls that usually follow; it is empty
+  after the gate and the report.
 
 ## `specr`
 
@@ -103,7 +117,10 @@ them: read the three artifacts of the package directly, work out the package's
 scope, each task's readiness and the cross-file rules by hand, validate against
 the JSON Schemas in `specification/schemas/*.v3.json` of a `spec` checkout with
 any JSON Schema validator, and change a task's `state` entry in `progress.json`
-by hand and nothing else. Say in the report that you did, and that no verdict
+by hand and nothing else. Run `linter` and `all_tests` by hand, in that order,
+at the moments the gate would run, the clean-environment run with an empty
+`HOME`, no global git configuration and `GIT_TERMINAL_PROMPT=0`; there is no
+reuse and no gate report. Say in the report that you did, and that no verdict
 from the format itself was taken.
 
 ## What a `speca` write does to the package

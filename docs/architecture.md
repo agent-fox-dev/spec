@@ -20,7 +20,7 @@ afspec/                     # The reference library, package afspec
 envelope/                   # The commands' JSON output as Go types (stdlib only)
 cmd/spec/                   # The spec command: flags, help, the entry point
 cmd/specr/                  # The specr command: a package rendered as Markdown
-cmd/speca/                  # The speca command: a package's state, its verdict, the list
+cmd/speca/                  # The speca command: a package's state, its verdict, the list, the gate
 specgen/                    # The generation pipeline: phases, prompts, review, split
   templates/                #   The prompts, as Markdown, embedded
 skills/                     # The af-* skills, one source for four agents
@@ -30,6 +30,7 @@ skills/                     # The af-* skills, one source for four agents
 internal/
   agentrun/                 #   One model phase on the AgentKit driver
   cli/                      #   The shell: input, envelope, flags, progress
+  gate/                     #   speca's gate: run linter and all_tests, record and reuse a pass
   issuex/                   #   GitHub and GitLab: read an issue, post a comment
   project/                  #   Language detection, the test-command audit, steering
   authoring/                #   The authoring hints: vague words, line references, foreign test commands
@@ -304,12 +305,14 @@ cmd/speca ──> afspec
     ├───────> internal/project (the steering, for steering_malformed; the profile, for the hints)
     ├───────> internal/authoring (the hints of --validate)
     ├───────> internal/specpkg
+    ├───────> internal/gate   (the gate form and the gate report)
     └───────> internal/cli    (the Run, SplitArgs, the --schema generator)
 
 cmd/specr ──> internal/specpkg
 specgen   ──> internal/specpkg, internal/authoring
 internal/authoring ──> afspec, internal/project
 internal/specpkg ──> afspec, envelope, internal/cli   (for the usage error)
+internal/gate    ──> envelope                         (and git, as a process)
 ```
 
 Like `specr`, it does not use `cli.App`, and it links `internal/cli` and so the
@@ -325,7 +328,7 @@ afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 breaks (`Rules`). It is a package of its own because `envelope` must stay
 standard-library only and `internal/cli` does not import `afspec`.
 
-`cmd/speca` has eight forms, each in a file of its own (the status form in three),
+`cmd/speca` has ten forms, each in a file of its own (the status form in three),
 chosen by the flags in `forms.go`:
 
 | Form | File | Reads | Writes |
@@ -338,6 +341,23 @@ chosen by the flags in `forms.go`:
 | the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package (`progress.json` and `spec.md` included), through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |
 | the render form, `speca <spec> --render`, and the sweep, `speca --render [--all]` | `render.go`; the sweep goes through the spec root with `list.go`'s `packageDirs` | the package, or every package of the spec root (and `archive/` with `--all`) | `spec.md` alone, through `cli.WriteAtomic`, when it is not the render already; never an artifact ([ADR 14](adr/14-commit-the-rendered-package-beside-its-json.md)) |
 | the migrate form, `speca <spec> --migrate`, and the sweep, `speca --migrate [--all]` | `migrate.go`; the sweep goes through the spec root as the render sweep does | the package, or every package of the spec root (and `archive/` with `--all`) | every artifact of a version 2 package, written as version 3 through the library's `MigrateV2`, and its `test_spec.json`, removed; a version 3 package is left alone ([ADR 19](adr/19-migrate-the-format-to-version-3.md)) |
+| the gate form, `speca <spec> --gate task\|full` | `gate.go`, through `internal/gate` | the package's `test_commands`, and the working tree, through git with a copy of the index | nothing under `--dir`; in the state directory, each command's log, the pass under its key (through a temporary file it renames) and a line of the run log ([ADR 22](adr/22-run-the-gate-with-speca.md)) |
+| the gate report, `speca <spec> --gate-report` | `gate_report.go`, through `internal/gate` | the package, the repository's run log in the state directory, and the commits since `--since`, through git | nothing |
+
+`internal/gate` is the gate's machinery, and imports `envelope` and nothing of
+the shell. `Split` splits a command string with quotes and nothing else;
+`Runner` starts each command directly, in a process group of its own
+(`proc_unix.go`; elsewhere the timeout ends the command alone), measures it on
+a clock a test can replace, and sends its output to one `sink`: the log file,
+the 40-line `tail` and, for a full gate's `all_tests`, the Go `units` reader,
+all fed as the output is written. `ReadTree` works out the tree id through a
+copied index and a temporary object directory; `Store` is the repository's
+directory under the state directory (`StateDir`, `RepoDir`), with the logs, the
+passes by `Key` and the run log (`AppendRun`, `ReadRuns`); `Top`, `Commit`,
+`BaseBranch`, `MergeBase` and `Since` are the git questions the gate report
+asks. The gate form reads the tree before anything runs, looks the key up,
+runs the commands when it finds no pass, and records a pass and logs every
+pass and fail after; the report selects the logged runs by ancestry.
 
 The forms that write do so only through the library. The task form:
 `plan.go` chooses the moves and applies them with `TransitionTask` (and, under
