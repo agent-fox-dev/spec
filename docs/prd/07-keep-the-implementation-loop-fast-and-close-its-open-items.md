@@ -38,6 +38,10 @@ are general: they hold for any project and any language the format supports.
 - **Measured gate cost.** The report and the merge commit record how long each
   full-suite run took, and its slowest units where the tool reports them. A
   gate over the project's budget is a finding.
+- **The gate is a command, not instructions.** `speca --gate` runs the gate,
+  reuses passing results, measures the run and checks the budget, and it
+  returns one JSON verdict. The model calls one command and does none of the
+  bookkeeping.
 - **Classified open items.** Every open item is filed with a kind (`awaits`,
   `defect`, `untested`, `deviation`), the package that opened it, and, for
   `awaits`, the package that must close it. A `defect` also carries a
@@ -51,10 +55,16 @@ are general: they hold for any project and any language the format supports.
     evidence.
   - Items that await it but are still open after its landing are passed on
     or reclassified, never left pointing at a package that is done.
-- **Defects stop or repair the loop.** The runner stops, or runs a repair,
-  after a package opens a defect at or above a configured severity. Every few
-  packages, and at the end, it reconciles every open item against the base
-  branch.
+- **Every open item has a path to closed.**
+  - The runner stops, or runs a repair, after a package opens a defect at or
+    above a configured severity.
+  - Every few packages, and at the end, it reconciles every open item
+    against the base branch.
+  - The other defects and the untested criteria are repaired in batches at
+    each reconcile.
+  - A person settles a deviation with one label, and the next reconcile
+    acts on it.
+  - Issues opened before this change are adopted into the same lifecycle.
 - **Cross-package wiring is declared.** A package that leaves an extension
   point for another package to fill declares it as a handoff. `speca` refuses
   a handoff to a package that lands earlier, and warns when the receiving
@@ -64,9 +74,11 @@ are general: they hold for any project and any language the format supports.
 
 ## Non-goals
 
-- **Fixing a project's test suite.** This plan gives the steering a test-cost
-  directive, measures the cost and reports it. Making a given suite parallel
-  or its fixtures cheap is that project's own work.
+- **A recipe for fixing a project's test suite.** This plan gives the
+  steering a test-cost directive, measures the cost and files a finding when
+  the suite grows past its budget. That finding is repaired like any minor
+  defect. How a given suite is made parallel, or its fixtures cheap, is the
+  project's own decision, made in that repair or by a person.
 - **Weakening the test-first gate.** Every task's new tests are still seen
   failing first, and every task still lands only on a passing gate. Only the
   scope of the between-task gate changes.
@@ -223,9 +235,10 @@ levels.
 1.2 **The affected-tests command is the project's.**
 
 `tasks.json` `test_commands` gets an optional `affected_tests`: a command that
-contains the placeholder `{base}` exactly once. Before running it, af-impl
-replaces `{base}` with the id of the commit the task started from, so the
-command runs the tests that the diff from that commit can affect. An example
+contains the placeholder `{base}` exactly once. Before running it,
+`speca --gate` (1.8) replaces `{base}` with the id of the commit the task
+started from, so the command runs the tests that the diff from that commit
+can affect. An example
 is `make test-affected BASE={base}`. A command without `{base}`, or with it
 more than once, fails validation. The project's tool works out the changed
 paths itself, new and untracked files included. The project decides what
@@ -238,11 +251,12 @@ such a command. The af-spec survey looks for one.
 
 1.3 **A tree that passed is not checked again.**
 
-af-impl records every gate result in a file outside the repository, under the
-user's state directory, keyed by four things:
+`speca --gate` (1.8) records every gate result in a file outside the
+repository, under the user's state directory, keyed by four things:
 
-- the tree id (`git rev-parse HEAD^{tree}`, or `git write-tree` for an
-  uncommitted merge);
+- the tree id of the working tree as it is, tracked and untracked files
+  included (written through a temporary index, so the user's index is not
+  touched);
 - the gate level;
 - the exact commands;
 - whether the environment was clean.
@@ -257,16 +271,17 @@ The task and full gates run the commands in `test_commands`. A more thorough
 repository target, such as `make check`, runs once, on the merged tree,
 before the merge is committed. af-impl's text says this order takes
 precedence over a project instruction to substitute the thorough target for
-every check. The project template's "Quality Commands" section is reworded to
-match: "the thorough target before committing a merge, the spec's commands
-between tasks".
+every check. The project template's "Quality Commands" section
+(`docs/templates/AGENTS.md`) is reworded to match: "the thorough target
+before committing a merge, the spec's commands between tasks".
 
 1.5 **Gate cost is measured and reported.**
 
-Every gate run records its duration. Where the tool reports units (Go
-packages, pytest files, Jest suites), af-impl also keeps the five slowest
-units of the full gate on the merged tree. The merge commit and the report
-hold:
+`speca --gate` (1.8) records the duration of every gate run. Where it
+recognises the tool's output (Go packages first; pytest files and Jest suites
+as later additions), it also keeps the five slowest units of each full gate.
+For an output it does not recognise, the list is empty. The merge commit and
+the report hold, from `speca <package> --gate-report`:
 
 - the full gate's duration at the baseline and on the merged tree;
 - those slowest units;
@@ -275,10 +290,14 @@ hold:
 1.6 **A gate budget.**
 
 The steering may set `gate_budget_seconds` for the full gate, default 120.
-When the full gate on the merged tree exceeds the budget, or grew by more
-than half over this branch, the conformance pass records a `test-cost`
-finding. It is filed as a `defect` of severity `minor` (requirement 3), so it
-reaches someone instead of disappearing into a commit message.
+`speca --gate` compares each full gate with the budget, and with the full
+gate recorded for the base branch's tree. Its verdict says whether the run
+exceeded the budget, and by how much it grew. When the full gate on the
+merged tree exceeds the budget, or grew by more than half over this branch,
+the conformance pass records a `test-cost` finding. It is filed as a
+`defect` of severity `minor` (requirement 3), so it reaches someone instead
+of disappearing into a commit message. The reconcile's repair queue (5.2)
+then picks it up like any other minor defect.
 
 1.7 **A test-cost directive in the steering template.**
 
@@ -294,6 +313,59 @@ section:
 The conformance "Tests" checklist adds: "a new test that runs serially
 without a stated reason, or rebuilds a fixture the shared helpers already
 build once".
+
+1.8 **`speca` runs the gate.**
+
+`speca <package> --gate task|full [--clean-env] [--base <commit>]` runs one
+gate of the package and answers in speca's JSON envelope.
+
+- **The commands.**
+  - `full` runs `linter`, then `all_tests`.
+  - `task` runs `linter`, then `affected_tests` with `{base}` replaced by
+    `--base` (default `HEAD`, the commit the uncommitted task work sits on).
+    It falls back to `all_tests` when the package has no `affected_tests`.
+  - Each command runs without a shell, as `test_commands` already requires,
+    and stops at the first command that fails.
+- **The clean environment.** `--clean-env` runs the commands with:
+  - an empty temporary `HOME`;
+  - no global or system git configuration;
+  - `GIT_TERMINAL_PROMPT=0`.
+
+  This is the run the conformance pass asks for today.
+- **Reuse.** Before running anything, it looks up the key of 1.3. A recorded
+  pass is returned as the verdict, with `reused` naming the commit and time
+  of the run it came from.
+- **Output.** Each command's full output goes to a log file outside the
+  repository. The envelope names the file, and holds the last 40 lines of a
+  failing command, so the model reads a failure without reading a log.
+- **The verdict** (`result`):
+  - `level`;
+  - `verdict` (`pass`, `fail` or `not_run`);
+  - `reused`;
+  - per command: its name, exit code, seconds, and the path of its log;
+  - total seconds;
+  - the slowest units (1.5);
+  - for a full gate, the budget, whether it was exceeded and the growth over
+    the base branch (1.6).
+
+  `not_run` means a command could not start: it is missing, or the
+  package's `test_commands` are invalid.
+- **What it writes.** It writes nothing into the repository or the package.
+  It is not a task move and is allowed in any package status. The exit code
+  follows speca's conventions: `0` when the gate ran, whatever its verdict.
+  The verdict is in the JSON.
+- **The report.** `speca <package> --gate-report [--since <commit>]` sums
+  this package's recorded gate runs since the branch left the base branch:
+  - the full and task runs, their seconds and how many were reused;
+  - the full gate's duration at the baseline and on the last tree;
+  - the slowest units of the last full gate.
+
+  af-impl copies this report into the merge commit and its `AF-Run:`
+  trailer (5.5).
+
+af-impl compares the verdict with the baseline using the table of §5, as it
+does today. Only the running and the bookkeeping move into `speca`. A repair
+(5.2) runs the full gate through the same command.
 
 ### 2. The session's context stays bounded
 
@@ -386,8 +458,9 @@ item with `issue <ref> --close --body`. The comment names the merge commit,
 the evidence and this package.
 
 af-impl's "Never" rule changes accordingly. af-impl may comment on and close
-an issue labelled `af:*` whose closing condition this branch meets. It still
-never closes, edits or comments on any other issue.
+an issue labelled `af:*` whose closing condition this branch meets. A
+reconcile may also label the issues it adopts (5.3). af-impl still never
+closes, edits or comments on any other issue.
 
 3.6 **Nothing is left awaiting a package that is done.**
 
@@ -406,6 +479,22 @@ When this package's landing ends, no open issue carries
 
 They say how many open items the package opened, closed, passed on and
 reclassified, per kind and severity, with the issue links.
+
+3.8 **A person settles a deviation with a label.**
+
+A deviation waits for a person. To settle it, the person adds one label to
+the issue:
+
+- `af:accepted`: the deviation stands. The next reconcile closes the issue
+  with a comment naming the ADR that records it. The spec is not edited. The
+  ADR and the closed issue are the record.
+- `af:rejected`: the code must do what the spec says. The next reconcile
+  relabels the issue `af:defect` with severity `correctness`, with a comment
+  saying a person rejected the deviation. It is then repaired like any other
+  defect (5.2).
+
+A deviation with neither label stays open, and every reconcile report lists
+it, oldest first.
 
 ### 4. Handoffs between packages are declared and checked
 
@@ -442,6 +531,7 @@ warning does not make the package invalid.
 The flag stores nothing; the caller decides each time. CI, a person, af-spec
 when it writes a package, or af-impl when the runner asks for it can each
 pass the flag.
+
 `specr <package> --task <N>` renders a task's handoffs with the sending
 package's text, so the coder sees what to wire.
 
@@ -476,14 +566,34 @@ package is not started on top of them.
 
 A `deviation` never stops the runner. The ledger line and the merge commit
 count it, and every reconcile report (5.3) lists the open deviations, so a
-person can accept or reject them in a batch.
+person can settle them in a batch (3.8).
+
+`STOP_ON` decides only when the runner halts. What it repairs is decided
+separately, by `REPAIR` and `REPAIR_ON` (5.2).
 
 5.2 **Repair as its own unit of work.**
 
-With `REPAIR=1`, the runner runs `/af-impl --repair <issue>` instead of
-stopping, for each such defect, in severity order.
+The runner runs `/af-impl --repair <issue>` at two moments:
 
-A repair:
+- **Instead of stopping.** With `REPAIR=1`, after a package that opened
+  defects whose severity is in `STOP_ON`, it repairs each of them, most
+  severe first, before the next package.
+- **At every reconcile.** After each reconcile (5.3), it repairs the open
+  items the reconcile put in its repair queue, most severe first, at most
+  `REPAIR_MAX` (default 5) per reconcile. The queue holds:
+  - every `af:defect` whose severity is in `REPAIR_ON` (default
+    `security,data-loss,correctness,minor`);
+  - every `af:untested` item, when `REPAIR_ON` holds `untested` (it does by
+    default).
+
+  Items not repaired this time stay queued for the next reconcile. This is
+  how `correctness` and `minor` defects, `test-cost` findings and untested
+  criteria get closed without stopping the loop.
+
+A `security` defect is repaired only when `REPAIR_SECURITY=1` is also set,
+whichever of the two moments it comes up at.
+
+A repair of a defect:
 
 - branches `fix/<issue>-<slug>` from the base branch;
 - writes the regression test first and runs it on the unchanged code;
@@ -496,28 +606,70 @@ A repair:
   that package's commands;
 - merges `--no-ff` and closes the issue with the merge commit as evidence.
 
-A repair whose test cannot reproduce the issue as it is described, for
-example because the issue names code that no longer exists, does not guess.
-It comments on the issue with what it tried, leaves it open, and the runner
-stops.
+A repair of an `untested` item is a test-only repair. It writes the test the
+criterion is missing, on a `fix/<issue>-<slug>` branch, and runs it on the
+unchanged code:
+
+- when the test passes, the behaviour was right. The repair commits the test
+  (`test:`), passes the full gate, merges and closes the issue with the test
+  as evidence;
+- when the test fails, the behaviour was wrong. The repair relabels the issue
+  `af:defect` with severity `correctness`, with a comment holding the
+  failure, and goes on as a repair of that defect, in the same session.
 
 A repair touches only what the fix needs. It is not a package task and moves
 no task state. It may edit a landed package's code, because the defect is its
-scope. If the repair cannot fix the defect in two attempts, it leaves the
-issue open with a comment and the runner stops. `security` defects are
-repaired only when `REPAIR_SECURITY=1` is also set.
+scope.
+
+A repair can fail in two ways:
+
+- its test cannot reproduce the issue as it is described, for example
+  because the issue names code that no longer exists, and the repair does
+  not guess;
+- it cannot fix the defect in two attempts.
+
+Either way, the repair comments on the issue with what it tried, adds the
+label `af:repair-failed` and leaves the issue open. The runner stops when the
+issue's severity is in `STOP_ON`. Otherwise it goes on, and later reconciles
+leave the issue out of their repair queue until a person removes the label.
 
 5.3 **Reconcile periodically.**
 
 Every `RECONCILE_EVERY` packages (default 5), and once more when every
-package is done, the runner runs `/af-impl --reconcile`. That session checks
-every open `af:*` issue against the base branch:
+package is done, the runner runs `/af-impl --reconcile`. That session first
+adopts the issues opened before this change, then checks every open `af:*`
+issue against the base branch.
 
-- it closes those whose closing condition holds, with evidence;
-- it relabels an `awaits` whose receiver has landed (3.6);
-- it lists the rest by kind and severity.
+**Adopting older issues.** An open issue with no `af:` label is adopted when
+its title starts with `<NN_name>:` and `NN_name` is a package under the spec
+root. That is the title af-impl has always given an open item. The reconcile
+reads the issue's body, which already says what is missing, why, the
+evidence and what closes it, and assigns:
 
-It changes no code. Its report goes to the runner's log directory.
+- its kind;
+- `af:from-<NN>`;
+- `af:awaits-<NN>` when it awaits a package;
+- a severity when it is a defect.
+
+It adds those labels with a comment saying the issue was adopted and why it
+got that kind. An issue whose kind the body does not settle is labelled
+`af:deviation`, so a person decides it (3.8). An issue whose title does not
+match is never touched. Adoption runs at every reconcile, so issues opened
+by an older af-impl during a mixed run are picked up too.
+
+**Checking the `af:*` issues.** The reconcile then:
+
+- closes those whose closing condition holds on the base branch, with
+  evidence;
+- relabels an `awaits` whose receiver has landed (3.6);
+- closes an `af:accepted` deviation, and turns an `af:rejected` one into a
+  defect (3.8);
+- builds the repair queue (5.2);
+- lists the rest by kind and severity, deviations oldest first.
+
+The reconcile changes no code. Its report goes to the runner's log directory
+as Markdown, with the repair queue as JSON beside it. The runner reads the
+queue and runs the repairs (5.2).
 
 5.4 **Full logs and a ledger.**
 
@@ -532,6 +684,10 @@ It changes no code. Its report goes to the runner's log directory.
   - full gate runs and seconds, reused gates, task gate runs and seconds
     (read from the merge commit's trailer, see 5.5);
   - open items opened, closed and passed on.
+
+  A reconcile and each repair also get a line, with their kind in place of
+  the package and, for a repair, the issue and its outcome (fixed,
+  already fixed, failed).
 - After each package it prints that line. When a package's wall time is more
   than twice the median of the packages before it, it also prints a warning.
 
@@ -628,15 +784,49 @@ repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
     crossed 120 s around the fifteenth package, when the slowdown first
     showed in wall time. Both can be set by the project; neither is
     switched off by default.
+16. **The gate is a `speca` command, not instructions to the model.**
+    Recording results by tree, timing runs, parsing per-unit times,
+    comparing with a budget and summing runs for the trailer are all
+    mechanical. Written as skill instructions, the model would run
+    `git write-tree`, time commands and edit a state file by hand on every
+    gate. That is fragile, differs from run to run, and adds model turns to
+    the path this plan is trying to make cheaper. `speca` already reads
+    `test_commands`, and it is the command af-impl calls for every other
+    mechanical step. One call per gate, with a JSON verdict, also gives
+    interactive runs, unattended runs and repairs the same gate.
+17. **Stopping and repairing are configured separately.** What is dangerous
+    to build on (`STOP_ON`) and what the loop may fix by itself (`REPAIR_ON`)
+    are different questions. Tying them together left every `correctness`
+    and `minor` defect open forever, which is the backlog this plan exists
+    to end. Batching repairs at reconciles, with a cap, keeps the time they
+    take bounded and visible in the ledger.
+18. **An untested criterion is closed by a test.** The cheapest way to
+    settle "believed to work" is to write the missing test. Either it
+    passes, and the issue closes with the test as evidence, or it fails,
+    and the item was a defect all along and is repaired as one in the same
+    session.
+19. **A person settles a deviation where it is tracked, with a label.**
+    Labels are the one thing the runner, the reconcile and the forge's own
+    filters all read. Accepting needs no spec edit, because the ADR already
+    records the rule the code follows. Rejecting turns the item into an
+    ordinary defect, so the repair path needs nothing new.
+20. **Older issues are adopted by their title, and only by their title.**
+    af-impl has always titled an open item `<NN_name>: <what is missing>`,
+    and its body already holds what a classification needs. Matching the
+    title against the packages in the spec root keeps the reconcile away
+    from every issue a person opened. When the body does not settle the
+    kind, `deviation` puts the decision in front of a person instead of
+    guessing.
 
 ## Sequencing
 
 Three steps. Each lands on its own and is useful without the next.
 
 1. **Cheap and largest gain.**
-   - Gate levels, the reused-gate cache and the gate's commands (1.1, 1.3,
-     1.4), first without `affected_tests`: the task gate is then the full
-     suite, but baselines and identical merged trees are not run again.
+   - `speca --gate` and `--gate-report` (1.8), with the gate levels, the
+     reused-gate cache and the gate's commands (1.1, 1.3, 1.4), first
+     without `affected_tests`: the task gate is then the full suite, but
+     baselines and identical merged trees are not run again.
    - Gate measurement (1.5).
    - Runner logs, ledger and versions (5.4, 5.6).
    - Kinds and labels (3.1, 3.2, 3.7).
@@ -644,7 +834,9 @@ Three steps. Each lands on its own and is useful without the next.
 2. **The loop reads back.**
    - The no-dead-handoffs check (3.3), the survey reading open items (3.4)
      and passing on what remains (3.6).
-   - Stop, repair and reconcile (5.1–5.3) and the trailer (5.5).
+   - Stop, repair and reconcile (5.1–5.3), with `REPAIR_ON` and the
+     test-only repair, adopting older issues, and the trailer (5.5).
+   - Settling deviations by label (3.8).
    - `affected_tests` (1.2), the budget (1.6) and the steering directive
      (1.7).
 3. **Format and context.**
@@ -659,11 +851,13 @@ Three steps. Each lands on its own and is useful without the next.
 
 - `speca --next` and the dependency graph (`feature/speca-next`), for 3.3 and
   4.2.
+- `speca`'s JSON envelope and exit-code conventions (`docs/speca.md`), which
+  `--gate` and `--gate-report` follow.
 - `issue` from `aflib`, which already supports `--list --label`,
   `--create-label`, `--edit --add-label/--remove-label`, `--comment` and
   `--close`.
 - The v3 format (PRD 06, ADR 19). `handoffs`, `takes_handoffs` and
   `test_commands.affected_tests` are additions to its schemas.
-- The steering template `docs/templates/steering.md` and the project
-  template's "Quality Commands" section.
+- The steering template `docs/templates/steering.md` and the "Quality
+  Commands" section of the project template `docs/templates/AGENTS.md`.
 - `claude -p --output-format stream-json`, for 5.4.
