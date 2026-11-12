@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -125,6 +127,14 @@ func (r *run) reconcile() *Stopped {
 	if err := os.WriteFile(adoptPath, append(b, '\n'), 0o644); err != nil {
 		return stop(fmt.Sprintf("reconcile: the adopt file could not be written: %v", err))
 	}
+	openNow, err := r.listOpen(nil)
+	if err != nil {
+		return stop(fmt.Sprintf("reconcile: listing the open issues: %v", err))
+	}
+	openBefore := map[int]bool{}
+	for _, is := range openNow {
+		openBefore[is.Number] = true
+	}
 	started := now().UTC().Truncate(time.Second)
 	r.state.Running = &runningStep{Kind: kindReconcile, Subject: kindReconcile, StartedAt: started.Format(time.RFC3339),
 		Head: before, PID: os.Getpid()}
@@ -150,6 +160,15 @@ func (r *run) reconcile() *Stopped {
 			r.warnings = append(r.warnings, envelope.Warning{Code: warnReportMissing, Severity: envelope.SeverityLow, Stage: "reconcile", Message: msg})
 			fmt.Fprintf(r.stderr, "%s: warning: %s\n", tool, msg)
 		}
+		counts, err := r.reconcileRules(adopt, openBefore, before)
+		if err != nil {
+			reason = err.Error()
+			if r.ctx.Err() != nil {
+				reason = reasonInterrupted
+			}
+		} else {
+			line.Adopted, line.Closed, line.Settled = &counts.adopted, &counts.closed, &counts.settled
+		}
 	}
 	switch reason {
 	case "":
@@ -168,7 +187,11 @@ func (r *run) reconcile() *Stopped {
 		fmt.Fprintf(r.stderr, "%s: %s %s: %s\n", tool, step, line.Outcome, reason)
 		return stop(reason)
 	}
-	fmt.Fprintf(r.stderr, "%s: %s reconciled in %.1f min\n", tool, step, line.WallMinutes)
+	fmt.Fprintf(r.stderr, "%s: %s reconciled in %.1f min: %d adopted, %d closed, %d settled\n", tool, step, line.WallMinutes,
+		*line.Adopted, *line.Closed, *line.Settled)
+	for _, d := range r.result.OpenDeviations {
+		fmt.Fprintf(r.stderr, "%s: open deviation #%d %s (%s) %s\n", tool, d.Number, d.Title, d.CreatedAt, d.URL)
+	}
 	r.state.SinceReconcile = 0
 	r.finishStep(kindReconcile, kindReconcile)
 	return nil
@@ -190,4 +213,197 @@ func (r *run) unmoved(before string) string {
 	return ""
 }
 
-var _ = issuex.Issue{}
+// The rules a reconcile applies after its session, and its warning for a
+// deviation a person both accepted and rejected.
+const (
+	ruleAdoptionUnsettled = "adoption-unsettled"
+	ruleDeviationAccepted = "deviation-accepted"
+	ruleDeviationRejected = "deviation-rejected"
+
+	warnDeviationConflict envelope.WarnCode = "deviation_conflict"
+)
+
+// adrPath finds the first ADR an issue's body cites.
+var adrPath = regexp.MustCompile(`docs/adr/[A-Za-z0-9._-]+\.md`)
+
+// hasKind reports whether the labels hold one of the kinds.
+func hasKind(labels []string) bool {
+	return slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(kindLabels, l) })
+}
+
+// adoptionUnsettled is the rule adoption-unsettled: an issue of the adopt
+// file still open with no kind becomes a deviation of the package its title
+// names, for a person to decide. ids maps a package directory to its spec id.
+func adoptionUnsettled(adopt []adoptEntry, issues map[int]issuex.Issue, ids map[string]string, base string) []labelChange {
+	var out []labelChange
+	for _, a := range adopt {
+		is, ok := issues[a.Number]
+		if !ok || is.State != "open" || hasKind(is.Labels) {
+			continue
+		}
+		c := labelChange{Issue: a.Number, Rule: ruleAdoptionUnsettled,
+			Comment: fmt.Sprintf("specrun, rule adoption-unsettled, on %s: the reconcile left this issue of %s with no kind. "+
+				"It is now af:deviation, for a person to decide.", base, a.Package)}
+		for _, l := range []string{"af:deviation", "af:from-" + ids[a.Package]} {
+			if !slices.Contains(is.Labels, l) {
+				c.Add = append(c.Add, l)
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// deviationRules are the rules deviation-accepted and deviation-rejected over
+// the open issues: a deviation a person accepted is closed, naming the ADR it
+// cites; one a person rejected becomes a correctness defect. One both
+// accepted and rejected is nobody's decision, and is returned apart.
+func deviationRules(issues []issuex.Issue, base string) (changes []labelChange, conflicts []issuex.Issue) {
+	for _, is := range issues {
+		if is.State != "open" || !slices.Contains(is.Labels, "af:deviation") {
+			continue
+		}
+		accepted, rejected := slices.Contains(is.Labels, "af:accepted"), slices.Contains(is.Labels, "af:rejected")
+		switch {
+		case accepted && rejected:
+			conflicts = append(conflicts, is)
+		case accepted:
+			adr := "it cites no ADR"
+			if p := adrPath.FindString(is.Body); p != "" {
+				adr = "its decision is recorded in " + p
+			}
+			changes = append(changes, labelChange{Issue: is.Number, Rule: ruleDeviationAccepted, Close: true,
+				Comment: fmt.Sprintf("specrun, rule deviation-accepted, on %s: a person accepted this deviation; %s.", base, adr)})
+		case rejected:
+			c := labelChange{Issue: is.Number, Rule: ruleDeviationRejected, Remove: []string{"af:deviation", "af:rejected"},
+				Comment: fmt.Sprintf("specrun, rule deviation-rejected, on %s: a person rejected this deviation, "+
+					"so the code must do what the spec asks. It is now a correctness defect.", base)}
+			for _, l := range []string{"af:defect", "af:severity-correctness"} {
+				if !slices.Contains(is.Labels, l) {
+					c.Add = append(c.Add, l)
+				}
+			}
+			changes = append(changes, c)
+		}
+	}
+	return changes, conflicts
+}
+
+// packageIDs maps the directory name of every package under the spec root
+// and its archive to its spec id; one that does not load keeps its number.
+func (r *run) packageIDs() map[string]string {
+	out := map[string]string{}
+	for _, sub := range []string{"", "archive"} {
+		dir := filepath.Join(r.specsDir, sub)
+		names, _ := afspec.ListSpecDirs(dir)
+		for _, n := range names {
+			if spec, err := afspec.LoadSpec(filepath.Join(dir, n)); err == nil {
+				out[n] = spec.SpecID
+			} else {
+				out[n], _, _ = strings.Cut(n, "_")
+			}
+		}
+	}
+	return out
+}
+
+// reconcileCounts are what a reconcile's ledger line counts.
+type reconcileCounts struct {
+	adopted, closed, settled int
+}
+
+// reconcileRules settles by rule what needs no judgement after a reconcile
+// session: the adoptions it left unsettled, the deviations a person
+// decided, then incomplete-labels for every package and awaits-finished. It
+// counts what the reconcile adopted, closed and settled, and lists the open
+// deviations nobody has settled, oldest first.
+func (r *run) reconcileRules(adopt []adoptEntry, openBefore map[int]bool, base string) (reconcileCounts, error) {
+	var n reconcileCounts
+	all, err := r.forge.ListIssues(r.ctx, r.repo, issuex.IssueFilter{State: "all", Limit: 25600})
+	if err != nil {
+		return n, fmt.Errorf("reconcile: listing the issues: %w", err)
+	}
+	byNumber := map[int]issuex.Issue{}
+	for _, is := range all.Issues {
+		byNumber[is.Number] = is
+	}
+	for _, a := range adopt {
+		if is, ok := byNumber[a.Number]; ok && hasKind(is.Labels) {
+			n.adopted++
+		}
+	}
+	ids := r.packageIDs()
+	if err := r.apply(adoptionUnsettled(adopt, byNumber, ids, base)); err != nil {
+		return n, err
+	}
+	open, err := r.listOpen(nil)
+	if err != nil {
+		return n, fmt.Errorf("reconcile: listing the open issues: %w", err)
+	}
+	devs, conflicts := deviationRules(open, base)
+	for _, is := range conflicts {
+		msg := fmt.Sprintf("issue #%d %q carries both af:accepted and af:rejected, which is nobody's decision; it is left as it is", is.Number, is.Title)
+		r.warnings = append(r.warnings, envelope.Warning{Code: warnDeviationConflict, Severity: envelope.SeverityLow, Stage: "reconcile", Message: msg})
+		fmt.Fprintf(r.stderr, "%s: warning: %s\n", tool, msg)
+	}
+	if err := r.apply(devs); err != nil {
+		return n, err
+	}
+	n.settled = len(devs)
+	var labels []labelChange
+	for dir, id := range ids {
+		issues, err := r.packageIssues(id, dir)
+		if err != nil {
+			return n, fmt.Errorf("%s: listing the issues of %s: %w", ruleIncompleteLabels, dir, err)
+		}
+		labels = append(labels, incompleteLabels(issues, id, base)...)
+	}
+	awaiting, err := r.listOpen([]string{"af:awaits"})
+	if err != nil {
+		return n, fmt.Errorf("%s: listing the awaits issues: %w", ruleAwaitsFinished, err)
+	}
+	awaiting = slices.DeleteFunc(awaiting, func(is issuex.Issue) bool {
+		return slices.ContainsFunc(labels, func(c labelChange) bool { return c.Issue == is.Number })
+	})
+	if err := r.apply(append(labels, awaitsFinished(awaiting, r.knownPackages(), base)...)); err != nil {
+		return n, err
+	}
+	after, err := r.listOpen(nil)
+	if err != nil {
+		return n, fmt.Errorf("reconcile: listing the open issues: %w", err)
+	}
+	stillOpen := map[int]bool{}
+	for _, is := range after {
+		stillOpen[is.Number] = true
+		if slices.Contains(is.Labels, "af:deviation") && !slices.Contains(is.Labels, "af:accepted") && !slices.Contains(is.Labels, "af:rejected") {
+			r.result.OpenDeviations = append(r.result.OpenDeviations, OpenDeviation{Number: is.Number, Title: is.Title, URL: is.HTMLURL,
+				CreatedAt: is.CreatedAt.UTC().Format(time.RFC3339)})
+		}
+	}
+	for num := range openBefore {
+		if !stillOpen[num] {
+			n.closed++
+		}
+	}
+	slices.SortStableFunc(r.result.OpenDeviations, func(a, b OpenDeviation) int { return strings.Compare(a.CreatedAt, b.CreatedAt) })
+	return n, nil
+}
+
+// wouldReconcile is what a dry run reports of a due reconcile: the step, the
+// issues it would hand over, and the deviation changes it would make.
+func (r *run) wouldReconcile() *envelope.ErrorInfo {
+	r.result.NextStep = &NextStep{Kind: kindReconcile}
+	adopt, err := r.adoptable()
+	if err != nil {
+		return failure("forge", "forge", "reconcile: listing the issues to adopt: %v", err)
+	}
+	r.result.WouldAdopt = adopt
+	open, err := r.listOpen(nil)
+	if err != nil {
+		return failure("forge", "forge", "reconcile: listing the open issues: %v", err)
+	}
+	base, _ := gitOutput(r.root, "rev-parse", "HEAD")
+	devs, _ := deviationRules(open, base)
+	r.result.WouldChange = append(r.result.WouldChange, devs...)
+	return nil
+}

@@ -150,6 +150,7 @@ variable sets ([specrun.md](specrun.md#configuration)):
 | `SPECRUN_MAX` | `--max` | no limit |
 | `SPECRUN_STALL` | `--stall` | `30m` |
 | `SPECRUN_LOG_DIR` | `--log-dir` | `agent-fox/specrun/<repository name>` under the cache directory |
+| `SPECRUN_RECONCILE_EVERY` | `--reconcile-every` | `5` |
 | `SPECRUN_STOP_ON` | `--stop-on` | `security,data-loss` |
 | `SPECRUN_STRICT_SKILLS` | `--strict-skills` | off |
 

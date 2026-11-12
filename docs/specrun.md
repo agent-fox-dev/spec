@@ -165,6 +165,63 @@ start makes the same check for it before it chooses a step, so starting
 issue, changes its severity label, or runs with a `--stop-on` that no longer
 holds it.
 
+## The reconcile
+
+A reconcile is a step of the loop that brings every open item in line with
+the base branch: a session for what needs judgement, rules for the rest. It
+runs after every `--reconcile-every` landed packages (default 5), before the
+next package, and once more when every package is done, unless a reconcile
+was the last step and no package landed since (on a repository whose ledger
+records no reconcile, that is one session even when nothing was open,
+[docs/errata/20_specrun_driver.md](errata/20_specrun_driver.md)). The state
+counts the packages since the last one (`since_reconcile`), so a restart
+continues the count, and a reconcile recorded as running is run again first.
+`--reconcile-every 0` leaves only the one at the end.
+
+**The session.** `specrun` selects the issues the session may adopt: the
+open issues with no label starting `af:` whose title starts with the
+directory name of a package under the spec root or its archive and a colon,
+as af-impl titled an open item before the label scheme. It writes them as a
+JSON array of `{number, title, url, package}` to `<step>-adopt.json` in the
+log directory (`[]` when there are none) and starts
+
+```
+claude -p "/af-impl --reconcile <log dir>/<step>-adopt.json --report <log dir>/<step>-report.md" …
+```
+
+with the flags, process group, stream files and stall of every session. The
+session adopts the issues of the file (their kind and labels), closes the
+`af:*` issues whose closing condition holds on the base branch, and writes the
+report; it changes no code. When it ends, the base branch must be checked out,
+the tree clean and `HEAD` where it was: a session that changed the repository
+stops the loop (outcome `stopped`, or `stalled`), and no rule is applied. A
+missing report is a low `reconcile_report_missing` warning.
+
+**The rules**, each change with a comment naming the rule and the commit of
+the base branch:
+
+| Rule | What it does |
+|---|---|
+| `adoption-unsettled` | an issue of the adopt file still open with no kind gets `af:deviation` and `af:from-<NN>` of the package its title names |
+| `deviation-accepted` | an open `af:deviation` with `af:accepted` (and not `af:rejected`) is closed, the comment naming the first `docs/adr/….md` its body cites, or saying it cites none |
+| `deviation-rejected` | an open `af:deviation` with `af:rejected` (and not `af:accepted`) loses both labels and gets `af:defect` and `af:severity-correctness` |
+| `incomplete-labels`, `awaits-finished` | as after a landing, for every package under the spec root and its archive |
+
+A deviation with both `af:accepted` and `af:rejected` is nobody's decision: it
+is left as it is, with a low `deviation_conflict` warning naming it. A person
+settles a deviation where it is tracked, by adding `af:accepted` or
+`af:rejected`; the next reconcile does the rest.
+
+The reconcile's ledger line has kind `reconcile`, outcome `reconciled`, and
+`adopted` (issues of the adopt file that the session gave a kind), `closed`
+(issues open before the step and closed after it) and `settled` (deviations
+accepted or rejected). `result.open_deviations` lists the open deviations
+nobody has settled (`number`, `title`, `url`, `created_at`), oldest first,
+and stderr prints them. A dry run names a due reconcile as its next step
+(`next_step.kind` `reconcile`), lists the issues it would hand over in
+`result.would_adopt`, and adds the deviation rules' changes to
+`result.would_change`.
+
 ## What it runs
 
 At the start of a run `specrun` logs on stderr, and puts in
@@ -320,6 +377,7 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--max N` | `SPECRUN_MAX` | no limit | land at most N packages in this run; a whole number greater than zero |
 | `--stall D` | `SPECRUN_STALL` | `30m` | end a session that writes no event for D, a Go duration greater than zero |
 | `--log-dir DIR` | `SPECRUN_LOG_DIR` | `agent-fox/specrun/<repository>` under the cache directory | where the streams, the final messages and the ledger go; never inside the working tree |
+| `--reconcile-every N` | `SPECRUN_RECONCILE_EVERY` | `5` | run a reconcile after every N landed packages; `0` leaves only the reconcile at the end |
 | `--stop-on LIST` | `SPECRUN_STOP_ON` | `security,data-loss` | stop after a package that left an open defect of one of these severities (`security`, `data-loss`, `correctness`, `minor`, comma-separated); `''` never stops |
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
@@ -435,6 +493,8 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | `skill_mismatch` | high | preflight | the installed af-impl skill's SHA-256 is not the one `specrun` was built with |
 | `skill_not_installed` | high | preflight | no af-impl skill is installed where a session here would load it |
 | `forge_unavailable` | low | preflight | a dry run has no forge client; it writes nothing to a forge anyway |
+| `reconcile_report_missing` | low | reconcile | the reconcile session wrote no report |
+| `deviation_conflict` | low | reconcile | a deviation carries both `af:accepted` and `af:rejected`, and is left alone |
 | `trailer_missing` | low | land | a landed package's merge commit has no `AF-Run:` trailer holding one JSON object |
 
 ## What it leaves out

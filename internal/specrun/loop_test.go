@@ -97,9 +97,11 @@ func TestLoop_DryRunChangesNothing(t *testing.T) {
 		"nothing can start": {func(f *fixture) {
 			f.addPackage(t, "02_b", "02", "pending", "07")
 		}, "", 1, false},
+		// The reconcile due when none was ever recorded
+		// (docs/errata/20_specrun_driver.md).
 		"every package done": {func(f *fixture) {
 			f.addPackage(t, "01_a", "01", "done")
-		}, "", 0, true},
+		}, "reconcile", 0, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
@@ -122,7 +124,9 @@ func TestLoop_DryRunChangesNothing(t *testing.T) {
 			next := ""
 			if r.NextStep != nil {
 				next = r.NextStep.SpecDir
-				if r.NextStep.Kind != "implement" {
+				if r.NextStep.Kind == "reconcile" {
+					next = "reconcile"
+				} else if r.NextStep.Kind != "implement" {
 					t.Errorf("next step kind %q", r.NextStep.Kind)
 				}
 			}

@@ -187,3 +187,156 @@ func TestReconcile_WarnsWhenTheReportIsMissing(t *testing.T) {
 	}
 	_ = filepath.Join
 }
+
+// reconcilePlan writes a script whose package sessions land and whose
+// reconcile session does the forge actions.
+func reconcilePlan(t *testing.T, f *fixture, actions ...map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"runs": []any{land(0)}, "reconcile": []any{map[string]any{"forge": actions}}})
+	writeFile(t, f.script, string(b))
+}
+
+// An issue of the adopt file the session left with no kind becomes a
+// deviation of its package; one the session labelled is left to it.
+func TestReconcile_LabelsAnAdoptionTheSessionLeftUnsettled(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "archive/00_zero", "00", "done")
+	f.addPackage(t, "01_a", "01", "pending")
+	labelled := f.forge.add("00_zero: a", "open")
+	left := f.forge.add("00_zero: b", "open")
+	reconcilePlan(t, f, map[string]any{"op": "add_labels", "issue": labelled, "labels": []string{"af:defect", "af:severity-minor", "af:from-00"}})
+	if _, code, stderr := runMain(t); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	if got := strings.Join(f.forge.labelsOf(left), ","); got != "af:deviation,af:from-00" {
+		t.Errorf("the issue left: %s", got)
+	}
+	if c := f.forge.comments[left]; len(c) != 1 || !strings.Contains(c[0], "adoption-unsettled") {
+		t.Errorf("comments %q", c)
+	}
+	for _, w := range f.forge.writes() {
+		if strings.Contains(w, fmt.Sprintf(" %d ", labelled)) || strings.HasSuffix(w, fmt.Sprintf(" %d", labelled)) {
+			t.Errorf("specrun wrote to the issue the session adopted: %s", w)
+		}
+	}
+}
+
+// A person settles a deviation with af:accepted or af:rejected: accepted is
+// closed naming the ADR it cites, rejected becomes a correctness defect, both
+// is left alone with a warning.
+func TestReconcile_SettlesTheDeviationsAPersonDecided(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending") // open, so 02's items are not reconsidered
+	cites := f.forge.add("02_b: a", "open", "af:deviation", "af:accepted", "af:from-02")
+	f.forge.issue(cites).Body = "Recorded in docs/adr/07-x.md, and docs/adr/09-y.md."
+	plain := f.forge.add("02_b: b", "open", "af:deviation", "af:accepted", "af:from-02")
+	rejected := f.forge.add("02_b: c", "open", "af:deviation", "af:rejected", "af:from-02")
+	open := f.forge.add("02_b: d", "open", "af:deviation", "af:from-02")
+	both := f.forge.add("02_b: e", "open", "af:deviation", "af:accepted", "af:rejected", "af:from-02")
+	defect := f.forge.add("02_b: f", "open", "af:defect", "af:severity-minor", "af:accepted", "af:from-02")
+	reconcilePlan(t, f)
+	env, code, stderr := runMain(t, "--max", "1", "--reconcile-every", "1")
+	if code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	base := git(t, f.root, "rev-parse", "main")
+	if is := f.forge.issue(cites); is.State != "closed" || !strings.Contains(strings.Join(f.forge.comments[cites], ""), "docs/adr/07-x.md") ||
+		!strings.Contains(strings.Join(f.forge.comments[cites], ""), "deviation-accepted") || !strings.Contains(strings.Join(f.forge.comments[cites], ""), base) {
+		t.Errorf("the accepted deviation citing an ADR: %s, %q", is.State, f.forge.comments[cites])
+	}
+	if is := f.forge.issue(plain); is.State != "closed" || !strings.Contains(strings.Join(f.forge.comments[plain], ""), "cites no ADR") {
+		t.Errorf("the accepted deviation citing none: %s, %q", is.State, f.forge.comments[plain])
+	}
+	if got := strings.Join(f.forge.labelsOf(rejected), ","); f.forge.issue(rejected).State != "open" || got != "af:defect,af:from-02,af:severity-correctness" ||
+		!strings.Contains(strings.Join(f.forge.comments[rejected], ""), "deviation-rejected") {
+		t.Errorf("the rejected deviation: %s, %q", got, f.forge.comments[rejected])
+	}
+	for _, n := range []int{open, both, defect} {
+		for _, w := range f.forge.writes() {
+			if strings.Contains(w, fmt.Sprintf(" %d ", n)) || strings.HasSuffix(w, fmt.Sprintf(" %d", n)) {
+				t.Errorf("issue #%d was written: %s", n, w)
+			}
+		}
+	}
+	var conflict []string
+	for _, w := range env.Warnings {
+		if w.Code == "deviation_conflict" {
+			conflict = append(conflict, w.Message)
+		}
+	}
+	if len(conflict) != 1 || !strings.Contains(conflict[0], fmt.Sprintf("#%d", both)) {
+		t.Errorf("deviation_conflict warnings %q", conflict)
+	}
+}
+
+// A reconcile's ledger line counts what was adopted, closed and settled, and
+// the open deviations are listed oldest first; the label rules run over every
+// open af: issue.
+func TestReconcile_ReportsWhatItDidAndWhatIsLeft(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "archive/00_zero", "00", "done")
+	f.addPackage(t, "01_a", "01", "pending")
+	a1, a2 := f.forge.add("00_zero: a", "open"), f.forge.add("00_zero: b", "open")
+	resolved := f.forge.add("00_zero: wired", "open", "af:awaits", "af:awaits-01", "af:from-00")
+	f.forge.add("00_zero: accepted", "open", "af:deviation", "af:accepted", "af:from-00")
+	var plain []int
+	for _, title := range []string{"00_zero: d3", "00_zero: d1", "00_zero: d2"} {
+		plain = append(plain, f.forge.add(title, "open", "af:deviation", "af:from-00"))
+	}
+	f.forge.issue(plain[0]).CreatedAt, f.forge.issue(plain[1]).CreatedAt = f.forge.issue(plain[1]).CreatedAt, f.forge.issue(plain[0]).CreatedAt
+	stale := f.forge.add("00_zero: wire it in 00", "open", "af:awaits", "af:awaits-00", "af:from-00")
+	reconcilePlan(t, f,
+		map[string]any{"op": "add_labels", "issue": a1, "labels": []string{"af:untested", "af:from-00"}},
+		map[string]any{"op": "add_labels", "issue": a2, "labels": []string{"af:untested", "af:from-00"}},
+		map[string]any{"op": "close", "issue": resolved})
+	env, code, stderr := runMain(t)
+	if code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	lines := f.ledgerLines(t)
+	l := lines[len(lines)-1]
+	if l["kind"] != "reconcile" || l["outcome"] != "reconciled" || l["adopted"] != 2.0 || l["closed"] != 2.0 || l["settled"] != 1.0 {
+		t.Errorf("the reconcile's line %v; want adopted 2, closed 2, settled 1", l)
+	}
+	var got []int
+	for _, d := range env.Result.OpenDeviations {
+		got = append(got, d.Number)
+	}
+	if want := []int{plain[1], plain[0], plain[2]}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("open deviations %v; want %v, oldest first", got, want)
+	}
+	if !strings.Contains(stderr, fmt.Sprintf("#%d", plain[1])) {
+		t.Errorf("stderr does not list the open deviations:\n%s", stderr)
+	}
+	if got := strings.Join(f.forge.labelsOf(stale), ","); got != "af:defect,af:from-00,af:severity-correctness" {
+		t.Errorf("the item awaiting the archived 00: %s", got)
+	}
+}
+
+// A dry run says a reconcile is next, what it would hand over, and the
+// deviation changes, and writes nothing.
+func TestReconcile_ADryRunShowsTheReconcile(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	writeFile(t, f.statePath(), `{"done":[],"since_reconcile":5}`)
+	f.forge.add("01_a: old", "open")
+	f.forge.add("01_a: yes", "open", "af:deviation", "af:accepted", "af:from-01")
+	f.forge.add("01_a: no", "open", "af:deviation", "af:rejected", "af:from-01")
+	env, code, _ := runMain(t, "--dry-run")
+	r := env.Result
+	if code != 0 || r.NextStep == nil || r.NextStep.Kind != "reconcile" || len(r.WouldAdopt) != 1 {
+		t.Fatalf("code %d, next %+v, would_adopt %+v", code, r.NextStep, r.WouldAdopt)
+	}
+	rules := map[string]bool{}
+	for _, c := range r.WouldChange {
+		rules[c.Rule] = true
+	}
+	if !rules["deviation-accepted"] || !rules["deviation-rejected"] {
+		t.Errorf("would_change %+v", r.WouldChange)
+	}
+	entries, _ := os.ReadDir(f.logDir())
+	if w := f.forge.writes(); len(w) != 0 || len(f.starts(t)) != 0 || len(entries) != 0 {
+		t.Errorf("writes %v, %d sessions, log files %v", w, len(f.starts(t)), entries)
+	}
+}

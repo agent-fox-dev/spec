@@ -41,6 +41,12 @@ type ledgerLine struct {
 	// Issues are the serious defects a landed package left open, which
 	// stopped the loop.
 	Issues []StopIssue `json:"issues,omitempty"`
+	// Adopted, Closed and Settled count, for a reconcile, the issues of the
+	// adopt file that carry a kind, the issues open before it and closed
+	// after it, and the deviations accepted or rejected.
+	Adopted *int `json:"adopted,omitempty"`
+	Closed  *int `json:"closed,omitempty"`
+	Settled *int `json:"settled,omitempty"`
 }
 
 // readLedger reads the ledger in dir; a missing ledger is no line, and a line
