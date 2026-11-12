@@ -1,0 +1,160 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "19",
+  "spec_name": "speca_gate",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/speca/... ./internal/gate/... ./envelope/... -count=1"
+  },
+  "dependencies": [],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Run the gate's commands and answer with a verdict",
+      "criteria": [
+        "REQ-1",
+        "REQ-5.1",
+        "REQ-5.4"
+      ],
+      "steps": [
+        "Add the task's behaviours as tests and confirm they fail: the command splitting and the timing with a stubbed clock in the new package internal/gate, the gate form through speca's Main in cmd/speca/gate_test.go, and the refused flag combinations in the existing usage table of cmd/speca/main_test.go. The test scripts are executable files written to a temporary directory outside the repository",
+        "Add the package internal/gate with no import of internal/cli or of anything that depends on agentkit-go: a function that splits a command string into a program and its arguments on white space, keeping a stretch in single or double quotes as one argument and refusing an empty string and an unterminated quote; and a runner that starts each command directly in a given directory with a given environment, measures its wall-clock seconds through a clock a test can replace, stops at the first command that exits non-zero, and returns per command its name, exit code and seconds, with the total as their sum",
+        "A command whose program is not found, whose string cannot be split, or that test_commands does not name ends the run as not_run with a reason naming the command; no later command starts",
+        "Give every command a time limit: when it passes, end the command together with every process it started (start it in a process group of its own and signal the group), mark the command timed_out with no exit code, and end the run as fail",
+        "Add the result types to the envelope package beside AdminResult: the gate verdict (level, verdict, clean_env, reason, reused, commands, seconds, slowest) and its command entry (name, exit_code as a pointer so that 0 is written, seconds, log, tail, timed_out), each field with a description tag as the other result types carry; add the field gate to AdminResult",
+        "Add the gate form to cmd/speca in a file of its own, chosen in forms.go: flags --gate (task or full), --clean-env and --timeout (a Go duration, default 20m); it locates and loads the package as the report does, whatever its status, reads linter and all_tests from its test_commands, runs them in the --dir directory, and returns the verdict with exit code 0 for pass, fail and not_run alike. Both levels run the same two commands; a full gate's slowest is an empty list for now and a task gate has none",
+        "Refuse as a usage error, before anything is read: a --gate value other than task or full, with a fix hint naming the two values; --gate combined with another form or given no package; --clean-env or --timeout without --gate; a --timeout that is not a duration greater than zero. Extend the existing checks of options.check so that the other forms refuse --gate the way they refuse one another",
+        "Keep the command's output off speca's stdout from the first version on: discard it here; the next task sends it to a log"
+      ],
+      "touches": [
+        "internal/gate/",
+        "cmd/speca/gate.go",
+        "cmd/speca/gate_test.go",
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/helpers_test.go",
+        "envelope/gate_result.go",
+        "envelope/admin_result.go"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Keep each command's output in a log, a failure's tail in the verdict, and offer the clean environment",
+      "criteria": [
+        "REQ-4",
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the task's behaviours to cmd/speca/gate_test.go and confirm they fail: the log of each command, the tail table over 0, 1, 40, 41 and 500 lines, the one JSON object on stdout, the clean-environment probe with and without the flag, and the removal of the temporary HOME after a pass, a failure and a timeout",
+        "Resolve the state directory in internal/gate: agent-fox/speca under $XDG_STATE_HOME when it is set, else under .local/state in the user's home directory, on Linux and macOS alike",
+        "Send each command's stdout and stderr, together, to a log file of its own under the state directory, in a directory per repository, named so that two gates and two commands never share a file; put its absolute path in the command's log. When the file cannot be created the command still runs and its entry has no log",
+        "For a command that exits non-zero or times out, keep the last 40 lines of its output as it is written and put them in tail: all lines when there are fewer, an empty string when there are none, a last line without a newline counted as a line. A command that exits 0 has no tail. Do not read the whole log back into memory to find them",
+        "With --clean-env, create an empty temporary directory outside the repository and run every command with HOME set to it, GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pointing at the null device, GIT_CONFIG_NOSYSTEM set to 1 and GIT_TERMINAL_PROMPT set to 0, every other variable inherited; set clean_env in the verdict; remove the directory when the gate ends, whatever its verdict, a timeout included",
+        "Without --clean-env the commands inherit speca's environment unchanged"
+      ],
+      "touches": [
+        "internal/gate/",
+        "cmd/speca/gate.go",
+        "cmd/speca/gate_test.go"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Record a passing gate by tree and reuse it",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the task's behaviours to cmd/speca/gate_test.go and confirm they fail: the second call that runs nothing, the table of changes that do and do not change the key, the failure and the not_run that are never reused, the repository snapshot with staged, unstaged and untracked changes, the directory with no git, and the state directory that cannot be written or holds a record that cannot be parsed. The tests build their git repositories with a helper added to cmd/speca/helpers_test.go that sets the identity and the default branch itself, so that they pass in a clean environment",
+        "Work out the tree id of the working tree with git, tracked and untracked files included and ignored files left out, without touching the repository: a copy of the index in a temporary file as the index, and a temporary object directory with the repository's object store as an alternate, so that neither .git/index nor .git/objects gains or changes a file; remove both temporaries afterwards",
+        "Build the key from the tree id, the level, the exact linter and all_tests strings and whether the environment is clean. Before running, look the key up in the store under the state directory, in the directory of this repository; a recorded pass is returned as the verdict with reused holding the commit that was checked out at the recorded run, its time in RFC 3339 and its seconds, with commands empty, seconds 0 and, for a full gate, the recorded slowest list",
+        "After a gate that ends in pass, write the record through a temporary file that is renamed, holding the commit checked out, the time, the seconds and the slowest list. A fail and a not_run write no record",
+        "Where --dir is not inside a git work tree or git is not installed, run the gate without a lookup, record nothing and raise a gate_not_recorded warning saying there is no tree id; where the state directory cannot be created or written, run the gate, and raise the same warning naming the path. Add the warning code to envelope/warn.go and internal/cli/warn.go beside the existing ones",
+        "A record that cannot be parsed counts as no record: the gate runs, and a pass replaces it"
+      ],
+      "touches": [
+        "internal/gate/",
+        "cmd/speca/gate.go",
+        "cmd/speca/gate_test.go",
+        "cmd/speca/helpers_test.go",
+        "envelope/warn.go",
+        "internal/cli/warn.go"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Keep the slowest units of a full gate and sum a package's runs in the gate report",
+      "criteria": [
+        "REQ-5.2",
+        "REQ-5.3",
+        "REQ-6",
+        "REQ-7.1"
+      ],
+      "steps": [
+        "Add the task's behaviours as tests and confirm they fail: the table of test outputs for the unit reader in internal/gate, the report scenarios in the new cmd/speca/gate_report_test.go, and in cmd/speca/gate_test.go the table over the five lifecycle statuses that runs both forms and compares the repository snapshot",
+        "Read the all_tests output of a full gate for Go's per-package result lines as it is written: a line that starts with ok or FAIL and holds a package and a duration in seconds is a unit, with or without text after the duration; a line with (cached) or [no test files] is not. Keep the five units with the most seconds, slowest first, equal ones in output order; an output with no such line gives an empty list. Put the list in the verdict's slowest and in the record of a pass",
+        "Append every gate that ends in pass or fail, a reused one included, to a run log under the state directory, in the directory of this repository: the package's spec id, the time, the commit checked out, the level, whether the environment was clean, the verdict, whether it was reused and from which run, its seconds, the recorded run's seconds when reused, and the slowest list. A not_run gate is not logged. A run log that cannot be written raises gate_not_recorded and does not change the verdict",
+        "Add the gate report form to cmd/speca in a file of its own: flags --gate-report and --since; add the report type to the envelope package and the field gate_report to AdminResult. It locates and loads the package whatever its status and writes nothing",
+        "Resolve the commit: --since when given; else the merge base of HEAD and the base branch, which is the branch refs/remotes/origin/HEAD names, else main. Refuse as a usage error, with no result: a --since that names no commit, no --since and no base branch, a --dir outside a git work tree, --since without --gate-report, and --gate-report combined with another form or given no package",
+        "Count the runs of this package whose commit is the resolved commit or a descendant of it reachable from HEAD or, when .git holds a MERGE_HEAD, from MERGE_HEAD. For the full and the task level report runs, seconds (the runs' own, a reused run adding 0) and reused; report baseline_full_seconds from the earliest full run counted and last_full_seconds from the latest, a reused run giving the seconds of the run it came from; report the latest full run's slowest list. Skip a line of the run log that cannot be parsed. With nothing to count, every number is 0, the two durations are absent and slowest is an empty list",
+        "Confirm that neither form writes under --dir in any lifecycle status: no progress.json, no spec.md, nothing under .git"
+      ],
+      "touches": [
+        "internal/gate/",
+        "cmd/speca/gate.go",
+        "cmd/speca/gate_test.go",
+        "cmd/speca/gate_report.go",
+        "cmd/speca/gate_report_test.go",
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/forms.go",
+        "envelope/gate_result.go",
+        "envelope/admin_result.go"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Describe the two forms, and move af-impl and the project template onto them",
+      "criteria": [
+        "REQ-7.2",
+        "REQ-7.3"
+      ],
+      "steps": [
+        "Extend the --schema test and the summary tests in cmd/speca and confirm they fail; then add the two forms to speca's description, input description, usage text, examples and exit-code texts in cmd/speca/main.go, pass the values task and full for --gate to the flags document, and write cmd/speca/testdata/schema.golden.json again from the command's own output",
+        "Give Result.Summary the sentences for a gate that ran, a reused gate, a gate that could not start and the gate report, and make Result.Next suggest nothing after either form",
+        "Document both forms in docs/speca.md, each in a section of its own in the style of the other forms, with every flag, every result field, the key of a reused result, where the state directory is and what it holds, the gate_not_recorded warning and the exit codes, every sample copied from a test or from the command's output; add the forms to the table in docs/architecture.md with internal/gate in the package graph; name $XDG_STATE_HOME and the state directory in docs/configuration.md; add the new envelope types to docs/api.md",
+        "Record the decision in a new ADR, docs/adr/22-run-the-gate-with-speca.md: the gate is a speca command, a pass is reused by tree id and never by commit, only passes are recorded, and the thorough repository target runs once before the merge commit",
+        "Rewrite the gate in skills/af-impl/SKILL.md: the baseline of §2 is `speca <package> --gate full`, whose commit the run notes for the report; the gate after every implement task in §5 is `speca <package> --gate task`, and after the integration task `--gate full`; the verdict table of §5 stays and applies to both levels, reading pass, fail and not_run from result.gate.verdict, with not_run as 'a check could not run'; a failure is read from the command's tail, and the log is opened only when the tail does not explain it; a reused gate is reported as 'reused the gate of <commit>, <date>'. Say that the gate runs the spec's test_commands, that a more thorough repository target such as `make check` runs once, on the merged tree, before the merge is committed, and that this order takes precedence over a project instruction to substitute the thorough target for every check",
+        "In skills/af-impl/references/conformance.md make the clean-environment run `speca <package> --gate full --clean-env` and the gate after the conformance fix commit `--gate full`; in skills/af-impl/references/landing.md run `--gate full` on the merged tree, then the thorough repository target where the repository has one, and copy `speca <package> --gate-report --since <baseline commit>` into the merge commit's verification section and into the report of §8: the full gate's duration at the baseline and on the merged tree, the slowest units, and the full and task runs with how many were reused",
+        "Add --gate and --gate-report to skills/_shared/references/speca-specr.md: what each returns, that exit code 0 carries any verdict, and what to do without speca (run linter and all_tests by hand at the same moments and say so in the report). Keep every rendered skill body under the ceiling `make skills-check` enforces, moving text into a reference file where SKILL.md would pass it",
+        "Reword the 'Quality Commands' section of docs/templates/AGENTS.md: the spec's test_commands between tasks, run through `speca <package> --gate`; the more thorough repository target once, before committing a merge. Leave this repository's own AGENTS.md and CLAUDE.md as they are",
+        "Run `make doc` and commit docs/generated with the change, since the envelope package gained exported types"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/result.go",
+        "cmd/speca/result_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "docs/speca.md",
+        "docs/architecture.md",
+        "docs/configuration.md",
+        "docs/api.md",
+        "docs/adr/22-run-the-gate-with-speca.md",
+        "docs/generated/",
+        "docs/templates/AGENTS.md",
+        "skills/af-impl/SKILL.md",
+        "skills/af-impl/references/conformance.md",
+        "skills/af-impl/references/landing.md",
+        "skills/_shared/references/speca-specr.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes",
+        "`make doc` leaves docs/generated as committed"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,556 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "19",
+  "spec_name": "speca_gate",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Run a gate of the package's commands",
+      "rationale": "A model that runs the gate by hand repeats work and keeps the result in its head; one call with one verdict is the same every time.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate full` is called and no passing result is recorded under the gate's key",
+          "action": "run the package's `linter` command, then its `all_tests` command, each once, in the directory `--dir` names, and report the verdict `pass` when both exit with code 0",
+          "contract": "exit code 0 and `ok` true; `result.gate` holds `level` \"full\", `verdict` \"pass\", `clean_env` false, `commands` with one entry per command in run order, each with `name` (`linter`, then `all_tests`), `exit_code` 0 and `seconds`, and the total `seconds`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a temporary git repository with one commit, holding one package under .specs whose test_commands name two executable scripts outside the repository, each appending its own name to a file outside the repository",
+              "XDG_STATE_HOME set to an empty temporary directory"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go (new), a table over the levels {full, task}, with the helpers run and result of cmd/speca/helpers_test.go: env, code = run('NN', '--gate', level); assert code == 0 and env.ok; g = env.result.gate; assert g.level == level and g.verdict == 'pass' and g.clean_env == false; assert names(g.commands) == ['linter', 'all_tests'] and every exit_code == 0; assert the scripts' file reads 'linter\\nall_tests\\n'; assert g.slowest is present for full and absent for task"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate task` is called and no passing result is recorded under the gate's key",
+          "action": "run the same two commands in the same order and report the verdict with `level` \"task\"",
+          "contract": "as REQ-1.1, with `level` \"task\"",
+          "check": {
+            "same_as": "REQ-1.1"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "unwanted",
+          "condition": "a command of the gate exits with a code other than 0",
+          "action": "end the gate with the verdict `fail` and start none of the commands after it",
+          "contract": "exit code 0 and `ok` true; `result.gate.verdict` is \"fail\"; `commands` ends with the failing command and its `exit_code`; a command after it has no entry and was not started",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository of REQ-1.1, with the linter script exiting 3"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go: env, code = run('NN', '--gate', 'full'); assert code == 0 and env.ok; g = env.result.gate; assert g.verdict == 'fail'; assert len(g.commands) == 1 and g.commands[0].name == 'linter' and g.commands[0].exit_code == 3; assert the all_tests script left no line in its file. A second case with linter passing and all_tests exiting 1: two entries, the second with exit_code 1"
+          }
+        },
+        {
+          "id": "REQ-1.4",
+          "pattern": "unwanted",
+          "condition": "a command cannot start: its program is not found, its command string has an unterminated quote, or the package's `test_commands` hold no `linter` or no `all_tests` command",
+          "action": "end the gate with the verdict `not_run` and start no further command",
+          "contract": "exit code 0 and `ok` true; `result.gate.verdict` is \"not_run\"; `result.gate.reason` names the command and says why it could not start; that command's entry, when it has one, carries no `exit_code`",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go, a table over {linter names a program that does not exist; all_tests names a program that does not exist (the linter script ran first); linter is `make 'lint` with the quote left open; tasks.json holds an empty test_commands object}: env, code = run('NN', '--gate', 'full'); assert code == 0 and env.ok; g = env.result.gate; assert g.verdict == 'not_run'; assert g.reason contains the command's name; assert no entry of g.commands for that command has exit_code"
+          }
+        },
+        {
+          "id": "REQ-1.5",
+          "pattern": "ubiquitous",
+          "action": "start each command's program directly, with the arguments its command string holds when split on white space, a stretch inside single or double quotes kept as one argument without its quotes",
+          "contract": "the program receives `|`, `&&`, `>`, `$HOME` and `*` as literal arguments, and an argument with a space when it was quoted; no shell is started",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/gate/command_test.go (new), a table over command strings for the function that splits one: 'make test' -> [make, test]; \"go test ./... -run 'A|B'\" -> [go, test, ./..., -run, A|B]; 'x \"a b\" c' -> [x, a b, c]; 'x  a\\tb' -> [x, a, b]; 'x && y > z $HOME *' -> [x, &&, y, >, z, $HOME, *]; '' and '   ' -> an error; \"x 'a\" -> an error. One case through cmd/speca/gate_test.go: a script that writes its arguments one per line, named in all_tests as `<script> a|b '$HOME c' *`; assert its file holds exactly 'a|b', '$HOME c', '*'"
+          }
+        },
+        {
+          "id": "REQ-1.6",
+          "pattern": "unwanted",
+          "condition": "a command is still running when the time `--timeout` gives, 20 minutes when the flag is absent, has passed since it started",
+          "action": "end the command and every process it started, and end the gate with the verdict `fail`",
+          "contract": "exit code 0 and `ok` true; `result.gate.verdict` is \"fail\"; the command's entry has `timed_out` true and no `exit_code`; no process the command started is running when speca returns; nothing is recorded for reuse",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository of REQ-1.1, with an all_tests script that starts a child process sleeping 60 seconds, writes both process ids to a file outside the repository and waits"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go: env, code = run('NN', '--gate', 'full', '--timeout', '300ms'); assert code == 0; c = last(env.result.gate.commands); assert env.result.gate.verdict == 'fail' and c.timed_out and c.exit_code is absent; assert neither recorded process id is alive; env2 = run('NN', '--gate', 'full', '--timeout', '300ms'); assert env2.result.gate.reused is absent"
+          }
+        },
+        {
+          "id": "REQ-1.7",
+          "pattern": "unwanted",
+          "condition": "`--gate` is given a value other than `task` or `full`",
+          "action": "refuse the call before a package is read or a command is started",
+          "contract": "exit code 2; `error.category` is \"usage\" and `error.fix_hint` names the flag `--gate` with the valid values `task` and `full`; nothing was run or written",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/main_test.go, beside the existing table of flag combinations that are refused with a usage error, the cases {--gate '', --gate all, --gate Full}: env, code = run('09', '--gate', value); assert code == 2 and env.error.category == 'usage'; assert env.error.fix_hint.flag == '--gate' and env.error.fix_hint.valid == ['task', 'full']"
+          }
+        },
+        {
+          "id": "REQ-1.8",
+          "pattern": "unwanted",
+          "condition": "`--gate` or `--gate-report` is combined with another form (`--validate`, `--list`, `--next`, `--task` or `--state`, `--status`, `--render`, `--migrate`, or the other of the two), is given no package, or a flag is given without its form (`--clean-env` or `--timeout` without `--gate`, `--since` without `--gate-report`), or `--timeout` is not a duration greater than zero",
+          "action": "refuse the call before a package is read or a command is started",
+          "contract": "exit code 2 and `error.category` \"usage\", with a message that names the two operations or the flag and the form it needs; nothing was run or written",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/main_test.go, the same table as REQ-1.7 with one case per combination the condition lists, among them ['09', '--gate', 'full', '--validate'], ['--gate', 'full'], ['09', '--gate', 'full', '--gate-report'], ['09', '--clean-env'], ['09', '--since', 'HEAD'], ['09', '--gate', 'full', '--timeout', '0s'], ['09', '--gate', 'full', '--timeout', 'soon']: assert code == 2 and env.error.category == 'usage' and the snapshot of the repository is as it was"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Run the gate in a clean environment",
+      "rationale": "A test that passes only on this machine's configuration fails for everyone else; the conformance pass asks for this run and should not have to build it by hand.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "optional",
+          "condition": "`--clean-env` is given with `--gate`",
+          "action": "run every command of the gate with `HOME` set to an empty directory created for this gate, with no global and no system git configuration read, and with `GIT_TERMINAL_PROMPT` set to `0`, every other environment variable inherited",
+          "contract": "`result.gate.clean_env` is true; a command sees a `HOME` that is an empty directory, `git config --global --list` and `git config --system --list` print nothing in it, `GIT_TERMINAL_PROMPT` is `0`, and a variable set in speca's environment is still set",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "HOME set to a temporary directory whose .gitconfig sets user.name, and a variable GATE_PROBE=1 in the environment",
+              "an all_tests script that writes, to a file outside the repository, $HOME, the listing of $HOME, $GIT_TERMINAL_PROMPT, $GATE_PROBE and the output of `git config --global --list` and `git config --system --list`"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, a table over {with --clean-env, without}: env = run('NN', '--gate', 'full', flag...); with the flag: assert env.result.gate.clean_env; assert the probe file shows a HOME other than the test's, an empty listing, GIT_TERMINAL_PROMPT == '0', GATE_PROBE == '1' and no git configuration line. Without it: assert clean_env == false, HOME is the test's and the global configuration lists user.name"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "event_driven",
+          "condition": "a gate run with `--clean-env` ends, with any verdict",
+          "action": "remove the directory it created as `HOME`, with everything the commands wrote into it",
+          "contract": "the directory a command saw as `HOME` does not exist when speca returns",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go, a table over an all_tests script that {exits 0, exits 1, runs past --timeout}, each writing $HOME to a file outside the repository and creating a file inside $HOME: run('NN', '--gate', 'full', '--clean-env', ...); assert the recorded directory does not exist"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "event_driven",
+          "condition": "a gate is run without `--clean-env`",
+          "action": "run every command with speca's own environment, unchanged",
+          "contract": "`result.gate.clean_env` is false; a command sees speca's `HOME` and the user's global git configuration",
+          "check": {
+            "same_as": "REQ-2.1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Reuse a result that passed",
+      "rationale": "The baseline of one package is the merged tree of the one before, and a merged tree is often the branch tip's tree; running the suite on a tree that already passed buys nothing.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "a gate ends with the verdict `pass` in a git work tree",
+          "action": "record the result outside the repository, under `agent-fox/speca` in the user's state directory (`$XDG_STATE_HOME`, else `~/.local/state`), keyed by the tree id of the working tree with tracked and untracked files included and ignored files left out, the level, the exact `linter` and `all_tests` command strings, and whether the environment was clean",
+          "contract": "after the call a record exists under the state directory and no file is new under `--dir`; a later call with the same key is answered from it",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "a gate is called and a passing result is recorded under its key",
+          "action": "start no command and answer with the recorded pass",
+          "contract": "exit code 0; `result.gate.verdict` is \"pass\"; `reused` holds `commit` (the commit that was checked out at the recorded run), `at` (the time of that run, RFC 3339) and `seconds` (its total); `commands` is empty and `seconds` is 0; for a full gate `slowest` is the recorded run's",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository of REQ-1.1, whose scripts count their runs in a file outside the repository"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go: first = run('NN', '--gate', 'full'); assert first.result.gate.reused is absent and the scripts ran once; assert a file exists under $XDG_STATE_HOME/agent-fox/speca and the snapshot of the repository is as it was; second = run('NN', '--gate', 'full'); g = second.result.gate; assert g.verdict == 'pass' and g.reused.commit == rev-parse(HEAD) and g.reused.at parses as RFC 3339 and g.reused.seconds == first.result.gate.seconds; assert g.commands == [] and g.seconds == 0 and g.slowest == first.result.gate.slowest; assert the scripts still ran once"
+          }
+        },
+        {
+          "id": "REQ-3.3",
+          "pattern": "ubiquitous",
+          "action": "for any gate whose key differs from every recorded pass in one part (the content of a tracked file, an untracked file that is not ignored, the level, a command string, or the clean environment), run the commands",
+          "contract": "`result.gate.reused` is absent and both commands were started",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository of REQ-3.2 after one passing `--gate full`, with a .gitignore that ignores *.log"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, a table of one change each, the gate run after it and the expected answer: {edit a tracked file -> ran; add an untracked file notes.txt -> ran; call --gate task -> ran; change the all_tests string in tasks.json by one argument -> ran; add --clean-env -> ran; add an ignored file x.log -> reused; commit the uncommitted change that the last pass covered -> reused, with reused.commit the commit before it; merge a branch with --no-ff whose tip's tree passed, the base not having moved -> reused}: assert reused is present exactly where the table says, and the scripts' run count rose exactly where it says ran"
+          }
+        },
+        {
+          "id": "REQ-3.4",
+          "pattern": "ubiquitous",
+          "action": "for any two working trees that hold the same files with the same content, use one key whatever commit is checked out and whatever the ignored files hold",
+          "contract": "a gate on the second tree is answered with `reused` naming the commit of the first run",
+          "check": {
+            "same_as": "REQ-3.3"
+          }
+        },
+        {
+          "id": "REQ-3.5",
+          "pattern": "unwanted",
+          "condition": "a gate ends with the verdict `fail` or `not_run`",
+          "action": "record nothing that a later gate could reuse",
+          "contract": "the next call with the same key starts the commands again and its `result.gate.reused` is absent",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go, a table over {all_tests exits 1, linter names a missing program}: a = run('NN', '--gate', 'full'); b = run('NN', '--gate', 'full'); assert a.result.gate.verdict == b.result.gate.verdict and b.result.gate.reused is absent; for the failing script assert it ran twice"
+          }
+        },
+        {
+          "id": "REQ-3.6",
+          "pattern": "ubiquitous",
+          "action": "work out the tree id without changing the repository: the user's index, the staged changes, the working tree and every file under `.git` stay as they were",
+          "contract": "with staged, unstaged and untracked changes present, every file under `--dir`, `.git` and its index and object store included, has the same content, size and mode after a gate as before it, and `git status --porcelain` prints the same",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the repository of REQ-1.1 with one staged edit, one unstaged edit and one untracked file"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, with the helper snapshot of cmd/speca/helpers_test.go: before = snapshot(root); status = git('status', '--porcelain'); run('NN', '--gate', 'full'); assert snapshot(root) == before; assert git('status', '--porcelain') == status; assert git('diff', '--cached', '--name-only') still names the staged file alone"
+          }
+        },
+        {
+          "id": "REQ-3.7",
+          "pattern": "unwanted",
+          "condition": "`--dir` is not inside a git work tree, or `git` is not installed",
+          "action": "run the gate and answer with its verdict, recording nothing",
+          "contract": "exit code 0; `result.gate.verdict` is what the commands returned; `warnings` holds one `gate_not_recorded` entry whose message says there is no tree id to record the result under; a second call starts the commands again",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go, a table over {a directory with .specs and no .git, a repository with PATH holding no git}: a = run('NN', '--gate', 'full'); assert a.exit_code == 0 and a.result.gate.verdict == 'pass'; assert codes(a.warnings) == ['gate_not_recorded']; b = run('NN', '--gate', 'full'); assert b.result.gate.reused is absent and the scripts ran twice"
+          }
+        },
+        {
+          "id": "REQ-3.8",
+          "pattern": "unwanted",
+          "condition": "the state directory cannot be created or written, or a recorded result under the gate's key cannot be parsed",
+          "action": "run the gate and answer with its verdict",
+          "contract": "exit code 0; `result.gate.verdict` is what the commands returned; where the directory cannot be written, `warnings` holds one `gate_not_recorded` entry naming the path and each command's `log` is absent; where a record cannot be parsed, it counts as no record, and the pass replaces it",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go, two cases. XDG_STATE_HOME names a regular file: a = run('NN', '--gate', 'full'); assert a.exit_code == 0 and a.result.gate.verdict == 'pass' and codes(a.warnings) == ['gate_not_recorded'] and the warning's message contains the path; assert no command entry has log. A recorded pass overwritten with 'not json': b = run('NN', '--gate', 'full'); assert b.result.gate.reused is absent and the scripts ran; c = run('NN', '--gate', 'full'); assert c.result.gate.reused is present"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "title": "Keep a command's output in a log and its failure in the verdict",
+      "rationale": "A test suite's output is thousands of lines the model does not need; the forty that explain a failure are the ones it does.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "a command of the gate runs",
+          "action": "write everything the command prints to stdout and stderr to one log file of its own under the state directory, and name the file in the command's `log`",
+          "contract": "`log` is an absolute path that is not under `--dir`; the file holds the command's complete output",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go: with a linter script printing 'out-1' to stdout and 'err-1' to stderr and an all_tests script printing 3000 numbered lines: env = run('NN', '--gate', 'full'); for each c of env.result.gate.commands: assert c.log is absolute and not under root and under $XDG_STATE_HOME; assert read(commands[0].log) contains 'out-1' and 'err-1'; assert read(commands[1].log) holds all 3000 lines in order; assert the two paths differ"
+          }
+        },
+        {
+          "id": "REQ-4.2",
+          "pattern": "unwanted",
+          "condition": "a command exits with a code other than 0 or is ended by the timeout",
+          "action": "put the last 40 lines of the command's output in its `tail`",
+          "contract": "`tail` holds the last 40 lines of the output in order, all of them when the output has fewer, and is an empty string when the command printed nothing; a command that exited with 0 has no `tail`",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go, a table over a failing all_tests script that prints {0, 1, 40, 41, 500} numbered lines, and one that prints 41 lines with no newline after the last: env = run('NN', '--gate', 'full'); c = last(env.result.gate.commands); assert lines(c.tail) == the last min(n, 40) lines printed, in order; assert the passing linter's entry has no tail"
+          }
+        },
+        {
+          "id": "REQ-4.3",
+          "pattern": "ubiquitous",
+          "action": "keep everything a command prints off its own stdout",
+          "contract": "speca's stdout is exactly one JSON object, whatever the commands print and however much",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_test.go: with a linter script that prints '{\"ok\":false}' and an all_tests script that prints 5 MB: out = the bytes speca wrote to stdout for ['NN', '--gate', 'full']; assert json.decode(out) succeeds with nothing left over; assert out does not contain the scripts' text"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-5",
+      "title": "Measure what a gate costs",
+      "rationale": "The suite of the measured run grew from ten seconds to nearly three minutes and nobody noticed, because nothing wrote a duration down.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-5.1",
+          "pattern": "ubiquitous",
+          "action": "record the wall-clock seconds each command of a gate ran, and report the gate's total as their sum",
+          "contract": "each `commands[i].seconds` is a number of seconds, zero or more, to the millisecond; `result.gate.seconds` equals their sum",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the gate runner's clock replaced by one that advances 1.5 s during the first command and 2.25 s during the second"
+            ],
+            "pseudocode": "in internal/gate/run_test.go (new): r = run the gate with two commands that exit 0; assert r.commands[0].seconds == 1.5 and r.commands[1].seconds == 2.25 and r.seconds == 3.75"
+          }
+        },
+        {
+          "id": "REQ-5.2",
+          "pattern": "event_driven",
+          "condition": "the `all_tests` command of a full gate has run and its output holds Go's per-package result lines",
+          "action": "report the five packages with the most seconds, slowest first, as `slowest`",
+          "contract": "`slowest` holds at most five entries `{unit, seconds}`, ordered by seconds descending, entries with equal seconds in output order; a line `ok <package> <n>s` or `FAIL <package> <n>s` is a unit, with or without text after the duration; a line with `(cached)` or `[no test files]` is not",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/gate/units_test.go (new), a table over outputs for the function that reads the units: {no line -> []; three ok lines -> three entries, slowest first; seven lines, one of them FAIL -> the five slowest, the FAIL line among them when its seconds place it; 'ok  \\tpkg/a\\t(cached)' and '?   \\tpkg/b\\t[no test files]' -> not units; 'ok  \\tpkg/c\\t0.512s\\tcoverage: 81.0% of statements' -> {pkg/c, 0.512}; two lines of 1.000s -> output order; pytest and Jest output -> []}"
+          }
+        },
+        {
+          "id": "REQ-5.3",
+          "pattern": "event_driven",
+          "condition": "the `all_tests` command of a full gate has run and its output holds no line speca recognises",
+          "action": "report an empty list of slowest units",
+          "contract": "`result.gate.slowest` is present and is `[]`",
+          "check": {
+            "same_as": "REQ-5.2"
+          }
+        },
+        {
+          "id": "REQ-5.4",
+          "pattern": "event_driven",
+          "condition": "a task gate has run",
+          "action": "report no list of slowest units",
+          "contract": "`result.gate.slowest` is absent",
+          "check": {
+            "same_as": "REQ-1.1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-6",
+      "title": "Sum a package's gate runs for the merge commit",
+      "rationale": "The merge commit and the report must say what the gates cost from something that was measured, not from what a model remembers.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-6.1",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate-report --since <commit>` is called",
+          "action": "count the gate runs recorded for this package that ended in `pass` or `fail`, reused ones included, whose checked-out commit is `<commit>` or a descendant of it reachable from `HEAD` or, while a merge is uncommitted, from `MERGE_HEAD`",
+          "contract": "exit code 0; `result.gate_report` holds `since` (the full id of the commit) and, under `full` and under `task`, `runs`, `seconds` (the sum of the runs' own seconds, a reused run adding 0) and `reused`; a run of another package, a `not_run` gate and a run at a commit outside that range are not counted",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a repository with two packages and the commits B (base), then F1, F2 and F3 on a branch, and a commit X on another branch",
+              "gates run through speca itself: package one full at B, task at F1, task again at F1 (reused), full failing at F2, full passing at F3, which commits the fix; package two full at B; package one full at X; package one full with a missing linter program at F3"
+            ],
+            "pseudocode": "in cmd/speca/gate_report_test.go (new): on F3: env = run('<one>', '--gate-report', '--since', B); r = env.result.gate_report; assert env.exit_code == 0 and r.since == B; assert r.full.runs == 3 and r.full.reused == 0; assert r.task.runs == 2 and r.task.reused == 1; assert r.full.seconds == the sum of the three full runs' seconds as their verdicts reported them. Then on the base, after `git merge --no-ff --no-commit <branch>` and one more `--gate full`: assert the report counts 4 full runs and full.reused == 1, the merged tree being F3's"
+          }
+        },
+        {
+          "id": "REQ-6.2",
+          "pattern": "ubiquitous",
+          "action": "report the duration of the earliest full run counted as `baseline_full_seconds`, that of the latest as `last_full_seconds`, a reused run's duration being that of the run it came from, and the slowest units of the latest full run as `slowest`",
+          "contract": "`baseline_full_seconds` and `last_full_seconds` are numbers of seconds; `slowest` is the list the latest full run's verdict held, the recorded run's list when that run was reused",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_report_test.go, in the scenario of the test above with an all_tests script that prints two Go result lines: assert r.baseline_full_seconds == the seconds of the full gate at B; assert r.last_full_seconds == the seconds of the passing full gate at F3; after the reused gate on the merged tree: assert r.last_full_seconds is still that number and not 0, and r.slowest == the two units, slowest first"
+          }
+        },
+        {
+          "id": "REQ-6.3",
+          "pattern": "unwanted",
+          "condition": "no recorded run counts: the state directory holds no run of this package in the range, or no run log at all, or only lines that cannot be parsed",
+          "action": "report a count of zero for every number",
+          "contract": "exit code 0; `full` and `task` each hold `runs` 0, `seconds` 0 and `reused` 0; `baseline_full_seconds` and `last_full_seconds` are absent; `slowest` is `[]`",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_report_test.go, a table over {an empty state directory, a run log holding one run of another package, a run log holding 'not json' and one run of this package (that run is counted, the line skipped)}: env = run('<one>', '--gate-report', '--since', 'HEAD'); assert env.exit_code == 0; for the first two: assert every count is 0, both durations are absent and slowest == []; for the third: assert full.runs == 1"
+          }
+        },
+        {
+          "id": "REQ-6.4",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --gate-report` is called without `--since`",
+          "action": "take as the commit the merge base of `HEAD` and the base branch, which is the branch `refs/remotes/origin/HEAD` names, else `main`",
+          "contract": "`result.gate_report.since` is the full id of that merge base, and the runs are counted from it",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_report_test.go, a table over {a clone whose origin/HEAD names a branch trunk, a repository with no remote and a branch main}: on a feature branch two commits ahead: env = run('<one>', '--gate-report'); assert env.result.gate_report.since == git('merge-base', 'HEAD', base)"
+          }
+        },
+        {
+          "id": "REQ-6.5",
+          "pattern": "unwanted",
+          "condition": "`--since` names no commit of the repository, or `--since` is absent and neither `refs/remotes/origin/HEAD` nor a branch `main` exists, or `--dir` is not inside a git work tree",
+          "action": "refuse the call",
+          "contract": "exit code 2 and `error.category` \"usage\"; the message names the value that is no commit, or says to give `--since <commit>`, or says the directory is not a git work tree; there is no `result`",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/speca/gate_report_test.go, a table over {--since nosuchref; no --since in a repository whose only branch is work; a directory with .specs and no .git}: env, code = run('<one>', '--gate-report', ...); assert code == 2 and env.error.category == 'usage' and env.result is absent; assert env.error.message contains 'nosuchref', '--since' or 'git' as the case has it"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-7",
+      "title": "Leave the repository alone and describe the two forms",
+      "rationale": "A gate is a measurement, not a task move, and an agent learns a command from its own description.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-7.1",
+          "pattern": "ubiquitous",
+          "action": "for any lifecycle status of the package (draft, active, sealed, superseded, archived), run `--gate` and `--gate-report` and leave every file and directory under `--dir` as it was",
+          "contract": "the gate answers with a verdict and the report with its counts in every status; no file under `--dir`, the package's `progress.json` and `spec.md` and the `.git` directory included, is created, changed or removed",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a git repository with one package per status, the superseded and archived ones under .specs/archive and named by their path, each with passing scripts that write outside the repository"
+            ],
+            "pseudocode": "in cmd/speca/gate_test.go, a table over the five statuses, with the helpers packageWith and snapshot of cmd/speca/helpers_test.go: before = snapshot(root); a = run(ref, '--gate', 'full'); b = run(ref, '--gate', 'task'); c = run(ref, '--gate-report', '--since', 'HEAD'); assert a.result.gate.verdict == 'pass' and b.result.gate.verdict == 'pass' and c.result.gate_report.full.runs == 1; assert snapshot(root) == before"
+          }
+        },
+        {
+          "id": "REQ-7.2",
+          "pattern": "event_driven",
+          "condition": "`speca --schema` is called",
+          "action": "describe the flags `--gate` with its two values, `--clean-env`, `--timeout`, `--gate-report` and `--since`, and the result fields `gate` and `gate_report` with every field of each",
+          "contract": "the JSON document's `flags` holds the five flags, `gate` with the enumeration `task`, `full`; its `result` schema holds `gate` and `gate_report` with a description for every field",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "extends TestSchema_DescribesTheFormsFlagsAndResult in cmd/speca/schema_test.go: assert flags has gate, clean-env, timeout, gate-report and since; assert flags.gate.enum == ['task', 'full']; assert result.properties.result has gate and gate_report, and that every property under each has a description. TestSchema_MatchesTheGoldenFile in the same file compares the document with cmd/speca/testdata/schema.golden.json, which is written again"
+          }
+        },
+        {
+          "id": "REQ-7.3",
+          "pattern": "ubiquitous",
+          "action": "say in the envelope's `summary` the level, the verdict and the seconds of a gate, or the commit a reused pass came from, and for the report the runs it counted",
+          "contract": "`speca: <directory> <level> gate <verdict> in <n>s` for a gate that ran; `speca: <directory> <level> gate pass, reused from <short commit>` for a reused one; `speca: <directory> <level> gate not_run: <reason>` for one that could not start; `speca: <directory> gate report: <n> full, <m> task, <k> reused` for the report",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/result_test.go, beside the existing tests of Result.Summary, a table over results holding a gate {full pass 42.5 s, task fail 3 s, full pass reused from abc1234, full not_run with a reason} and a gate report {3 full, 9 task, 2 reused}: assert r.Summary() equals the sentence the contract gives for each"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "An implementer gates a tree, gates it again unchanged, and reads the report",
+      "steps": [
+        {
+          "actor": "implementer",
+          "action": "runs `speca <package> --gate full` on the unchanged base branch, the baseline"
+        },
+        {
+          "actor": "speca",
+          "action": "asks git for the tree id of the working tree through a temporary index and finds no recorded pass under the key"
+        },
+        {
+          "actor": "speca",
+          "action": "runs `linter`, then `all_tests`, writing each command's output to its log and timing it"
+        },
+        {
+          "actor": "gate store",
+          "action": "records the pass under the key and the run in the package's run log"
+        },
+        {
+          "actor": "implementer",
+          "action": "commits a change on a branch and runs `speca <package> --gate task`, runs `--gate full` on the branch tip, then merges the branch with `--no-ff --no-commit` and runs `--gate full` on the merged tree"
+        },
+        {
+          "actor": "speca",
+          "action": "runs the commands for the changed tree, and for the merged tree answers `pass` with `reused`, because its tree is the branch tip's and that tree passed a full gate"
+        },
+        {
+          "actor": "implementer",
+          "action": "runs `speca <package> --gate-report --since <baseline commit>` and copies the counts into the merge commit"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "speca's Main",
+          "git",
+          "the gate's commands as real processes",
+          "the state directory on disk"
+        ],
+        "setup": [
+          "a temporary git repository with a branch main and one package whose test_commands name two executable scripts that count their runs outside the repository, the all_tests script printing two Go result lines",
+          "XDG_STATE_HOME set to an empty temporary directory"
+        ],
+        "end_state": [
+          "the scripts ran for the baseline, for the task gate and for the full gate on the branch tip, and not for the merged tree",
+          "the gate on the merged tree answers `pass` with `reused.commit` the branch tip",
+          "the report counts three full runs with one reused and one task run, and holds the baseline's duration and two slowest units",
+          "the repository holds no file the gates wrote"
+        ],
+        "pseudocode": "in cmd/speca/e2e_test.go, beside TestAnAgentFollowsNextFromTheReportToTheFinishedTask: base = rev-parse(main); run(pkg, '--gate', 'full'); switch -c feature; write and commit a file; run(pkg, '--gate', 'task'); full = run(pkg, '--gate', 'full'); tip = rev-parse(HEAD); switch main; merge --no-ff --no-commit feature; merged = run(pkg, '--gate', 'full'); assert merged.result.gate.reused.commit == tip and the run count did not rise; rep = run(pkg, '--gate-report', '--since', base).result.gate_report; assert rep.full.runs == 3 and rep.full.reused == 1 and rep.task.runs == 1 and len(rep.slowest) == 2 and rep.baseline_full_seconds is present; assert git('status', '--porcelain') lists only the merge's own changes"
+      }
+    },
+    {
+      "id": "PATH-2",
+      "title": "A conformance pass runs the gate in a clean environment and reads the failure from the verdict",
+      "steps": [
+        {
+          "actor": "implementer",
+          "action": "runs `speca <package> --gate full --clean-env` on a branch whose tests pass on this machine"
+        },
+        {
+          "actor": "speca",
+          "action": "creates an empty directory, runs the commands with it as `HOME`, with no global or system git configuration and `GIT_TERMINAL_PROMPT=0`"
+        },
+        {
+          "actor": "speca",
+          "action": "sees `all_tests` exit non-zero, stops, puts the last 40 lines of its output in the verdict and removes the directory"
+        },
+        {
+          "actor": "gate store",
+          "action": "records the run in the run log and no pass to reuse"
+        },
+        {
+          "actor": "implementer",
+          "action": "reads the failure from `tail`, without opening the log, and runs the same call again after the fix"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "speca's Main",
+          "git",
+          "the gate's commands as real processes",
+          "the state directory on disk"
+        ],
+        "setup": [
+          "a temporary git repository with one package whose all_tests script exits 0 when `git config --global user.name` prints a name and otherwise prints 60 lines and exits 1",
+          "HOME set to a temporary directory whose .gitconfig sets user.name"
+        ],
+        "end_state": [
+          "the gate without `--clean-env` answers `pass`",
+          "the gate with `--clean-env` on the same tree is not reused, answers `fail`, and its `tail` holds the last 40 of the 60 lines",
+          "a second gate with `--clean-env` runs the commands again",
+          "the temporary `HOME` is gone"
+        ],
+        "pseudocode": "in cmd/speca/e2e_test.go: a = run(pkg, '--gate', 'full'); assert a.result.gate.verdict == 'pass'; b = run(pkg, '--gate', 'full', '--clean-env'); g = b.result.gate; assert g.reused is absent and g.verdict == 'fail' and g.clean_env; assert lines(last(g.commands).tail) == lines 21 to 60; c = run(pkg, '--gate', 'full', '--clean-env'); assert c.result.gate.reused is absent; assert the HOME the script recorded does not exist"
+      }
+    }
+  ]
+}
