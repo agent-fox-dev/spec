@@ -284,3 +284,25 @@ func TestMain_RepairsADefectAndAnUntestedItemAfterAReconcile(t *testing.T) {
 		t.Errorf("main is not checked out clean: %q", s)
 	}
 }
+
+// An operator runs the loop with --strict-handoffs: a package that leaves an
+// inbound handoff untaken is refused before any session, and once its plan
+// takes the handoff it is started.
+func TestMain_RefusesAPackageThatLeavesAHandoffUntakenUntilItsPlanTakesIt(t *testing.T) {
+	f := handoffFixture(t, false)
+	env, code, _ := runMain(t, "--strict-handoffs")
+	if code != 1 || env.Result.Stopped == nil || !strings.Contains(env.Result.Stopped.Reason, "01:H-1") || len(f.starts(t)) != 0 {
+		t.Fatalf("code %d, stopped %+v, sessions %v; want a stop naming 01:H-1 and no session", code, env.Result.Stopped, f.starts(t))
+	}
+	editJSON(t, filepath.Join(f.root, ".specs", "02_b", "tasks.json"), func(m map[string]any) {
+		m["tasks"].([]any)[0].(map[string]any)["takes_handoffs"] = []any{"01:H-1"}
+	})
+	f.commit(t, "02 takes the handoff")
+	git(t, f.root, "push", "-q")
+	if _, code, stderr := runMain(t, "--strict-handoffs", "--max", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/02_b" {
+		t.Errorf("sessions %v; want 02 started", got)
+	}
+}

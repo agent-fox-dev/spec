@@ -160,3 +160,24 @@ func (g *DependencyGraph) TopologicalSort() ([]string, error) {
 
 	return order, nil
 }
+
+// DependsOn reports whether spec from depends on spec to, directly or
+// through other specs.
+func (g *DependencyGraph) DependsOn(from, to string) bool {
+	seen := map[string]bool{from: true}
+	queue := []string{from}
+	for len(queue) > 0 {
+		at := queue[0]
+		queue = queue[1:]
+		for _, e := range g.Dependencies(at) {
+			if e.ToSpec == to {
+				return true
+			}
+			if !seen[e.ToSpec] {
+				seen[e.ToSpec] = true
+				queue = append(queue, e.ToSpec)
+			}
+		}
+	}
+	return false
+}

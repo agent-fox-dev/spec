@@ -385,3 +385,37 @@ func TestNextTask_PicksTheFirstInProgressElseTheEarliestReadyTask(t *testing.T) 
 		}
 	}
 }
+
+// A package with an outbound handoff gets one step of its integration task
+// per handoff, after the paths are traced: a step unwired only for it does
+// not fail the task, is an awaits item for its receiver, and its criteria are
+// tested through the entry point.
+func TestIntegrationTask_TellsAnOutboundHandoffFromAGap(t *testing.T) {
+	s := loadFixture(t, fixtureValidSpec)
+	before, _ := s.IntegrationTask()
+	s.Requirements.Handoffs = []Handoff{{Id: "H-1", What: "after-landing hooks", To: "02", Criteria: []string{"REQ-1.1"}}}
+	after, _ := s.IntegrationTask()
+	var added []string
+	for _, step := range after.Steps {
+		if !slices.Contains(before.Steps, step) {
+			added = append(added, step)
+		}
+	}
+	if len(added) != 1 {
+		t.Fatalf("steps added %q; want one", added)
+	}
+	for _, want := range []string{"H-1", "after-landing hooks", "02", "REQ-1.1", "awaits"} {
+		if !strings.Contains(added[0], want) {
+			t.Errorf("the step %q does not say %q", added[0], want)
+		}
+	}
+	trace := -1
+	for i, s := range after.Steps {
+		if strings.HasPrefix(s, "Trace ") {
+			trace = i
+		}
+	}
+	if at := slices.Index(after.Steps, added[0]); trace < 0 || at < trace {
+		t.Errorf("the step is at %d, before the last trace at %d", at, trace)
+	}
+}

@@ -106,10 +106,14 @@ Forms:
                            is ready, the next task to work on, the lifecycle
                            moves allowed from its status, and the packages it
                            depends on and that depend on it
-  speca <spec> --validate  the format's full verdict: the schemas, the
+  speca <spec> --validate [--strict-handoffs]
+                           the format's full verdict: the schemas, the
                            cross-file rules C1 to C8 and the cross-spec rules
                            that concern the package, each finding naming its
-                           rule, and the derived traceability
+                           rule, and the derived traceability. A handoff
+                           another package addresses to this one that no task
+                           takes is a handoff_not_taken warning, an error with
+                           --strict-handoffs, which stores nothing
   speca --list             every package under the spec root, in number order,
                            each with its status, whether it validates, its task
                            counts and its next task; --all adds archive/
@@ -324,24 +328,25 @@ Flags:
 
 // options are speca's flags.
 type options struct {
-	dir      string
-	specsDir string
-	validate bool
-	list     bool
-	next     bool
-	all      bool
-	tasks    taskFlag
-	state    string
-	status   givenFlag
-	by       givenFlag
-	force    bool
-	dryRun   bool
-	render   bool
-	migrate  bool
-	gate     givenFlag
-	cleanEnv bool
-	timeout  givenDuration
-	base     givenFlag
+	dir            string
+	specsDir       string
+	validate       bool
+	strictHandoffs bool
+	list           bool
+	next           bool
+	all            bool
+	tasks          taskFlag
+	state          string
+	status         givenFlag
+	by             givenFlag
+	force          bool
+	dryRun         bool
+	render         bool
+	migrate        bool
+	gate           givenFlag
+	cleanEnv       bool
+	timeout        givenDuration
+	base           givenFlag
 	// The gate report.
 	gateReport bool
 	since      givenFlag
@@ -362,6 +367,7 @@ func (o *options) statusForm() bool { return o.status.given || o.by.given }
 func (o *options) gateForm() bool { return o.gate.given }
 
 func (o *options) register(fs *flag.FlagSet) {
+	fs.BoolVar(&o.strictHandoffs, "strict-handoffs", false, "with --validate, report each handoff another package addresses to this one that no task takes as an error (handoff_not_taken) instead of a warning; it stores nothing")
 	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
 	fs.BoolVar(&o.list, "list", false, "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input")
 	fs.BoolVar(&o.next, "next", false, "name the package to implement now: the first package under the spec root, in dependency order with ties broken by number, that is open (draft or active, with a task pending or in progress) and whose every dependency is finished; all_done says when nothing is left, waiting what cannot start and why; a dependency cycle fails the call; takes no input")
@@ -397,6 +403,9 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	}
 	if o.validate && o.list {
 		errs = append(errs, errors.New("--validate and --list are two operations: give one"))
+	}
+	if o.strictHandoffs && !o.validate {
+		errs = append(errs, errors.New("--strict-handoffs goes with --validate: it makes an untaken inbound handoff an error of the verdict"))
 	}
 	if o.next {
 		errs = append(errs, o.nextErrors(ref)...)

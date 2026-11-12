@@ -104,6 +104,20 @@ type ExternalApiSymbol struct {
 	Signature string `json:"signature" yaml:"signature" mapstructure:"signature"`
 }
 
+type Handoff struct {
+	// The criteria of this package that depend on the handoff being wired.
+	Criteria []string `json:"criteria" yaml:"criteria" mapstructure:"criteria"`
+
+	// Id corresponds to the JSON schema field "id".
+	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// The spec id of the package that takes the handoff.
+	To string `json:"to" yaml:"to" mapstructure:"to"`
+
+	// The extension point or entry point left for the receiving package.
+	What string `json:"what" yaml:"what" mapstructure:"what"`
+}
+
 type PathStep struct {
 	// Action corresponds to the JSON schema field "action".
 	Action string `json:"action" yaml:"action" mapstructure:"action"`
@@ -139,6 +153,9 @@ type RequirementsV3Json struct {
 
 	// ExternalApis corresponds to the JSON schema field "external_apis".
 	ExternalApis []ExternalApi `json:"external_apis,omitempty,omitzero" yaml:"external_apis,omitempty" mapstructure:"external_apis,omitempty"`
+
+	// What this package leaves for a later package to call, register into or fill.
+	Handoffs []Handoff `json:"handoffs,omitempty,omitzero" yaml:"handoffs,omitempty" mapstructure:"handoffs,omitempty"`
 
 	// Requirements corresponds to the JSON schema field "requirements".
 	Requirements []Requirement `json:"requirements" yaml:"requirements" mapstructure:"requirements"`

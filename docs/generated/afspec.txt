@@ -51,6 +51,14 @@ const (
 )
     Schema file names for the four v3 artifacts.
 
+const (
+	CheckHandoffDirection = "cross_spec_handoff_direction"
+	CheckHandoffTaken     = "cross_spec_handoff_taken"
+	CheckHandoffNotTaken  = "handoff_not_taken"
+)
+    The checks of the cross-spec handoff rules, and of the warning that a
+    handoff is not taken.
+
 const AffectedTestsBase = "{base}"
     AffectedTestsBase is the placeholder the affected-tests command holds
     exactly once, for the commit a change starts from.
@@ -510,6 +518,10 @@ func (g *DependencyGraph) Dependents(specID string) []DependencyEdge
     Dependents returns all edges where other specs depend on the given spec
     (i.e., edges where ToSpec matches specID).
 
+func (g *DependencyGraph) DependsOn(from, to string) bool
+    DependsOn reports whether spec from depends on spec to, directly or through
+    other specs.
+
 func (g *DependencyGraph) TopologicalSort() ([]string, error)
     TopologicalSort returns spec IDs in topological order using Kahn's algorithm
     such that every spec appears before its dependents. Returns an error if a
@@ -567,6 +579,42 @@ const (
 	StepRequirements GenerationStep = "requirements"
 	StepTasks        GenerationStep = "tasks"
 )
+type Handoff struct {
+	// The criteria of this package that depend on the handoff being wired.
+	Criteria []string `json:"criteria" yaml:"criteria" mapstructure:"criteria"`
+
+	// Id corresponds to the JSON schema field "id".
+	Id string `json:"id" yaml:"id" mapstructure:"id"`
+
+	// The spec id of the package that takes the handoff.
+	To string `json:"to" yaml:"to" mapstructure:"to"`
+
+	// The extension point or entry point left for the receiving package.
+	What string `json:"what" yaml:"what" mapstructure:"what"`
+}
+
+type InboundHandoff struct {
+	SenderDir  string
+	SenderID   string
+	Handoff    Handoff
+	Criteria   []string
+	Unreadable string
+}
+    InboundHandoff is a handoff another package of the spec root addresses to
+    a package, as a renderer reads it: the sending package's directory and id,
+    the handoff, and the sentences of the sender's criteria that depend on it.
+    Unreadable says why the sending package could not be read, when it could
+    not; the handoff then holds its id alone.
+
+func InboundHandoffs(specsDir string, s *Spec) []InboundHandoff
+    InboundHandoffs reads, from the packages under specsDir, every handoff
+    addressed to s, in the order of the packages and their handoffs. A package
+    a task of s takes a handoff from and that cannot be read is an entry of its
+    own, with why, so that a render can say so and go on.
+
+func (in InboundHandoff) Ref() string
+    Ref is the handoff as a task of the receiver names it in takes_handoffs.
+
 type IntentError struct {
 	Msg string
 	Err *SpecError
@@ -789,6 +837,13 @@ type ProgressV3Json struct {
 type RenderOption func(*renderConfig)
     RenderOption configures a render call.
 
+func WithInboundHandoffs(in []InboundHandoff) RenderOption
+    WithInboundHandoffs gives a scoped render the handoffs other packages of the
+    spec root address to the package, as InboundHandoffs reads them: a task that
+    takes one is rendered with the sender's text, and the integration task with
+    a step and a contract for each. A package's own render never reads another
+    package, so that its spec.md depends on its own files alone.
+
 func WithMaxTokens(n int) RenderOption
     WithMaxTokens caps the estimated token count of the rendered output.
     Values below 1 disable the budget.
@@ -831,6 +886,9 @@ type RequirementsV3Json struct {
 
 	// ExternalApis corresponds to the JSON schema field "external_apis".
 	ExternalApis []ExternalApi `json:"external_apis,omitempty,omitzero" yaml:"external_apis,omitempty" mapstructure:"external_apis,omitempty"`
+
+	// What this package leaves for a later package to call, register into or fill.
+	Handoffs []Handoff `json:"handoffs,omitempty,omitzero" yaml:"handoffs,omitempty" mapstructure:"handoffs,omitempty"`
 
 	// Requirements corresponds to the JSON schema field "requirements".
 	Requirements []Requirement `json:"requirements" yaml:"requirements" mapstructure:"requirements"`
@@ -1227,6 +1285,10 @@ type Task struct {
 	// Steps corresponds to the JSON schema field "steps".
 	Steps []string `json:"steps" yaml:"steps" mapstructure:"steps"`
 
+	// The handoffs this task takes, each as the sending package's spec id, a colon
+	// and the handoff's id.
+	TakesHandoffs []string `json:"takes_handoffs,omitempty,omitzero" yaml:"takes_handoffs,omitempty" mapstructure:"takes_handoffs,omitempty"`
+
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
 
@@ -1367,6 +1429,19 @@ type ValidationResult struct {
     ValidationResult holds the results of spec validation. Valid is true if and
     only if Errors is empty; warnings never block.
 
+func CrossSpecFindings(specs []*Spec, spec *Spec) ValidationResult
+    CrossSpecFindings runs the cross-spec rules over specs, the packages of
+    one spec root, spec among them, and keeps the findings that concern spec.
+    The graph is made of the dependencies the packages hold. The library tags
+    an unknown dependency, a missing shared actor and the handoff rules with
+    the package that decides them, so those are kept for it. The cycle names no
+    package, and a package with no edge cannot be on one, so it is kept for any
+    package with an edge. A warning tagged with the package's id is kept for it.
+
+func StrictHandoffs(v ValidationResult) ValidationResult
+    StrictHandoffs is v with each handoff_not_taken warning made an error,
+    as a caller that will not start a package leaving a handoff untaken asks.
+
 func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult
     ValidateCrossSpec checks the rules that span specs: every declared
     dependency exists, the dependency graph is acyclic, and each dependency
@@ -1396,6 +1471,12 @@ func ValidateGenerationStepComplete(step GenerationStep, partial PartialSpec) Va
     so a repair loop learns of every problem in one pass instead of one class
     per regenerated artifact. The schema errors come first, each with Category
     "schema"; a rule error may restate a consequence of one of them.
+
+func ValidateInRoot(specsDir string, spec *Spec) (ValidationResult, error)
+    ValidateInRoot is spec's own validation and the cross-spec rules that
+    concern it, over the packages under specsDir that load (spec in place of
+    the one at its directory), for a caller that needs the verdict without the
+    commands that give it. It fails only when specsDir cannot be read.
 
 type WaitingPackage struct {
 	// Dir is the package directory, as the display function shows it.

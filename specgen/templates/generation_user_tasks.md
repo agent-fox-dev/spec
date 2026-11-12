@@ -11,6 +11,7 @@ The complete requirements artifact is above, with the check of every criterion a
 - `touches` — optional. The files, packages or modules the task creates or modifies, the test files it extends among them. This is where the files are named, each once, without a line number.
 - `depends_on` — optional. Task IDs that must be done first; must reference lower IDs. Absent means "the previous task": **omit it** when it would name only the task before, and write it only to let independent tasks run in parallel or to name more than one task.
 - `done_when` — optional. Extra completion checks beyond the implicit ones.
+- `takes_handoffs` — optional. The handoffs another package addresses to this one that the task wires, each `"<spec id>:H-N"`. Every handoff the packages this one depends on address to it is taken by some task.
 
 There is no `kind`, no `tests`, no `state` and no `optional`: every stored task is an implement task, a task's tests are the checks of its criteria, and the state of every task lives in progress.json, which the tools write.
 

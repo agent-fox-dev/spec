@@ -17,13 +17,14 @@ const DefaultStall = 30 * time.Minute
 // options are specrun's settings. A setting's default comes from its SPECRUN_
 // variable when that is set, and the flag wins over it.
 type options struct {
-	max          int // 0: no limit
-	stall        time.Duration
-	logDir       string
-	logDirFrom   string // what gave logDir: --log-dir, or its variable
-	strictSkills bool
-	stopOn       []string
-	stopOnText   string // --stop-on as given, or its default
+	max            int // 0: no limit
+	stall          time.Duration
+	logDir         string
+	logDirFrom     string // what gave logDir: --log-dir, or its variable
+	strictSkills   bool
+	strictHandoffs bool
+	stopOn         []string
+	stopOnText     string // --stop-on as given, or its default
 	// reconcileEvery is the number of packages between reconciles; 0 leaves
 	// only the reconcile at the end.
 	reconcileEvery int
@@ -41,7 +42,7 @@ type options struct {
 const usageText = `specrun — run /af-impl on every open spec package, one fresh claude -p session each
 
 Usage:
-  specrun [--max N] [--stall D] [--log-dir DIR] [--strict-skills]
+  specrun [--max N] [--stall D] [--log-dir DIR] [--strict-skills] [--strict-handoffs]
   specrun --dry-run      say what the next step would be, and change nothing
   specrun --ledger       print the ledger of every step as a table
   specrun --reset-state  discard the state file
@@ -155,7 +156,7 @@ func (o *options) fromEnv(lookup func(string) (string, bool)) error {
 	for _, b := range []struct {
 		name string
 		to   *bool
-	}{{"repair", &o.repair}, {"repair-security", &o.repairSecurity}} {
+	}{{"repair", &o.repair}, {"repair-security", &o.repairSecurity}, {"strict-handoffs", &o.strictHandoffs}} {
 		if v := getenv(envName(b.name)); v != "" {
 			x, err := strconv.ParseBool(v)
 			if err != nil {
@@ -204,6 +205,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.repairSecurity, "repair-security", o.repairSecurity, "repair security defects too; without it a security defect is never repaired ($SPECRUN_REPAIR_SECURITY)")
 	fs.IntVar(&o.reconcileEvery, "reconcile-every", o.reconcileEvery, "run a reconcile after this many landed packages, 0 or more; 0 leaves only the reconcile at the end ($SPECRUN_RECONCILE_EVERY)")
 	fs.StringVar(&o.stopOnText, "stop-on", o.stopOnText, "stop the loop after a package that opened an open defect of one of these severities, comma-separated: security, data-loss, correctness, minor; '' never stops ($SPECRUN_STOP_ON)")
+	fs.BoolVar(&o.strictHandoffs, "strict-handoffs", o.strictHandoffs, "validate each package before its session with the cross-spec rules, an inbound handoff no task takes an error, and stop when it does not validate ($SPECRUN_STRICT_HANDOFFS)")
 	fs.BoolVar(&o.strictSkills, "strict-skills", o.strictSkills, "refuse to start when the installed af-impl skill is not the one specrun was built with ($SPECRUN_STRICT_SKILLS)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "say what the next step would be and change nothing: no branch switched, nothing pulled, no session, no state or log")
 	fs.BoolVar(&o.ledger, "ledger", false, "print the ledger as a table and start nothing")

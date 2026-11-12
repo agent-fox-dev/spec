@@ -154,6 +154,9 @@ type renderOptions struct {
 	// maxTokens is the budget; 0 means none. It is never combined with
 	// sections.
 	maxTokens int
+	// specsDir is the spec root, read for the handoffs other packages address
+	// to this one when a task is rendered.
+	specsDir string
 }
 
 // render renders spec as the options ask, using the afspec render
@@ -171,8 +174,9 @@ func render(spec *afspec.Spec, opts renderOptions, res *Result, run *cli.Run) {
 	switch {
 	case opts.task > 0:
 		res.Scope = envelope.ScopeTask
-		parts = spec.RenderIndividualScoped(opts.task, budget...)
-		full := spec.RenderIndividualScoped(opts.task)
+		inbound := afspec.WithInboundHandoffs(afspec.InboundHandoffs(opts.specsDir, spec))
+		parts = spec.RenderIndividualScoped(opts.task, append(budget, inbound)...)
+		full := spec.RenderIndividualScoped(opts.task, inbound)
 		res.Reduced = reducedParts(spec, parts, full)
 	case opts.sections != nil:
 		res.Scope = envelope.ScopeSpec

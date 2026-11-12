@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -473,6 +474,105 @@ func (s *Spec) checkAffectedTestsBase() []ValidationEntry {
 	return nil
 }
 
+// The checks of the cross-spec handoff rules, and of the warning that a
+// handoff is not taken.
+const (
+	CheckHandoffDirection = "cross_spec_handoff_direction"
+	CheckHandoffTaken     = "cross_spec_handoff_taken"
+	CheckHandoffNotTaken  = "handoff_not_taken"
+)
+
+// handoffRules are the cross-spec rules of handoffs. A handoff goes to a
+// package of the spec root that depends on the sender, directly or
+// transitively: in dependency order any other lands first, and nothing is
+// left to wire it. A takes_handoffs entry names a handoff its package
+// declares to the taker. Each is an error of the package that wrote it. A
+// handoff no task of its receiver takes is a warning of the receiver.
+func handoffRules(specs []*Spec, byID map[string]*Spec, graph *DependencyGraph) (errs, warns []ValidationEntry) {
+	if graph == nil {
+		graph = &DependencyGraph{}
+	}
+	for _, s := range specs {
+		for _, h := range handoffsOf(s) {
+			why := ""
+			switch {
+			case byID[h.To] == nil:
+				why = "names no package under the spec root"
+			case h.To == s.SpecID:
+				why = "names the package itself"
+			case !graph.DependsOn(h.To, s.SpecID):
+				why = fmt.Sprintf("names spec %s, which does not depend on spec %s, directly or transitively, so it can land first and leave nothing to wire the handoff", h.To, s.SpecID)
+			}
+			if why != "" {
+				errs = append(errs, ValidationEntry{Category: "integrity", Check: CheckHandoffDirection, Artifact: RequirementsFileName,
+					EntityID: s.SpecID, Message: fmt.Sprintf("spec %s's handoff %s (%s) to %q %s", s.SpecID, h.Id, h.What, h.To, why)})
+				continue
+			}
+			if !takes(byID[h.To], s.SpecID+":"+h.Id) {
+				warns = append(warns, ValidationEntry{Category: "integrity", Check: CheckHandoffNotTaken, Artifact: TasksFileName,
+					EntityID: h.To, Message: fmt.Sprintf("spec %s hands %s to this package, %s, and no task takes it: list \"%s:%s\" in the takes_handoffs of the task that wires it",
+						s.SpecID, h.Id, h.What, s.SpecID, h.Id)})
+			}
+		}
+		for _, task := range tasksOf(s) {
+			for _, take := range task.TakesHandoffs {
+				from, id, _ := strings.Cut(take, ":")
+				why := ""
+				switch sender := byID[from]; {
+				case sender == nil:
+					why = fmt.Sprintf("spec %s is no package under the spec root", from)
+				case !slices.ContainsFunc(handoffsOf(sender), func(h Handoff) bool { return h.Id == id }):
+					why = fmt.Sprintf("spec %s declares no handoff %s", from, id)
+				default:
+					for _, h := range handoffsOf(sender) {
+						if h.Id == id && h.To != s.SpecID {
+							why = fmt.Sprintf("spec %s's handoff %s is addressed to spec %s, not to this package", from, id, h.To)
+						}
+					}
+				}
+				if why != "" {
+					errs = append(errs, ValidationEntry{Category: "integrity", Check: CheckHandoffTaken, Artifact: TasksFileName,
+						EntityID: s.SpecID, Message: fmt.Sprintf("task %d takes %q, but %s", task.Id, take, why)})
+				}
+			}
+		}
+	}
+	return errs, warns
+}
+
+// StrictHandoffs is v with each handoff_not_taken warning made an error, as
+// a caller that will not start a package leaving a handoff untaken asks.
+func StrictHandoffs(v ValidationResult) ValidationResult {
+	out := ValidationResult{Errors: slices.Clone(v.Errors)}
+	for _, w := range v.Warnings {
+		if w.Check == CheckHandoffNotTaken {
+			out.Errors = append(out.Errors, w)
+		} else {
+			out.Warnings = append(out.Warnings, w)
+		}
+	}
+	out.Valid = len(out.Errors) == 0
+	return out
+}
+
+// takes reports whether a task of the package takes the handoff ref.
+func takes(s *Spec, ref string) bool {
+	for _, task := range tasksOf(s) {
+		if slices.Contains(task.TakesHandoffs, ref) {
+			return true
+		}
+	}
+	return false
+}
+
+// handoffsOf is the package's handoffs, none when it has no requirements.
+func handoffsOf(s *Spec) []Handoff {
+	if s.Requirements == nil {
+		return nil
+	}
+	return s.Requirements.Handoffs
+}
+
 // checkC1: spec_id and spec_name agree across prd.md, the JSON files and the
 // folder name.
 func (s *Spec) checkC1() []ValidationEntry {
@@ -603,6 +703,13 @@ func (s *Spec) checkC2() []ValidationEntry {
 		seenTask[task.Id] = true
 	}
 
+	seenHandoff := map[string]bool{}
+	for _, h := range handoffsOf(s) {
+		if seenHandoff[h.Id] {
+			errors = append(errors, bad(RequirementsFileName, h.Id, fmt.Sprintf("duplicate handoff ID %q", h.Id)))
+		}
+		seenHandoff[h.Id] = true
+	}
 	return errors
 }
 
@@ -646,6 +753,17 @@ func (s *Spec) checkC4C5(idx specIndex) []ValidationEntry {
 
 	ownedCriteria := map[string]bool{}
 	taskIDs := map[int]bool{}
+	for _, h := range handoffsOf(s) {
+		for _, ref := range h.Criteria {
+			if !idx.criterionIDs[ref] {
+				errors = append(errors, ValidationEntry{
+					Category: "integrity", Check: "C4", Artifact: RequirementsFileName, EntityID: h.Id,
+					Message: fmt.Sprintf("handoff %s depends on criterion %q, which is no criterion of this spec", h.Id, ref),
+				})
+			}
+		}
+	}
+
 	for _, task := range tasksOf(s) {
 		taskIDs[task.Id] = true
 	}
@@ -943,6 +1061,9 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 			}
 		}
 	}
+
+	moreErrs, moreWarns := handoffRules(specs, specByID, graph)
+	errors, warnings = append(errors, moreErrs...), append(warnings, moreWarns...)
 
 	if len(specs) <= 1 {
 		return ValidationResult{Valid: len(errors) == 0, Errors: errors, Warnings: warnings}

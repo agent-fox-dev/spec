@@ -438,6 +438,7 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--repair-on LIST` | `SPECRUN_REPAIR_ON` | `security,data-loss,correctness,minor,untested` | what a reconcile queues for repair: defects of these severities, and `untested` items, comma-separated; `''` queues nothing |
 | `--repair-max N` | `SPECRUN_REPAIR_MAX` | `5` | the most repairs after one reconcile, 0 or more; `0` repairs nothing after a reconcile (the repairs of `--repair` have no cap) |
 | `--repair-security` | `SPECRUN_REPAIR_SECURITY` | off | repair security defects too; off, a security defect is never repaired, and `--repair` stops on one as the stop rule does |
+| `--strict-handoffs` | `SPECRUN_STRICT_HANDOFFS` | off | before a package's session, validate it in process (`afspec.ValidateInRoot`: its own rules and the cross-spec rules) with every inbound handoff no task takes as an error (`afspec.StrictHandoffs`); a package that does not validate is not started, and the loop stops (exit 1, stage `validate`) with `result.stopped.reason` `package does not validate: ` and each failing rule with its message. A dry run lists such a package in `result.would_stop` as `{spec_dir, reason}` instead. Off, af-impl's own refusal of an invalid package is the only check |
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
 | `--ledger` | | | print the ledger as a table and start nothing |
@@ -486,7 +487,9 @@ every `af:awaits` issue, and the issues the stop rule would name, writing
 nothing: `result.would_change` lists each change with `issue`, `rule`
 (`incomplete-labels`, `awaits-finished`), `add` and `remove`, and
 `result.would_stop` the defects as `result.stopped.issues` names them; both
-are `[]` when there are none, and absent without a forge. `result.repair_queue`
+are `[]` when there are none, and absent without a forge. Under
+`--strict-handoffs`, `result.would_stop` also holds, with or without a forge,
+an entry `{spec_dir, reason}` for a next package that does not validate. `result.repair_queue`
 lists the repair queue the labels give now, as a reconcile would build it,
 each issue with `number`, `title`, `url`, `severity` (or `untested`) and
 `created_at`, in order and capped by `--repair-max`; `[]` when it is empty,
@@ -546,7 +549,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open or a repair of one failed (`defect`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open or a repair of one failed (`defect`), the next package does not validate under `--strict-handoffs` (`validate`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes

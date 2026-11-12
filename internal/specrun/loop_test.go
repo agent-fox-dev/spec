@@ -353,3 +353,68 @@ func TestLoop_StopsWithoutGit(t *testing.T) {
 		t.Error("a session was started")
 	}
 }
+
+// handoffFixture is a repository with 01 finished, handing H-1 to 02, and 02
+// open; with taken, 02's first task takes it.
+func handoffFixture(t *testing.T, taken bool) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	one := f.addPackage(t, "01_a", "01", "done")
+	two := f.addPackage(t, "02_b", "02", "pending", "01")
+	editJSON(t, filepath.Join(one, "requirements.json"), func(m map[string]any) {
+		m["handoffs"] = []any{map[string]any{"id": "H-1", "what": "after-landing hooks", "to": "02", "criteria": []any{"REQ-1.1"}}}
+	})
+	if taken {
+		editJSON(t, filepath.Join(two, "tasks.json"), func(m map[string]any) {
+			m["tasks"].([]any)[0].(map[string]any)["takes_handoffs"] = []any{"01:H-1"}
+		})
+	}
+	f.commit(t, "handoffs")
+	git(t, f.root, "push", "-q")
+	f.plan(t, land(0))
+	return f
+}
+
+// With --strict-handoffs a package that leaves an inbound handoff untaken is
+// not started: the loop stops, naming it; a dry run says it would.
+func TestLoop_StrictHandoffsStopBeforeAPackageThatDoesNotTakeOne(t *testing.T) {
+	for name, tc := range map[string]struct {
+		taken bool
+		argv  []string
+		env   map[string]string
+		stop  bool
+	}{
+		"no flag":                      {false, nil, nil, false},
+		"--strict-handoffs, untaken":   {false, []string{"--strict-handoffs"}, nil, true},
+		"--strict-handoffs, taken":     {true, []string{"--strict-handoffs"}, nil, false},
+		"SPECRUN_STRICT_HANDOFFS=true": {false, nil, map[string]string{"SPECRUN_STRICT_HANDOFFS": "true"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := handoffFixture(t, tc.taken)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			env, code, _ := runMain(t, append(tc.argv, "--max", "1")...)
+			started := specDirs(f.starts(t))
+			if !tc.stop {
+				if code != 0 || strings.Join(started, ",") != ".specs/02_b" {
+					t.Errorf("code %d, sessions %v; want 02 started", code, started)
+				}
+				return
+			}
+			s := env.Result.Stopped
+			if code != 1 || len(started) != 0 || s == nil || !strings.HasPrefix(s.Reason, "package does not validate") ||
+				!strings.Contains(s.Reason, "handoff_not_taken") || !strings.Contains(s.Reason, "01:H-1") {
+				t.Errorf("code %d, sessions %v, stopped %+v; want a stop naming the untaken handoff and no session", code, started, s)
+			}
+		})
+	}
+
+	f := handoffFixture(t, false)
+	env, code, _ := runMain(t, "--dry-run", "--strict-handoffs")
+	if code != 0 || len(f.starts(t)) != 0 || !slices.ContainsFunc(env.Result.WouldStop, func(s StopIssue) bool {
+		return s.SpecDir == ".specs/02_b" && strings.Contains(s.Reason, "01:H-1")
+	}) {
+		t.Errorf("code %d, would_stop %+v; want 02 named, nothing started", code, env.Result.WouldStop)
+	}
+}

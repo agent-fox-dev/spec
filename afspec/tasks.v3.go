@@ -27,6 +27,10 @@ type Task struct {
 	// Steps corresponds to the JSON schema field "steps".
 	Steps []string `json:"steps" yaml:"steps" mapstructure:"steps"`
 
+	// The handoffs this task takes, each as the sending package's spec id, a colon
+	// and the handoff's id.
+	TakesHandoffs []string `json:"takes_handoffs,omitempty,omitzero" yaml:"takes_handoffs,omitempty" mapstructure:"takes_handoffs,omitempty"`
+
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
 

@@ -4,6 +4,10 @@ What `af-impl` §3 produces in one read-only pass over the spec and the
 repository, before any branch exists. Every task is given this brief, so it is
 written once and read at every step that needs it.
 
+- **Handoffs.** Before the spec's prose about wiring, read the package's own
+  `## Handoffs` (what it leaves, to whom) and, in each task's `specr --task`
+  render, the inbound handoffs it takes with the sender's text: they say
+  what this package wires and what it leaves unwired on purpose.
 - **Where things live.** For each module, type, command and file the spec
   names: the file it is in, its callers, its tests. Where the spec expects
   something that does not exist, where it should be created and what it

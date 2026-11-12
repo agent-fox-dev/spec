@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/authoring"
 	"github.com/agent-fox-dev/spec/internal/cli"
@@ -38,6 +39,9 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		c.warnUnreadable("the spec root", c.specsDir, err, "the cross-spec rules are skipped, and the verdict is the package's own")
 	}
 
+	if c.opts.strictHandoffs {
+		combined = afspec.StrictHandoffs(combined)
+	}
 	validation := specpkg.ReportOf(combined)
 	r.Validation = &validation
 	valid := validation.Valid

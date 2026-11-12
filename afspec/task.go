@@ -109,6 +109,11 @@ func (s *Spec) IntegrationTask() (PlannedTask, bool) {
 			p.Id, p.Title, strings.Join(p.Smoke.RealComponents, ", "), strings.Join(p.Smoke.EndState, "; ")))
 		t.Steps = append(t.Steps, fmt.Sprintf("Trace %s through the real code; confirm each step calls the next and no stub remains", p.Id))
 	}
+	for _, h := range handoffsOf(s) {
+		t.Steps = append(t.Steps, fmt.Sprintf("Handoff %s (%s) is left for spec %s: a path step unwired only because %s does not take it yet does not fail this task; "+
+			"file it as an awaits item for %s, and cover its criteria (%s) with a test that calls the entry point directly. Every other path that is not live still fails the task",
+			h.Id, h.What, h.To, h.To, h.To, strings.Join(h.Criteria, ", ")))
+	}
 	if len(contracts) > 0 {
 		t.Steps = append(t.Steps, fmt.Sprintf("For every criterion with a contract (%s), confirm the producer's result is consumed by a caller in production code, not only by tests",
 			strings.Join(contracts, ", ")))
@@ -301,6 +306,7 @@ func (t Task) clone() Task {
 	t.Steps = copyStrings(t.Steps)
 	t.Touches = copyStrings(t.Touches)
 	t.DoneWhen = copyStrings(t.DoneWhen)
+	t.TakesHandoffs = copyStrings(t.TakesHandoffs)
 	if t.DependsOn != nil {
 		deps := make([]int, len(t.DependsOn))
 		copy(deps, t.DependsOn)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -294,5 +295,112 @@ func TestVerdict_ReportsTheAuthoringHintsWithoutChangingValid(t *testing.T) {
 	}
 	if !strings.Contains(env.Summary, "validates; 5 authoring hints") {
 		t.Errorf("summary %q", env.Summary)
+	}
+}
+
+// A handoff goes to a package that depends on the sender, directly or
+// transitively; one to no package of the spec root, to the package itself or
+// the wrong way is an error of the sending package only.
+func TestVerdict_RefusesAHandoffThatPointsTheWrongWay(t *testing.T) {
+	for name, tc := range map[string]struct {
+		from, to string
+		says     string // empty when valid
+	}{
+		"01 to 02":             {"01", "02", ""},
+		"01 to 03, transitive": {"01", "03", ""},
+		"02 to 01":             {"02", "01", "does not depend"},
+		"02 to itself":         {"02", "02", "itself"},
+		"01 to 99":             {"01", "99", "no package"},
+		"01 to an archived 00": {"01", "00", "no package"},
+		"03 to 01":             {"03", "01", "does not depend"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, dirs := handoffRoot(t)
+			setHandoffs(t, dirs[tc.from], [4]string{"H-1", "the hook", tc.to, "REQ-1.1"})
+			v := validation(t, root, dirs[tc.from])
+			errs := itemsOf(v.Errors, "cross_spec_handoff_direction")
+			if tc.says == "" {
+				if len(errs) != 0 || !v.Valid {
+					t.Errorf("errors %+v; want the handoff accepted", v.Errors)
+				}
+				return
+			}
+			if len(errs) != 1 || v.Valid || errs[0].Artifact != "requirements.json" ||
+				!strings.Contains(errs[0].Message, "H-1") || !strings.Contains(errs[0].Message, tc.says) {
+				t.Fatalf("errors %+v; want one cross_spec_handoff_direction saying %q", v.Errors, tc.says)
+			}
+			for id := range dirs {
+				if id != tc.from && len(itemsOf(validation(t, root, dirs[id]).Errors, "cross_spec_handoff_direction")) != 0 {
+					t.Errorf("package %s is told of %s's handoff", id, tc.from)
+				}
+			}
+		})
+	}
+}
+
+// A takes_handoffs entry names a handoff its package declares to this one.
+func TestVerdict_RefusesATakeOfNoHandoffForThisPackage(t *testing.T) {
+	for name, tc := range map[string]struct {
+		taker, take string
+		says        string
+	}{
+		"02 takes 01:H-1":        {"02", "01:H-1", ""},
+		"02 takes 01:H-2":        {"02", "01:H-2", "declares no handoff"},
+		"02 takes 09:H-1":        {"02", "09:H-1", "no package under the spec root"},
+		"03 takes 01:H-1, to 02": {"03", "01:H-1", "addressed to spec 02"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, dirs := handoffRoot(t)
+			setHandoffs(t, dirs["01"], [4]string{"H-1", "the hook", "02", "REQ-1.1"})
+			setTakes(t, dirs[tc.taker], tc.take)
+			v := validation(t, root, dirs[tc.taker])
+			errs := itemsOf(v.Errors, "cross_spec_handoff_taken")
+			if tc.says == "" {
+				if len(errs) != 0 || !v.Valid {
+					t.Errorf("errors %+v; want the take accepted", v.Errors)
+				}
+				return
+			}
+			if len(errs) != 1 || v.Valid || errs[0].Artifact != "tasks.json" || !strings.Contains(errs[0].Message, "task 1") ||
+				!strings.Contains(errs[0].Message, tc.take) || !strings.Contains(errs[0].Message, tc.says) {
+				t.Errorf("errors %+v; want one cross_spec_handoff_taken naming task 1, %s and %s", v.Errors, tc.take, tc.says)
+			}
+		})
+	}
+}
+
+// The receiver is warned of each inbound handoff no task takes, and with
+// --strict-handoffs it is an error; the flag writes nothing.
+func TestVerdict_TellsTheReceiverWhatItHasNotTaken(t *testing.T) {
+	root, dirs := handoffRoot(t)
+	setHandoffs(t, dirs["01"], [4]string{"H-1", "the landing hook", "02", "REQ-1.1"}, [4]string{"H-2", "the fork hook", "02", "REQ-1.2"})
+	setTakes(t, dirs["02"], "01:H-1")
+
+	v := validation(t, root, dirs["02"])
+	warns := itemsOf(v.Warnings, "handoff_not_taken")
+	if !v.Valid || len(warns) != 1 || !strings.Contains(warns[0].Message, "01") || !strings.Contains(warns[0].Message, "H-2") ||
+		!strings.Contains(warns[0].Message, "the fork hook") {
+		t.Fatalf("valid %v, warnings %+v; want valid with one handoff_not_taken for 01's H-2", v.Valid, v.Warnings)
+	}
+	for _, other := range []string{"01", "03"} {
+		if w := itemsOf(validation(t, root, dirs[other]).Warnings, "handoff_not_taken"); len(w) != 0 {
+			t.Errorf("%s is warned: %+v", other, w)
+		}
+	}
+
+	before := snapshot(t, root)
+	strict := validation(t, root, dirs["02"], "--strict-handoffs")
+	if strict.Valid || !slices.Equal(checks(strict.Errors), []string{"handoff_not_taken"}) || len(itemsOf(strict.Warnings, "handoff_not_taken")) != 0 {
+		t.Errorf("strict: valid %v, errors %+v, warnings %+v; want one handoff_not_taken error", strict.Valid, strict.Errors, strict.Warnings)
+	}
+	if !maps.Equal(snapshot(t, root), before) {
+		t.Error("--strict-handoffs changed the spec root")
+	}
+	if !validation(t, root, dirs["02"]).Valid {
+		t.Error("the call without the flag is no longer valid")
+	}
+	setTakes(t, dirs["02"], "01:H-1", "01:H-2")
+	if !validation(t, root, dirs["02"], "--strict-handoffs").Valid {
+		t.Error("with every handoff taken the strict call is not valid")
 	}
 }

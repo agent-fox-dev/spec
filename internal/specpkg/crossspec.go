@@ -77,48 +77,7 @@ func crossSpec(specsDir string, spec *afspec.Spec, siblings []*afspec.Spec) (afs
 		}
 	}
 
-	graph := &afspec.DependencyGraph{Edges: []afspec.DependencyEdge{}}
-	for _, s := range specs {
-		if s.Tasks == nil {
-			continue
-		}
-		for _, d := range s.Tasks.Dependencies {
-			graph.Edges = append(graph.Edges, afspec.DependencyEdge{FromSpec: s.SpecID, ToSpec: d.Spec, Reason: d.Reason})
-		}
-	}
-	return concern(spec, graph, afspec.ValidateCrossSpec(specs, graph)), nil
-}
-
-// concern keeps, of the findings over a whole spec root, the ones about spec.
-// The library tags an unknown dependency and a missing shared actor with the
-// downstream package, which decides them, so those are kept for it. The cycle
-// names no package, and a package with no edge cannot be on one, so it is kept
-// for any package with an edge. A warning tagged with the package's id is kept
-// for it.
-func concern(spec *afspec.Spec, graph *afspec.DependencyGraph, all afspec.ValidationResult) afspec.ValidationResult {
-	linked := len(graph.Dependencies(spec.SpecID)) > 0 || len(graph.Dependents(spec.SpecID)) > 0
-	var kept afspec.ValidationResult
-	for _, e := range all.Errors {
-		if e.EntityID == spec.SpecID || (e.EntityID == "" && linked) {
-			kept.Errors = append(kept.Errors, named(e))
-		}
-	}
-	for _, w := range all.Warnings {
-		if w.EntityID == spec.SpecID {
-			kept.Warnings = append(kept.Warnings, named(w))
-		}
-	}
-	return kept
-}
-
-// named gives a cross-spec finding the artifact the library leaves off: the
-// dependency cycle, which is made of the dependencies that tasks.json
-// declares, has none.
-func named(e afspec.ValidationEntry) afspec.ValidationEntry {
-	if e.Artifact == "" && e.Check == "cross_spec_cycle" {
-		e.Artifact = "tasks.json"
-	}
-	return e
+	return afspec.CrossSpecFindings(specs, spec), nil
 }
 
 // SameDir reports whether two paths are one directory, however they are spelled.

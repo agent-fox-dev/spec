@@ -27,7 +27,7 @@ func init() {
 	// These MUST match the order in the corresponding .v3.json schema files.
 	schemaFieldOrder = map[reflect.Type][]string{
 		// requirements.v3.json
-		reflect.TypeOf(RequirementsV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "requirements", "execution_paths", "external_apis"},
+		reflect.TypeOf(RequirementsV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "requirements", "execution_paths", "external_apis", "handoffs"},
 		reflect.TypeOf(Requirement{}):        {"id", "title", "rationale", "system", "criteria"},
 		reflect.TypeOf(Criterion{}):          {"id", "pattern", "condition", "system", "action", "contract", "check"},
 		reflect.TypeOf(Check{}):              {"kind", "setup", "pseudocode", "same_as"},
@@ -36,12 +36,13 @@ func init() {
 		reflect.TypeOf(Smoke{}):              {"real_components", "setup", "end_state", "pseudocode"},
 		reflect.TypeOf(ExternalApiSymbol{}):  {"name", "import_path", "signature", "notes"},
 		reflect.TypeOf(ExternalApi{}):        {"package", "version", "verified", "symbols"},
+		reflect.TypeOf(Handoff{}):            {"id", "what", "to", "criteria"},
 
 		// tasks.v3.json
 		reflect.TypeOf(TasksV3Json{}):  {"$schema", "spec_id", "spec_name", "schema_version", "test_commands", "dependencies", "tasks"},
 		reflect.TypeOf(TestCommands{}): {"all_tests", "linter", "spec_tests", "affected_tests"},
 		reflect.TypeOf(Dependency{}):   {"spec", "reason"},
-		reflect.TypeOf(Task{}):         {"id", "title", "criteria", "steps", "touches", "depends_on", "done_when"},
+		reflect.TypeOf(Task{}):         {"id", "title", "criteria", "steps", "touches", "depends_on", "done_when", "takes_handoffs"},
 
 		// progress.v3.json
 		reflect.TypeOf(ProgressV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "updated_at", "tasks"},
@@ -73,6 +74,7 @@ func init() {
 		reflect.TypeOf(RequirementsV3Json{}): {
 			"execution_paths": true,
 			"external_apis":   true,
+			"handoffs":        true,
 		},
 		reflect.TypeOf(ExternalApiSymbol{}): {
 			"notes": true,
@@ -82,9 +84,10 @@ func init() {
 			"affected_tests": true,
 		},
 		reflect.TypeOf(Task{}): {
-			"touches":    true,
-			"depends_on": true,
-			"done_when":  true,
+			"touches":        true,
+			"depends_on":     true,
+			"done_when":      true,
+			"takes_handoffs": true,
 		},
 	}
 }

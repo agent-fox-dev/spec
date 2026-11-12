@@ -78,6 +78,10 @@ Each path is an end-to-end scenario with at least two `{actor, action}` steps an
 
 **Paths across specs.** For every spec this one depends on (the specs the PRD's `## Dependencies` table names, which the tasks artifact lists in `dependencies`), at least one step of this spec's paths must be played by an actor that also plays a step in one of that spec's paths: the same name, with case ignored. A spec whose paths share an actor with none of its dependencies is rejected, and the tasks step cannot repair that, so decide it here. Where this spec drives or calls a component the other spec owns, name that component as the other spec does instead of coining a name for it; the actors of the existing specs are listed above when there are any.
 
+## Handoffs
+
+`handoffs` is optional. Write one wherever the PRD says that another package will call, register into or fill something this package offers: `{"id": "H-1", "what": "<the extension point or entry point>", "to": "<the receiving package's spec id>", "criteria": ["REQ-2.1"]}`. The receiver must depend on this package, directly or transitively; a handoff to a package that lands earlier is refused. `criteria` are this package's criteria that depend on the handoff being wired.
+
 ## Example
 
 The fragment below is structurally correct for a recipe-manager system. Use your own domain — this is for shape only.

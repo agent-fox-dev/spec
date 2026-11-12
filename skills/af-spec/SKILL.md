@@ -115,7 +115,8 @@ Every package under the spec root, archived ones included, each with its
 - **the packages this one touches.** For each, `specr <NN> --section prd` for
   what it promises and excludes, and its `## Glossary` where it has one, whose
   terms this package uses in the same sense; and
-  `specr <NN> --section requirements` for its **execution-path actors**. The
+  `specr <NN> --section requirements` for its **execution-path actors** and
+  its `## Handoffs`, the ones addressed to this package among them. The
   actors matter later: an actor this package fails to share with a dependency
   is an error no later artifact can repair (§6);
 - **the intent already specified.** A `sealed` or `active` package whose
@@ -306,7 +307,7 @@ so every fact a coder needs to implement belongs in a criterion or a task step.
 
 ```sh
 speca <NN> --render
-speca <NN> --validate
+speca <NN> --validate --strict-handoffs
 ```
 
 Every save through the library writes `spec.md`, the package's render, beside

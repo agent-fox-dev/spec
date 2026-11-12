@@ -174,7 +174,7 @@ func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[stri
 
 	render := func(slim bool) {
 		if s.Requirements != nil {
-			result["requirements"] = s.renderScopedRequirements(*task, criteriaRefs, requirementRefs, pathRefs, slim)
+			result["requirements"] = s.renderScopedRequirements(*task, criteriaRefs, requirementRefs, pathRefs, slim, cfg.inbound)
 		} else {
 			result["requirements"] = ""
 		}
@@ -182,7 +182,7 @@ func (s *Spec) RenderIndividualScoped(taskID int, opts ...RenderOption) map[stri
 	render(false)
 
 	if s.Tasks != nil {
-		result["tasks"] = s.renderScopedTasks(taskID)
+		result["tasks"] = s.renderScopedTasks(taskID, cfg.inbound)
 	} else {
 		result["tasks"] = ""
 	}
@@ -345,7 +345,7 @@ func isRequirementInScope(req Requirement, criteriaRefs, requirementRefs map[str
 // other requirement as one line, the in-scope execution paths in full and
 // every other as one line. For the integration task it lists, instead of
 // requirements in full, the criteria that carry a contract.
-func (s *Spec) renderScopedRequirements(task PlannedTask, criteriaRefs, requirementRefs, pathRefs map[string]bool, slim bool) string {
+func (s *Spec) renderScopedRequirements(task PlannedTask, criteriaRefs, requirementRefs, pathRefs map[string]bool, slim bool, inbound []InboundHandoff) string {
 	var sb strings.Builder
 	integration := task.Kind == TaskKindIntegration
 
@@ -381,6 +381,7 @@ func (s *Spec) renderScopedRequirements(task PlannedTask, criteriaRefs, requirem
 
 	if integration {
 		renderContracts(&sb, s.Requirements)
+		renderHandoffContracts(&sb, s, inbound)
 	} else {
 		sb.WriteString("## Requirements\n\n")
 		for _, req := range s.Requirements.Requirements {
@@ -388,6 +389,7 @@ func (s *Spec) renderScopedRequirements(task PlannedTask, criteriaRefs, requirem
 				renderRequirement(&sb, req, slim)
 			}
 		}
+		renderTakenHandoffs(&sb, task.TakesHandoffs, inbound)
 	}
 
 	var scopedPaths []ExecutionPath
@@ -402,6 +404,74 @@ func (s *Spec) renderScopedRequirements(task PlannedTask, criteriaRefs, requirem
 	renderExternalAPIs(&sb, s.Requirements.ExternalApis)
 
 	return sb.String()
+}
+
+// renderHandoffs lists the package's own handoffs, each with what it leaves,
+// to whom and the criteria that depend on it; nothing when it has none.
+func renderHandoffs(sb *strings.Builder, handoffs []Handoff) {
+	if len(handoffs) == 0 {
+		return
+	}
+	sb.WriteString("## Handoffs\n\n")
+	for _, h := range handoffs {
+		sb.WriteString(fmt.Sprintf("- **%s:** %s, to %s; criteria %s\n", h.Id, h.What, code(h.To), strings.Join(h.Criteria, ", ")))
+	}
+	sb.WriteString("\n")
+}
+
+// renderTakenHandoffs renders the handoffs a task takes with the sending
+// package's text: what it leaves and each dependent criterion's sentence.
+func renderTakenHandoffs(sb *strings.Builder, takes []string, inbound []InboundHandoff) {
+	if len(takes) == 0 {
+		return
+	}
+	sb.WriteString("## Handoffs This Task Takes\n\n")
+	for _, take := range takes {
+		i := slices.IndexFunc(inbound, func(in InboundHandoff) bool { return in.Ref() == take })
+		switch {
+		case i < 0:
+			sb.WriteString(fmt.Sprintf("- **%s:** no package of the spec root declares this handoff to this package\n", take))
+		case inbound[i].Unreadable != "":
+			sb.WriteString(fmt.Sprintf("- **%s:** the sending package %s could not be read: %s\n", take, code(inbound[i].SenderDir), inbound[i].Unreadable))
+		default:
+			in := inbound[i]
+			sb.WriteString(fmt.Sprintf("- %s **%s:** %s\n", code(in.SenderDir), in.Handoff.Id, in.Handoff.What))
+			for _, c := range in.Criteria {
+				sb.WriteString(fmt.Sprintf("  - %s\n", c))
+			}
+		}
+	}
+	sb.WriteString("\n")
+}
+
+// renderHandoffContracts lists, for the integration task, each inbound
+// handoff with whether a task takes it, and each outbound one.
+func renderHandoffContracts(sb *strings.Builder, s *Spec, inbound []InboundHandoff) {
+	if len(inbound) > 0 {
+		sb.WriteString("Inbound handoffs (production code must wire each one the package takes):\n\n")
+		for _, in := range inbound {
+			taker := "no task takes it"
+			for _, task := range tasksOf(s) {
+				if slices.Contains(task.TakesHandoffs, in.Ref()) {
+					taker = fmt.Sprintf("taken by task %d", task.Id)
+					break
+				}
+			}
+			what := in.Handoff.What
+			if in.Unreadable != "" {
+				what = "the sending package could not be read: " + in.Unreadable
+			}
+			sb.WriteString(fmt.Sprintf("- %s %s: %s; %s\n", code(in.SenderDir), in.Handoff.Id, what, taker))
+		}
+		sb.WriteString("\n")
+	}
+	if hs := handoffsOf(s); len(hs) > 0 {
+		sb.WriteString("Outbound handoffs (left for a later package to wire):\n\n")
+		for _, h := range hs {
+			sb.WriteString(fmt.Sprintf("- %s: %s, to %s; criteria %s\n", h.Id, h.What, code(h.To), strings.Join(h.Criteria, ", ")))
+		}
+		sb.WriteString("\n")
+	}
 }
 
 // renderContracts lists every criterion that carries a contract, with it: the
@@ -425,12 +495,21 @@ func renderContracts(sb *strings.Builder, r *RequirementsV3Json) {
 
 // renderScopedTasks renders the target task in full and every other task as a
 // one-line summary.
-func (s *Spec) renderScopedTasks(taskID int) string {
+func (s *Spec) renderScopedTasks(taskID int, inbound []InboundHandoff) string {
 	var sb strings.Builder
 	renderPlanContext(&sb, s.Tasks)
 	sb.WriteString("## Tasks\n\n")
 	for _, t := range s.Plan() {
 		if t.Id == taskID {
+			if t.Kind == TaskKindIntegration {
+				// The inbound steps read other packages, so they are the
+				// render's and never the package's.
+				t.Steps = slices.Clone(t.Steps)
+				for _, in := range inbound {
+					t.Steps = append(t.Steps, fmt.Sprintf("Confirm by file:line that production code wires %s's handoff %s (%s); a handoff a task takes and the code does not wire fails this task",
+						in.SenderID, in.Handoff.Id, in.Handoff.What))
+				}
+			}
 			renderTaskFull(&sb, t, &s.Tasks.TestCommands)
 		} else {
 			renderTaskSummary(&sb, t)
@@ -457,6 +536,8 @@ func renderRequirements(r *RequirementsV3Json, slim bool) string {
 	for _, req := range r.Requirements {
 		renderRequirement(&sb, req, slim)
 	}
+
+	renderHandoffs(&sb, r.Handoffs)
 
 	renderExecutionPaths(&sb, r.ExecutionPaths, slim)
 
@@ -682,6 +763,14 @@ func renderTaskFull(sb *strings.Builder, task PlannedTask, commands *TestCommand
 
 	if len(task.Criteria) > 0 {
 		sb.WriteString(fmt.Sprintf("**Criteria:** %s\n\n", strings.Join(task.Criteria, ", ")))
+	}
+
+	if len(task.TakesHandoffs) > 0 {
+		takes := make([]string, len(task.TakesHandoffs))
+		for i, h := range task.TakesHandoffs {
+			takes[i] = code(h)
+		}
+		sb.WriteString(fmt.Sprintf("**Takes handoffs:** %s\n\n", strings.Join(takes, ", ")))
 	}
 
 	if len(task.DependsOn) > 0 {

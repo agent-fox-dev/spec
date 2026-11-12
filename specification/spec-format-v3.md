@@ -180,6 +180,7 @@ Unchanged from v2 §5: optional, free-form, no frontmatter, not validated.
 | `requirements` | array | yes | Requirement objects (§6.2). At least one. |
 | `execution_paths` | array | no | Path objects (§6.3). At least one in a `full` package, none in a `lite` one (rule C7). |
 | `external_apis` | array | no | Verified external symbols, as v2 §6.4. |
+| `handoffs` | array | no | What this package leaves for a later package to call, register into or fill (§6.4.1). |
 
 Removed from v2: `introduction`, which restated `## Intent`; `glossary`,
 which is a PRD section (§4.2).
@@ -339,6 +340,26 @@ the checks verify.
 
 As v2 §6.4.
 
+#### 6.4.1 Handoffs (optional)
+
+A handoff is an extension point or entry point a package offers and leaves
+for a named package that lands later to call, register into or fill.
+
+```json
+{ "id": "H-1", "what": "after-landing hooks of internal/land", "to": "24", "criteria": ["REQ-2.1"] }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | `H-N`, unique within the package (C2). |
+| `what` | string | yes | The extension point or entry point left. |
+| `to` | string | yes | The spec id of the receiving package, which must depend on this one directly or transitively (cross-spec rule `cross_spec_handoff_direction`, §10.3). |
+| `criteria` | array of strings | yes | At least one criterion id of this package (C4) that depends on the handoff being wired; no requirement ids, no repeats. |
+
+The receiving package's tasks name what they take in `takes_handoffs`
+(§7.2). Validating the receiver warns `handoff_not_taken` for each inbound
+handoff no task takes, an error under `speca --validate --strict-handoffs`.
+
 ### 6.5 Requirement quality rules
 
 1. **[schema]** Every criterion has a non-empty `action` and a `check`; every
@@ -433,6 +454,7 @@ and no integration task is stored (§8.4).
 | `touches` | array of strings | no | Files, packages or modules the task is expected to create or modify, the test files it extends among them. |
 | `depends_on` | array of integers | no | Task ids that must be `done` first. Absent means "the previous task" in array order. Must reference lower ids. The generator omits one that names only the previous task. |
 | `done_when` | array of strings | no | Extra completion checks beyond the implicit ones. |
+| `takes_handoffs` | array of strings | no | The handoffs the task takes, each `<spec id>:H-N` (`"24:H-1"`), at least one, no repeats; each must name a handoff that package declares to this one (cross-spec rule `cross_spec_handoff_taken`). |
 
 Removed from v2: `kind` (every stored task is an implement task), `tests`
 (the checks are on the criteria the task owns), `state` (§8.7) and
@@ -601,9 +623,9 @@ All rules are errors.
 | # | Rule | Artifacts |
 |---|---|---|
 | C1 | `spec_id` and `spec_name` agree across `prd.md`, `requirements.json`, `tasks.json`, `progress.json` when present, and the folder name. | all |
-| C2 | Every id matches its format (Appendix A), a criterion id is under its requirement, and every id is unique within its family. | requirements, tasks |
+| C2 | Every id matches its format (Appendix A), a criterion id is under its requirement, and every id is unique within its family (a handoff id among the handoffs). | requirements, tasks |
 | C3 | Every `check.same_as` names a criterion of this spec whose check is its own and is not the criterion itself, or a path of this spec. | requirements |
-| C4 | Every `task.criteria` entry resolves to a requirement or a criterion; every `depends_on` entry resolves to a lower task id. | tasks → requirements |
+| C4 | Every `task.criteria` entry resolves to a requirement or a criterion; every `depends_on` entry resolves to a lower task id; every handoff's `criteria` entry resolves to a criterion. | tasks → requirements |
 | C5 | Every criterion is owned by at least one task, directly or through its requirement. | requirements ← tasks |
 | C6 | Every `unwanted` criterion has a non-empty `contract`. | requirements |
 | C7 | A `full` package has at least one execution path; a `lite` package has no execution path and at most three requirements. | prd.md, requirements |
@@ -625,6 +647,14 @@ dependency graph is acyclic; and, for each dependency edge where both
 packages have execution paths, the downstream spec has at least one path step
 whose actor also appears in an upstream path (error). An actor matches by
 name, ignoring case. The v2 glossary comparison is gone with the glossary.
+
+The handoff rules (§6.4.1): a handoff's `to` names a package under the spec
+root, not the package itself, that depends on the sender directly or
+transitively (`cross_spec_handoff_direction`, an error of the sender); a
+`takes_handoffs` entry names a handoff its package declares to the taker
+(`cross_spec_handoff_taken`, an error of the taker); and an inbound handoff
+no task of the receiver takes is the warning `handoff_not_taken`, an error
+when the caller asks for strict handoffs.
 
 ### 10.4 Steering version
 
@@ -730,9 +760,11 @@ archive.
 | Criterion | `REQ-{N}.{C}` | `REQ-3.2` |
 | Execution path | `PATH-{N}` | `PATH-1` |
 | Task | `{N}` (integer); the integration task is `N+1` | `3` |
+| Handoff | `H-{N}`; taken from another package as `{spec id}:H-{N}` | `H-1`, `24:H-1` |
 
-Three formats, down from five. Nothing references a criterion across
-packages; a renderer that needs a global name prefixes the package's.
+Nothing references a criterion across packages; a renderer that needs a
+global name prefixes the package's. A handoff is the one id another package
+names, through `takes_handoffs`.
 
 ## Appendix B: Schema files
 

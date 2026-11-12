@@ -1,10 +1,12 @@
 package afspec
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -799,5 +801,94 @@ func TestSave_KeepsTheAffectedTestsCommand(t *testing.T) {
 	at := func(k string) int { return strings.Index(string(b), `"`+k+`"`) }
 	if !(at("all_tests") < at("linter") && at("linter") < at("spec_tests") && at("spec_tests") < at("affected_tests")) {
 		t.Errorf("the test commands are out of order:\n%s", b)
+	}
+}
+
+// handoffFixture is the v3 example with one handoff and one task taking one.
+func handoffFixture(t *testing.T, dir string) *Spec {
+	t.Helper()
+	s := loadFixture(t, dir)
+	s.Requirements.Handoffs = []Handoff{{Id: "H-1", What: "after-landing hooks of internal/land", To: "02", Criteria: []string{"REQ-1.1"}}}
+	s.Tasks.Tasks[0].TakesHandoffs = []string{"01:H-1"}
+	return s
+}
+
+// A package may declare handoffs and list the handoffs a task takes; a save
+// keeps both, and a package with neither saves as it did.
+func TestSave_KeepsTheHandoffs(t *testing.T) {
+	plain := copyFixture(t, "testdata/v3_example")
+	before := map[string][]byte{}
+	for _, f := range []string{RequirementsFileName, TasksFileName} {
+		before[f], _ = os.ReadFile(filepath.Join(plain, f))
+	}
+	if err := loadFixture(t, plain).Save(plain); err != nil {
+		t.Fatal(err)
+	}
+	for f, b := range before {
+		if after, _ := os.ReadFile(filepath.Join(plain, f)); !bytes.Equal(after, b) {
+			t.Errorf("%s changed on a save of a package without handoffs", f)
+		}
+	}
+
+	dir := copyFixture(t, "testdata/v3_example")
+	s := handoffFixture(t, dir)
+	if v := s.ValidateSchema(); !v.Valid {
+		t.Fatalf("schema errors %v", v.Errors)
+	}
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	again := loadFixture(t, dir)
+	if !reflect.DeepEqual(again.Requirements.Handoffs, s.Requirements.Handoffs) || !slices.Equal(again.Tasks.Tasks[0].TakesHandoffs, []string{"01:H-1"}) {
+		t.Errorf("after a round trip: handoffs %+v, takes %v", again.Requirements.Handoffs, again.Tasks.Tasks[0].TakesHandoffs)
+	}
+}
+
+// A malformed handoff or takes_handoffs entry makes the package invalid: a
+// value the schema refuses, a duplicate id (C2), a criterion it does not have
+// (C4).
+func TestValidate_RefusesAMalformedHandoff(t *testing.T) {
+	for name, tc := range map[string]struct {
+		edit  func(s *Spec)
+		check string
+		names []string
+	}{
+		"an id without its hyphen": {func(s *Spec) { s.Requirements.Handoffs[0].Id = "H1" }, "json_schema", nil},
+		"an id twice": {func(s *Spec) {
+			s.Requirements.Handoffs = append(s.Requirements.Handoffs, s.Requirements.Handoffs[0])
+		}, "C2", []string{"H-1"}},
+		"an empty what":          {func(s *Spec) { s.Requirements.Handoffs[0].What = "" }, "json_schema", nil},
+		"no criteria":            {func(s *Spec) { s.Requirements.Handoffs[0].Criteria = []string{} }, "json_schema", nil},
+		"an unknown criterion":   {func(s *Spec) { s.Requirements.Handoffs[0].Criteria = []string{"REQ-9.9"} }, "C4", []string{"H-1", "REQ-9.9"}},
+		"a requirement id":       {func(s *Spec) { s.Requirements.Handoffs[0].Criteria = []string{"REQ-1"} }, "json_schema", nil},
+		"a take with no package": {func(s *Spec) { s.Tasks.Tasks[0].TakesHandoffs = []string{"H-1"} }, "json_schema", nil},
+		"a take twice":           {func(s *Spec) { s.Tasks.Tasks[0].TakesHandoffs = []string{"01:H-1", "01:H-1"} }, "json_schema", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := handoffFixture(t, "testdata/v3_example")
+			if v := s.Validate(); !v.Valid {
+				t.Fatalf("the fixture is invalid before the edit: %v", v.Errors)
+			}
+			tc.edit(s)
+			v := s.Validate()
+			if v.Valid {
+				t.Fatal("valid; want an error")
+			}
+			var found bool
+			for _, e := range v.Errors {
+				if e.Check != tc.check {
+					continue
+				}
+				found = true
+				for _, n := range tc.names {
+					if !strings.Contains(e.Message, n) {
+						t.Errorf("%s message %q does not name %s", tc.check, e.Message, n)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("errors %v; want one of %s", v.Errors, tc.check)
+			}
+		})
 	}
 }

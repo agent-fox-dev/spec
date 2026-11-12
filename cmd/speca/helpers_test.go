@@ -1192,3 +1192,91 @@ func (g *gateRepo) writeSteering(t *testing.T, lines string) {
 	writeFile(t, filepath.Join(g.root, ".specs", "steering.md"), "---\nversion: 1.0.0\n"+lines+
 		"amendments:\n  - version: 1.0.0\n    date: 2026-10-15\n    change: A.\n---\n# Steering\n\nKeep tests fast.\n")
 }
+
+// handoffRoot is a spec root with 01, 02 depending on 01, and 03 depending on
+// 02, and an archived 00; it returns the root and the three package
+// directories.
+func handoffRoot(t *testing.T) (root string, dirs map[string]string) {
+	t.Helper()
+	root = t.TempDir()
+	dirs = map[string]string{
+		"01": addPackage(t, root, "01_one", "01", "one"),
+		"02": addPackage(t, root, "02_two", "02", "two"),
+		"03": addPackage(t, root, "03_three", "03", "three"),
+	}
+	setDependencies(t, dirs["02"], "01")
+	setDependencies(t, dirs["03"], "02")
+	for _, dir := range dirs {
+		setActors(t, dir, "operator")
+		renderPackage(t, root, dir)
+	}
+	addPackage(t, root, "archive/00_zero", "00", "zero")
+	return root, dirs
+}
+
+// setHandoffs gives the package in dir these handoffs, each its id, what, to
+// and one criterion.
+func setHandoffs(t *testing.T, dir string, handoffs ...[4]string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.RequirementsFileName), func(m map[string]any) {
+		var hs []any
+		for _, h := range handoffs {
+			hs = append(hs, map[string]any{"id": h[0], "what": h[1], "to": h[2], "criteria": []any{h[3]}})
+		}
+		if hs == nil {
+			delete(m, "handoffs")
+		} else {
+			m["handoffs"] = hs
+		}
+	})
+	renderPackage(t, filepath.Dir(filepath.Dir(dir)), dir)
+}
+
+// setTakes makes task 1 of the package in dir take these handoffs.
+func setTakes(t *testing.T, dir string, takes ...string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
+		task := m["tasks"].([]any)[0].(map[string]any)
+		if len(takes) == 0 {
+			delete(task, "takes_handoffs")
+			return
+		}
+		var ts []any
+		for _, x := range takes {
+			ts = append(ts, x)
+		}
+		task["takes_handoffs"] = ts
+	})
+	renderPackage(t, filepath.Dir(filepath.Dir(dir)), dir)
+}
+
+// validation is the verdict of the package ref of the root, with flags.
+func validation(t *testing.T, root, ref string, flags ...string) *envelope.ValidationReport {
+	t.Helper()
+	env, _ := rawRun(t, append([]string{"--dir", root, "--validate", ref}, flags...)...)
+	r := result(t, env)
+	if env.ExitCode != cli.ExitOK || r.Validation == nil {
+		t.Fatalf("speca --validate %s %v: exit %d, %+v", ref, flags, env.ExitCode, env.Error)
+	}
+	return r.Validation
+}
+
+// itemsOf are the items of the check among items.
+func itemsOf(items []envelope.ValidationItem, check string) []envelope.ValidationItem {
+	var out []envelope.ValidationItem
+	for _, it := range items {
+		if it.Check == check {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// renderPackage writes the package's spec.md, so that its verdict does not
+// warn that the render is missing.
+func renderPackage(t *testing.T, root, dir string) {
+	t.Helper()
+	if _, code, _ := run(t, "--dir", root, dir, "--render"); code != cli.ExitOK {
+		t.Fatalf("speca %s --render: exit %d", dir, code)
+	}
+}

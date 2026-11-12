@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -300,5 +301,95 @@ func TestNext_SuggestsTheClaimAndTheNextRender(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A task that takes handoffs is rendered with each, the sending package's
+// what and the sentences of its criteria that depend on it; a sending package
+// that cannot be read is said to be unreadable.
+func TestRender_ShowsTheHandoffsATaskTakes(t *testing.T) {
+	root := handoffRepo(t)
+	env, code, _ := run(t, "--dir", root, "02", "--task", "1")
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	sender := load(t, root, "01_one")
+	var sentence string
+	for _, r := range sender.Requirements.Requirements {
+		for _, c := range r.Criteria {
+			if c.Id == "REQ-1.1" {
+				sentence = r.Resolve(c).RenderEARSSentence()
+			}
+		}
+	}
+	for _, want := range []string{"01_one", "H-1", "after-landing hooks", sentence} {
+		if !strings.Contains(env.Result.Markdown, want) {
+			t.Errorf("the render of task 1 lacks %q", want)
+		}
+	}
+	if env, _, _ := run(t, "--dir", root, "02", "--task", "2"); strings.Contains(env.Result.Markdown, "after-landing hooks") {
+		t.Error("task 2, which takes no handoff, is rendered with one")
+	}
+
+	if err := os.Chmod(filepath.Join(root, ".specs", "01_one", "requirements.json"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, ".specs", "01_one", "requirements.json"), 0o644) })
+	env, code, _ = run(t, "--dir", root, "02", "--task", "1")
+	if code != cli.ExitOK || !strings.Contains(env.Result.Markdown, "could not be read") {
+		t.Errorf("code %d; want the render to say the sending package could not be read", code)
+	}
+}
+
+// The integration task lists each inbound and outbound handoff with its
+// contracts, and gets one rendered step per inbound handoff, which the
+// package's spec.md does not hold.
+func TestRender_TheIntegrationTaskConfirmsTheHandoffs(t *testing.T) {
+	root := handoffRepo(t)
+	id := "3" // the plain example has two tasks, so its integration task is 3
+	env, code, _ := run(t, "--dir", root, "02", "--task", id)
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, env.Error)
+	}
+	md := env.Result.Markdown
+	contracts := md[strings.Index(md, "## Contracts"):]
+	contracts = contracts[:strings.Index(contracts[3:], "\n## ")+3]
+	for _, want := range []string{"Inbound", "`01_one` H-1", "after-landing hooks", "taken by task 1", "Outbound", "H-1", "the fork hook", "to `03`"} {
+		if !strings.Contains(contracts, want) {
+			t.Errorf("the contracts lack %q:\n%s", want, contracts)
+		}
+	}
+	steps := md[strings.Index(md, "**Steps:**"):]
+	if !strings.Contains(steps, "01") || !strings.Contains(steps, "H-1") || !strings.Contains(steps, "file:line") {
+		t.Errorf("no rendered step confirms 01's H-1 by file:line:\n%s", steps)
+	}
+	// The package's own render, as a save writes it to spec.md, holds no
+	// inbound step, and the saved package still validates as rendered.
+	two := load(t, root, "02_two")
+	if err := two.Save(two.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(two.Dir, "spec.md")); strings.Contains(string(b), "file:line that production code wires") {
+		t.Error("02's spec.md holds the inbound step")
+	}
+	saved := load(t, root, "02_two").Validate()
+	for _, w := range append(saved.Errors, saved.Warnings...) {
+		if w.Check == "rendered" {
+			t.Errorf("02's spec.md is not its render: %s", w.Message)
+		}
+	}
+
+	section := func(pkg string) string {
+		env, _, _ := run(t, "--dir", root, pkg, "--task", id)
+		c := env.Result.Markdown[strings.Index(env.Result.Markdown, "## Contracts"):]
+		return c[:strings.Index(c[3:], "\n## ")+3]
+	}
+	if one := section("01"); strings.Contains(one, "Inbound") || !strings.Contains(one, "Outbound") || !strings.Contains(one, "to `02`") {
+		t.Errorf("01's contracts: want its outbound handoff to 02 only:\n%s", one)
+	}
+	plain := newRepo(t)
+	env, _, _ = run(t, "--dir", plain, "9", "--task", fmt.Sprint(integrationTask))
+	if md := env.Result.Markdown; strings.Contains(md, "Inbound handoffs") || strings.Contains(md, "Outbound handoffs") {
+		t.Error("a package with no handoff lists handoffs among its contracts")
 	}
 }

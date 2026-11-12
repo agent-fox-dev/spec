@@ -115,6 +115,11 @@
         "default": "",
         "description": "the status form: move the package to this lifecycle status: active (computes the intent hash), sealed, archived or superseded (which needs --by); archived and superseded packages are moved under archive/. A move the lifecycle does not allow is refused, with the moves that are allowed"
       },
+      "strict-handoffs": {
+        "type": "boolean",
+        "default": false,
+        "description": "with --validate, report each handoff another package addresses to this one that no task takes as an error (handoff_not_taken) instead of a warning; it stores nothing"
+      },
       "task": {
         "type": "string",
         "default": "",

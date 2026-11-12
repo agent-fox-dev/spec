@@ -64,7 +64,14 @@ confirm production code consumes the result, not only a test; search every
 `NotImplementedError`, a bare `return nil` on a non-trivial path); confirm
 entry points that belong to another spec are called from production code.
 A path that is not live in production code fails this task, and a recorded
-decision or a deferral does not satisfy it.
+decision or a deferral does not satisfy it. The one exception is a declared
+outbound handoff (`## Handoffs`, and its step in the rendered task): a path
+step unwired only because the handoff's receiver does not take it yet does
+not fail the task. It is an `awaits` item for that package, and the
+handoff's criteria are covered by a test that calls the entry point
+directly. Every other path that is not live still fails the task. For each
+inbound handoff the render lists, confirm by `file:line` that production
+code wires it; one a task takes and the code does not wire fails the task.
 
 ## The traceability line in the commit
 

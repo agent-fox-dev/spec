@@ -19,6 +19,7 @@
       "items": { "$ref": "#/$defs/execution_path" },
       "description": "The end-to-end paths. A full package has at least one; a lite package has none."
     },
+    "handoffs": { "type": "array", "items": { "$ref": "#/$defs/handoff" }, "description": "What this package leaves for a later package to call, register into or fill." },
     "external_apis": {
       "type": "array",
       "items": { "$ref": "#/$defs/external_api" }
@@ -130,6 +131,18 @@
         "smoke": { "$ref": "#/$defs/smoke" }
       },
       "required": ["id", "title", "steps", "smoke"],
+      "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
+      "additionalProperties": false
+    },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^H-[0-9]+$" },
+        "what": { "type": "string", "minLength": 1, "description": "The extension point or entry point left for the receiving package." },
+        "to": { "type": "string", "pattern": "^[0-9]+$", "description": "The spec id of the package that takes the handoff." },
+        "criteria": { "type": "array", "items": { "type": "string", "pattern": "^REQ-[0-9]+\\.[0-9]+$" }, "minItems": 1, "uniqueItems": true, "description": "The criteria of this package that depend on the handoff being wired." }
+      },
+      "required": ["id", "what", "to", "criteria"],
       "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },
       "additionalProperties": false
     },

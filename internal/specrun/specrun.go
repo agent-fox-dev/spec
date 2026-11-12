@@ -89,11 +89,16 @@ type Stopped struct {
 }
 
 // StopIssue is an open defect the stop rule names.
+//
+// A package the loop would not start is an entry too, under --dry-run: its
+// SpecDir and the Reason, with no issue.
 type StopIssue struct {
-	Number   int    `json:"number"`
-	URL      string `json:"url"`
-	Title    string `json:"title"`
-	Severity string `json:"severity"`
+	Number   int    `json:"number,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	SpecDir  string `json:"spec_dir,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // NextStep is a step: its kind and the package it is for.
@@ -237,6 +242,9 @@ func (r *run) dryRun() int {
 	switch {
 	case next != nil:
 		r.result.NextStep = &NextStep{Kind: kindImplement, SpecDir: next.Dir}
+		if why := r.handoffsRefuse(next); why != "" {
+			r.result.WouldStop = append(r.result.WouldStop, StopIssue{SpecDir: next.Dir, Reason: why})
+		}
 		return r.emit(envelope.ExitOK, fmt.Sprintf("%s: dry run; the next step is %s %s", tool, kindImplement, next.Dir), nil)
 	case r.result.AllDone:
 		return r.emit(envelope.ExitOK, tool+": dry run; every package is done", nil)
@@ -391,8 +399,38 @@ func (r *run) recheckDefects() *Stopped {
 	return s
 }
 
+// reasonNotValid begins the reason a package is not started for under
+// --strict-handoffs.
+const reasonNotValid = "package does not validate"
+
+// handoffsRefuse is, under --strict-handoffs, why the package is not started:
+// its own rules and the cross-spec rules, an inbound handoff no task takes an
+// error, find something; "" when they find nothing, or without the flag.
+// afspec gives the verdict, so the loop needs neither speca nor its packages.
+func (r *run) handoffsRefuse(next *afspec.NextPackage) string {
+	if !r.opts.strictHandoffs || next.Spec == nil {
+		return ""
+	}
+	v, err := afspec.ValidateInRoot(r.specsDir, next.Spec)
+	if err != nil {
+		return fmt.Sprintf("%s: the spec root could not be read: %v", reasonNotValid, err)
+	}
+	v = afspec.StrictHandoffs(v)
+	if v.Valid {
+		return ""
+	}
+	var found []string
+	for _, e := range v.Errors {
+		found = append(found, e.Check+": "+e.Message)
+	}
+	return reasonNotValid + ": " + strings.Join(found, "; ")
+}
+
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
+	if strings.HasPrefix(reason, reasonNotValid) {
+		return "validate"
+	}
 	if reason == reasonSeriousDefect || reason == reasonRepairFailed {
 		return "defect"
 	}
@@ -468,6 +506,10 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	earlier, _ := readLedger(r.logDir)
 	subject := filepath.Base(next.Dir)
 	step := stepName(len(earlier)+1, kindImplement, subject)
+	if why := r.handoffsRefuse(next); why != "" {
+		fmt.Fprintf(r.stderr, "%s: %s not started: %s\n", tool, subject, why)
+		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: why}
+	}
 	started := now().UTC().Truncate(time.Second)
 	r.startStep(kindImplement, next, before, started)
 
