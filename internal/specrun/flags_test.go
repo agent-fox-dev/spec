@@ -33,7 +33,7 @@ func TestOptions_TakeTheirDefaultsFromTheEnvironment(t *testing.T) {
 			func(o *options) bool { return !o.strictSkills }},
 	} {
 		t.Run(name, func(t *testing.T) {
-			o, err := parseOptions(tc.argv, func(k string) string { return tc.env[k] })
+			o, err := parseOptions(tc.argv, envOf(tc.env))
 			if err != nil || !tc.check(o) {
 				t.Errorf("parseOptions(%v, %v) = %+v, %v", tc.argv, tc.env, o, err)
 			}
@@ -157,7 +157,7 @@ func TestOptions_TakeTheSeveritiesToStopOn(t *testing.T) {
 		"a bad variable":             {nil, map[string]string{"SPECRUN_STOP_ON": "severe"}, nil, "SPECRUN_STOP_ON"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			o, err := parseOptions(tc.argv, func(k string) string { return tc.env[k] })
+			o, err := parseOptions(tc.argv, envOf(tc.env))
 			if tc.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.err) || !strings.Contains(err.Error(), "data-loss") {
 					t.Errorf("err %v; want one naming %q and the four severities", err, tc.err)
@@ -168,5 +168,26 @@ func TestOptions_TakeTheSeveritiesToStopOn(t *testing.T) {
 				t.Errorf("stopOn %#v, %v; want %v", o, err, tc.want)
 			}
 		})
+	}
+}
+
+// envOf is a lookup over the variables in m, a variable set to "" being set.
+func envOf(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+}
+
+// Through Main, a severity outside the four is a usage error, and an empty
+// --stop-on lets a package with a security defect go on.
+func TestMain_TakesStopOnFromTheCall(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.forge.add("01_a: leak", "open", "af:defect", "af:severity-security", "af:from-01")
+	f.plan(t, land(0))
+	if env, code, _ := runMain(t, "--stop-on", "severe"); code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "severe") {
+		t.Errorf("--stop-on severe: code %d, error %+v; want a usage error naming it", code, env.Error)
+	}
+	if _, code, stderr := runMain(t, "--stop-on", ""); code != 0 || len(f.starts(t)) != 2 {
+		t.Errorf("--stop-on '': code %d, %d sessions; want both packages\n%s", code, len(f.starts(t)), stderr)
 	}
 }

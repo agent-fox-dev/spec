@@ -233,10 +233,17 @@ func (r *run) knownPackages() func(id string) (bool, bool) {
 		dir := filepath.Join(r.specsDir, sub)
 		names, _ := afspec.ListSpecDirs(dir)
 		for _, n := range names {
+			id, fin := "", false
 			if spec, err := afspec.LoadSpec(filepath.Join(dir, n)); err == nil {
-				f, seen := finished[spec.SpecID]
-				finished[spec.SpecID] = (!seen || f) && (sub == "archive" || spec.IsFinished())
+				id, fin = spec.SpecID, sub == "archive" || spec.IsFinished()
+			} else {
+				// A package that does not load exists, and whether it is
+				// finished is not known: it is taken as not finished, as the
+				// choice of the next package takes it.
+				id, _, _ = strings.Cut(n, "_")
 			}
+			f, seen := finished[id]
+			finished[id] = (!seen || f) && fin
 		}
 	}
 	return func(id string) (bool, bool) {
@@ -410,10 +417,15 @@ func (r *run) wouldDo() *envelope.ErrorInfo {
 			_ = json.Unmarshal(b, &st)
 		}
 	}
+	// The package whose rules are owed, else the one that landed last.
+	pkg := st.LabelCheck
+	if pkg == "" {
+		pkg = st.LastLanded
+	}
 	var changes []labelChange
 	var err error
-	if st.LastLanded != "" {
-		changes, err = r.labelChanges(st.LastLanded)
+	if pkg != "" {
+		changes, err = r.labelChanges(pkg)
 	} else {
 		var awaiting []issuex.Issue
 		if awaiting, err = r.listOpen([]string{"af:awaits"}); err == nil {
@@ -425,8 +437,8 @@ func (r *run) wouldDo() *envelope.ErrorInfo {
 		return failure("forge", "forge", "%v", err)
 	}
 	r.result.WouldChange = append(r.result.WouldChange, changes...)
-	if st.LastLanded != "" {
-		serious, err := r.seriousDefects(st.LastLanded)
+	if pkg != "" {
+		serious, err := r.seriousDefects(pkg)
 		if err != nil {
 			return failure("forge", "forge", "%v", err)
 		}

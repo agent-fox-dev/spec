@@ -74,12 +74,17 @@ func TestStop_TheNextStartChecksTheLastLandedPackageAgain(t *testing.T) {
 			f.addPackage(t, "02_b", "02", "pending")
 			n := f.forge.add("01_a: lost write", "open", "af:defect", "af:severity-data-loss", "af:from-01")
 			f.plan(t, land(0))
-			if _, code, _ := runMain(t); code != 1 {
+			env1, code, _ := runMain(t)
+			if code != 1 {
 				t.Fatalf("the first call: code %d; want a stop", code)
 			}
+			lastStop := env1.Result.Stopped
+			first := lastStop
 			env, code, _ := runMain(t)
-			if code != 1 || env.Result.Stopped == nil || env.Result.Stopped.Reason != "serious defect" || len(f.starts(t)) != 1 {
-				t.Fatalf("the second call: code %d, stopped %+v, %d sessions; want the same stop and no session", code, env.Result.Stopped, len(f.starts(t)))
+			s := env.Result.Stopped
+			if code != 1 || s == nil || len(f.starts(t)) != 1 || first == nil || s.Reason != first.Reason || s.Step != first.Step ||
+				s.Kind != first.Kind || s.Subject != first.Subject || len(s.Issues) != 1 || s.Issues[0] != first.Issues[0] {
+				t.Fatalf("the second call: code %d, stopped %+v, %d sessions; want the first stop %+v again and no session", code, s, len(f.starts(t)), first)
 			}
 			tc.act(f, n)
 			if _, code, stderr := runMain(t, append([]string{"--max", "1"}, tc.flags...)...); code != 0 {

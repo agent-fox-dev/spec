@@ -439,7 +439,7 @@ commits in place.
 - Put a spec, requirement, criterion or path id in code, a test name, a test
   file name or a comment; the commit body is where they go.
 - Leave an open item without an issue or the reason it has none, or open one
-  for anything else. Comment on, relabel or close an issue that is not
+  for anything else. Edit, comment on, relabel or close an issue that is not
   `af:*`, or one that neither awaited this package nor is resolved by it.
 
 ## 8. Report
@@ -453,7 +453,7 @@ commits in place.
 - The survey's decisions, and the deviations declared with the ADRs that
   record them.
 - The conformance findings, fixed and unmet.
-- The gate report, and the open items' counts by kind.
+- The gate report, and the open-item counts the trailer holds.
 - The open items, each with its issue URL, or why it has none and the
   `issue --create` call that opens it.
 - Anything left unfinished, and the command that continues it.

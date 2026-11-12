@@ -76,9 +76,10 @@ is missing.
   `baseline_full_seconds` and `last_full_seconds`. `open_items` holds
   `opened`, `closed`, `passed_on` and `reclassified`, each an object of
   counts keyed by kind, a defect as `defect:<severity>`; `closed`,
-  `closed` counts the items this run closed, `passed_on` the `awaits` items
-  it relabelled to a later package, and `reclassified` the ones it made
-  defects; the open-items section lists each with its issue link.
+  `passed_on` and `reclassified` count what this run decided, before the
+  merge, to close, to pass on to a later package and to make a defect after
+  the push, which it then does; the open-items section lists each with its
+  issue link.
 - **Merge.** Switch to the base branch and bring it up to date with
   `git pull --ff-only`. Then `git merge --no-ff --no-commit <branch>`. A
   conflict stops the landing: `git merge --abort`, stay on the base branch,

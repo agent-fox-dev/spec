@@ -122,7 +122,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r := &run{ctx: ctx, stdout: stdout, stderr: stderr, started: time.Now()}
-	opts, err := parseOptions(argv, os.Getenv)
+	opts, err := parseOptions(argv, os.LookupEnv)
 	if errors.Is(err, flag.ErrHelp) {
 		printUsage(stderr)
 		return envelope.ExitOK
@@ -316,7 +316,17 @@ func (r *run) recheckDefects() *Stopped {
 		return nil
 	}
 	issues, err := r.seriousDefects(dir)
-	s := &Stopped{Step: "defects-" + filepath.Base(dir), Kind: "defects", Subject: filepath.Base(dir)}
+	subject := filepath.Base(dir)
+	// The same stop the landing made: its step is the package's last ledger line.
+	s := &Stopped{Step: stepName(0, kindImplement, subject), Kind: kindImplement, Subject: subject}
+	if lines, _ := readLedger(r.logDir); len(lines) > 0 {
+		for i := len(lines) - 1; i >= 0; i-- {
+			if lines[i].Kind == kindImplement && lines[i].Subject == subject {
+				s.Step = stepName(i+1, kindImplement, subject)
+				break
+			}
+		}
+	}
 	switch {
 	case err != nil:
 		s.Reason = err.Error()

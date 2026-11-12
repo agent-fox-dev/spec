@@ -53,9 +53,9 @@ func envName(name string) string {
 
 // parseOptions reads the settings from argv and the environment. Its error is
 // a usage error; flag.ErrHelp asks for the help.
-func parseOptions(argv []string, getenv func(string) string) (*options, error) {
+func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, error) {
 	o := &options{stall: DefaultStall, stopOnText: defaultStopOn}
-	if err := o.fromEnv(getenv); err != nil {
+	if err := o.fromEnv(lookup); err != nil {
 		return nil, err
 	}
 	fs := flag.NewFlagSet("specrun", flag.ContinueOnError)
@@ -75,7 +75,7 @@ func parseOptions(argv []string, getenv func(string) string) (*options, error) {
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	from := "--stop-on"
-	if !set["stop-on"] && getenv(envName("stop-on")) != "" {
+	if _, ok := lookup(envName("stop-on")); !set["stop-on"] && ok {
 		from = envName("stop-on")
 	}
 	stopOn, err := parseSeverities(o.stopOnText, from)
@@ -110,7 +110,8 @@ func parseOptions(argv []string, getenv func(string) string) (*options, error) {
 
 // fromEnv takes the defaults from the SPECRUN_ variables that are set. A
 // value its flag would refuse is a usage error naming the variable.
-func (o *options) fromEnv(getenv func(string) string) error {
+func (o *options) fromEnv(lookup func(string) (string, bool)) error {
+	getenv := func(k string) string { v, _ := lookup(k); return v }
 	var errs []error
 	if v := getenv(envName("max")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -127,7 +128,8 @@ func (o *options) fromEnv(getenv func(string) string) error {
 		o.stall = d
 	}
 	o.logDir = getenv(envName("log-dir"))
-	if v := getenv(envName("stop-on")); v != "" {
+	// Set to "", the variable stops on nothing: it is not unset.
+	if v, ok := lookup(envName("stop-on")); ok {
 		o.stopOnText = v
 	}
 	if v := getenv(envName("strict-skills")); v != "" {
@@ -158,7 +160,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, usageText)
 	fs := flag.NewFlagSet("specrun", flag.ContinueOnError)
 	fs.SetOutput(w)
-	(&options{stall: DefaultStall}).register(fs)
+	(&options{stall: DefaultStall, stopOnText: defaultStopOn}).register(fs)
 	fs.PrintDefaults()
 }
 

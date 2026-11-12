@@ -140,8 +140,9 @@ or with no task pending or in progress, as `afspec`'s `IsFinished` says), or
 names no package at all, will never be taken up: the rule `awaits-finished`
 removes `af:awaits` and `af:awaits-<NN>`, adds `af:defect` and
 `af:severity-correctness`, and comments, naming the package and the commit of
-the base branch. An item awaiting a package that is still open, a closed
-issue, and one that is not `af:awaits` are not touched; the rule changes
+the base branch. An item awaiting a package that is still open, or that is there
+but does not load (whether it is finished is not known), a closed issue, and
+one that is not `af:awaits` are not touched; the rule changes
 nothing the second time, and its forge failures stop the loop as the other
 rule's do.
 
@@ -154,7 +155,9 @@ stage `defect`: `result.stopped.reason` is `serious defect`, and
 `result.stopped.issues` names each issue (`number`, `url`, `title`,
 `severity`); the package's ledger line, outcome `landed`, holds them too. A
 deviation, an untested item and a defect of another severity never stop it,
-and `--stop-on ''` stops on none.
+and `--stop-on ''`, or `SPECRUN_STOP_ON` set to the empty string, stops on
+none. A stop at the next start reports the same `result.stopped` as the one
+after the landing.
 
 The state records the last package that landed (`last_landed`), and every
 start makes the same check for it before it chooses a step, so starting

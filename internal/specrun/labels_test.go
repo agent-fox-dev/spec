@@ -320,7 +320,7 @@ func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
 			t.Errorf("%s: labels %s; want %s", name, got, want.labels)
 		}
 		c := f.forge.comments[n]
-		if len(c) != 1 || !strings.Contains(c[0], "awaits-finished") || !strings.Contains(c[0], want.awaits) || !strings.Contains(c[0], base) {
+		if len(c) != 1 || !strings.Contains(c[0], "awaits-finished") || !strings.Contains(c[0], "package "+want.awaits) || !strings.Contains(c[0], base) {
 			t.Errorf("%s: comments %q", name, c)
 		}
 	}
@@ -329,6 +329,7 @@ func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
 // The relabelling changes nothing the second time it runs.
 func TestLabels_TheAwaitsRuleChangesNothingTheSecondTime(t *testing.T) {
 	f, _ := awaitsFixture(t)
+	done(t, f, "02_b") // landed, so every awaits row toward a finished package is relabelled
 	r := &run{ctx: context.Background(), root: f.root, specsDir: filepath.Join(f.root, ".specs"), stderr: io.Discard,
 		forge: f.forge, repo: issuex.Repo{Owner: "acme", Name: "widgets"}}
 	if err := r.checkLabels(".specs/02_b"); err != nil {
@@ -377,5 +378,32 @@ func TestLabels_ADryRunShowsWhatTheRulesWouldChange(t *testing.T) {
 	}
 	if w := f.forge.writes(); len(w) != 0 || len(f.starts(t)) != 0 {
 		t.Errorf("writes %v, %d sessions", w, len(f.starts(t)))
+	}
+}
+
+// A dry run with nothing to change or stop on reports both lists empty.
+func TestLabels_ADryRunWithNothingToChangeSaysSo(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	env, code, _ := runMain(t, "--dry-run")
+	r := env.Result
+	if code != 0 || r.WouldChange == nil || len(r.WouldChange) != 0 || r.WouldStop == nil || len(r.WouldStop) != 0 {
+		t.Errorf("code %d, would_change %#v, would_stop %#v; want both []", code, r.WouldChange, r.WouldStop)
+	}
+}
+
+// An item awaiting a package that is there but does not load is not judged:
+// whether that package is finished is not known.
+func TestLabels_AnItemAwaitingAPackageThatDoesNotLoadIsLeftAlone(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	writeFile(t, filepath.Join(f.root, ".specs", "05_broken", "prd.md"), "---\nspec_id: [\n---\n")
+	f.commit(t, "a broken package")
+	git(t, f.root, "push", "-q")
+	n := f.forge.add("01_a: wire it in 05", "open", "af:awaits", "af:awaits-05", "af:from-01")
+	f.plan(t, land(0))
+	runMain(t, "--max", "1")
+	if got := strings.Join(f.forge.labelsOf(n), ","); got != "af:awaits,af:awaits-05,af:from-01" {
+		t.Errorf("labels %s; want the item left as it was", got)
 	}
 }
