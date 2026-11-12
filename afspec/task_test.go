@@ -409,8 +409,13 @@ func TestIntegrationTask_TellsAnOutboundHandoffFromAGap(t *testing.T) {
 			t.Errorf("the step %q does not say %q", added[0], want)
 		}
 	}
-	trace := slices.IndexFunc(after.Steps, func(s string) bool { return strings.HasPrefix(s, "Trace ") })
-	if at := slices.Index(after.Steps, added[0]); at < trace {
-		t.Errorf("the step is at %d, before the trace at %d", at, trace)
+	trace := -1
+	for i, s := range after.Steps {
+		if strings.HasPrefix(s, "Trace ") {
+			trace = i
+		}
+	}
+	if at := slices.Index(after.Steps, added[0]); trace < 0 || at < trace {
+		t.Errorf("the step is at %d, before the last trace at %d", at, trace)
 	}
 }

@@ -136,7 +136,10 @@ package will call, register into or fill something this package offers:
 `to` the spec id of the receiving package, which must depend on this one
 directly or transitively (a package that lands earlier leaves nothing to
 wire it, and `speca` refuses it), and `criteria` this package's criteria
-that depend on the handoff being wired.
+that depend on the handoff being wired. The receiver must exist when you
+write the handoff; when it is a package not yet written, say in the report
+that its author should declare the handoff with the owner of this package,
+and write nothing that names it.
 
 **`external_apis`** is optional and holds the signatures the work relies on:
 `{package, version, verified, symbols: [{name, import_path, signature}]}`.

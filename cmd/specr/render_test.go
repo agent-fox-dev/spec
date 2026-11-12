@@ -363,13 +363,33 @@ func TestRender_TheIntegrationTaskConfirmsTheHandoffs(t *testing.T) {
 	if !strings.Contains(steps, "01") || !strings.Contains(steps, "H-1") || !strings.Contains(steps, "file:line") {
 		t.Errorf("no rendered step confirms 01's H-1 by file:line:\n%s", steps)
 	}
-	if strings.Contains(load(t, root, "02_two").RenderCombined(), "file:line that production code wires") {
-		t.Error("the package's own render holds the inbound step")
+	// The package's own render, as a save writes it to spec.md, holds no
+	// inbound step, and the saved package still validates as rendered.
+	two := load(t, root, "02_two")
+	if err := two.Save(two.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(two.Dir, "spec.md")); strings.Contains(string(b), "file:line that production code wires") {
+		t.Error("02's spec.md holds the inbound step")
+	}
+	saved := load(t, root, "02_two").Validate()
+	for _, w := range append(saved.Errors, saved.Warnings...) {
+		if w.Check == "rendered" {
+			t.Errorf("02's spec.md is not its render: %s", w.Message)
+		}
 	}
 
-	env, _, _ = run(t, "--dir", root, "01", "--task", id)
-	contracts = env.Result.Markdown[strings.Index(env.Result.Markdown, "## Contracts"):]
-	if strings.Contains(contracts[:strings.Index(contracts[3:], "\n## ")+3], "Inbound") {
-		t.Error("01, which nothing hands anything to, lists inbound handoffs")
+	section := func(pkg string) string {
+		env, _, _ := run(t, "--dir", root, pkg, "--task", id)
+		c := env.Result.Markdown[strings.Index(env.Result.Markdown, "## Contracts"):]
+		return c[:strings.Index(c[3:], "\n## ")+3]
+	}
+	if one := section("01"); strings.Contains(one, "Inbound") || !strings.Contains(one, "Outbound") || !strings.Contains(one, "to `02`") {
+		t.Errorf("01's contracts: want its outbound handoff to 02 only:\n%s", one)
+	}
+	plain := newRepo(t)
+	env, _, _ = run(t, "--dir", plain, "9", "--task", fmt.Sprint(integrationTask))
+	if md := env.Result.Markdown; strings.Contains(md, "Inbound handoffs") || strings.Contains(md, "Outbound handoffs") {
+		t.Error("a package with no handoff lists handoffs among its contracts")
 	}
 }

@@ -345,9 +345,9 @@ func TestVerdict_RefusesATakeOfNoHandoffForThisPackage(t *testing.T) {
 		says        string
 	}{
 		"02 takes 01:H-1":        {"02", "01:H-1", ""},
-		"02 takes 01:H-2":        {"02", "01:H-2", "H-2"},
-		"02 takes 09:H-1":        {"02", "09:H-1", "09"},
-		"03 takes 01:H-1, to 02": {"03", "01:H-1", "02"},
+		"02 takes 01:H-2":        {"02", "01:H-2", "declares no handoff"},
+		"02 takes 09:H-1":        {"02", "09:H-1", "no package under the spec root"},
+		"03 takes 01:H-1, to 02": {"03", "01:H-1", "addressed to spec 02"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root, dirs := handoffRoot(t)
