@@ -451,7 +451,7 @@ commits in place.
 - The survey's decisions, and the deviations declared with the ADRs that
   record them.
 - The conformance findings, fixed and unmet.
-- The gate report.
+- The gate report, and the open items' counts by kind.
 - The open items, each with its issue URL, or why it has none and the
   `issue --create` call that opens it.
 - Anything left unfinished, and the command that continues it.

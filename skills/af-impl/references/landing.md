@@ -23,9 +23,15 @@ is missing.
      URL on the forge, and the spec by its `NN_name`, its `spec_dir` and a
      link to that directory on the base branch, where it is after the merge.
   3. `issue --create --title "<NN_name>: <what is missing>" --body-file
-     <file> --dry-run`, then the same call without `--dry-run`. The title
-     says the gap in under 60 characters. `result.issue.html_url` is the
-     issue.
+     <file> --label af:<kind> --label af:from-<NN> [...] --dry-run`, then the
+     same call without `--dry-run`. The labels are `af:<kind>` and
+     `af:from-<NN>`, this package; for `awaits` also `af:awaits-<MM>`, the
+     package that must take it up, and for a `defect` its
+     `af:severity-<security|data-loss|correctness|minor>`. A label the
+     repository lacks is created first, with `issue --create-label
+     <name>`. The title says the gap in under 60 characters.
+     `result.issue.html_url` is the issue. The body's "What closes it"
+     names, for `awaits`, the receiving package by id.
 
   Entries that concern one criterion may share one issue; an entry that is
   fixed before the merge is not an open item and gets none.
@@ -50,8 +56,24 @@ is missing.
   the baseline and on the merged tree, the slowest units, and the full and
   task runs with how many were reused, a reused gate written as "reused the
   gate of `<commit>`, `<date>`"; and the conformance findings and what was done
-  about each. Every claim in it comes from something that ran. It ends with
-  a `Spec: <NN_name>` trailer.
+  about each. The open-items section counts the items this package opened,
+  closed, passed on and reclassified, per kind and, for a defect, per
+  severity, with the issue links; the report of §8 gives the same counts.
+  Every claim in it comes from something that ran. It ends with a
+  `Spec: <NN_name>` trailer, then, in the same block, the trailer
+  `AF-Run: <one line of JSON>`, which specrun reads into its ledger:
+
+  ```
+  AF-Run: {"gate":{"full":{"runs":4,"seconds":160.2,"reused":1},"task":{"runs":6,"seconds":219.8,"reused":0},"baseline_full_seconds":40.6,"last_full_seconds":40.6},"open_items":{"opened":{"awaits":1,"defect:minor":1},"closed":{},"passed_on":{},"reclassified":{}}}
+  ```
+
+  `gate` is copied from `speca <package> --gate-report --since <baseline
+  commit>`: `full` and `task`, each with `runs`, `seconds` and `reused`, and
+  `baseline_full_seconds` and `last_full_seconds`. `open_items` holds
+  `opened`, `closed`, `passed_on` and `reclassified`, each an object of
+  counts keyed by kind, a defect as `defect:<severity>`; `closed`,
+  `passed_on` and `reclassified` are `{}` until af-impl reads open items
+  back.
 - **Merge.** Switch to the base branch and bring it up to date with
   `git pull --ff-only`. Then `git merge --no-ff --no-commit <branch>`. A
   conflict stops the landing: `git merge --abort`, stay on the base branch,

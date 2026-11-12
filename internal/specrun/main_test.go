@@ -3,8 +3,10 @@ package specrun
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -109,5 +111,44 @@ func TestMain_TakesUpAStalledPackageWhenStartedAgain(t *testing.T) {
 	}
 	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "stalled,landed" {
 		t.Errorf("the ledger is %v", got)
+	}
+}
+
+// A package lands with one labelled issue, one unlabelled, and a trailer:
+// specrun has created the scheme, leaves the labelled issue alone, makes the
+// unlabelled one a deviation with a comment, and files the trailer's counts
+// in the ledger.
+func TestMain_FilesTheIssuesAndTheTrailerOfALandedPackage(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	labelled := f.forge.add("01_a: a minor slip", "open", "af:defect", "af:severity-minor", "af:from-01")
+	bare := f.forge.add("01_a: no caller", "open")
+	f.plan(t, landWith(`AF-Run: {"gate":{"full":{"runs":3,"seconds":412.5,"reused":1},"task":{"runs":9,"seconds":95,"reused":0}},"open_items":{"opened":{"defect:minor":1,"deviation":1},"closed":{},"passed_on":{},"reclassified":{}}}`))
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	for _, l := range append(slices.Clone(fixedLabels), "af:from-01", "af:awaits-01") {
+		if !f.forge.labels[l] {
+			t.Errorf("the forge has no %s", l)
+		}
+	}
+	for _, w := range f.forge.writes() {
+		if strings.HasPrefix(w, fmt.Sprintf("AddLabels %d ", labelled)) || strings.HasPrefix(w, fmt.Sprintf("RemoveLabel %d ", labelled)) ||
+			w == fmt.Sprintf("AddComment %d", labelled) {
+			t.Errorf("the labelled issue was written: %s", w)
+		}
+	}
+	base := git(t, f.root, "rev-parse", "main")
+	if got := f.forge.labelsOf(bare); strings.Join(got, ",") != "af:deviation,af:from-01" {
+		t.Errorf("the unlabelled issue carries %v", got)
+	}
+	if c := f.forge.comments[bare]; len(c) != 1 || !strings.Contains(c[0], "incomplete-labels") || !strings.Contains(c[0], base) {
+		t.Errorf("comments %q", c)
+	}
+	l := f.ledgerLines(t)[0]
+	gate, _ := l["gate"].(map[string]any)
+	full, _ := gate["full"].(map[string]any)
+	if l["outcome"] != "landed" || full["runs"] != 3.0 || l["open_items"] == nil {
+		t.Errorf("ledger line %v", l)
 	}
 }

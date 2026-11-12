@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-fox-dev/aflib/envelope"
+	"github.com/agent-fox-dev/aflib/issuex"
 	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/afspec"
 )
@@ -85,6 +86,8 @@ type run struct {
 	statePath string
 	state     state
 	holding   bool // this run holds the repository, as state.Owner says
+	forge     issuex.Client
+	repo      issuex.Repo
 	result    *Result
 	warnings  []envelope.Warning
 }
@@ -122,6 +125,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
 	if opts.dryRun {
+		_ = r.connect() // a dry run warns, and writes to no forge
 		return r.dryRun()
 	}
 	if opts.ledger {
@@ -209,6 +213,9 @@ func (r *run) loop() int {
 	if f := r.versions(); f != nil {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
+	if f := r.connect(); f != nil {
+		return r.emit(envelope.ExitFailed, "", f)
+	}
 	if f := r.loadState(); f != nil {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
@@ -216,6 +223,7 @@ func (r *run) loop() int {
 		return r.emit(code, "", f)
 	}
 	r.base = baseBranch(r.root)
+	schemed := false // the scheme is made from the spec root the first pull brings
 	for {
 		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
 			if _, f := r.choose(); f == nil && r.result.AllDone {
@@ -228,7 +236,16 @@ func (r *run) loop() int {
 			return r.emit(envelope.ExitFailed, "", f)
 		}
 		r.hold()
+		if !schemed {
+			if f := r.createScheme(r.ctx); f != nil {
+				return r.emit(envelope.ExitFailed, "", f)
+			}
+			schemed = true
+		}
 		next := r.resume()
+		if stop := r.recheckLabels(); stop != nil {
+			return r.stop(stop)
+		}
 		if next == nil {
 			var f *envelope.ErrorInfo
 			if next, f = r.choose(); f != nil {
@@ -239,15 +256,42 @@ func (r *run) loop() int {
 			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
 		}
 		if stop := r.implement(next, before); stop != nil {
-			r.result.Stopped = stop
-			return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, stop.Step, stop.Reason,
-				len(r.result.Landed)), failure(stopStage(stop.Reason), "input", "%s %s: %s", stop.Kind, stop.Subject, stop.Reason))
+			return r.stop(stop)
 		}
 	}
 }
 
+// stop ends the loop at the step.
+func (r *run) stop(s *Stopped) int {
+	r.result.Stopped = s
+	return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, s.Step, s.Reason,
+		len(r.result.Landed)), failure(stopStage(s.Reason), "input", "%s %s: %s", s.Kind, s.Subject, s.Reason))
+}
+
+// recheckLabels applies the label rules a forge call cut short in an earlier
+// run, before a step is chosen.
+func (r *run) recheckLabels() *Stopped {
+	dir := r.state.LabelCheck
+	if dir == "" && len(r.state.PendingComments) == 0 {
+		return nil
+	}
+	err := r.postPending()
+	if err == nil && dir != "" {
+		err = r.checkLabels(dir)
+	}
+	if err != nil {
+		return &Stopped{Step: "labels-" + filepath.Base(dir), Kind: "labels", Subject: filepath.Base(dir), Reason: err.Error()}
+	}
+	r.state.LabelCheck = ""
+	r.saveState()
+	return nil
+}
+
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
+	if strings.HasPrefix(reason, "incomplete-labels") {
+		return "forge"
+	}
 	switch reason {
 	case reasonStalled:
 		return "stall"
@@ -332,8 +376,13 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	ended := now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindImplement, Subject: subject, StartedAt: started.Format(time.RFC3339),
 		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded}
+	short := ""
 	switch reason {
 	case "":
+		if t, ok := r.readTrailer(); ok {
+			line.Gate, line.OpenItems = t.Gate, t.OpenItems
+			short = trailerSummary(t)
+		}
 	case reasonStalled:
 		line.Outcome = outcomeStalled
 	default:
@@ -348,12 +397,26 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
 	}
 	r.finishStep(kindImplement, subject)
-	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min\n", tool, step, line.WallMinutes)
+	r.result.Landed = append(r.result.Landed, subject)
+	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min%s\n", tool, step, line.WallMinutes, short)
 	if median, slow := slowerThanUsual(earlier, line.WallMinutes); slow {
 		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",
 			tool, subject, line.WallMinutes, median)
 	}
-	r.result.Landed = append(r.result.Landed, subject)
+	// The check is owed until it is done, so a crash in it leaves it to the
+	// next start.
+	r.state.LabelCheck = next.Dir
+	r.saveState()
+	if err := r.checkLabels(next.Dir); err != nil {
+		reason := err.Error()
+		if r.ctx.Err() != nil {
+			reason = reasonInterrupted
+		}
+		fmt.Fprintf(r.stderr, "%s: %s: %s\n", tool, step, reason)
+		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
+	}
+	r.state.LabelCheck = ""
+	r.saveState()
 	return nil
 }
 

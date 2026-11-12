@@ -22,6 +22,19 @@ type state struct {
 	// Owner is the process id of the specrun whose loop works on the
 	// repository, from its first step to its end; absent otherwise.
 	Owner int `json:"owner,omitempty"`
+	// LabelCheck is the landed package whose label rules a forge call cut
+	// short: the next start applies them again before it chooses a step.
+	LabelCheck string `json:"label_check,omitempty"`
+	// PendingComments are the comments of label changes made but not yet
+	// posted: the next start posts them before anything else, since the
+	// issue they speak of no longer shows what was missing.
+	PendingComments []pendingComment `json:"pending_comments,omitempty"`
+}
+
+// pendingComment is a comment a label rule owes an issue.
+type pendingComment struct {
+	Issue int    `json:"issue"`
+	Body  string `json:"body"`
 }
 
 // doneStep is a step that landed.
@@ -162,13 +175,18 @@ func (r *run) resume() *afspec.NextPackage {
 		if perr == nil {
 			minutes = ended.Sub(started).Minutes()
 		}
-		if err := appendLedger(r.logDir, ledgerLine{Kind: run.Kind, Subject: run.Subject, StartedAt: run.StartedAt,
-			EndedAt: ended.Format(time.RFC3339), WallMinutes: minutes, Outcome: outcomeLanded}); err != nil {
+		line := ledgerLine{Kind: run.Kind, Subject: run.Subject, StartedAt: run.StartedAt,
+			EndedAt: ended.Format(time.RFC3339), WallMinutes: minutes, Outcome: outcomeLanded}
+		if t, ok := r.readTrailer(); ok {
+			line.Gate, line.OpenItems = t.Gate, t.OpenItems
+		}
+		if err := appendLedger(r.logDir, line); err != nil {
 			fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
 		}
 		// It landed in the run that was interrupted, not in this one: it is in
 		// the ledger, and neither in landed nor counted against --max.
 		fmt.Fprintf(r.stderr, "%s: %s %s landed before this run, as the repository shows\n", tool, run.Kind, run.Subject)
+		r.state.LabelCheck = run.SpecDir // its issues are checked like any landed package's
 		r.finishStep(run.Kind, run.Subject)
 		return nil
 	}

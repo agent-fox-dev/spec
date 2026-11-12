@@ -145,9 +145,13 @@ func TestLoop_DryRunChangesNothing(t *testing.T) {
 
 // land is a plan for one session that implements its package and merges it
 // into main, exiting with code.
+// The merge commit carries the AF-Run trailer af-impl writes.
 func land(code int) map[string]any {
-	return map[string]any{"events": 2, "actions": []string{"land"}, "result": "landed", "exit": code}
+	return map[string]any{"events": 2, "actions": []string{"land"}, "result": "landed", "exit": code, "trailer": minimalTrailer}
 }
+
+// minimalTrailer is an AF-Run trailer with nothing counted.
+const minimalTrailer = `AF-Run: {"gate":{"full":{"runs":0,"seconds":0,"reused":0},"task":{"runs":0,"seconds":0,"reused":0}},"open_items":{"opened":{},"closed":{},"passed_on":{},"reclassified":{}}}`
 
 // The loop brings the base branch up to date and starts one session for the
 // package afspec names next, with af-impl's command line, in the repository.

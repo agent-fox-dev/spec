@@ -3,23 +3,23 @@
   "spec_id": "21",
   "spec_name": "open_item_labels",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-12T18:36:45Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 3,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 4,
-      "state": "pending"
+      "state": "done"
     }
   ]
 }

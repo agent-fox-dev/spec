@@ -34,6 +34,10 @@ type ledgerLine struct {
 	EndedAt     string  `json:"ended_at"`
 	WallMinutes float64 `json:"wall_minutes"`
 	Outcome     string  `json:"outcome"`
+	// Gate and OpenItems are the AF-Run trailer's objects of a landed
+	// package's merge commit, as the trailer gave them; absent without one.
+	Gate      json.RawMessage `json:"gate,omitempty"`
+	OpenItems json.RawMessage `json:"open_items,omitempty"`
 }
 
 // readLedger reads the ledger in dir; a missing ledger is no line, and a line

@@ -57,6 +57,18 @@ deviation that leaves a criterion unsatisfied), and what the run could not
 show (a check or test that did not run here, a contract no test asserts, a
 finding left as it is). Each is one entry, with what is missing, why, the
 ids it concerns (`REQ-3.2`, `PATH-1`, `D-3`) and its evidence
-(`file:line`, the check's output). §7 opens an issue for each. A deviation
+(`file:line`, the check's output), and exactly one **kind**:
+
+- `awaits`: the branch offers something that a named later package must use
+  or wire. It is not a fault of this package; the entry names that package.
+- `defect`: code this branch delivered behaves differently from what its
+  spec asks, or loses data, races, or exposes something. It carries one
+  **severity**: `security`, `data-loss`, `correctness` or `minor`.
+- `untested`: the behaviour is believed to work, but a criterion has no test
+  that asserts it.
+- `deviation`: the code deliberately does something other than the spec,
+  recorded in an ADR, and a person must accept it or change the spec.
+
+§7 opens an issue for each, labelled by its kind. A deviation
 that is decided, recorded in an ADR (§5, step 8) and leaves every criterion met is
 not an open item; it goes with the deviations.

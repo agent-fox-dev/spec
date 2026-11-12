@@ -37,6 +37,31 @@ specrun --reset-state           # forget the step that was running
 `--help` prints the help to stderr, `--version` the build identity and
 `--ledger` the ledger table to stdout; none of the three writes an envelope.
 
+## The forge
+
+`specrun` reaches the forge of the repository's origin remote, GitHub or
+GitLab, through `aflib/issuex`, with the token the `issue` command reads
+(`GITHUB_TOKEN` or `GH_TOKEN`, `GITLAB_TOKEN`): the sessions open their open
+items as issues with the same token, and the label rules decide what the
+loop does next. Without a client (no token, no origin remote naming a GitHub
+or GitLab repository, a forge that is not supported) a run refuses to start
+at stage `preflight`, naming the variables or the remote. A dry run goes on
+with a low `forge_unavailable` warning, and writes nothing to a forge in any
+case.
+
+Before its first step, once the base branch is pulled, a run creates every
+label of the scheme the repository lacks; one that exists is left as it is
+(`issuex` lists no labels, so a conflict on creating one is how it is found),
+and a label that cannot be created otherwise refuses the run at stage
+`preflight`:
+
+| Label | Meaning |
+|---|---|
+| `af:awaits`, `af:defect`, `af:untested`, `af:deviation` | the kind of an open item; an issue carries exactly one |
+| `af:severity-security`, `af:severity-data-loss`, `af:severity-correctness`, `af:severity-minor` | the severity of a `defect` |
+| `af:accepted`, `af:rejected`, `af:repair-failed` | what a person decided about a deviation, and a repair that did not land |
+| `af:from-<NN>`, `af:awaits-<NN>` | for every package under the spec root and `archive/` that loads: the package that opened an item, and the package an `awaits` item waits for |
+
 ## The loop
 
 Each step is **implement the next package**:
@@ -77,6 +102,34 @@ each package's reason as `speca --next` words it; when the dependencies form a
 cycle it stops at stage `graph`, naming the cycle. A base branch that cannot be
 checked out or pulled, and a missing `git` or `claude`, stop it at stage
 `preflight` before any session.
+
+### The check after a landing
+
+When a package has landed, `specrun` lists its open issues: those labelled
+`af:from-<NN>`, and those whose title starts with the package's directory
+name and a colon (`01_cache: …`), as af-impl titles an open item. Each must
+carry exactly one kind, `af:from-<NN>`, for a `defect` exactly one severity,
+and for `awaits` an `af:awaits-<MM>`. The rule `incomplete-labels` makes an
+issue that lacks any of these a `deviation`: its other kind labels are
+removed, `af:deviation` and, when missing, `af:from-<NN>` are added, and a
+comment names the rule, what was missing and the commit of the base branch,
+so that a person decides it:
+
+```
+specrun, rule incomplete-labels, on 4b1f0c2…: it has no kind; it lacks af:from-01. It is now af:deviation, for a person to decide.
+```
+
+A complete issue, an issue of another package and a closed issue are not
+touched, and the rule changes nothing the second time it runs. The check is
+owed in the state (`label_check`) from the landing until it is done, and a
+change's comment is owed (`pending_comments`) from before its labels change
+until it is posted. A forge call that fails stops the loop at stage `forge`,
+after the package's ledger line is written with outcome `landed`, and a crash
+leaves the same: the next start posts the owed comments and applies the rule
+again before it chooses a step. A landing the next start finds in the
+repository (see *State and resume*) gets its trailer read and its issues
+checked the same way. A package that has gone under `archive/` since is
+checked there; one found nowhere is left unchecked, with a note.
 
 ## What it runs
 
@@ -181,8 +234,23 @@ run at stage `preflight`.
   ```
 
   `outcome` is `landed`, `stopped` or `stalled`; `wall_minutes` is
-  `ended_at` less `started_at`, in minutes.
-- After each step the line is printed short on stderr. When a landed package
+  `ended_at` less `started_at`, in minutes. A landed package's line also holds
+  `gate` and `open_items`, copied as they are from the `AF-Run:` trailer of
+  its merge commit (the tip of the base branch after the landing):
+
+  ```
+  AF-Run: {"gate":{"full":{"runs":3,"seconds":412.5,"reused":1},"task":{"runs":9,"seconds":95,"reused":0},"baseline_full_seconds":130.2,"last_full_seconds":141},"open_items":{"opened":{"awaits":1,"defect:minor":2},"closed":{},"passed_on":{},"reclassified":{}}}
+  ```
+
+  `gate` is what `speca <package> --gate-report` counted; `open_items` holds
+  `opened`, `closed`, `passed_on` and `reclassified`, each counts by kind, a
+  defect as `defect:<severity>`. Other keys of the trailer are ignored. A
+  merge commit with no `AF-Run:` trailer, or one whose value is not one JSON
+  object, still counts as landed: its line holds neither object, and a low
+  `trailer_missing` warning names the commit.
+- After each step the line is printed short on stderr, a landed package's
+  with its trailer's counts (`landed in 12.0 min; gate 3 full in 412.5s, 1
+  reused; 3 opened`). When a landed package
   took more than twice the median wall minutes of the packages that landed
   before it in the ledger, a warning line follows; stopped and stalled steps
   are no part of the median.
@@ -314,7 +382,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes
@@ -323,9 +391,11 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 |---|---|---|---|
 | `skill_mismatch` | high | preflight | the installed af-impl skill's SHA-256 is not the one `specrun` was built with |
 | `skill_not_installed` | high | preflight | no af-impl skill is installed where a session here would load it |
+| `forge_unavailable` | low | preflight | a dry run has no forge client; it writes nothing to a forge anyway |
+| `trailer_missing` | low | land | a landed package's merge commit has no `AF-Run:` trailer holding one JSON object |
 
 ## What it leaves out
 
-`specrun` writes nothing to a forge and needs no token: labels, the checks on
-issues, the reconcile and repairs come with later packages. It runs one package
+The reconcile, repairs, and the rules that read the labels beyond the check
+after a landing come with later packages. It runs one package
 at a time, in dependency order, and has no `--schema` self-description.
