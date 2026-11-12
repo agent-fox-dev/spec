@@ -366,3 +366,29 @@ func (r *run) postPending() error {
 	}
 	return nil
 }
+
+// seriousDefects lists the open defects of the package in specDir whose
+// severity is one of --stop-on.
+func (r *run) seriousDefects(specDir string) ([]StopIssue, error) {
+	spec := r.findPackage(specDir)
+	if spec == nil || len(r.opts.stopOn) == 0 {
+		return nil, nil
+	}
+	issues, err := r.listOpen([]string{"af:defect", "af:from-" + spec.SpecID})
+	if err != nil {
+		return nil, fmt.Errorf("serious defects: listing the defects of %s: %w", specDir, err)
+	}
+	var out []StopIssue
+	for _, is := range issues {
+		for _, l := range is.Labels {
+			if s, ok := strings.CutPrefix(l, "af:severity-"); ok && slices.Contains(r.opts.stopOn, s) {
+				out = append(out, StopIssue{Number: is.Number, URL: is.HTMLURL, Title: is.Title, Severity: s})
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// reasonSeriousDefect is the reason of a stop on serious defects.
+const reasonSeriousDefect = "serious defect"

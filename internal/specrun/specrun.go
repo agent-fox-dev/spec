@@ -60,6 +60,16 @@ type Stopped struct {
 	Kind    string `json:"kind"`
 	Subject string `json:"subject"`
 	Reason  string `json:"reason"`
+	// Issues are the serious defects a stop on them names.
+	Issues []StopIssue `json:"issues,omitempty"`
+}
+
+// StopIssue is an open defect the stop rule names.
+type StopIssue struct {
+	Number   int    `json:"number"`
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+	Severity string `json:"severity"`
 }
 
 // NextStep is a step: its kind and the package it is for.
@@ -246,6 +256,9 @@ func (r *run) loop() int {
 		if stop := r.recheckLabels(); stop != nil {
 			return r.stop(stop)
 		}
+		if stop := r.recheckDefects(); stop != nil {
+			return r.stop(stop)
+		}
 		if next == nil {
 			var f *envelope.ErrorInfo
 			if next, f = r.choose(); f != nil {
@@ -287,8 +300,34 @@ func (r *run) recheckLabels() *Stopped {
 	return nil
 }
 
+// recheckDefects stops before a step is chosen while the last package that
+// landed still has an open defect of a severity in --stop-on.
+func (r *run) recheckDefects() *Stopped {
+	dir := r.state.LastLanded
+	if dir == "" {
+		return nil
+	}
+	issues, err := r.seriousDefects(dir)
+	s := &Stopped{Step: "defects-" + filepath.Base(dir), Kind: "defects", Subject: filepath.Base(dir)}
+	switch {
+	case err != nil:
+		s.Reason = err.Error()
+	case len(issues) > 0:
+		s.Reason, s.Issues = reasonSeriousDefect, issues
+	default:
+		return nil
+	}
+	return s
+}
+
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
+	if reason == reasonSeriousDefect {
+		return "defect"
+	}
+	if strings.HasPrefix(reason, "serious defects:") {
+		return "forge"
+	}
 	if strings.HasPrefix(reason, ruleIncompleteLabels) || strings.HasPrefix(reason, ruleAwaitsFinished) {
 		return "forge"
 	}
@@ -377,12 +416,16 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	line := ledgerLine{Kind: kindImplement, Subject: subject, StartedAt: started.Format(time.RFC3339),
 		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded}
 	short := ""
+	var labelErr error
+	var serious []StopIssue
 	switch reason {
 	case "":
 		if t, ok := r.readTrailer(); ok {
 			line.Gate, line.OpenItems = t.Gate, t.OpenItems
 			short = trailerSummary(t)
 		}
+		serious, labelErr = r.afterLanding(next.Dir)
+		line.Issues = serious
 	case reasonStalled:
 		line.Outcome = outcomeStalled
 	default:
@@ -403,21 +446,35 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",
 			tool, subject, line.WallMinutes, median)
 	}
-	// The check is owed until it is done, so a crash in it leaves it to the
-	// next start.
-	r.state.LabelCheck = next.Dir
-	r.saveState()
-	if err := r.checkLabels(next.Dir); err != nil {
-		reason := err.Error()
+	if labelErr != nil {
+		reason := labelErr.Error()
 		if r.ctx.Err() != nil {
 			reason = reasonInterrupted
 		}
 		fmt.Fprintf(r.stderr, "%s: %s: %s\n", tool, step, reason)
 		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
 	}
+	if len(serious) > 0 {
+		for _, is := range serious {
+			fmt.Fprintf(r.stderr, "%s: %s left a %s defect open: #%d %s\n", tool, subject, is.Severity, is.Number, is.Title)
+		}
+		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reasonSeriousDefect, Issues: serious}
+	}
+	return nil
+}
+
+// afterLanding applies the label rules for the package in specDir, which
+// has landed, and lists its serious defects. The check is owed in the state
+// until it is done, so that a crash in it leaves it to the next start.
+func (r *run) afterLanding(specDir string) ([]StopIssue, error) {
+	r.state.LabelCheck = specDir
+	r.saveState()
+	if err := r.checkLabels(specDir); err != nil {
+		return nil, err
+	}
 	r.state.LabelCheck = ""
 	r.saveState()
-	return nil
+	return r.seriousDefects(specDir)
 }
 
 // session is the session of the step, its stream going to <step>.jsonl and

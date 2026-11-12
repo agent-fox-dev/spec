@@ -145,6 +145,23 @@ issue, and one that is not `af:awaits` are not touched; the rule changes
 nothing the second time, and its forge failures stop the loop as the other
 rule's do.
 
+### Stopping on a serious defect
+
+After a package lands and the label rules ran, `specrun` lists its open
+issues labelled `af:defect` and `af:from-<NN>`. When one carries a severity in
+`--stop-on` (default `security,data-loss`), the loop stops with exit code 1 at
+stage `defect`: `result.stopped.reason` is `serious defect`, and
+`result.stopped.issues` names each issue (`number`, `url`, `title`,
+`severity`); the package's ledger line, outcome `landed`, holds them too. A
+deviation, an untested item and a defect of another severity never stop it,
+and `--stop-on ''` stops on none.
+
+The state records the last package that landed (`last_landed`), and every
+start makes the same check for it before it chooses a step, so starting
+`specrun` again is not the way past a stop. To go on, a person closes the
+issue, changes its severity label, or runs with a `--stop-on` that no longer
+holds it.
+
 ## What it runs
 
 At the start of a run `specrun` logs on stderr, and puts in
@@ -300,6 +317,7 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--max N` | `SPECRUN_MAX` | no limit | land at most N packages in this run; a whole number greater than zero |
 | `--stall D` | `SPECRUN_STALL` | `30m` | end a session that writes no event for D, a Go duration greater than zero |
 | `--log-dir DIR` | `SPECRUN_LOG_DIR` | `agent-fox/specrun/<repository>` under the cache directory | where the streams, the final messages and the ledger go; never inside the working tree |
+| `--stop-on LIST` | `SPECRUN_STOP_ON` | `security,data-loss` | stop after a package that left an open defect of one of these severities (`security`, `data-loss`, `correctness`, `minor`, comma-separated); `''` never stops |
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
 | `--ledger` | | | print the ledger as a table and start nothing |
@@ -396,7 +414,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open (`defect`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes

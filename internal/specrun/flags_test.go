@@ -136,3 +136,37 @@ func TestMain_NamesTheVariableOfALogDirectoryItRefuses(t *testing.T) {
 		t.Errorf("code %d, error %+v; want a usage error naming SPECRUN_LOG_DIR", code, env.Error)
 	}
 }
+
+// --stop-on is a comma-separated list of the four severities, the empty
+// string meaning never stop, SPECRUN_STOP_ON its default.
+func TestOptions_TakeTheSeveritiesToStopOn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		env  map[string]string
+		want []string
+		err  string
+	}{
+		"absent":                     {nil, nil, []string{"security", "data-loss"}, ""},
+		"minor":                      {[]string{"--stop-on", "minor"}, nil, []string{"minor"}, ""},
+		"two":                        {[]string{"--stop-on", "security,correctness"}, nil, []string{"security", "correctness"}, ""},
+		"empty":                      {[]string{"--stop-on", ""}, nil, []string{}, ""},
+		"the variable":               {nil, map[string]string{"SPECRUN_STOP_ON": "minor"}, []string{"minor"}, ""},
+		"the flag over the variable": {[]string{"--stop-on", "security"}, map[string]string{"SPECRUN_STOP_ON": "minor"}, []string{"security"}, ""},
+		"an unknown severity":        {[]string{"--stop-on", "severe"}, nil, nil, "severe"},
+		"an empty element":           {[]string{"--stop-on", "security,"}, nil, nil, "--stop-on"},
+		"a bad variable":             {nil, map[string]string{"SPECRUN_STOP_ON": "severe"}, nil, "SPECRUN_STOP_ON"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, err := parseOptions(tc.argv, func(k string) string { return tc.env[k] })
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) || !strings.Contains(err.Error(), "data-loss") {
+					t.Errorf("err %v; want one naming %q and the four severities", err, tc.err)
+				}
+				return
+			}
+			if err != nil || strings.Join(o.stopOn, ",") != strings.Join(tc.want, ",") || o.stopOn == nil {
+				t.Errorf("stopOn %#v, %v; want %v", o, err, tc.want)
+			}
+		})
+	}
+}
