@@ -27,6 +27,11 @@ type options struct {
 	// reconcileEvery is the number of packages between reconciles; 0 leaves
 	// only the reconcile at the end.
 	reconcileEvery int
+	repair         bool
+	repairOn       []string
+	repairOnText   string
+	repairMax      int
+	repairSecurity bool
 	dryRun         bool
 	ledger         bool
 	resetState     bool
@@ -57,7 +62,8 @@ func envName(name string) string {
 // parseOptions reads the settings from argv and the environment. Its error is
 // a usage error; flag.ErrHelp asks for the help.
 func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, error) {
-	o := &options{stall: DefaultStall, stopOnText: defaultStopOn, reconcileEvery: defaultReconcileEvery}
+	o := &options{stall: DefaultStall, stopOnText: defaultStopOn, reconcileEvery: defaultReconcileEvery,
+		repairOnText: defaultRepairOn, repairMax: defaultRepairMax}
 	if err := o.fromEnv(lookup); err != nil {
 		return nil, err
 	}
@@ -86,6 +92,16 @@ func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, 
 		return nil, err
 	}
 	o.stopOn = stopOn
+	from = "--repair-on"
+	if _, ok := lookup(envName("repair-on")); !set["repair-on"] && ok {
+		from = envName("repair-on")
+	}
+	if o.repairOn, err = parseRepairOn(o.repairOnText, from); err != nil {
+		return nil, err
+	}
+	if set["repair-max"] && o.repairMax < 0 {
+		return nil, fmt.Errorf("--repair-max %d: the number of repairs per reconcile must be 0 or more", o.repairMax)
+	}
 	o.logDirFrom = "--log-dir"
 	if !set["log-dir"] && o.logDir != "" {
 		o.logDirFrom = envName("log-dir")
@@ -126,6 +142,28 @@ func (o *options) fromEnv(lookup func(string) (string, bool)) error {
 		}
 		o.max = n
 	}
+	if v, ok := lookup(envName("repair-on")); ok {
+		o.repairOnText = v
+	}
+	if v := getenv(envName("repair-max")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			errs = append(errs, fmt.Errorf("%s=%s: the number of repairs per reconcile must be a whole number, 0 or more", envName("repair-max"), v))
+		}
+		o.repairMax = n
+	}
+	for _, b := range []struct {
+		name string
+		to   *bool
+	}{{"repair", &o.repair}, {"repair-security", &o.repairSecurity}} {
+		if v := getenv(envName(b.name)); v != "" {
+			x, err := strconv.ParseBool(v)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s=%s: must be true or false", envName(b.name), v))
+			}
+			*b.to = x
+		}
+	}
 	if v := getenv(envName("reconcile-every")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
@@ -160,6 +198,10 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.IntVar(&o.max, "max", o.max, "land at most this many packages in this run, a whole number greater than zero; default no limit ($SPECRUN_MAX)")
 	fs.DurationVar(&o.stall, "stall", o.stall, "end a session that writes no event for this long, a duration greater than zero ($SPECRUN_STALL)")
 	fs.StringVar(&o.logDir, "log-dir", o.logDir, "where the sessions' streams, final messages and the ledger go; default agent-fox/specrun/<repository> under the user's cache directory; never inside the working tree ($SPECRUN_LOG_DIR)")
+	fs.BoolVar(&o.repair, "repair", o.repair, "after a package that left an open defect of a severity in --stop-on, repair each instead of stopping ($SPECRUN_REPAIR)")
+	fs.StringVar(&o.repairOnText, "repair-on", o.repairOnText, "what a reconcile queues for repair, comma-separated: security, data-loss, correctness, minor (defects of that severity), untested; '' none ($SPECRUN_REPAIR_ON)")
+	fs.IntVar(&o.repairMax, "repair-max", o.repairMax, "the most repairs after one reconcile, 0 or more; 0 repairs nothing there ($SPECRUN_REPAIR_MAX)")
+	fs.BoolVar(&o.repairSecurity, "repair-security", o.repairSecurity, "repair security defects too; without it a security defect is never repaired ($SPECRUN_REPAIR_SECURITY)")
 	fs.IntVar(&o.reconcileEvery, "reconcile-every", o.reconcileEvery, "run a reconcile after this many landed packages, 0 or more; 0 leaves only the reconcile at the end ($SPECRUN_RECONCILE_EVERY)")
 	fs.StringVar(&o.stopOnText, "stop-on", o.stopOnText, "stop the loop after a package that opened an open defect of one of these severities, comma-separated: security, data-loss, correctness, minor; '' never stops ($SPECRUN_STOP_ON)")
 	fs.BoolVar(&o.strictSkills, "strict-skills", o.strictSkills, "refuse to start when the installed af-impl skill is not the one specrun was built with ($SPECRUN_STRICT_SKILLS)")
@@ -174,7 +216,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, usageText)
 	fs := flag.NewFlagSet("specrun", flag.ContinueOnError)
 	fs.SetOutput(w)
-	(&options{stall: DefaultStall, stopOnText: defaultStopOn, reconcileEvery: defaultReconcileEvery}).register(fs)
+	(&options{stall: DefaultStall, stopOnText: defaultStopOn, reconcileEvery: defaultReconcileEvery,
+		repairOnText: defaultRepairOn, repairMax: defaultRepairMax}).register(fs)
 	fs.PrintDefaults()
 }
 

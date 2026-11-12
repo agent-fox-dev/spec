@@ -465,5 +465,10 @@ func (r *run) wouldDo() *envelope.ErrorInfo {
 		}
 		r.result.WouldStop = append(r.result.WouldStop, serious...)
 	}
+	queue, err := r.buildQueue()
+	if err != nil {
+		return failure("forge", "forge", "%v", err)
+	}
+	r.result.RepairQueue = queue
 	return nil
 }

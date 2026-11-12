@@ -87,10 +87,14 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SPECRUN_FAKE_RECORD", f.record)
 	t.Setenv("SPECRUN_FAKE_SCRIPT", f.script)
-	for _, v := range []string{"SPECRUN_MAX", "SPECRUN_STALL", "SPECRUN_LOG_DIR", "SPECRUN_STRICT_SKILLS", "AF_SPEC_DIR"} {
+	for _, v := range []string{"SPECRUN_MAX", "SPECRUN_STALL", "SPECRUN_LOG_DIR", "SPECRUN_STRICT_SKILLS", "AF_SPEC_DIR",
+		"SPECRUN_STOP_ON", "SPECRUN_RECONCILE_EVERY", "SPECRUN_REPAIR", "SPECRUN_REPAIR_ON", "SPECRUN_REPAIR_SECURITY"} {
 		t.Setenv(v, "")
 		_ = os.Unsetenv(v)
 	}
+	// A reconcile repairs nothing unless a test asks it to, with --repair-max:
+	// the defects and untested items the other tests leave are theirs.
+	t.Setenv("SPECRUN_REPAIR_MAX", "0")
 	git(t, base, "init", "-q", "--bare", "-b", "main", f.origin)
 	git(t, base, "clone", "-q", f.origin, f.root)
 	writeFile(t, filepath.Join(f.root, "README.md"), "fixture\n")
@@ -191,7 +195,7 @@ func specDirs(starts []fakeStart) []string {
 	var out []string
 	for _, s := range starts {
 		for _, a := range s.Argv {
-			if strings.HasPrefix(a, "/af-impl ") && !strings.HasPrefix(a, "/af-impl --reconcile ") {
+			if strings.HasPrefix(a, "/af-impl ") && !strings.HasPrefix(a, "/af-impl --") {
 				out = append(out, strings.TrimPrefix(a, "/af-impl "))
 			}
 		}
@@ -407,6 +411,8 @@ func prompts(starts []fakeStart) []string {
 			switch {
 			case strings.HasPrefix(a, "/af-impl --reconcile "):
 				out = append(out, "reconcile")
+			case strings.HasPrefix(a, "/af-impl --repair "):
+				out = append(out, "repair "+strings.TrimPrefix(a, "/af-impl --repair "))
 			case strings.HasPrefix(a, "/af-impl "):
 				out = append(out, strings.TrimPrefix(a, "/af-impl "))
 			}
@@ -450,8 +456,16 @@ func (m *memForge) replay() {
 			Op     string   `json:"op"`
 			Issue  int      `json:"issue"`
 			Labels []string `json:"labels"`
+			Title  string   `json:"title"`
 		}
 		if json.Unmarshal([]byte(lines[m.applied]), &a) != nil {
+			continue
+		}
+		if a.Op == "open" {
+			n := len(m.issues) + 1
+			m.issues = append(m.issues, issuex.Issue{Number: n, Title: a.Title, State: "open", Labels: a.Labels,
+				HTMLURL:   fmt.Sprintf("https://forge.example/acme/widgets/issues/%d", n),
+				CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)})
 			continue
 		}
 		is := m.issue(a.Issue)
@@ -587,13 +601,27 @@ func (m *memForge) add(title, state string, labels ...string) int {
 	return n
 }
 
+func (m *memForge) ReadIssue(_ context.Context, ref issuex.IssueRef) (issuex.IssueThread, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.call("ReadIssue", fmt.Sprint(ref.Number)); err != nil {
+		return issuex.IssueThread{}, err
+	}
+	for _, is := range m.issues {
+		if is.Number == ref.Number {
+			return issuex.IssueThread{Issue: is}, nil
+		}
+	}
+	return issuex.IssueThread{}, fmt.Errorf("issue %d: %w", ref.Number, issuex.ErrNotFound)
+}
+
 // writes lists the calls that change the forge.
 func (m *memForge) writes() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []string
 	for _, c := range m.calls {
-		if !strings.HasPrefix(c, "ListIssues") {
+		if !strings.HasPrefix(c, "ListIssues") && !strings.HasPrefix(c, "ReadIssue") {
 			out = append(out, c)
 		}
 	}

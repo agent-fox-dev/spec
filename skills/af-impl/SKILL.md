@@ -1,7 +1,7 @@
 ---
 name: af-impl
 description: Implement a version 3 specification package with the user watching. Reads the spec's three artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the merge into the base branch on its own, without waiting to be told to continue. Opens an issue for every open item the merge leaves, linked both ways, with the issue command. Never edits the spec, and merges only on checks that pass on the merged tree.
-argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search] | --reconcile <adopt file> --report <report file>"
+argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search] | --reconcile <adopt file> --report <report file> | --repair <issue>"
 disable-model-invocation: false
 ---
 
@@ -78,8 +78,9 @@ Read [references/speca-specr.md](references/speca-specr.md) in full before the
 first call: the commands' fields, exit codes and output files, what a `speca`
 write does, and what to do without them.
 
-`--reconcile <adopt file> --report <report file>` implements no package:
-follow [references/reconcile.md](references/reconcile.md) instead.
+`--reconcile <adopt file> --report <report file>` and `--repair <issue>`
+implement no package: follow [references/reconcile.md](references/reconcile.md)
+or [references/repair.md](references/repair.md) instead.
 
 The argument the skill was given is a path to a spec package, such as
 `.specs/16_indexed_code_search`. It may also be a bare id (`16`), a name, or a
@@ -440,7 +441,8 @@ commits in place.
 - Leave an open item without an issue or the reason it has none, or open one
   for anything else. Edit, comment on, relabel or close an issue that is not
   `af:*`, or one that neither awaited this package nor is resolved by it; a
-  reconcile may also label the issues of its adopt file.
+  reconcile may also label the issues of its adopt file, and a repair change
+  the issue it was given.
 
 ## 8. Report
 

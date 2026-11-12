@@ -222,6 +222,61 @@ and stderr prints them. A dry run names a due reconcile as its next step
 `result.would_adopt`, and adds the deviation rules' changes to
 `result.would_change`.
 
+## Repairs
+
+A repair is a step of the loop that fixes one issue: one session on a branch
+of its own, merged into the base branch, with the issue closed. After every
+reconcile `specrun` builds the repair queue from the forge's labels and runs
+it before the next package:
+
+- every open `af:defect` with exactly one `af:severity-*` label whose severity
+  is in `--repair-on`, and every open `af:untested` item when `--repair-on`
+  holds `untested`;
+- never an issue marked `af:repair-failed`, and never a security defect
+  unless `--repair-security` is given;
+- most severe first (`security`, `data-loss`, `correctness`, `minor`, then
+  `untested`), then oldest first, at most `--repair-max` (default 5; 0
+  repairs nothing after a reconcile).
+
+The state holds the queue (`repair_queue`), each issue leaving it as its step
+starts, so a restart goes on with the rest. Each step starts
+
+```
+claude -p "/af-impl --repair <issue number>" …
+```
+
+with the flags, process group, stream files and stall of every session.
+
+**With `--repair`**, where the stop rule would stop after a landing (or at
+the next start), the defects it names are repaired instead, most severe first
+then oldest first, with no cap, before the next package; then the stop check
+is made again, and a defect still open stops the loop as the stop rule does.
+A security defect without `--repair-security`, or a defect whose repair
+already failed, is left to a person: the loop stops as the stop rule does,
+before any repair.
+
+**What the session left** is read from the repository and the forge, not
+from the session's account. The base branch must be checked out and the tree
+clean; otherwise the loop stops (reason `not on the base branch` or `working
+tree not clean`, outcome `stopped`). Then the issue decides:
+
+| The issue | Outcome | The loop |
+|---|---|---|
+| closed, and the `AF-Run:` trailer of the commit at the tip of the base branch holds `{"repair": {"issue": N, "outcome": "already_fixed"}}` for it | `already_fixed` | goes on |
+| closed, any other way | `fixed` | goes on |
+| open, with `af:repair-failed` | `failed` | stops with reason `repair failed` (exit 1, stage `defect`, the issue in `result.stopped.issues`) when its severity is in `--stop-on`; goes on otherwise |
+| open, without `af:repair-failed` | `stopped` | stops with reason `issue neither closed nor marked failed` |
+
+The step's ledger line has kind `repair`, the issue number as its subject and
+that outcome. A repair recorded as running at the start of a run is done,
+with a ledger line of outcome `fixed` and no session, when its issue is
+closed by then; `failed`, as above, when it carries `af:repair-failed`;
+dropped, without a ledger line, when it is a security defect this run's
+flags do not allow; and run again otherwise. The rest of a queue left in the state is checked when
+it runs, after the label rules owed and the stop check: an issue closed
+since, marked `af:repair-failed`, or a security defect that this run's
+flags do not allow is left out, without a session.
+
 ## What it runs
 
 At the start of a run `specrun` logs on stderr, and puts in
@@ -379,6 +434,10 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--log-dir DIR` | `SPECRUN_LOG_DIR` | `agent-fox/specrun/<repository>` under the cache directory | where the streams, the final messages and the ledger go; never inside the working tree |
 | `--reconcile-every N` | `SPECRUN_RECONCILE_EVERY` | `5` | run a reconcile after every N landed packages; `0` leaves only the reconcile at the end |
 | `--stop-on LIST` | `SPECRUN_STOP_ON` | `security,data-loss` | stop after a package that left an open defect of one of these severities (`security`, `data-loss`, `correctness`, `minor`, comma-separated); `''` never stops |
+| `--repair` | `SPECRUN_REPAIR` | off | after a package that left an open defect of a severity in `--stop-on`, repair each instead of stopping ([Repairs](#repairs)); off stops as the stop rule does |
+| `--repair-on LIST` | `SPECRUN_REPAIR_ON` | `security,data-loss,correctness,minor,untested` | what a reconcile queues for repair: defects of these severities, and `untested` items, comma-separated; `''` queues nothing |
+| `--repair-max N` | `SPECRUN_REPAIR_MAX` | `5` | the most repairs after one reconcile, 0 or more; `0` repairs nothing after a reconcile (the repairs of `--repair` have no cap) |
+| `--repair-security` | `SPECRUN_REPAIR_SECURITY` | off | repair security defects too; off, a security defect is never repaired, and `--repair` stops on one as the stop rule does |
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
 | `--ledger` | | | print the ledger as a table and start nothing |
@@ -427,7 +486,11 @@ every `af:awaits` issue, and the issues the stop rule would name, writing
 nothing: `result.would_change` lists each change with `issue`, `rule`
 (`incomplete-labels`, `awaits-finished`), `add` and `remove`, and
 `result.would_stop` the defects as `result.stopped.issues` names them; both
-are `[]` when there are none, and absent without a forge.
+are `[]` when there are none, and absent without a forge. `result.repair_queue`
+lists the repair queue the labels give now, as a reconcile would build it,
+each issue with `number`, `title`, `url`, `severity` (or `untested`) and
+`created_at`, in order and capped by `--repair-max`; `[]` when it is empty,
+and absent without a forge.
 
 ## The output
 
@@ -483,7 +546,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open (`defect`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open or a repair of one failed (`defect`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes
@@ -499,6 +562,5 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 
 ## What it leaves out
 
-The reconcile, repairs, and the rules that read the labels beyond the check
-after a landing come with later packages. It runs one package
+It runs one package
 at a time, in dependency order, and has no `--schema` self-description.

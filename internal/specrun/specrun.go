@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -52,6 +53,9 @@ type Result struct {
 	// WouldAdopt is, under --dry-run, the issues a due reconcile would hand
 	// over for adoption.
 	WouldAdopt []adoptEntry `json:"would_adopt,omitzero"`
+	// RepairQueue is, under --dry-run with a forge, the repair queue the
+	// labels give now, in order and capped by --repair-max.
+	RepairQueue []queued `json:"repair_queue,omitzero"`
 	// OpenDeviations are the open deviations no person has settled, oldest
 	// first, after a reconcile.
 	OpenDeviations []OpenDeviation `json:"open_deviations,omitzero"`
@@ -286,11 +290,20 @@ func (r *run) loop() int {
 				return r.stop(stop)
 			}
 		}
+		if run := r.state.Running; run != nil && run.Kind == kindRepair {
+			n, _ := strconv.Atoi(run.Subject)
+			if stop := r.rerunRepair(n); stop != nil {
+				return r.stop(stop)
+			}
+		}
 		next := r.resume()
 		if stop := r.recheckLabels(); stop != nil {
 			return r.stop(stop)
 		}
 		if stop := r.recheckDefects(); stop != nil {
+			return r.stop(stop)
+		}
+		if stop := r.drainQueue(); stop != nil {
 			return r.stop(stop)
 		}
 		// A reconcile already due, as after a restart, comes before any package.
@@ -369,6 +382,9 @@ func (r *run) recheckDefects() *Stopped {
 		s.Reason = err.Error()
 	case len(issues) > 0:
 		s.Reason, s.Issues = reasonSeriousDefect, issues
+		if r.opts.repair {
+			return r.repairSerious(dir, s)
+		}
 	default:
 		return nil
 	}
@@ -377,7 +393,7 @@ func (r *run) recheckDefects() *Stopped {
 
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
-	if reason == reasonSeriousDefect {
+	if reason == reasonSeriousDefect || reason == reasonRepairFailed {
 		return "defect"
 	}
 	if strings.HasPrefix(reason, "serious defects:") {
@@ -515,7 +531,11 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		for _, is := range serious {
 			fmt.Fprintf(r.stderr, "%s: %s left a %s defect open: #%d %s\n", tool, subject, is.Severity, is.Number, is.Title)
 		}
-		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reasonSeriousDefect, Issues: serious}
+		s := &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reasonSeriousDefect, Issues: serious}
+		if r.opts.repair {
+			return r.repairSerious(next.Dir, s)
+		}
+		return s
 	}
 	return nil
 }

@@ -35,6 +35,8 @@ type state struct {
 	LastLanded string `json:"last_landed,omitempty"`
 	// SinceReconcile counts the packages landed since the last reconcile.
 	SinceReconcile int `json:"since_reconcile"`
+	// RepairQueue is the rest of the repairs the last reconcile queued.
+	RepairQueue []queued `json:"repair_queue,omitempty"`
 }
 
 // pendingComment is a comment a label rule owes an issue.
