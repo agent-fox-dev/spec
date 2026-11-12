@@ -7,6 +7,8 @@ spec [flags] <input>    a product idea → a validated specification package
 Its companions `specr`, which renders an existing package as Markdown, and `speca`,
 which reports a package's state and changes it, share this interface and are
 documented in [specr.md](specr.md) and [speca.md](speca.md). `spec --help` says so.
+`specrun`, the loop that implements every open package with `/af-impl`, one
+session each, is documented in [specrun.md](specrun.md).
 
 `spec` turns a product idea into a complete, validated version 3 package under
 `.specs/NN_name/`. It takes **exactly one positional input** and writes

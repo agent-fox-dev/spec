@@ -12,6 +12,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -42,6 +44,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	check := flags.Bool("check", false, "run the checks and write nothing")
 	doInstall := flags.Bool("install", false, "install the skills for one agent")
 	doUninstall := flags.Bool("uninstall", false, "remove the installed skills of one agent")
+	hashOf := flags.String("sha256", "", "print the SHA-256 of this skill's SKILL.md as rendered for --agent, what an install writes, and write nothing")
 	opts := options{}
 	flags.StringVar(&opts.agent, "agent", defaultAgent, "the agent to install for")
 	flags.StringVar(&opts.project, "project", "", "install into this repository instead of the user's directory")
@@ -104,6 +107,9 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	if *check {
 		return exitOK
 	}
+	if *hashOf != "" {
+		return src.printHash(*hashOf, opts.agent, stdout, stderr)
+	}
 	if *doInstall {
 		if err := src.install(chosen, target, opts, stdout, stderr); err != nil {
 			fmt.Fprintln(stderr, "skillgen: "+err.Error())
@@ -119,3 +125,23 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 }
 
 func main() { os.Exit(Main(os.Args[1:], os.Stdout, os.Stderr)) }
+
+// printHash prints the SHA-256 of the skill's SKILL.md as rendered for the
+// agent, which is what an install of this tree writes: specrun is built with
+// it, to tell the installed af-impl from another.
+func (s *source) printHash(name, agentName string, stdout, stderr io.Writer) int {
+	a, ok := lookupAgent(agentName)
+	if !ok {
+		fmt.Fprintf(stderr, "skillgen: no agent %q\n", agentName)
+		return exitUsage
+	}
+	for _, sk := range s.skills {
+		if sk.name == name {
+			sum := sha256.Sum256([]byte(renderSkill(sk, a).doc))
+			fmt.Fprintln(stdout, hex.EncodeToString(sum[:]))
+			return exitOK
+		}
+	}
+	fmt.Fprintf(stderr, "skillgen: no skill %q under the source\n", name)
+	return exitUsage
+}

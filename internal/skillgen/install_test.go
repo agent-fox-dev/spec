@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -268,5 +270,37 @@ func TestMain_RefusesAnUnknownAgentOrABadProjectWithoutWriting(t *testing.T) {
 				t.Errorf("the directory changed: %v", got)
 			}
 		})
+	}
+}
+
+// --sha256 prints the SHA-256 of a skill's SKILL.md as it is installed for the
+// agent, and writes nothing.
+func TestMain_PrintsTheHashOfASkillAsItIsInstalled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	source := t.TempDir()
+	writeTree(t, source, threeSkills())
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--source", source, "--sha256", "af-impl"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("code %d, stderr %q", code, stderr.String())
+	}
+	if entries, _ := os.ReadDir(home); len(entries) != 0 {
+		t.Errorf("--sha256 wrote %v", entries)
+	}
+	var install bytes.Buffer
+	if code := Main([]string{"--source", source, "--install"}, &install, &stderr); code != exitOK {
+		t.Fatalf("install: code %d, stderr %q", code, stderr.String())
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".claude", "skills", "af-impl", skillDoc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(b)
+	if got, want := strings.TrimSpace(stdout.String()), hex.EncodeToString(sum[:]); got != want {
+		t.Errorf("--sha256 printed %q; the installed file hashes to %q", got, want)
+	}
+	stdout.Reset()
+	if code := Main([]string{"--source", source, "--sha256", "no-such-skill"}, &stdout, &stderr); code != exitUsage {
+		t.Errorf("an unknown skill: code %d", code)
 	}
 }

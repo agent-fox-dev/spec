@@ -20,11 +20,22 @@ LDFLAGS := -ldflags "\
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*##"}; {printf "  %-16s %s\n", $$1, $$2}'
 
+# specrun is built with the SHA-256 of the af-impl SKILL.md as this tree
+# renders it for Claude Code, so that a run can tell the installed skill from
+# another (ADR 23). Recursive, so that only build renders it.
+SKILL_SHA256 = $(shell go run ./internal/skillgen --source skills --sha256 af-impl)
+SPECRUN_LDFLAGS = -ldflags "\
+  -X github.com/agent-fox-dev/spec.Version=$(VERSION) \
+  -X github.com/agent-fox-dev/spec.Commit=$(COMMIT) \
+  -X github.com/agent-fox-dev/spec.BuildTime=$(BUILD_TIME) \
+  -X github.com/agent-fox-dev/spec/internal/specrun.builtSkillSHA256=$(SKILL_SHA256)"
+
 .PHONY: build
-build: ## Install the spec, specr and speca commands
+build: ## Install the spec, specr, speca and specrun commands
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/specr
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/speca
+	CGO_ENABLED=0 go install $(SPECRUN_LDFLAGS) ./cmd/specrun
 
 .PHONY: test
 test: ## Run all Go tests

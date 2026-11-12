@@ -21,6 +21,7 @@ envelope/                   # The commands' JSON output as Go types (stdlib only
 cmd/spec/                   # The spec command: flags, help, the entry point
 cmd/specr/                  # The specr command: a package rendered as Markdown
 cmd/speca/                  # The speca command: a package's state, its verdict, the list, the gate
+cmd/specrun/                # The specrun command: the implementation loop
 specgen/                    # The generation pipeline: phases, prompts, review, split
   templates/                #   The prompts, as Markdown, embedded
 skills/                     # The af-* skills, one source for four agents
@@ -37,6 +38,7 @@ internal/
   repomap/                  #   The token-budgeted repository map
   skillgen/                 #   The skill render behind the make targets
   specpkg/                  #   What the commands share about a package on disk
+  specrun/                  #   The loop: the next package, the session, the landing checks, state, ledger
 examples/                   # Programs using afspec: create, validate, work through tasks
 docs/                       # Repository documentation
 .specs/                     # Spec packages for work on this repository
@@ -399,6 +401,34 @@ that claims a task or records it done, but only for a package that can take it, 
 package whose intent has not drifted, `IntentDrift`). `speca` accepts a write and
 suggests a claim by it, `specr` suggests a call of `speca` by it, and it keeps the answer
 in a field of its result that is never written.
+
+## The specrun command
+
+`specrun` is documented for callers in [specrun.md](specrun.md); the decision is
+[ADR 23](adr/23-drive-the-implementation-loop-with-specrun.md).
+
+```
+cmd/specrun ──> internal/specrun ──> afspec           (the next package, ChooseNext; the task states)
+                                ├──> aflib/envelope   (the one envelope on stdout)
+                                └──> spec             (the build identity)
+claude -p, git                  (processes it starts)
+```
+
+It links nothing of `agentkit-go`: not `internal/cli`, `internal/specpkg` or
+`specgen`. That is why the choice of the next package is in `afspec`
+(`ChooseNext`, with `ListSpecDirs`, `(*Spec).IsLegacy` and
+`(*Spec).OpenTasks`), where `speca --next` calls it too.
+
+`internal/specrun` is one run of the loop. `flags.go` reads the flags and
+their `SPECRUN_` variables; `specrun.go` is `Main`, the dry run and the loop,
+which checks out and pulls the base branch before every step and chooses the
+next package; `session.go` starts `claude -p` in a process group of its own
+(`proc_unix.go`), reads its stream line by line into `<step>.jsonl` and ends it
+when it stalls; `land.go` makes the four landing checks; `ledger.go`,
+`logdir.go`, `state.go` and `versions.go` keep the ledger, the log directory,
+the state file with the resume, and what the run runs. The fake `claude` of the
+tests is `internal/specrun/testdata/fakeclaude`, built once per test run and put
+first on `PATH`.
 
 ## The skill render
 

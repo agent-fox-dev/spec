@@ -117,6 +117,7 @@ speca 16 --task 3 --state in_progress         # claim it; refused if another age
 speca 16 --task 3 --state done                # record it; progress.json is the only file that changes
 speca 16 --validate                           # the format's full verdict, rule by rule
 speca --next                                  # the package to implement next, in dependency order
+specrun                                       # implement every open package, one /af-impl session each
 ```
 
 Every command writes one JSON object to stdout, with a `next` field naming
@@ -132,6 +133,7 @@ loop without parsing prose.
 | [`envelope/`](docs/api.md#envelope) | The commands' JSON output as Go types, for a program that calls them |
 | `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline |
 | `cmd/specr/`, `cmd/speca/` | The `specr` render and the `speca` admin commands |
+| `cmd/specrun/`, `internal/specrun/` | The `specrun` loop: `/af-impl` on every open package, each in a `claude -p` session, checked from the repository |
 | `skills/` | The `af-prd`, `af-spec` and `af-impl` skills, one source rendered for four agents |
 | [`examples/`](examples/README.md) | Programs that create, validate and work through a package with the library |
 | `docs/` | The reference docs, the decisions (ADRs), the errata and this kit's comparison with others |
@@ -140,12 +142,13 @@ loop without parsing prose.
 
 ```bash
 git clone https://github.com/agent-fox-dev/spec && cd spec
-make build              # spec, specr and speca into $GOBIN
+make build              # spec, specr, speca and specrun into $GOBIN
 make install-skills     # the three skills into ~/.claude/skills (AGENT=codex|cursor|copilot for the others)
 ```
 
 `spec` reaches Claude through `ANTHROPIC_API_KEY`, Vertex AI or Amazon
-Bedrock; `specr` and `speca` make no model call at all. Building without a
+Bedrock; `specr` and `speca` make no model call at all, and `specrun` runs
+every session through `claude -p`. Building without a
 checkout, the library, the make targets and the rules a coding session
 follows are in [docs/development.md](docs/development.md).
 
@@ -153,6 +156,7 @@ follows are in [docs/development.md](docs/development.md).
 
 - [The format](specification/spec-format-v3.md) — every field, the EARS patterns, the checks, the validation rules, rendering and the migration from version 3
 - [The `spec` command](docs/cli.md), [the `specr` command](docs/specr.md) and [the `speca` command](docs/speca.md) — input, flags, the output envelope, errors and warnings
+- [The `specrun` command](docs/specrun.md) — the implementation loop: the landing checks, the state and resume, the stall, the logs and the ledger
 - [Architecture](docs/architecture.md), [configuration](docs/configuration.md) and [the public Go API](docs/api.md)
 - [Comparison with other spec kits](docs/spec-kit-comparison.md) — where this kit is stronger, where it is weaker, and what it borrowed
 - [Decisions](docs/adr/) — one ADR per choice, from running the generator on the AgentKit driver to migrating the format to version 3

@@ -38,6 +38,8 @@ type Result struct {
 	DryRun bool `json:"dry_run,omitempty"`
 	// NextStep is the step a dry run would take.
 	NextStep *NextStep `json:"next_step,omitempty"`
+	// Versions is what the run runs.
+	Versions *Versions `json:"versions,omitempty"`
 }
 
 // Waiting is an open package that cannot start, as speca --next words it.
@@ -193,6 +195,9 @@ func (r *run) loop() int {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return r.emit(envelope.ExitFailed, "", failure("preflight", "environment",
 			"claude is not on PATH: every session is a claude -p process"))
+	}
+	if f := r.versions(); f != nil {
+		return r.emit(envelope.ExitFailed, "", f)
 	}
 	if f := r.loadState(); f != nil {
 		return r.emit(envelope.ExitFailed, "", f)

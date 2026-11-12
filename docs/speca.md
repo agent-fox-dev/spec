@@ -360,8 +360,9 @@ A spec root that cannot be read fails the call at stage `load`, as for
 `--list`; an `archive/` that cannot be read raises a `specs_dir_unreadable`
 warning, and a dependency on a package there is then not finished.
 
-`scripts/impl-specs.sh` runs `af-impl` once for each package `--next` names,
-until `all_done`, and stops when no package can start or the call fails.
+`specrun` runs `af-impl` once for each package this choice names, through the
+same library function, `afspec.ChooseNext`, until every package is done, and
+stops when no package can start ([specrun.md](specrun.md)).
 
 ## The task form: `speca <spec> --task T --state S`
 
