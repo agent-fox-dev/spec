@@ -151,7 +151,7 @@ follows are in [docs/development.md](docs/development.md).
 
 ## Read more
 
-- [The format](specification/spec-format-v3.md) — every field, the EARS patterns, the checks, the validation rules, rendering and the migration from version 2
+- [The format](specification/spec-format-v3.md) — every field, the EARS patterns, the checks, the validation rules, rendering and the migration from version 3
 - [The `spec` command](docs/cli.md), [the `specr` command](docs/specr.md) and [the `speca` command](docs/speca.md) — input, flags, the output envelope, errors and warnings
 - [Architecture](docs/architecture.md), [configuration](docs/configuration.md) and [the public Go API](docs/api.md)
 - [Comparison with other spec kits](docs/spec-kit-comparison.md) — where this kit is stronger, where it is weaker, and what it borrowed
