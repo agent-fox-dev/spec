@@ -62,7 +62,7 @@ func TestMain_LandsEveryOpenPackageWithOneCall(t *testing.T) {
 	entries, _ := os.ReadDir(f.logDir())
 	var logs []string
 	for _, e := range entries {
-		if e.Name() != "ledger.jsonl" {
+		if e.Name() != "ledger.jsonl" && (strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".log")) {
 			logs = append(logs, e.Name())
 		}
 	}

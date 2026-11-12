@@ -20,9 +20,9 @@ stream and a ledger of what each step took. The decision is
 
 It runs in the repository it is started in (the git work tree of the working
 directory), with the spec root `afspec` resolves there (`.specs`, or
-`$AF_SPEC_DIR`). It writes one JSON envelope to stdout when it ends, the
-envelope of `aflib/envelope` that `spec`, `specr` and `speca` share, and one
-line per step to stderr as it goes. It calls no model API: every session is a
+`$AF_SPEC_DIR`). It writes one JSON envelope to stdout when it ends, through
+`aflib/envelope`, whose JSON is the envelope `spec`, `specr` and `speca`
+write, and one line per step to stderr as it goes. It calls no model API: every session is a
 `claude -p` process, and the command links nothing of `agentkit-go`.
 
 ```sh
@@ -34,8 +34,8 @@ specrun --ledger                # what every step took
 specrun --reset-state           # forget the step that was running
 ```
 
-`--help` prints the help to stderr and `--version` the build identity to
-stdout; neither writes an envelope.
+`--help` prints the help to stderr, `--version` the build identity and
+`--ledger` the ledger table to stdout; none of the three writes an envelope.
 
 ## The loop
 
@@ -121,7 +121,8 @@ commit `HEAD` was at and the process id of `specrun`:
 ```
 
 A step that stops or stalls stays as `running`, its `pid` 0, so that the next
-run takes it up. Started again, after a stop, a crash, a kill or a reboot,
+run takes it up. From its first step to its end, a loop also records itself as
+`owner`, so that a second `specrun` is refused between steps too. Started again, after a stop, a crash, a kill or a reboot,
 `specrun` reads the file and, once the base branch is up to date, checks the
 running step against the repository before it chooses one:
 
@@ -134,18 +135,29 @@ running step against the repository before it chooses one:
 - a package that no longer exists is dropped, and the next one is chosen.
 
 A state file that cannot be parsed refuses the start at stage `state`, naming
-the file and `--reset-state`; so does one whose running step records a process
-that is still alive, since two loops would switch branches under each other.
-The file is left as it is. `specrun --reset-state` removes it and does nothing
+the file and `--reset-state`; so does one whose running step, or whose
+`owner`, records a process that is alive and is a `specrun` (`ps` names it),
+since two loops would switch branches under each other. A recorded process
+that has ended, or whose id now belongs to another program, as after a reboot,
+refuses nothing. The file is left as it is.
+
+The state file and the default log directory are named after the repository's
+directory, as the spec asks: two clones whose directories have the same name
+share them, and should each be given `--log-dir`, and run one at a time. `specrun --reset-state` removes it and does nothing
 else; with no file it says so.
 
 ## Watching a session
 
 `specrun` reads the session's stdout line by line as it arrives. When no line
 arrives for `--stall` (default 30 minutes), it ends the session's process
-group, records the step as `stalled`, and stops the loop with exit code 1 at
-stage `stall`. The session's exit code decides nothing: the landing checks
-do.
+group, stops reading its output (even when a process that left the group still
+holds it open), records the step as `stalled`, and stops the loop with exit
+code 1 at stage `stall`. An interrupt or a termination of `specrun` (Ctrl-C,
+`SIGTERM`) ends the session's process group the same way, records the step as
+`stopped` with the reason `interrupted`, and stops at stage `interrupt`; the
+step is taken up by the next run. The session's exit code decides nothing: the
+landing checks do. What a session leaves running when it exits is ended with
+its group.
 
 ## Logs and the ledger
 
@@ -160,6 +172,8 @@ run at stage `preflight`.
   where `<step>` is the step's number in the ledger, its kind and its subject
   (`0001-implement-01_cache`). `<step>.log` holds the `result` text of the
   stream's last event of type `result`, and is empty when there is none.
+  `<step>.stderr` holds what the session wrote to stderr: a `claude` that
+  fails at once, for want of a login, says so there.
 - Each step appends one JSON line to `ledger.jsonl`:
 
   ```json
@@ -189,7 +203,7 @@ A run over two packages, the second depending on the first, writes on stderr
 
 ```
 specrun: v1.5.1-57-g25ce0b9 (commit 25ce0b9, built 2026-11-12T18:00:42Z); af-impl ~/.claude/skills/af-impl/SKILL.md sha256 cd159ab9… (built with d41f18c7…); claude 2.1.322 (Claude Code); issue issue 76b8216 (commit 76b8216, built 2026-10-23T09:42:50Z)
-specrun: warning: the af-impl skill at ~/.claude/skills/af-impl/SKILL.md has sha256 cd159ab9…, and specrun was built with d41f18c7…: make install-skills installs this tree's
+specrun: warning: the installed af-impl skill is not the one specrun was built with; make install-skills installs this tree's: ~/.claude/skills/af-impl/SKILL.md has sha256 cd159ab9…, specrun was built with d41f18c7…
 specrun: 0001-implement-01_cache landed in 0.0 min
 specrun: 0002-implement-02_search landed in 0.0 min
 ```
@@ -211,7 +225,7 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--version` | | | print the build identity |
 
 A variable whose value its flag would refuse is a usage error naming the
-variable (`SPECRUN_STALL=soon`). An unknown flag, a positional argument, a
+variable (`SPECRUN_STALL=soon`, a `SPECRUN_LOG_DIR` inside the working tree). An unknown flag, a positional argument, a
 `--max` or `--stall` that is not greater than zero, and two of `--dry-run`,
 `--ledger` and `--reset-state` together are usage errors with exit code 2.
 
@@ -260,7 +274,7 @@ The run above ends with:
   "summary": "specrun: every package is done, landed 2",
   "warnings": [
     { "code": "skill_mismatch", "severity": "high", "stage": "preflight",
-      "message": "the af-impl skill at ~/.claude/skills/af-impl/SKILL.md has sha256 cd159ab9…, and specrun was built with d41f18c7…: make install-skills installs this tree's" }
+      "message": "the installed af-impl skill is not the one specrun was built with; make install-skills installs this tree's: ~/.claude/skills/af-impl/SKILL.md has sha256 cd159ab9…, specrun was built with d41f18c7…" }
   ],
   "result": {
     "landed": ["01_cache", "02_search"],
@@ -287,20 +301,20 @@ tests; the home directory is written `~` and the hashes are cut short.)
 | `landed` | the packages that landed in this run, by directory name, in order |
 | `all_done` | true when no package is open |
 | `waiting` | the open packages that cannot start, each with `spec_dir`, `spec_id`, `waits_on` and `reason` |
-| `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, `stalled`, or `the session could not start`) |
+| `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, `stalled`, `interrupted`, or `the session could not start`) |
 | `dry_run`, `next_step` | under `--dry-run`: `true`, and the step it would take, `kind` and `spec_dir` |
 | `versions` | what the run runs: `specrun`, `skill_path`, `skill_sha256`, `built_skill_sha256`, `claude`, `issue` |
 
 A stopped run's `summary` is `specrun: stopped at <step>: <reason>; landed <n>`,
-and its `error` names the stage: `land` for a landing check, `stall`, or
-`session`.
+and its `error` names the stage: `land` for a landing check, `stall`,
+`interrupt`, or `session`.
 
 ### Exit codes
 
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall` or `session`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes

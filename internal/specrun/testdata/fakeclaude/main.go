@@ -23,12 +23,13 @@ type script struct {
 }
 
 type run struct {
-	Events     int      `json:"events"`       // assistant events to print
-	EventGapMS int      `json:"event_gap_ms"` // the pause before each
-	Actions    []string `json:"actions"`      // what to do to the repository, in order
-	Result     *string  `json:"result"`       // the final message; none when absent
-	Silence    int      `json:"silence_s"`    // then print nothing for this long
-	Child      bool     `json:"child"`        // start a child that sleeps, recording both pids
+	Events     int      `json:"events"`         // assistant events to print
+	EventGapMS int      `json:"event_gap_ms"`   // the pause before each
+	Actions    []string `json:"actions"`        // what to do to the repository, in order
+	Result     *string  `json:"result"`         // the final message; none when absent
+	Silence    int      `json:"silence_s"`      // then print nothing for this long
+	Child      bool     `json:"child"`          // start a child that sleeps, recording both pids
+	Detached   bool     `json:"detached_child"` // the same, the child in a process group of its own
 	Exit       int      `json:"exit"`
 }
 
@@ -64,9 +65,11 @@ func main() {
 	for _, a := range r.Actions {
 		act(a, specDir)
 	}
-	if r.Child || r.Silence > 0 {
-		if r.Child {
+	if r.Child || r.Detached || r.Silence > 0 {
+		if r.Child || r.Detached {
 			child := exec.Command("sleep", "60")
+			child.Stdout = os.Stdout
+			detach(child, r.Detached)
 			if err := child.Start(); err == nil {
 				appendLine(os.Getenv("SPECRUN_FAKE_PIDS"), fmt.Sprintf("%d %d", os.Getpid(), child.Process.Pid))
 			}

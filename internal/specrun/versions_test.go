@@ -115,11 +115,24 @@ func TestVersions_WarnOrRefuseOnASkillThatIsNotTheBuiltOne(t *testing.T) {
 					case embedded == "different":
 						wantCode = "skill_mismatch"
 					}
+					path := filepath.Join(f.home, ".claude", "skills", "af-impl", "SKILL.md")
+					names := func(msg string) bool {
+						installedHash := map[bool]string{true: same, false: "not installed"}[installed]
+						builtHash := map[string]string{"equal": same, "different": strings.Repeat("0", 64), "empty": "unknown"}[embedded]
+						return strings.Contains(msg, path) && strings.Contains(msg, installedHash) && strings.Contains(msg, builtHash)
+					}
 					if strict && !(embedded == "equal" && installed) {
 						if code != 1 || env.Error == nil || env.Error.Stage != "preflight" || len(f.starts(t)) != 0 {
 							t.Errorf("code %d, error %+v, %d sessions; want a refusal at preflight", code, env.Error, len(f.starts(t)))
+						} else if !names(env.Error.Message) {
+							t.Errorf("message %q does not name the path and both hashes", env.Error.Message)
 						}
 						return
+					}
+					for _, w := range env.Warnings {
+						if !names(w.Message) {
+							t.Errorf("warning %q does not name the path and both hashes", w.Message)
+						}
 					}
 					if code != 0 || len(f.starts(t)) != 1 {
 						t.Errorf("code %d, error %+v, %d sessions; want the run to go on", code, env.Error, len(f.starts(t)))

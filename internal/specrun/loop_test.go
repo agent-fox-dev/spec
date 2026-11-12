@@ -279,6 +279,16 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			writeFile(t, filepath.Join(f.root, "README.md"), "ours\n")
 			f.commit(t, "ours")
 		}, "git pull"},
+		"a diverged main, started on another branch": {func(t *testing.T, f *fixture) {
+			other := filepath.Join(f.scratch, "other")
+			git(t, f.scratch, "clone", "-q", f.origin, other)
+			writeFile(t, filepath.Join(other, "README.md"), "theirs\n")
+			git(t, other, "commit", "-q", "-am", "theirs")
+			git(t, other, "push", "-q")
+			writeFile(t, filepath.Join(f.root, "README.md"), "ours\n")
+			f.commit(t, "ours")
+			git(t, f.root, "switch", "-q", "-c", "elsewhere")
+		}, "git pull"},
 		"a dirty tree on another branch": {func(t *testing.T, f *fixture) {
 			git(t, f.root, "switch", "-q", "-c", "other")
 			writeFile(t, filepath.Join(f.root, "README.md"), "other\n")
@@ -297,6 +307,7 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			f.plan(t, land(0))
 			tc.setup(t, f)
 			head, status := git(t, f.root, "rev-parse", "HEAD"), git(t, f.root, "status", "--porcelain")
+			branch := git(t, f.root, "branch", "--show-current")
 			env, code, _ := runMain(t)
 			if code != 1 || env.Error == nil || env.Error.Stage != "preflight" || !strings.Contains(env.Error.Message, tc.says) {
 				t.Fatalf("code %d, error %+v; want stage preflight saying %q", code, env.Error, tc.says)
@@ -304,12 +315,28 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			if len(f.starts(t)) != 0 {
 				t.Error("a session was started")
 			}
-			if git(t, f.root, "rev-parse", "HEAD") != head || git(t, f.root, "status", "--porcelain") != status {
+			if git(t, f.root, "rev-parse", "HEAD") != head || git(t, f.root, "status", "--porcelain") != status ||
+				git(t, f.root, "branch", "--show-current") != branch {
 				t.Error("the repository changed")
 			}
 			if exists(filepath.Join(f.state, "agent-fox", "specrun")) {
 				t.Error("a state file was written")
 			}
 		})
+	}
+}
+
+// Without git on PATH specrun stops before anything, saying so.
+func TestLoop_StopsWithoutGit(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.plan(t, land(0))
+	t.Setenv("PATH", fakeBin(t))
+	env, code, _ := runMain(t)
+	if code != 1 || env.Error == nil || env.Error.Stage != "preflight" || !strings.Contains(env.Error.Message, "git") {
+		t.Errorf("code %d, error %+v; want stage preflight naming git", code, env.Error)
+	}
+	if len(f.starts(t)) != 0 {
+		t.Error("a session was started")
 	}
 }

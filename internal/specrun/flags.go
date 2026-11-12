@@ -19,6 +19,7 @@ type options struct {
 	max          int // 0: no limit
 	stall        time.Duration
 	logDir       string
+	logDirFrom   string // what gave logDir: --log-dir, or its variable
 	strictSkills bool
 	dryRun       bool
 	ledger       bool
@@ -70,6 +71,10 @@ func parseOptions(argv []string, getenv func(string) string) (*options, error) {
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	o.logDirFrom = "--log-dir"
+	if !set["log-dir"] && o.logDir != "" {
+		o.logDirFrom = envName("log-dir")
+	}
 	var errs []error
 	if set["max"] && o.max <= 0 {
 		errs = append(errs, fmt.Errorf("--max %d: the number of packages to land must be greater than zero", o.max))

@@ -36,8 +36,10 @@ func TestLedger_HasOneLinePerStep(t *testing.T) {
 		if err1 != nil || err2 != nil {
 			t.Fatalf("line %d times: %v %v", i+1, err1, err2)
 		}
-		if got, want := l["wall_minutes"].(float64), end.Sub(start).Minutes(); got != want || got <= 0 {
-			t.Errorf("line %d wall_minutes %v; want %v", i+1, got, want)
+		// The clock moves a minute each time it is read, and a step reads it
+		// at its start and at its end.
+		if got := l["wall_minutes"].(float64); got != end.Sub(start).Minutes() || got != 1 {
+			t.Errorf("line %d wall_minutes %v; want the clock's 1 minute", i+1, got)
 		}
 	}
 	if lines[0]["kind"] != "implement" || lines[0]["subject"] != "01_a" || lines[2]["subject"] != "02_b" {

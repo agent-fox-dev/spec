@@ -35,6 +35,7 @@ build: ## Install the spec, specr, speca and specrun commands
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/spec
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/specr
 	CGO_ENABLED=0 go install $(LDFLAGS) ./cmd/speca
+	@test -n "$(SKILL_SHA256)" || { echo "make build: the af-impl render failed; specrun would carry no skill hash" >&2; exit 1; }
 	CGO_ENABLED=0 go install $(SPECRUN_LDFLAGS) ./cmd/specrun
 
 .PHONY: test

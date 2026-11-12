@@ -1,10 +1,14 @@
+//go:build unix
+
 package specrun
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // A session that writes no event for --stall is ended with every process it
@@ -65,5 +69,52 @@ func TestSession_SavesItsStreamAndItsFinalMessage(t *testing.T) {
 	}
 	if got := read("0002-implement-02_b.log"); got != "" {
 		t.Errorf("the second final message is %q; want it empty", got)
+	}
+	if !exists(filepath.Join(f.logDir(), "0001-implement-01_a.stderr")) {
+		t.Error("the session's stderr was not kept")
+	}
+}
+
+// A stalled session is ended even when a process that left its group still
+// holds its output open.
+func TestSession_IsEndedWhenAProcessOutsideItsGroupHoldsItsOutput(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	pids := filepath.Join(f.scratch, "pids")
+	t.Setenv("SPECRUN_FAKE_PIDS", pids)
+	f.plan(t, map[string]any{"events": 1, "detached_child": true, "silence_s": 60})
+	start := time.Now()
+	_, code, _ := runMain(t, "--stall", "300ms")
+	if took := time.Since(start); code != 1 || took > 30*time.Second {
+		t.Errorf("code %d after %v; want a stall within seconds", code, took)
+	}
+	pidsAlive(t, pids) // ends what the session left
+}
+
+// An interrupt ends the session with what it started, records the step as
+// stopped, and leaves it to be taken up again.
+func TestSession_IsEndedWhenSpecrunIsInterrupted(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	pids := filepath.Join(f.scratch, "pids")
+	t.Setenv("SPECRUN_FAKE_PIDS", pids)
+	f.plan(t, map[string]any{"events": 1, "child": true, "silence_s": 60})
+	go func() {
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if exists(pids) {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+				return
+			}
+		}
+	}()
+	env, code, _ := runMain(t)
+	if code != 1 || env.Result == nil || env.Result.Stopped == nil || env.Result.Stopped.Reason != "interrupted" {
+		t.Fatalf("code %d, result %+v, error %+v; want an interrupted stop", code, env.Result, env.Error)
+	}
+	if alive := pidsAlive(t, pids); len(alive) != 0 {
+		t.Errorf("processes %v of the session are alive", alive)
+	}
+	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "stopped" {
+		t.Errorf("ledger %v", got)
 	}
 }

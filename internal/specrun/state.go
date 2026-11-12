@@ -19,6 +19,9 @@ import (
 type state struct {
 	Done    []doneStep   `json:"done"`
 	Running *runningStep `json:"running,omitempty"`
+	// Owner is the process id of the specrun whose loop works on the
+	// repository, from its first step to its end; absent otherwise.
+	Owner int `json:"owner,omitempty"`
 }
 
 // doneStep is a step that landed.
@@ -74,9 +77,12 @@ func (r *run) loadState() *envelope.ErrorInfo {
 	if err := json.Unmarshal(b, &r.state); err != nil {
 		return failure("state", "input", "the state file %s cannot be parsed (%v): specrun --reset-state discards it", path, err)
 	}
-	if run := r.state.Running; run != nil && run.PID > 0 && processAlive(run.PID) {
-		return failure("state", "input", "the state file %s records %s %s as running in process %d, which is alive: "+
+	if run := r.state.Running; run != nil && run.PID > 0 && isSpecrun(run.PID) {
+		return failure("state", "input", "the state file %s records %s %s as running in process %d, a specrun that is alive: "+
 			"another specrun works on this repository", path, run.Kind, run.Subject, run.PID)
+	}
+	if o := r.state.Owner; o > 0 && isSpecrun(o) {
+		return failure("state", "input", "the state file %s records process %d, a specrun that is alive, as working on this repository", path, o)
 	}
 	return nil
 }
@@ -199,6 +205,24 @@ func (r *run) finishStep(kind, subject string) {
 func (r *run) releaseStep() {
 	if r.state.Running != nil {
 		r.state.Running.PID = 0
+		r.saveState()
+	}
+}
+
+// hold records this specrun as the one working on the repository, so that a
+// second one is refused between steps too.
+func (r *run) hold() {
+	if r.statePath != "" && !r.holding {
+		r.state.Owner, r.holding = os.Getpid(), true
+		r.saveState()
+	}
+}
+
+// release gives the repository up when the loop ends, however it ends, if
+// this run held it.
+func (r *run) release() {
+	if r.holding {
+		r.state.Owner, r.holding = 0, false
 		r.saveState()
 	}
 }

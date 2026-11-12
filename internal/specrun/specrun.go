@@ -6,14 +6,17 @@
 package specrun
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -69,6 +72,7 @@ const kindImplement = "implement"
 
 // run is one call of specrun.
 type run struct {
+	ctx      context.Context
 	opts     *options
 	stdout   io.Writer
 	stderr   io.Writer
@@ -80,6 +84,7 @@ type run struct {
 	// statePath is the state file, and state what it holds.
 	statePath string
 	state     state
+	holding   bool // this run holds the repository, as state.Owner says
 	result    *Result
 	warnings  []envelope.Warning
 }
@@ -94,7 +99,11 @@ func failure(stage, category, format string, args ...any) *envelope.ErrorInfo {
 // Main runs specrun with argv and returns its exit code. It writes exactly one
 // envelope to stdout, except for --help and --version, which are for a person.
 func Main(argv []string, stdout, stderr io.Writer) int {
-	r := &run{stdout: stdout, stderr: stderr, started: time.Now()}
+	// An interrupt or a termination ends the session with everything it
+	// started, and the step is left to be taken up again.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	r := &run{ctx: ctx, stdout: stdout, stderr: stderr, started: time.Now()}
 	opts, err := parseOptions(argv, os.Getenv)
 	if errors.Is(err, flag.ErrHelp) {
 		printUsage(stderr)
@@ -121,6 +130,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	if opts.resetState {
 		return r.resetState()
 	}
+	defer r.release()
 	return r.loop()
 }
 
@@ -217,6 +227,7 @@ func (r *run) loop() int {
 		if f != nil {
 			return r.emit(envelope.ExitFailed, "", f)
 		}
+		r.hold()
 		next := r.resume()
 		if next == nil {
 			var f *envelope.ErrorInfo
@@ -242,6 +253,8 @@ func stopStage(reason string) string {
 		return "stall"
 	case reasonNoSession:
 		return "session"
+	case reasonInterrupted:
+		return "interrupt"
 	}
 	return "land"
 }
@@ -274,10 +287,15 @@ func baseBranch(root string) string {
 // returns the commit HEAD is at then. A failure of either is the preflight's,
 // in git's own words.
 func (r *run) syncBase() (string, *envelope.ErrorInfo) {
+	was, _ := gitOutput(r.root, "branch", "--show-current")
 	if _, err := gitOutput(r.root, "switch", "--quiet", r.base); err != nil {
 		return "", failure("preflight", "input", "the base branch %s could not be checked out: %v", r.base, err)
 	}
 	if _, err := gitOutput(r.root, "pull", "--quiet", "--ff-only", "origin", r.base); err != nil {
+		// The repository is left as it was found.
+		if was != "" && was != r.base {
+			_, _ = gitOutput(r.root, "switch", "--quiet", was)
+		}
 		return "", failure("preflight", "input", "the base branch %s could not be brought up to date: %v", r.base, err)
 	}
 	head, err := gitOutput(r.root, "rev-parse", "HEAD")
@@ -298,10 +316,12 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	r.startStep(kindImplement, next, before, started)
 
 	reason := ""
-	o, err := r.session(step).run(next.Dir)
+	o, err := r.session(step).run(r.ctx, next.Dir)
 	switch {
 	case err != nil:
 		reason = reasonNoSession
+	case o.interrupted:
+		reason = reasonInterrupted
 	case o.stalled:
 		reason = reasonStalled
 	default:
@@ -337,25 +357,31 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	return nil
 }
 
-// session is the session of the step, its stream going to <step>.jsonl.
+// session is the session of the step, its stream going to <step>.jsonl and
+// its stderr to <step>.stderr.
 func (r *run) session(step string) *runningSession {
-	return &runningSession{session: session{dir: r.root, stall: r.opts.stall}, path: filepath.Join(r.logDir, step+".jsonl")}
+	return &runningSession{session: session{dir: r.root, stall: r.opts.stall}, base: filepath.Join(r.logDir, step)}
 }
 
-// runningSession is a session whose stream is saved to a file.
+// runningSession is a session whose stream and stderr are saved to files.
 type runningSession struct {
 	session
-	path string
+	base string
 }
 
-func (s *runningSession) run(specDir string) (outcome, error) {
-	f, err := os.Create(s.path)
+func (s *runningSession) run(ctx context.Context, specDir string) (outcome, error) {
+	stream, err := os.Create(s.base + ".jsonl")
 	if err != nil {
 		return outcome{}, err
 	}
-	defer f.Close()
-	s.stream = f
-	return s.session.run(specDir)
+	defer stream.Close()
+	errs, err := os.Create(s.base + ".stderr")
+	if err != nil {
+		return outcome{}, err
+	}
+	defer errs.Close()
+	s.stream, s.errs = stream, errs
+	return s.session.run(ctx, specDir)
 }
 
 // emit writes the one envelope and returns its exit code. An empty summary is

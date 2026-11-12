@@ -124,3 +124,15 @@ func TestMain_RefusesALogDirectoryItCannotUse(t *testing.T) {
 		}
 	})
 }
+
+// A log directory the variable gives is reported by the variable's name.
+func TestMain_NamesTheVariableOfALogDirectoryItRefuses(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.plan(t, land(0))
+	t.Setenv("SPECRUN_LOG_DIR", filepath.Join(f.root, "logs"))
+	env, code, _ := runMain(t)
+	if code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "SPECRUN_LOG_DIR") {
+		t.Errorf("code %d, error %+v; want a usage error naming SPECRUN_LOG_DIR", code, env.Error)
+	}
+}

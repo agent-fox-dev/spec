@@ -77,15 +77,15 @@ func (r *run) versions() *envelope.ErrorInfo {
 	var problem string
 	switch {
 	case builtSkillSHA256 == "":
-		problem = "specrun was built with no af-impl hash (make build embeds one), so the installed skill cannot be checked"
+		problem = "specrun was built with no af-impl hash (make build embeds one), so the skill cannot be checked"
 	case !installed:
-		code, problem = warnSkillNotInstalled, fmt.Sprintf("no af-impl skill is installed at %s (built with %s)", v.SkillPath, builtSkillSHA256)
+		code, problem = warnSkillNotInstalled, "no af-impl skill is installed"
 	case v.SkillSHA256 != builtSkillSHA256:
-		code, problem = warnSkillMismatch, fmt.Sprintf("the af-impl skill at %s has sha256 %s, and specrun was built with %s: "+
-			"make install-skills installs this tree's", v.SkillPath, v.SkillSHA256, builtSkillSHA256)
+		code, problem = warnSkillMismatch, "the installed af-impl skill is not the one specrun was built with; make install-skills installs this tree's"
 	default:
 		return nil
 	}
+	problem = fmt.Sprintf("%s: %s has sha256 %s, specrun was built with %s", problem, v.SkillPath, v.SkillSHA256, v.BuiltSkillSHA256)
 	if r.opts.strictSkills {
 		return failure("preflight", "environment", "--strict-skills: %s", problem)
 	}

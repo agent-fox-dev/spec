@@ -59,7 +59,7 @@ func (r *run) prepareLogDir() (int, *envelope.ErrorInfo) {
 	}
 	if inside(dir, r.root) {
 		return envelope.ExitUsage, failure("usage", envelope.CategoryUsage,
-			"--log-dir %s is inside the repository's working tree, and af-impl refuses a dirty tree: give a directory outside it", dir)
+			"%s %s is inside the repository's working tree, and af-impl refuses a dirty tree: give a directory outside it", r.opts.logDirFrom, dir)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return envelope.ExitFailed, failure("preflight", "environment", "the log directory %s could not be created: %v", dir, err)

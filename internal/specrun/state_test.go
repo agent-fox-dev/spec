@@ -2,7 +2,9 @@ package specrun
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,8 +98,12 @@ func TestState_ResumesTheRunningStepFromTheRepository(t *testing.T) {
 			if got := specDirs(f.starts(t)); len(got) == 0 || got[0] != tc.first {
 				t.Errorf("the first session was for %v; want %s", got, tc.first)
 			}
-			if got := len(f.ledgerLines(t)); got != tc.landed+1 {
-				t.Errorf("%d ledger lines; want %d", got, tc.landed+1)
+			lines := f.ledgerLines(t)
+			if len(lines) != tc.landed+1 {
+				t.Fatalf("%d ledger lines; want %d", len(lines), tc.landed+1)
+			}
+			if tc.landed == 1 && (lines[0]["subject"] != "01_a" || lines[0]["outcome"] != "landed") {
+				t.Errorf("the resumed step's line %v; want 01_a landed", lines[0])
 			}
 		})
 	}
@@ -135,7 +141,10 @@ func TestState_ResetRemovesTheFileAndStartsNothing(t *testing.T) {
 func TestState_RefusesToStartOnAStateItCannotTrust(t *testing.T) {
 	for name, write := range map[string]func(f *fixture){
 		"not json":              func(f *fixture) { writeFile(t, f.statePath(), "not json") },
-		"a live process's step": func(f *fixture) { f.writeState(t, ".specs/01_a", "abc", os.Getpid()) },
+		"a live specrun's step": func(f *fixture) { f.writeState(t, ".specs/01_a", "abc", os.Getpid()) },
+		"a live specrun's loop, between steps": func(f *fixture) {
+			writeFile(t, f.statePath(), fmt.Sprintf(`{"done":[],"owner":%d}`, os.Getpid()))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
@@ -155,5 +164,23 @@ func TestState_RefusesToStartOnAStateItCannotTrust(t *testing.T) {
 				t.Error("the file changed, or a session started")
 			}
 		})
+	}
+}
+
+// A running step whose recorded process is alive but is not specrun, as after
+// a reboot that gave its id to another program, does not refuse the start.
+func TestState_TakesUpAStepWhoseProcessIsAnotherProgram(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.plan(t, land(0))
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	f.writeState(t, ".specs/01_a", "abc", other.Process.Pid)
+	env, code, stderr := runMain(t)
+	if code != 0 || env.Result == nil || len(env.Result.Landed) != 1 {
+		t.Errorf("code %d, error %+v\n%s", code, env.Error, stderr)
 	}
 }

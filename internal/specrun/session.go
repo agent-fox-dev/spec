@@ -25,26 +25,29 @@ type session struct {
 	dir    string        // the repository
 	stall  time.Duration // how long it may write nothing
 	stream io.Writer     // where every line of its stdout goes
+	errs   io.Writer     // where its stderr goes
 }
 
 // outcome is how a session ended.
 type outcome struct {
-	stalled bool
-	final   string // the result text of its last result event
+	stalled     bool
+	interrupted bool
+	final       string // the result text of its last result event
 }
 
 // run starts the session for the package in specDir and waits for it to end.
 // Every line it writes goes to the stream as it arrives; one that writes
 // nothing for the stall time is ended with every process it started. Its exit
 // code decides nothing: the landing checks do.
-func (s *session) run(specDir string) (outcome, error) {
+func (s *session) run(ctx context.Context, specDir string) (outcome, error) {
 	var o outcome
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	cmd := exec.CommandContext(ctx, "claude", sessionArgs(specDir)...)
 	cmd.Dir = s.dir
 	cmd.Env = append(os.Environ(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="+strconv.FormatInt(s.stall.Milliseconds(), 10))
 	cmd.Stderr = io.Discard
+	if s.errs != nil {
+		cmd.Stderr = s.errs
+	}
 	cmd.WaitDelay = 5 * time.Second
 	isolate(cmd)
 	out, err := cmd.StdoutPipe()
@@ -85,13 +88,25 @@ read:
 			}
 		case <-timer.C:
 			o.stalled = true
-			_ = endGroup(cmd)
-			for range lines {
-			}
+			s.end(cmd, out, lines)
+			break read
+		case <-ctx.Done():
+			o.interrupted = true
+			s.end(cmd, out, lines)
 			break read
 		}
 	}
 	_ = cmd.Wait()
 	_ = endGroup(cmd)
 	return o, nil
+}
+
+// end ends the session's process group and stops reading its output: closing
+// the read end lets the reader finish even when a process that left the
+// group still holds the output open.
+func (s *session) end(cmd *exec.Cmd, out io.Closer, lines <-chan string) {
+	_ = endGroup(cmd)
+	_ = out.Close()
+	for range lines {
+	}
 }

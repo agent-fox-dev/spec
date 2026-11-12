@@ -9,12 +9,13 @@ import (
 // The landing checks, in the order they are made, by the words that name a
 // failed one.
 const (
-	reasonNotOnBase = "not on the base branch"
-	reasonDirty     = "working tree not clean"
-	reasonHeadStill = "HEAD did not move"
-	reasonTasksOpen = "tasks still open"
-	reasonStalled   = "stalled"
-	reasonNoSession = "the session could not start"
+	reasonNotOnBase   = "not on the base branch"
+	reasonDirty       = "working tree not clean"
+	reasonHeadStill   = "HEAD did not move"
+	reasonTasksOpen   = "tasks still open"
+	reasonStalled     = "stalled"
+	reasonNoSession   = "the session could not start"
+	reasonInterrupted = "interrupted"
 )
 
 // landed checks from the repository that the package in dir landed: the base

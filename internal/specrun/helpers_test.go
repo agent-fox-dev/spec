@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -376,4 +377,10 @@ func (f *fixture) writeState(t *testing.T, specDir, head string, pid int) {
 		t.Fatal(err)
 	}
 	writeFile(t, f.statePath(), string(b))
+}
+
+// processAlive reports whether a process with the id runs.
+func processAlive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	return err == nil && p.Signal(syscall.Signal(0)) == nil
 }
