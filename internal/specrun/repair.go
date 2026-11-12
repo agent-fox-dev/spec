@@ -173,6 +173,17 @@ func (r *run) drainQueue() *Stopped {
 	for len(r.state.RepairQueue) > 0 {
 		q := r.state.RepairQueue[0]
 		r.state.RepairQueue = r.state.RepairQueue[1:]
+		// The queue may come from an earlier run, under other flags.
+		is, err := r.findIssue(q.Number)
+		if err != nil {
+			r.saveState()
+			return &Stopped{Step: "repair-" + strconv.Itoa(q.Number), Kind: kindRepair, Subject: strconv.Itoa(q.Number), Reason: err.Error()}
+		}
+		if why := r.leftToAPerson(is); why != "" {
+			r.saveState()
+			fmt.Fprintf(r.stderr, "%s: #%d left out of the repairs: %s\n", tool, q.Number, why)
+			continue
+		}
 		if stop := r.repair(q.Number); stop != nil {
 			return stop
 		}
@@ -268,13 +279,7 @@ func (r *run) repairLeft(issue int) (outcome string, failed *StopIssue, reason s
 	case is.State != "open":
 		return r.repairOutcome(issue), nil, ""
 	case slices.Contains(is.Labels, "af:repair-failed"):
-		sev := ""
-		for _, l := range is.Labels {
-			if s, ok := strings.CutPrefix(l, "af:severity-"); ok {
-				sev = s
-			}
-		}
-		if sev != "" && slices.Contains(r.opts.stopOn, sev) {
+		if sev := severityOf(is); sev != "" && slices.Contains(r.opts.stopOn, sev) {
 			return outcomeFailed, &StopIssue{Number: is.Number, URL: is.HTMLURL, Title: is.Title, Severity: sev}, reasonRepairFailed
 		}
 		return outcomeFailed, nil, ""
@@ -284,16 +289,27 @@ func (r *run) repairLeft(issue int) (outcome string, failed *StopIssue, reason s
 
 // findIssue reads one issue, open or closed, from the forge.
 func (r *run) findIssue(n int) (issuex.Issue, error) {
-	l, err := r.forge.ListIssues(r.ctx, r.repo, issuex.IssueFilter{State: "all", Limit: 25600})
+	t, err := r.forge.ReadIssue(r.ctx, issuex.IssueRef{Repo: r.repo, Number: n})
 	if err != nil {
 		return issuex.Issue{}, fmt.Errorf("repair: reading issue #%d: %w", n, err)
 	}
-	for _, is := range l.Issues {
-		if is.Number == n {
-			return is, nil
-		}
+	return t.Issue, nil
+}
+
+// leftToAPerson says why an issue the state queued is not repaired now, as
+// the labels and the flags of this run stand: closed since, its repair
+// failed, or a security defect this run may not repair. Empty when it is
+// repaired.
+func (r *run) leftToAPerson(is issuex.Issue) string {
+	switch {
+	case is.State != "open":
+		return "it is closed"
+	case slices.Contains(is.Labels, "af:repair-failed"):
+		return "its repair failed"
+	case slices.Contains(is.Labels, "af:severity-security") && !r.opts.repairSecurity:
+		return "it is a security defect and --repair-security is not given"
 	}
-	return issuex.Issue{}, fmt.Errorf("repair: issue #%d is not on the forge", n)
+	return ""
 }
 
 // repairOutcome is already_fixed when the AF-Run trailer of the commit at the
@@ -317,19 +333,54 @@ func (r *run) repairOutcome(issue int) string {
 }
 
 // rerunRepair is a repair recorded as running at start: done when its issue
-// is closed, with a ledger line of outcome fixed, and run again otherwise.
+// is closed, with a ledger line of outcome fixed; failed, as a repair that
+// failed, when the session marked it af:repair-failed before it was
+// recorded; dropped when this run may not repair it; and run again
+// otherwise.
 func (r *run) rerunRepair(issue int) *Stopped {
-	if is, err := r.findIssue(issue); err == nil && is.State != "open" {
-		subject := strconv.Itoa(issue)
-		earlier, _ := readLedger(r.logDir)
+	is, err := r.findIssue(issue)
+	if err != nil {
+		return r.repair(issue)
+	}
+	subject := strconv.Itoa(issue)
+	earlier, _ := readLedger(r.logDir)
+	step := stepName(len(earlier)+1, kindRepair, subject)
+	record := func(outcome string) {
 		ended := now().UTC().Truncate(time.Second)
 		if err := appendLedger(r.logDir, ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: r.state.Running.StartedAt,
-			EndedAt: ended.Format(time.RFC3339), Outcome: outcomeFixed}); err != nil {
+			EndedAt: ended.Format(time.RFC3339), Outcome: outcome}); err != nil {
 			fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
 		}
-		fmt.Fprintf(r.stderr, "%s: %s fixed before this run, as the forge shows\n", tool, stepName(len(earlier)+1, kindRepair, subject))
+		fmt.Fprintf(r.stderr, "%s: %s %s before this run, as the forge shows\n", tool, step, outcome)
 		r.finishStep(kindRepair, subject)
+	}
+	switch {
+	case is.State != "open":
+		record(outcomeFixed)
+		return nil
+	case slices.Contains(is.Labels, "af:repair-failed"):
+		record(outcomeFailed)
+		if sev := severityOf(is); sev != "" && slices.Contains(r.opts.stopOn, sev) {
+			return &Stopped{Step: step, Kind: kindRepair, Subject: subject, Reason: reasonRepairFailed,
+				Issues: []StopIssue{{Number: is.Number, URL: is.HTMLURL, Title: is.Title, Severity: sev}}}
+		}
+		return nil
+	case r.leftToAPerson(is) != "":
+		fmt.Fprintf(r.stderr, "%s: #%d left out of the repairs: %s\n", tool, issue, r.leftToAPerson(is))
+		r.state.Running = nil
+		r.saveState()
 		return nil
 	}
 	return r.repair(issue)
+}
+
+// severityOf is the issue's af:severity-* label, without its prefix; empty
+// when it has none.
+func severityOf(is issuex.Issue) string {
+	for _, l := range is.Labels {
+		if s, ok := strings.CutPrefix(l, "af:severity-"); ok {
+			return s
+		}
+	}
+	return ""
 }

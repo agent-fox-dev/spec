@@ -231,6 +231,13 @@ func TestRepair_StopsWhenTheSessionLeftSomethingElse(t *testing.T) {
 			if code != 1 || env.Result.Stopped == nil || env.Result.Stopped.Reason != tc.reason {
 				t.Fatalf("code %d, stopped %+v; want %q", code, env.Result.Stopped, tc.reason)
 			}
+			want := "stopped"
+			if tc.reason == "stalled" {
+				want = "stalled"
+			}
+			if l := repairLines(f, t); len(l) != 1 || l[0]["outcome"] != want {
+				t.Errorf("repair lines %v; want one with outcome %s", l, want)
+			}
 			if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a" {
 				t.Errorf("package sessions %v; want none after the repair", got)
 			}
@@ -394,5 +401,71 @@ func TestRepair_StartsOneSessionForTheIssue(t *testing.T) {
 	}
 	if !exists(fmt.Sprintf("%s/0003-repair-%d.jsonl", f.logDir(), issue)) {
 		t.Errorf("no stream file 0003-repair-%d.jsonl", issue)
+	}
+}
+
+// With --repair, a repair that closes its defect but leaves another serious
+// one of the package open stops the loop on the check made after them.
+func TestRepair_ChecksThePackageAgainAfterItsRepairs(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.forge.add("01_a: data-loss", "open", "af:defect", "af:severity-data-loss", "af:from-01")
+	repairPlan(t, f, map[string]any{"merge": true, "close": true,
+		"opens": [][]string{{"01_a: another data-loss", "af:defect", "af:severity-data-loss", "af:from-01"}}})
+	env, code, _ := runMain(t, "--repair")
+	s := env.Result.Stopped
+	if code != 1 || s == nil || s.Reason != "serious defect" || len(s.Issues) != 1 || s.Issues[0].Title != "01_a: another data-loss" {
+		t.Fatalf("code %d, stopped %+v; want the stop rule's stop naming the new defect", code, s)
+	}
+	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a" {
+		t.Errorf("package sessions %v; want none after 01", got)
+	}
+}
+
+// The queue a run left in the state is checked against the forge and the
+// flags of the next one: an issue closed since, or a security defect this run
+// may not repair, gets no session.
+func TestRepair_ARestartRepairsOnlyWhatItMayStill(t *testing.T) {
+	for name, tc := range map[string]struct {
+		first, second []string
+		labels        []string
+		closeSecond   bool
+	}{
+		"the second issue closed since": {nil, nil, []string{"af:defect", "af:severity-minor"}, true},
+		"a security defect, no longer allowed": {[]string{"--repair-security"}, nil,
+			[]string{"af:defect", "af:severity-security"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "archive/00_zero", "00", "done")
+			f.addPackage(t, "01_a", "01", "pending")
+			first := f.forge.add("00_zero: first", "open", append(slices.Clone(tc.labels), "af:from-00")...)
+			second := f.forge.add("00_zero: second", "open", "af:defect", "af:severity-minor", "af:from-00")
+			repairPlan(t, f, map[string]any{"silence_s": 30}, map[string]any{"close": true})
+			argv := append([]string{"--reconcile-every", "1", "--repair-max", "5", "--stop-on", ""}, tc.first...)
+			if _, code, _ := runMain(t, append(argv, "--stall", "1s")...); code != 1 {
+				t.Fatalf("code %d; want the first repair to stall", code)
+			}
+			want := []string{fmt.Sprint("repair ", first)}
+			if tc.closeSecond {
+				f.forge.issue(second).State = "closed"
+			} else {
+				want = []string{fmt.Sprint("repair ", second)}
+			}
+			before := len(f.starts(t))
+			if _, code, stderr := runMain(t, append([]string{"--reconcile-every", "1", "--repair-max", "5", "--stop-on", ""}, tc.second...)...); code != 0 {
+				t.Fatalf("code %d\n%s", code, stderr)
+			}
+			var got []string
+			for _, p := range prompts(f.starts(t)[before:]) {
+				if strings.HasPrefix(p, "repair ") {
+					got = append(got, p)
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("the restart's repairs %v; want %v", got, want)
+			}
+		})
 	}
 }

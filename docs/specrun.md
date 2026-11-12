@@ -270,7 +270,12 @@ tree not clean`, outcome `stopped`). Then the issue decides:
 The step's ledger line has kind `repair`, the issue number as its subject and
 that outcome. A repair recorded as running at the start of a run is done,
 with a ledger line of outcome `fixed` and no session, when its issue is
-closed by then, and run again otherwise.
+closed by then; `failed`, as above, when it carries `af:repair-failed`;
+dropped, without a ledger line, when it is a security defect this run's
+flags do not allow; and run again otherwise. The rest of a queue left in the state is checked when
+it runs, after the label rules owed and the stop check: an issue closed
+since, marked `af:repair-failed`, or a security defect that this run's
+flags do not allow is left out, without a session.
 
 ## What it runs
 

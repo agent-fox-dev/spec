@@ -456,8 +456,16 @@ func (m *memForge) replay() {
 			Op     string   `json:"op"`
 			Issue  int      `json:"issue"`
 			Labels []string `json:"labels"`
+			Title  string   `json:"title"`
 		}
 		if json.Unmarshal([]byte(lines[m.applied]), &a) != nil {
+			continue
+		}
+		if a.Op == "open" {
+			n := len(m.issues) + 1
+			m.issues = append(m.issues, issuex.Issue{Number: n, Title: a.Title, State: "open", Labels: a.Labels,
+				HTMLURL:   fmt.Sprintf("https://forge.example/acme/widgets/issues/%d", n),
+				CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)})
 			continue
 		}
 		is := m.issue(a.Issue)
@@ -593,13 +601,27 @@ func (m *memForge) add(title, state string, labels ...string) int {
 	return n
 }
 
+func (m *memForge) ReadIssue(_ context.Context, ref issuex.IssueRef) (issuex.IssueThread, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.call("ReadIssue", fmt.Sprint(ref.Number)); err != nil {
+		return issuex.IssueThread{}, err
+	}
+	for _, is := range m.issues {
+		if is.Number == ref.Number {
+			return issuex.IssueThread{Issue: is}, nil
+		}
+	}
+	return issuex.IssueThread{}, fmt.Errorf("issue %d: %w", ref.Number, issuex.ErrNotFound)
+}
+
 // writes lists the calls that change the forge.
 func (m *memForge) writes() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []string
 	for _, c := range m.calls {
-		if !strings.HasPrefix(c, "ListIssues") {
+		if !strings.HasPrefix(c, "ListIssues") && !strings.HasPrefix(c, "ReadIssue") {
 			out = append(out, c)
 		}
 	}

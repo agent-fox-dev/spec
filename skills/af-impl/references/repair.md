@@ -54,8 +54,7 @@ it on the unchanged code.
 ## Landing
 
 1. Pass the full gate for the issue's package, `speca <package> --gate full`,
-   which runs its `test_commands`; when the package has none, run the
-   repository's own most thorough suite. A gate that does not pass is a
+   which runs the package's `test_commands`. A gate that does not pass is a
    failed attempt.
 2. Merge the fix branch into the base branch with `git merge --no-ff`, and
    pass the gate again on the merged tree. The merge commit message ends

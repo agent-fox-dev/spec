@@ -41,6 +41,9 @@ type repair struct {
 	Stay    bool   `json:"stay_on_branch"`
 	Dirty   bool   `json:"dirty"`
 	Silence int    `json:"silence_s"`
+	// Opens are issues the session opens, each its labels; the first is
+	// its title.
+	Opens [][]string `json:"opens"`
 }
 
 // reconcile is the plan of a reconcile session: what it does on the forge,
@@ -312,6 +315,10 @@ func repairSession(prompt string) {
 	}
 	if p.Fail {
 		appendLine(os.Getenv("SPECRUN_FAKE_FORGE"), fmt.Sprintf(`{"op":"add_labels","issue":%d,"labels":["af:repair-failed"]}`, issue))
+	}
+	for _, o := range p.Opens {
+		b, _ := json.Marshal(map[string]any{"op": "open", "title": o[0], "labels": o[1:]})
+		appendLine(os.Getenv("SPECRUN_FAKE_FORGE"), string(b))
 	}
 	if p.Dirty {
 		_ = os.WriteFile("stray.txt", []byte("x"), 0o644)

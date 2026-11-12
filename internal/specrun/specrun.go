@@ -296,14 +296,14 @@ func (r *run) loop() int {
 				return r.stop(stop)
 			}
 		}
-		if stop := r.drainQueue(); stop != nil {
-			return r.stop(stop)
-		}
 		next := r.resume()
 		if stop := r.recheckLabels(); stop != nil {
 			return r.stop(stop)
 		}
 		if stop := r.recheckDefects(); stop != nil {
+			return r.stop(stop)
+		}
+		if stop := r.drainQueue(); stop != nil {
 			return r.stop(stop)
 		}
 		// A reconcile already due, as after a restart, comes before any package.
