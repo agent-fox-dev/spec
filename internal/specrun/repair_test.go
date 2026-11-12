@@ -369,3 +369,30 @@ func TestRepair_TheDryRunShowsTheQueue(t *testing.T) {
 		})
 	}
 }
+
+// A repair step is one session with the prompt the af-impl repair mode takes
+// and the flags of every session, its stream under the step's name.
+func TestRepair_StartsOneSessionForTheIssue(t *testing.T) {
+	f, issue := repairFixture(t, "af:defect", "af:severity-minor")
+	repairPlan(t, f, map[string]any{"merge": true, "outcome": "fixed", "close": true})
+	if _, code, stderr := runMain(t, "--reconcile-every", "1", "--repair-max", "1", "--max", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	var pkg, rep []string
+	for _, s := range f.starts(t) {
+		for i, a := range s.Argv {
+			switch {
+			case a == fmt.Sprintf("/af-impl --repair %d", issue):
+				rep = slices.Delete(slices.Clone(s.Argv), i, i+1)
+			case strings.HasPrefix(a, "/af-impl .specs/"):
+				pkg = slices.Delete(slices.Clone(s.Argv), i, i+1)
+			}
+		}
+	}
+	if rep == nil || pkg == nil || strings.Join(rep, " ") != strings.Join(pkg, " ") {
+		t.Errorf("the repair's flags %v; want a session with the prompt and the package session's flags %v", rep, pkg)
+	}
+	if !exists(fmt.Sprintf("%s/0003-repair-%d.jsonl", f.logDir(), issue)) {
+		t.Errorf("no stream file 0003-repair-%d.jsonl", issue)
+	}
+}
