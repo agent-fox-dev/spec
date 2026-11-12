@@ -473,6 +473,14 @@ func (s *Spec) checkAffectedTestsBase() []ValidationEntry {
 	return nil
 }
 
+// handoffsOf is the package's handoffs, none when it has no requirements.
+func handoffsOf(s *Spec) []Handoff {
+	if s.Requirements == nil {
+		return nil
+	}
+	return s.Requirements.Handoffs
+}
+
 // checkC1: spec_id and spec_name agree across prd.md, the JSON files and the
 // folder name.
 func (s *Spec) checkC1() []ValidationEntry {
@@ -603,6 +611,13 @@ func (s *Spec) checkC2() []ValidationEntry {
 		seenTask[task.Id] = true
 	}
 
+	seenHandoff := map[string]bool{}
+	for _, h := range handoffsOf(s) {
+		if seenHandoff[h.Id] {
+			errors = append(errors, bad(RequirementsFileName, h.Id, fmt.Sprintf("duplicate handoff ID %q", h.Id)))
+		}
+		seenHandoff[h.Id] = true
+	}
 	return errors
 }
 
@@ -646,6 +661,17 @@ func (s *Spec) checkC4C5(idx specIndex) []ValidationEntry {
 
 	ownedCriteria := map[string]bool{}
 	taskIDs := map[int]bool{}
+	for _, h := range handoffsOf(s) {
+		for _, ref := range h.Criteria {
+			if !idx.criterionIDs[ref] {
+				errors = append(errors, ValidationEntry{
+					Category: "integrity", Check: "C4", Artifact: RequirementsFileName, EntityID: h.Id,
+					Message: fmt.Sprintf("handoff %s depends on criterion %q, which is no criterion of this spec", h.Id, ref),
+				})
+			}
+		}
+	}
+
 	for _, task := range tasksOf(s) {
 		taskIDs[task.Id] = true
 	}

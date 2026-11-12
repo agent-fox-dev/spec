@@ -3,11 +3,11 @@
   "spec_id": "26",
   "spec_name": "package_handoffs",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-12T20:50:24Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

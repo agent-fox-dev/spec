@@ -301,6 +301,7 @@ func (t Task) clone() Task {
 	t.Steps = copyStrings(t.Steps)
 	t.Touches = copyStrings(t.Touches)
 	t.DoneWhen = copyStrings(t.DoneWhen)
+	t.TakesHandoffs = copyStrings(t.TakesHandoffs)
 	if t.DependsOn != nil {
 		deps := make([]int, len(t.DependsOn))
 		copy(deps, t.DependsOn)
