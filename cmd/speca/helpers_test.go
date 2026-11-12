@@ -973,6 +973,85 @@ func envelopeSummary(r *Result) string {
 	return cli.NewRun(tool, "v").Envelope(cli.ExitOK, r, nil).Summary
 }
 
+// gateRepo is a repository with one package, 05_gate, whose linter and
+// all_tests commands are shell scripts in a directory outside the repository,
+// and a state directory of its own in $XDG_STATE_HOME.
+type gateRepo struct {
+	root  string // the repository
+	dir   string // the package
+	bin   string // the scripts, outside the repository
+	ran   string // the file each script appends its name to when it runs
+	state string // $XDG_STATE_HOME
+}
+
+func newGateRepo(t *testing.T) *gateRepo {
+	t.Helper()
+	g := &gateRepo{root: t.TempDir(), bin: t.TempDir(), state: t.TempDir()}
+	t.Setenv("XDG_STATE_HOME", g.state)
+	g.ran = filepath.Join(g.bin, "ran")
+	g.dir = addPackage(t, g.root, "05_gate", "05", "gate")
+	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", ""))
+	return g
+}
+
+// script writes an executable script called name to the scripts directory,
+// which appends its name to the run file and then runs body, and returns its
+// path.
+func (g *gateRepo) script(t *testing.T, name, body string) string {
+	t.Helper()
+	path := filepath.Join(g.bin, name)
+	content := "#!/bin/sh\necho " + name + " >> '" + g.ran + "'\n" + body + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// setCommands names the package's linter and all_tests commands.
+func (g *gateRepo) setCommands(t *testing.T, linter, allTests string) {
+	t.Helper()
+	editJSON(t, filepath.Join(g.dir, afspec.TasksFileName), func(m map[string]any) {
+		m["test_commands"] = map[string]any{"linter": linter, "all_tests": allTests}
+	})
+}
+
+// gate runs speca's gate form on the package with the flags after --gate, and
+// returns the envelope and the members of its gate as they were written.
+func (g *gateRepo) gate(t *testing.T, args ...string) (envelope.AdminEnvelope, map[string]json.RawMessage) {
+	t.Helper()
+	env, raw, code, _ := runRaw(t, append([]string{"--dir", g.root, "05", "--gate"}, args...)...)
+	if code != cli.ExitOK || !env.OK || env.Result == nil || env.Result.Gate == nil {
+		t.Fatalf("--gate %v: code %d, error %+v", args, code, env.Error)
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw["gate"], &members); err != nil {
+		t.Fatal(err)
+	}
+	return env, members
+}
+
+// runs lists the scripts that ran, in order, from the run file.
+func (g *gateRepo) runs(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(g.ran)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(b))
+}
+
+// commandNames lists the name of each command of a gate.
+func commandNames(cmds []envelope.GateCommand) []string {
+	var out []string
+	for _, c := range cmds {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if specrBinary.dir != "" {

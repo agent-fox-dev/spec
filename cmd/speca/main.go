@@ -44,6 +44,7 @@ import (
 	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/cli"
+	"github.com/agent-fox-dev/spec/internal/gate"
 )
 
 const tool = "speca"
@@ -266,6 +267,9 @@ type options struct {
 	dryRun   bool
 	render   bool
 	migrate  bool
+	gate     givenFlag
+	cleanEnv bool
+	timeout  givenDuration
 	schema   bool
 	version  bool
 }
@@ -277,6 +281,10 @@ func (o *options) taskForm() bool { return len(o.tasks) > 0 || o.state != "" }
 // package's lifecycle status. --by alone asks for it, so that it is refused
 // where it stands rather than ignored.
 func (o *options) statusForm() bool { return o.status.given || o.by.given }
+
+// gateForm reports whether the call asks for the gate form. An empty --gate
+// asks for it, so that it is refused where it stands.
+func (o *options) gateForm() bool { return o.gate.given }
 
 func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
@@ -291,6 +299,10 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, the status form (--status), the render form (--render) or the migrate form (--migrate), run every check and report what would change, and write nothing")
 	fs.BoolVar(&o.render, "render", false, "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed")
 	fs.BoolVar(&o.migrate, "migrate", false, "the migrate form: convert a version 2 package to version 3 in place, whatever its status, by the rules of format v3 §13; a version 3 package is left alone; each package is reported written, unchanged or failed")
+	fs.Var(&o.gate, "gate", "the gate form: run the package's linter command, then its all_tests command, from its test_commands, in --dir, each started directly with no shell, and answer with one verdict, pass, fail or not_run; task or full, the gate's level, which is part of the answer; whatever the package's status, and writing nothing under --dir")
+	fs.BoolVar(&o.cleanEnv, "clean-env", false, "with --gate, run every command with an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0, every other variable inherited; the directory is removed when the gate ends")
+	o.timeout.value = gate.DefaultTimeout
+	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
 	fs.StringVar(&o.dir, "dir", ".", "the repository the spec root and a relative reference are resolved against")
 	fs.BoolVar(&o.schema, "schema", false, "print the flags, the input and the output's JSON Schema as one JSON object, and exit")
@@ -352,6 +364,25 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			hint = statusHint
 		}
 	}
+	if o.gateForm() {
+		more, gateHint := o.gateErrors(ref)
+		errs = append(errs, more...)
+		if gateHint != nil {
+			hint = gateHint
+		}
+	} else {
+		for _, f := range []struct {
+			name  string
+			given bool
+		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given}} {
+			if f.given {
+				errs = append(errs, fmt.Errorf("%s goes with --gate: it applies to the gate form", f.name))
+			}
+		}
+	}
+	if o.timeout.given && o.timeout.value <= 0 {
+		errs = append(errs, fmt.Errorf("--timeout %s: a command's time limit must be greater than zero", o.timeout.value))
+	}
 	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate {
 		for _, f := range []struct {
 			name  string
@@ -387,6 +418,33 @@ func (o *options) nextErrors(ref string) []error {
 		}
 	}
 	return errs
+}
+
+// gateErrors are the faults of a call that asks for the gate form: it needs a
+// package, is the only operation of the call, and its level is task or full.
+// The hint holds the two levels when it is neither.
+func (o *options) gateErrors(ref string) ([]error, *cli.FixHint) {
+	var errs []error
+	var hint *cli.FixHint
+	if !slices.Contains(gateLevels, o.gate.value) {
+		errs = append(errs, fmt.Errorf("--gate %q is not a gate level: the levels are task and full", o.gate.value))
+		hint = &cli.FixHint{Flag: "--gate", Valid: slices.Clone(gateLevels)}
+	}
+	if ref == "" {
+		errs = append(errs, errors.New("--gate needs a package: name the package whose test_commands to run"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--gate and %s are two operations: give one", f.name))
+		}
+	}
+	return errs, hint
 }
 
 // sweepErrors are the faults of a call that asks for the render form or the
@@ -502,7 +560,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.next && !o.render && !o.migrate {
+	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage

@@ -94,6 +94,7 @@ func TestUsageErrors(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "file")
 	writeFile(t, file, "")
 	statusHint := &cli.FixHint{Flag: "--status", Valid: wantStatusTargets}
+	gateHint := &cli.FixHint{Flag: "--gate", Valid: []string{"task", "full"}}
 	const in = "09_agent_mode"
 
 	for name, tc := range map[string]struct {
@@ -190,6 +191,27 @@ func TestUsageErrors(t *testing.T) {
 		"--migrate --force":          {[]string{in, "--migrate", "--force"}, []string{"--force has no effect with --migrate"}, nil},
 		"--migrate --all, one package": {[]string{in, "--migrate", "--all"},
 			[]string{"--all adds the archive to the sweep", "speca --migrate", "means nothing for one package"}, nil},
+
+		// The gate form. Its level is one of two, case-sensitive.
+		"--gate empty":      {[]string{in, "--gate", ""}, []string{"--gate", "task", "full"}, gateHint},
+		"--gate all":        {[]string{in, "--gate", "all"}, []string{"--gate", `"all"`, "task", "full"}, gateHint},
+		"--gate Full":       {[]string{in, "--gate", "Full"}, []string{"--gate", `"Full"`, "task", "full"}, gateHint},
+		"--gate --validate": {[]string{in, "--gate", "full", "--validate"}, []string{"--gate", "--validate", "two operations"}, nil},
+		"--gate --list":     {[]string{"--gate", "full", "--list"}, []string{"--gate", "--list", "two operations"}, nil},
+		"--gate --next":     {[]string{"--gate", "full", "--next"}, []string{"--gate", "--next", "two operations"}, nil},
+		"--gate, the task form": {[]string{in, "--gate", "full", "--task", "1", "--state", "done"},
+			[]string{"--gate", "--task", "two operations"}, nil},
+		"--gate, the status form":    {[]string{in, "--gate", "full", "--status", "sealed"}, []string{"--gate", "--status", "two operations"}, nil},
+		"--gate --render":            {[]string{in, "--gate", "full", "--render"}, []string{"--gate", "--render", "two operations"}, nil},
+		"--gate --migrate":           {[]string{in, "--gate", "full", "--migrate"}, []string{"--gate", "--migrate", "two operations"}, nil},
+		"--gate --gate-report":       {[]string{in, "--gate", "full", "--gate-report"}, []string{"gate-report"}, nil},
+		"--gate without a package":   {[]string{"--gate", "full"}, []string{"--gate", "package"}, nil},
+		"--clean-env without --gate": {[]string{in, "--clean-env"}, []string{"--clean-env", "--gate"}, nil},
+		"--timeout without --gate":   {[]string{in, "--timeout", "1m"}, []string{"--timeout", "--gate"}, nil},
+		"--timeout 0s":               {[]string{in, "--gate", "full", "--timeout", "0s"}, []string{"--timeout", "greater than zero"}, nil},
+		"--timeout -1m":              {[]string{in, "--gate", "full", "--timeout", "-1m"}, []string{"--timeout", "greater than zero"}, nil},
+		"--timeout soon":             {[]string{in, "--gate", "full", "--timeout", "soon"}, []string{"timeout"}, nil},
+		"--since without the report": {[]string{in, "--since", "HEAD"}, []string{"since"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := refusedAsUsage(t, root, append([]string{"--dir", root}, tc.argv...), tc.want...)
