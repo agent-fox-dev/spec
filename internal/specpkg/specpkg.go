@@ -78,6 +78,4 @@ func TaskInfo(spec *afspec.Spec, t afspec.PlannedTask) envelope.TaskInfo {
 // its progress and little of its plan: a v2 task carries its state and its
 // tests, a v1 plan is task_groups, not tasks. speca <package> --migrate
 // converts a version 2 package.
-func Legacy(spec *afspec.Spec) bool {
-	return spec.SchemaVersion != 0 && spec.SchemaVersion != afspec.SchemaVersion
-}
+func Legacy(spec *afspec.Spec) bool { return spec.IsLegacy() }

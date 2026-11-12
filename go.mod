@@ -3,6 +3,7 @@ module github.com/agent-fox-dev/spec
 go 1.27
 
 require (
+	github.com/agent-fox-dev/aflib v0.0.0-20261111111046-6b70ef77a6ff
 	github.com/agent-fox-dev/agentkit-go v0.9.0
 	github.com/agent-fox-dev/agentkit-go/codesearch v0.9.0
 	github.com/anthropics/anthropic-sdk-go v1.79.1
@@ -61,7 +62,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -117,7 +118,7 @@ require (
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/api v0.217.0 // indirect

@@ -3,11 +3,11 @@
   "spec_id": "20",
   "spec_name": "specrun_driver",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-12T17:46:02Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

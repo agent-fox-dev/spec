@@ -566,3 +566,39 @@ func withRender(t *testing.T, dir string) string {
 func scopedRender(parts map[string]string) string {
 	return parts["prd"] + parts["architecture"] + parts["requirements"] + parts["tasks"]
 }
+
+// ---------------------------------------------------------------------------
+// The next package: packages of a spec root with dependencies and states
+// ---------------------------------------------------------------------------
+
+// pkgAt copies the valid fixture to root/dirName as the package id, depending
+// on deps, with every task of its plan, the integration task included, in
+// state.
+func pkgAt(t *testing.T, root, dirName, id string, state TaskState, deps ...string) string {
+	t.Helper()
+	dir := filepath.Join(root, dirName)
+	copyDir(t, fixtureValidSpec, dir)
+	prd := filepath.Join(dir, "prd.md")
+	b, err := os.ReadFile(prd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prd, []byte(strings.Replace(string(b), `spec_id: "01"`, `spec_id: "`+id+`"`, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	editTasks(t, filepath.Join(dir, TasksFileName), func(tj *TasksV3Json) {
+		tj.SpecId = id
+		tj.Dependencies = nil
+		for _, d := range deps {
+			tj.Dependencies = append(tj.Dependencies, Dependency{Spec: d, Reason: "needs " + d})
+		}
+	})
+	editProgress(t, filepath.Join(dir, ProgressFileName), func(p *ProgressV3Json) {
+		p.SpecId = id
+		p.Tasks = nil
+		for i := 1; i <= 3; i++ {
+			p.Tasks = append(p.Tasks, TaskProgress{Id: i, State: state})
+		}
+	})
+	return dir
+}
