@@ -53,6 +53,9 @@ type Result struct {
 	// WouldAdopt is, under --dry-run, the issues a due reconcile would hand
 	// over for adoption.
 	WouldAdopt []adoptEntry `json:"would_adopt,omitzero"`
+	// RepairQueue is, under --dry-run with a forge, the repair queue the
+	// labels give now, in order and capped by --repair-max.
+	RepairQueue []queued `json:"repair_queue,omitzero"`
 	// OpenDeviations are the open deviations no person has settled, oldest
 	// first, after a reconcile.
 	OpenDeviations []OpenDeviation `json:"open_deviations,omitzero"`
@@ -379,6 +382,9 @@ func (r *run) recheckDefects() *Stopped {
 		s.Reason = err.Error()
 	case len(issues) > 0:
 		s.Reason, s.Issues = reasonSeriousDefect, issues
+		if r.opts.repair {
+			return r.repairSerious(dir, s)
+		}
 	default:
 		return nil
 	}
@@ -525,7 +531,11 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		for _, is := range serious {
 			fmt.Fprintf(r.stderr, "%s: %s left a %s defect open: #%d %s\n", tool, subject, is.Severity, is.Number, is.Title)
 		}
-		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reasonSeriousDefect, Issues: serious}
+		s := &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reasonSeriousDefect, Issues: serious}
+		if r.opts.repair {
+			return r.repairSerious(next.Dir, s)
+		}
+		return s
 	}
 	return nil
 }

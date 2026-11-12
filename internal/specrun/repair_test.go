@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,110 @@ func TestRepair_ARunningRepairIsCheckedAtTheNextStart(t *testing.T) {
 			}
 			if len(got) == 0 || got[0] != fmt.Sprint("repair ", n) {
 				t.Errorf("sessions %v; want the repair run again first", got)
+			}
+		})
+	}
+}
+
+// With --repair a landed package's serious defects are repaired, most severe
+// first then oldest first, with no cap, before the next package; one still
+// open after its repair stops the loop.
+func TestRepair_RepairsASeriousDefectInsteadOfStopping(t *testing.T) {
+	for name, tc := range map[string]struct {
+		severities []string
+		plan       map[string]any
+		code       int
+		want       []string // the sessions, with the defects as their severities
+	}{
+		"data-loss and security, both fixed": {[]string{"data-loss", "security"}, map[string]any{"close": true}, 0,
+			[]string{".specs/01_a", "repair security", "repair data-loss", ".specs/02_b"}},
+		"data-loss, the repair failed": {[]string{"data-loss"}, map[string]any{"fail": true}, 1,
+			[]string{".specs/01_a", "repair data-loss"}},
+		"data-loss, the repair left it open and clean": {[]string{"data-loss"}, map[string]any{"merge": true}, 1,
+			[]string{".specs/01_a", "repair data-loss"}},
+		"a correctness defect alone": {[]string{"correctness"}, map[string]any{"close": true}, 0,
+			[]string{".specs/01_a", ".specs/02_b"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.addPackage(t, "02_b", "02", "pending")
+			names := map[string]string{}
+			for i, sev := range tc.severities {
+				n := f.forge.add(fmt.Sprintf("01_a: %s %d", sev, i), "open", "af:defect", "af:severity-"+sev, "af:from-01")
+				names[fmt.Sprint("repair ", n)] = "repair " + sev
+			}
+			repairPlan(t, f, tc.plan)
+			_, code, stderr := runMain(t, "--repair", "--repair-security")
+			var got []string
+			for _, p := range prompts(f.starts(t)) {
+				if p == "reconcile" {
+					continue
+				}
+				if n, ok := names[p]; ok {
+					p = n
+				}
+				got = append(got, p)
+			}
+			if code != tc.code || strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("code %d, sessions %v; want %d, %v\n%s", code, got, tc.code, tc.want, stderr)
+			}
+		})
+	}
+}
+
+// Without --repair-security a security defect is not repaired: the loop stops
+// as the stop rule does, before any repair.
+func TestRepair_LeavesASecurityDefectToAPerson(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	security := f.forge.add("01_a: security", "open", "af:defect", "af:severity-security", "af:from-01")
+	f.forge.add("01_a: data-loss", "open", "af:defect", "af:severity-data-loss", "af:from-01")
+	repairPlan(t, f, map[string]any{"close": true})
+	env, code, _ := runMain(t, "--repair")
+	s := env.Result.Stopped
+	if code != 1 || s == nil || s.Reason != "serious defect" || !slices.ContainsFunc(s.Issues, func(i StopIssue) bool { return i.Number == security }) {
+		t.Fatalf("code %d, stopped %+v; want the stop rule's stop naming #%d", code, s, security)
+	}
+	if got := prompts(f.starts(t)); strings.Join(got, ",") != ".specs/01_a" {
+		t.Errorf("sessions %v; want none after 01", got)
+	}
+}
+
+// A dry run reports the queue the labels give, capped, and starts and writes
+// nothing.
+func TestRepair_TheDryRunShowsTheQueue(t *testing.T) {
+	for name, tc := range map[string]struct {
+		issues [][]string
+		want   string
+	}{
+		"three, capped at two": {[][]string{{"minor", "af:defect", "af:severity-minor"}, {"correctness", "af:defect", "af:severity-correctness"},
+			{"untested", "af:untested"}}, "correctness:correctness,minor:minor"},
+		"none": {nil, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			for _, is := range tc.issues {
+				f.forge.add(is[0], "open", is[1:]...)
+			}
+			env, code, stderr := runMain(t, "--dry-run", "--repair-max", "2")
+			if code != 0 || env.Result.RepairQueue == nil {
+				t.Fatalf("code %d, repair_queue %v; want 0 and a list\n%s", code, env.Result.RepairQueue, stderr)
+			}
+			var got []string
+			for _, q := range env.Result.RepairQueue {
+				if q.URL == "" || q.Number == 0 {
+					t.Errorf("queued %+v has no number or URL", q)
+				}
+				got = append(got, q.Title+":"+q.Severity)
+			}
+			if strings.Join(got, ",") != tc.want {
+				t.Errorf("repair_queue %v; want %s", got, tc.want)
+			}
+			if len(f.starts(t)) != 0 || len(f.forge.writes()) != 0 {
+				t.Errorf("sessions %v, forge writes %v; want none", f.starts(t), f.forge.writes())
 			}
 		})
 	}

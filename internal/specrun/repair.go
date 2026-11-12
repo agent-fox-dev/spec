@@ -87,7 +87,13 @@ func repairQueue(issues []issuex.Issue, o *options) []queued {
 		}
 		out = append(out, queued{Number: is.Number, Title: is.Title, URL: is.HTMLURL, Severity: kind, Created: is.CreatedAt})
 	}
-	slices.SortStableFunc(out, func(a, b queued) int {
+	sortQueue(out)
+	return out[:min(len(out), o.repairMax)]
+}
+
+// sortQueue orders repairs most severe first, then oldest first.
+func sortQueue(q []queued) {
+	slices.SortStableFunc(q, func(a, b queued) int {
 		if d := slices.Index(repairKinds, a.Severity) - slices.Index(repairKinds, b.Severity); d != 0 {
 			return d
 		}
@@ -96,7 +102,56 @@ func repairQueue(issues []issuex.Issue, o *options) []queued {
 		}
 		return a.Number - b.Number
 	})
-	return out[:min(len(out), o.repairMax)]
+}
+
+// repairSerious is --repair where the stop rule stops: the serious defects
+// stop names, as stop does, are repaired instead, most severe first then
+// oldest first, with no cap, and the check is made again after them. A
+// security defect without --repair-security, or one whose repair already
+// failed, is left to a person: the loop stops as the stop rule does, before
+// any repair. It returns the stop, or nil.
+func (r *run) repairSerious(specDir string, stop *Stopped) *Stopped {
+	spec := r.findPackage(specDir)
+	if spec == nil {
+		return stop
+	}
+	issues, err := r.listOpen([]string{"af:defect", "af:from-" + spec.SpecID})
+	if err != nil {
+		stop.Reason = fmt.Sprintf("serious defects: listing the defects of %s: %v", specDir, err)
+		stop.Issues = nil
+		return stop
+	}
+	var queue []queued
+	for _, is := range issues {
+		i := slices.IndexFunc(stop.Issues, func(s StopIssue) bool { return s.Number == is.Number })
+		if i < 0 {
+			continue
+		}
+		sev := stop.Issues[i].Severity
+		if (sev == "security" && !r.opts.repairSecurity) || slices.Contains(is.Labels, "af:repair-failed") {
+			return stop
+		}
+		queue = append(queue, queued{Number: is.Number, Title: is.Title, URL: is.HTMLURL, Severity: sev, Created: is.CreatedAt})
+	}
+	sortQueue(queue)
+	rest := slices.DeleteFunc(r.state.RepairQueue, func(q queued) bool {
+		return slices.ContainsFunc(queue, func(s queued) bool { return s.Number == q.Number })
+	})
+	r.state.RepairQueue = append(queue, rest...)
+	r.saveState()
+	if s := r.drainQueue(); s != nil {
+		return s
+	}
+	serious, err := r.seriousDefects(specDir)
+	switch {
+	case err != nil:
+		stop.Reason, stop.Issues = err.Error(), nil
+	case len(serious) > 0:
+		stop.Issues = serious
+	default:
+		return nil
+	}
+	return stop
 }
 
 // buildQueue builds the repair queue from the forge's labels as they stand.
