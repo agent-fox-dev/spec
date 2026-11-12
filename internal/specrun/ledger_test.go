@@ -17,7 +17,7 @@ func TestLedger_HasOneLinePerStep(t *testing.T) {
 	f.addPackage(t, "01_a", "01", "pending")
 	f.addPackage(t, "02_b", "02", "pending")
 	f.addPackage(t, "03_c", "03", "pending")
-	stubClock(t, time.Minute)
+	f.stubClock(time.Minute)
 	f.plan(t, land(0), map[string]any{"events": 1}, map[string]any{"events": 1, "silence_s": 30})
 	runMain(t)                     // 01 lands, 02 changes nothing and stops
 	runMain(t, "--stall", "300ms") // 02 again, and it stalls
@@ -88,7 +88,7 @@ func TestLedger_IsPrintedOnStderrWithItsWarning(t *testing.T) {
 	f.addPackage(t, "01_a", "01", "pending")
 	writeFile(t, filepath.Join(f.logDir(), "ledger.jsonl"),
 		`{"kind":"implement","subject":"00_x","started_at":"2026-11-12T08:00:00Z","ended_at":"2026-11-12T08:00:30Z","wall_minutes":0.5,"outcome":"landed"}`+"\n")
-	stubClock(t, 2*time.Minute) // a step of two minutes, four times the median
+	f.stubClock(2 * time.Minute) // a step of two minutes, four times the median
 	f.plan(t, land(0))
 	_, code, stderr := runMain(t)
 	if code != 0 {
@@ -108,7 +108,7 @@ func TestLedger_PrintsTheLedgerAsATable(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	var stdout, stderr bytes.Buffer
-	if code := Main([]string{"--ledger"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "no step is recorded") {
+	if code := runOn(f.host(), []string{"--ledger"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "no step is recorded") {
 		t.Errorf("with no ledger: code %d, stdout %q", code, stdout.String())
 	}
 	line := func(subject, outcome string) string {
@@ -116,7 +116,7 @@ func TestLedger_PrintsTheLedgerAsATable(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(f.logDir(), "ledger.jsonl"), line("01_a", "landed")+"not json\n"+line("02_b", "stopped")+line("02_b", "stalled"))
 	stdout.Reset()
-	if code := Main([]string{"--ledger"}, &stdout, &stderr); code != 0 {
+	if code := runOn(f.host(), []string{"--ledger"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code %d", code)
 	}
 	rows := strings.Split(strings.TrimSpace(stdout.String()), "\n")

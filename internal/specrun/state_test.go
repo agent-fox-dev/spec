@@ -18,7 +18,7 @@ func TestState_RecordsTheRunningStepAndThenTheDoneOne(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	copied := filepath.Join(f.scratch, "state-copy.json")
-	t.Setenv("SPECRUN_FAKE_STATE_COPY", copied)
+	f.setenv("SPECRUN_FAKE_STATE_COPY", copied)
 	f.plan(t, map[string]any{"events": 1, "actions": []string{"copy_state", "land"}})
 	if _, code, stderr := runMain(t); code != 0 {
 		t.Fatalf("code %d\n%s", code, stderr)

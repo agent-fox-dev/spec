@@ -309,7 +309,7 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			writeFile(t, filepath.Join(f.root, "README.md"), "uncommitted\n")
 		}, "git switch"},
 		"no claude on PATH": {func(t *testing.T, f *fixture) {
-			t.Setenv("PATH", strings.Join(slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(d string) bool {
+			f.setenv("PATH", strings.Join(slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(d string) bool {
 				return exists(filepath.Join(d, "claude"))
 			}), string(os.PathListSeparator)))
 		}, "claude"},
@@ -344,7 +344,7 @@ func TestLoop_StopsWithoutGit(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	f.plan(t, land(0))
-	t.Setenv("PATH", fakeBin(t))
+	f.setenv("PATH", fakeBin(t))
 	env, code, _ := runMain(t)
 	if code != 1 || env.Error == nil || env.Error.Stage != "preflight" || !strings.Contains(env.Error.Message, "git") {
 		t.Errorf("code %d, error %+v; want stage preflight naming git", code, env.Error)
@@ -392,7 +392,7 @@ func TestLoop_StrictHandoffsStopBeforeAPackageThatDoesNotTakeOne(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := handoffFixture(t, tc.taken)
 			for k, v := range tc.env {
-				t.Setenv(k, v)
+				f.setenv(k, v)
 			}
 			env, code, _ := runMain(t, append(tc.argv, "--max", "1")...)
 			started := specDirs(f.starts(t))

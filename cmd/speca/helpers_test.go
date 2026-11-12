@@ -1160,7 +1160,15 @@ func commandNames(cmds []envelope.GateCommand) []string {
 	return out
 }
 
+// TestMain turns git's background maintenance and gc off for every git the
+// tests start: one left running from a test's commit writes under .git
+// while a later check of that repository reads it.
 func TestMain(m *testing.M) {
+	for k, v := range map[string]string{"GIT_CONFIG_COUNT": "2",
+		"GIT_CONFIG_KEY_0": "maintenance.auto", "GIT_CONFIG_VALUE_0": "false",
+		"GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0"} {
+		_ = os.Setenv(k, v)
+	}
 	code := m.Run()
 	if specrBinary.dir != "" {
 		_ = os.RemoveAll(specrBinary.dir)

@@ -67,7 +67,7 @@ func TestMain_RefusesACallThatCannotHold(t *testing.T) {
 			f := newFixture(t)
 			f.addPackage(t, "01_a", "01", "pending")
 			for k, v := range tc.env {
-				t.Setenv(k, v)
+				f.setenv(k, v)
 			}
 			env, code, _ := runMain(t, tc.argv...)
 			if code != 2 || env.OK || env.Error == nil || env.Error.Category != "usage" || !strings.Contains(env.Error.Message, tc.says) {
@@ -130,7 +130,7 @@ func TestMain_NamesTheVariableOfALogDirectoryItRefuses(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	f.plan(t, land(0))
-	t.Setenv("SPECRUN_LOG_DIR", filepath.Join(f.root, "logs"))
+	f.setenv("SPECRUN_LOG_DIR", filepath.Join(f.root, "logs"))
 	env, code, _ := runMain(t)
 	if code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "SPECRUN_LOG_DIR") {
 		t.Errorf("code %d, error %+v; want a usage error naming SPECRUN_LOG_DIR", code, env.Error)

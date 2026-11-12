@@ -112,6 +112,7 @@ const kindImplement = "implement"
 
 // run is one call of specrun.
 type run struct {
+	host     host
 	ctx      context.Context
 	opts     *options
 	stdout   io.Writer
@@ -141,12 +142,17 @@ func failure(stage, category, format string, args ...any) *envelope.ErrorInfo {
 // Main runs specrun with argv and returns its exit code. It writes exactly one
 // envelope to stdout, except for --help and --version, which are for a person.
 func Main(argv []string, stdout, stderr io.Writer) int {
+	return runOn(processHost(), argv, stdout, stderr)
+}
+
+// runOn is Main on the host h.
+func runOn(h host, argv []string, stdout, stderr io.Writer) int {
 	// An interrupt or a termination ends the session with everything it
 	// started, and the step is left to be taken up again.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	r := &run{ctx: ctx, stdout: stdout, stderr: stderr, started: time.Now()}
-	opts, err := parseOptions(argv, os.LookupEnv)
+	r := &run{host: h, ctx: ctx, stdout: stdout, stderr: stderr, started: time.Now()}
+	opts, err := parseOptions(argv, h.lookup)
 	if errors.Is(err, flag.ErrHelp) {
 		printUsage(stderr)
 		return envelope.ExitOK
@@ -179,10 +185,10 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 
 // locate finds the repository the working directory is in, and its spec root.
 func (r *run) locate() *envelope.ErrorInfo {
-	if _, err := exec.LookPath("git"); err != nil {
+	if _, err := r.host.lookPath("git"); err != nil {
 		return failure("preflight", "environment", "git is not on PATH: specrun reads and moves the repository through it")
 	}
-	top, err := gitOutput("", "rev-parse", "--show-toplevel")
+	top, err := gitOutput(r.host.dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return failure("preflight", "input", "the working directory is not in a git repository: %v", err)
 	}
@@ -257,7 +263,7 @@ func (r *run) dryRun() int {
 // --max packages have landed. Before every step the base branch is checked
 // out and pulled.
 func (r *run) loop() int {
-	if _, err := exec.LookPath("claude"); err != nil {
+	if _, err := r.host.lookPath("claude"); err != nil {
 		return r.emit(envelope.ExitFailed, "", failure("preflight", "environment",
 			"claude is not on PATH: every session is a claude -p process"))
 	}
@@ -456,7 +462,7 @@ func stopStage(reason string) string {
 // printLedger is --ledger: the ledger as a table on stdout, which is for a
 // person, and nothing started.
 func (r *run) printLedger() int {
-	dir, err := logDirFor(r.opts, r.root)
+	dir, err := r.logDirFor()
 	if err == nil {
 		err = printLedger(r.stdout, dir)
 	}
@@ -510,7 +516,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		fmt.Fprintf(r.stderr, "%s: %s not started: %s\n", tool, subject, why)
 		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: why}
 	}
-	started := now().UTC().Truncate(time.Second)
+	started := r.host.now().UTC().Truncate(time.Second)
 	r.startStep(kindImplement, next, before, started)
 
 	reason := ""
@@ -529,7 +535,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	}
 	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
 
-	ended := now().UTC().Truncate(time.Second)
+	ended := r.host.now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindImplement, Subject: subject, StartedAt: started.Format(time.RFC3339),
 		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded}
 	short := ""
@@ -601,7 +607,7 @@ func (r *run) afterLanding(specDir string) ([]StopIssue, error) {
 // session is the session of the step, its stream going to <step>.jsonl and
 // its stderr to <step>.stderr.
 func (r *run) session(step string) *runningSession {
-	return &runningSession{session: session{dir: r.root, stall: r.opts.stall}, base: filepath.Join(r.logDir, step)}
+	return &runningSession{session: session{dir: r.root, stall: r.opts.stall, host: r.host}, base: filepath.Join(r.logDir, step)}
 }
 
 // runningSession is a session whose stream and stderr are saved to files.

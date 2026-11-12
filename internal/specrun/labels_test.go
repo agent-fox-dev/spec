@@ -60,11 +60,11 @@ func TestLabels_NoForgeRefusesTheStart(t *testing.T) {
 		}, []string{"origin"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(t)
+			f := newSerialFixture(t) // the real forge reads the process's tokens
 			f.addPackage(t, "01_a", "01", "pending")
 			f.plan(t, land(0))
 			tc.setup(f)
-			realForge(t)
+			f.realForge(t)
 			env, code, _ := runMain(t)
 			if code != 1 || env.Error == nil || env.Error.Stage != "preflight" {
 				t.Fatalf("code %d, error %+v; want a refusal at preflight", code, env.Error)
@@ -85,11 +85,11 @@ func TestLabels_NoForgeRefusesTheStart(t *testing.T) {
 // still names the next step.
 func TestLabels_ADryRunWritesNothingToTheForge(t *testing.T) {
 	for _, withForge := range []bool{true, false} {
-		f := newFixture(t)
+		f := newSerialFixture(t) // the real forge reads the process's tokens
 		f.addPackage(t, "01_a", "01", "pending")
 		if !withForge {
 			git(t, f.root, "remote", "remove", "origin")
-			realForge(t)
+			f.realForge(t)
 		}
 		env, code, _ := runMain(t, "--dry-run")
 		if code != 0 || env.Result == nil || env.Result.NextStep == nil {
@@ -162,7 +162,7 @@ func TestLabels_TheRuleChangesNothingTheSecondTime(t *testing.T) {
 	f.forge.add("x", "open", "af:defect", "af:untested", "af:from-01")
 	f.forge.add("y", "open", "af:defect", "af:from-01")
 	f.forge.add("z", "open", "af:awaits", "af:from-01")
-	r := &run{ctx: context.Background(), root: f.root, stderr: io.Discard, forge: f.forge, repo: issuex.Repo{Owner: "acme", Name: "widgets"}}
+	r := &run{host: f.host(), ctx: context.Background(), root: f.root, stderr: io.Discard, forge: f.forge, repo: issuex.Repo{Owner: "acme", Name: "widgets"}}
 	if err := r.checkLabels(".specs/01_a"); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
 func TestLabels_TheAwaitsRuleChangesNothingTheSecondTime(t *testing.T) {
 	f, _ := awaitsFixture(t)
 	done(t, f, "02_b") // landed, so every awaits row toward a finished package is relabelled
-	r := &run{ctx: context.Background(), root: f.root, specsDir: filepath.Join(f.root, ".specs"), stderr: io.Discard,
+	r := &run{host: f.host(), ctx: context.Background(), root: f.root, specsDir: filepath.Join(f.root, ".specs"), stderr: io.Discard,
 		forge: f.forge, repo: issuex.Repo{Owner: "acme", Name: "widgets"}}
 	if err := r.checkLabels(".specs/02_b"); err != nil {
 		t.Fatal(err)

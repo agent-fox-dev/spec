@@ -21,7 +21,7 @@ import (
 )
 
 // example is the worked example of format v3 the fixture's packages copy, by
-// an absolute path, since a fixture changes the working directory.
+// an absolute path.
 var example, _ = filepath.Abs(filepath.Join("..", "..", "afspec", "testdata", "v3_example"))
 
 // fakeClaude is the fake claude, built once per run of the package's tests.
@@ -31,29 +31,68 @@ var fakeClaude struct {
 	err  error
 }
 
-// fakeBin builds the fake claude into a directory of its own and returns it.
+// buildFakeClaude builds the fake claude into a directory of its own.
+func buildFakeClaude() {
+	if fakeClaude.dir, fakeClaude.err = os.MkdirTemp("", "specrun-fake-claude"); fakeClaude.err != nil {
+		return
+	}
+	out, err := exec.Command("go", "build", "-o", filepath.Join(fakeClaude.dir, "claude"),
+		"github.com/agent-fox-dev/spec/internal/specrun/testdata/fakeclaude").CombinedOutput()
+	if err != nil {
+		fakeClaude.err = fmt.Errorf("building the fake claude: %v\n%s", err, out)
+	}
+}
+
+// fakeBin is the directory of the fake claude, which TestMain built.
 func fakeBin(t *testing.T) string {
 	t.Helper()
-	fakeClaude.once.Do(func() {
-		if fakeClaude.dir, fakeClaude.err = os.MkdirTemp("", "specrun-fake-claude"); fakeClaude.err != nil {
-			return
-		}
-		out, err := exec.Command("go", "build", "-o", filepath.Join(fakeClaude.dir, "claude"),
-			"github.com/agent-fox-dev/spec/internal/specrun/testdata/fakeclaude").CombinedOutput()
-		if err != nil {
-			fakeClaude.err = fmt.Errorf("building the fake claude: %v\n%s", err, out)
-		}
-	})
-	if fakeClaude.err != nil {
-		t.Fatal(fakeClaude.err)
+	if fakeClaude.err != nil || fakeClaude.dir == "" {
+		t.Fatalf("the fake claude was not built: %v", fakeClaude.err)
 	}
 	return fakeClaude.dir
 }
 
+// TestMain builds the fake claude, puts it first on PATH and gives the test
+// process an empty HOME, as its working directory too, so that no git a test
+// starts reads the user's configuration and nothing runs in this repository. Every fixture's specrun runs on a host of its own (see
+// fixture.host), so the fixture tests run side by side.
 func TestMain(m *testing.M) {
-	code := m.Run()
-	if fakeClaude.dir != "" {
-		_ = os.RemoveAll(fakeClaude.dir)
+	code := func() int {
+		home, err := os.MkdirTemp("", "specrun-test-home")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer os.RemoveAll(home)
+		fakeClaude.once.Do(buildFakeClaude)
+		if fakeClaude.err != nil {
+			fmt.Fprintln(os.Stderr, fakeClaude.err)
+			return 1
+		}
+		_ = os.Setenv("PATH", fakeClaude.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		_ = os.Setenv("HOME", home)
+		// No git a test starts runs maintenance or gc in the background:
+		// they cost processes and repositories this small never need them.
+		for k, v := range map[string]string{"GIT_CONFIG_COUNT": "2",
+			"GIT_CONFIG_KEY_0": "maintenance.auto", "GIT_CONFIG_VALUE_0": "false",
+			"GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0"} {
+			_ = os.Setenv(k, v)
+		}
+		// A run that is given the process's own host by mistake finds no
+		// repository and no token, instead of the developer's.
+		for _, v := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN"} {
+			_ = os.Unsetenv(v)
+		}
+		if err := os.Chdir(home); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return m.Run()
+	}()
+	for _, dir := range []string{fakeClaude.dir, template.dir} {
+		if dir != "" {
+			_ = os.RemoveAll(dir)
+		}
 	}
 	os.Exit(code)
 }
@@ -68,11 +107,105 @@ type fixture struct {
 	script                           string // the fake claude's plan
 	scratch                          string // a directory for the test's own files
 	forge                            *memForge
+	// env is the variables the fixture's specrun and its sessions see over
+	// the test process's own, and newForge how its specrun makes its forge.
+	env      map[string]string
+	newForge func(root string) (issuex.Client, issuex.Repo, error)
+	// now is the clock of the fixture's specrun, and builtSkill the skill
+	// hash it was built with.
+	now        func() time.Time
+	builtSkill string
 }
 
+// template is a bare origin and its clone on a branch main with one commit
+// pushed, origin/HEAD set, made once for every fixture to copy.
+var template struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+// fixtureTemplate makes the template the first time it is asked for, and
+// returns its directory.
+func fixtureTemplate(t *testing.T) string {
+	t.Helper()
+	template.once.Do(func() {
+		if template.dir, template.err = os.MkdirTemp("", "specrun-fixture"); template.err != nil {
+			return
+		}
+		origin, repo := filepath.Join(template.dir, "origin.git"), filepath.Join(template.dir, "repo")
+		steps := [][]string{{"init", "-q", "--bare", "-b", "main", origin}, {"clone", "-q", origin, repo}}
+		for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "base"}, {"push", "-q", "-u", "origin", "main"},
+			{"remote", "set-head", "origin", "main"}} {
+			steps = append(steps, append([]string{"-C", repo}, args...))
+		}
+		for i, args := range steps {
+			if i == 2 {
+				if template.err = os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o644); template.err != nil {
+					return
+				}
+			}
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				template.err = fmt.Errorf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+				return
+			}
+		}
+	})
+	if template.err != nil {
+		t.Fatal(template.err)
+	}
+	return template.dir
+}
+
+// fixtures maps a test to its fixture, so that runMain finds the host of the
+// test's run.
+var fixtures sync.Map
+
+// specrunVars are the variables of the test process that no fixture's
+// specrun sees: its settings, and the tokens of the real forge.
+var specrunVars = []string{"SPECRUN_", "AF_SPEC_DIR=", "GITHUB_TOKEN=", "GH_TOKEN=", "GITLAB_TOKEN=", "GITHUB_API_URL=", "GITLAB_API_URL="}
+
+// setenv sets a variable the fixture's specrun and its sessions see.
+func (f *fixture) setenv(name, value string) { f.env[name] = value }
+
+// host is the host the fixture's specrun runs on: the repository as its
+// working directory, the test process's environment without specrun's own
+// settings, with the fixture's variables over it, and the fixture's forge.
+func (f *fixture) host() host {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !slices.ContainsFunc(specrunVars, func(p string) bool { return strings.HasPrefix(kv, p) }) {
+			env = append(env, kv)
+		}
+	}
+	for k, v := range f.env {
+		env = append(env, k+"="+v)
+	}
+	return host{dir: f.root, env: env, newForge: f.newForge, now: f.now, builtSkill: f.builtSkill}
+}
+
+// newFixture is the fixture of a test that runs side by side with the
+// others: it calls t.Parallel.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	bin := fakeBin(t) // before HOME moves: the build reads the user's module cache
+	if _, again := parallel.LoadOrStore(t, true); !again {
+		t.Parallel()
+	}
+	return setUpFixture(t)
+}
+
+// parallel holds the tests that called t.Parallel, which a test may call once.
+var parallel sync.Map
+
+// newSerialFixture is the fixture of a test that changes something every run
+// reads, the process's variables or its signals, and so runs alone.
+func newSerialFixture(t *testing.T) *fixture {
+	t.Helper()
+	return setUpFixture(t)
+}
+
+func setUpFixture(t *testing.T) *fixture {
+	t.Helper()
 	base := t.TempDir()
 	f := &fixture{root: filepath.Join(base, "repo"), origin: filepath.Join(base, "origin.git"),
 		home: filepath.Join(base, "home"), state: filepath.Join(base, "state"), cache: filepath.Join(base, "cache"),
@@ -81,36 +214,32 @@ func newFixture(t *testing.T) *fixture {
 		mustMkdir(t, d)
 	}
 	f.record, f.script = filepath.Join(f.scratch, "record.jsonl"), filepath.Join(f.scratch, "script.json")
-	t.Setenv("HOME", f.home)
-	t.Setenv("XDG_STATE_HOME", f.state)
-	t.Setenv("XDG_CACHE_HOME", f.cache)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SPECRUN_FAKE_RECORD", f.record)
-	t.Setenv("SPECRUN_FAKE_SCRIPT", f.script)
-	for _, v := range []string{"SPECRUN_MAX", "SPECRUN_STALL", "SPECRUN_LOG_DIR", "SPECRUN_STRICT_SKILLS", "AF_SPEC_DIR",
-		"SPECRUN_STOP_ON", "SPECRUN_RECONCILE_EVERY", "SPECRUN_REPAIR", "SPECRUN_REPAIR_ON", "SPECRUN_REPAIR_SECURITY"} {
-		t.Setenv(v, "")
-		_ = os.Unsetenv(v)
-	}
-	// A reconcile repairs nothing unless a test asks it to, with --repair-max:
-	// the defects and untested items the other tests leave are theirs.
-	t.Setenv("SPECRUN_REPAIR_MAX", "0")
-	git(t, base, "init", "-q", "--bare", "-b", "main", f.origin)
-	git(t, base, "clone", "-q", f.origin, f.root)
-	writeFile(t, filepath.Join(f.root, "README.md"), "fixture\n")
-	f.commit(t, "base")
-	git(t, f.root, "push", "-q", "-u", "origin", "main")
-	git(t, f.root, "remote", "set-head", "origin", "main")
+	f.now = time.Now
 	f.forge = newMemForge()
 	f.forge.starts = func() int { return len(f.starts(t)) }
 	f.forge.actions = filepath.Join(f.scratch, "forge-actions.jsonl")
-	t.Setenv("SPECRUN_FAKE_FORGE", f.forge.actions)
-	was := newForge
-	newForge = func(string) (issuex.Client, issuex.Repo, error) {
+	f.newForge = func(string) (issuex.Client, issuex.Repo, error) {
 		return f.forge, issuex.Repo{Owner: "acme", Name: "widgets"}, nil
 	}
-	t.Cleanup(func() { newForge = was })
-	t.Chdir(f.root)
+	f.env = map[string]string{
+		"HOME": f.home, "XDG_STATE_HOME": f.state, "XDG_CACHE_HOME": f.cache,
+		"SPECRUN_FAKE_RECORD": f.record, "SPECRUN_FAKE_SCRIPT": f.script, "SPECRUN_FAKE_FORGE": f.forge.actions,
+		// A reconcile repairs nothing unless a test asks it to, with
+		// --repair-max: the defects and untested items the other tests
+		// leave are theirs.
+		"SPECRUN_REPAIR_MAX": "0",
+	}
+	// A copy of the template, its clone pointed at its own origin, costs one
+	// git process where making it costs seven.
+	tmpl := fixtureTemplate(t)
+	for _, d := range []string{"origin.git", "repo"} {
+		if err := os.CopyFS(filepath.Join(base, d), os.DirFS(filepath.Join(tmpl, d))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, f.root, "remote", "set-url", "origin", f.origin)
+	fixtures.Store(t, f)
+	t.Cleanup(func() { fixtures.Delete(t) })
 	return f
 }
 
@@ -203,11 +332,16 @@ func specDirs(starts []fakeStart) []string {
 	return out
 }
 
-// runMain runs specrun in the working directory and decodes its envelope.
+// runMain runs specrun on the test's fixture, in its repository, and decodes
+// its envelope.
 func runMain(t *testing.T, argv ...string) (envelope.Envelope[*Result], int, string) {
 	t.Helper()
+	f, ok := fixtures.Load(t)
+	if !ok {
+		t.Fatal("runMain needs the test's fixture: call newFixture with this t first")
+	}
 	var stdout, stderr bytes.Buffer
-	code := Main(argv, &stdout, &stderr)
+	code := runOn(f.(*fixture).host(), argv, &stdout, &stderr)
 	env, err := envelope.Decode[*Result](stdout.Bytes())
 	if err != nil {
 		t.Fatalf("stdout is not one envelope (%v):\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
@@ -368,14 +502,11 @@ func pidsAlive(t *testing.T, path string) []int {
 	return alive
 }
 
-// stubClock replaces specrun's clock for the rest of the test with one that
-// advances by step every time it is read.
-func stubClock(t *testing.T, step time.Duration) {
-	t.Helper()
-	was := now
+// stubClock gives the fixture's specrun a clock that advances by step every
+// time it is read.
+func (f *fixture) stubClock(step time.Duration) {
 	at := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
-	now = func() time.Time { at = at.Add(step); return at }
-	t.Cleanup(func() { now = was })
+	f.now = func() time.Time { at = at.Add(step); return at }
 }
 
 // statePath is the fixture repository's state file.
@@ -649,11 +780,12 @@ func hasAll(have, want []string) bool {
 
 // realForge makes specrun build its forge client as it does outside the
 // tests, from the origin remote and the token variables, none of them set.
-func realForge(t *testing.T) {
+//
+// The client reads its token from the test process's variables, so a test
+// that calls it uses newSerialFixture.
+func (f *fixture) realForge(t *testing.T) {
 	t.Helper()
-	was := newForge
-	newForge = defaultForge
-	t.Cleanup(func() { newForge = was })
+	f.newForge = defaultForge
 	for _, v := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GITHUB_API_URL", "GITLAB_API_URL"} {
 		t.Setenv(v, "")
 		_ = os.Unsetenv(v)

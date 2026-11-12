@@ -20,14 +20,6 @@ func installSkill(t *testing.T, dir, content string) (string, string) {
 	return path, hex.EncodeToString(sum[:])
 }
 
-// builtWith makes specrun's embedded skill hash h for the rest of the test.
-func builtWith(t *testing.T, h string) {
-	t.Helper()
-	was := builtSkillSHA256
-	builtSkillSHA256 = h
-	t.Cleanup(func() { builtSkillSHA256 = was })
-}
-
 // A run says what it runs: specrun's version, the skill a session here loads
 // with its hash, and the versions of claude and issue.
 func TestVersions_SayWhatARunRuns(t *testing.T) {
@@ -46,7 +38,7 @@ func TestVersions_SayWhatARunRuns(t *testing.T) {
 			return path, sum
 		}, true},
 		"no issue on PATH": {func(t *testing.T, f *fixture) (string, string) {
-			t.Setenv("PATH", strings.Join(slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(d string) bool {
+			f.setenv("PATH", strings.Join(slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(d string) bool {
 				return exists(filepath.Join(d, "issue"))
 			}), string(os.PathListSeparator)))
 			return installSkill(t, f.home, "the user's af-impl\n")
@@ -97,7 +89,7 @@ func TestVersions_WarnOrRefuseOnASkillThatIsNotTheBuiltOne(t *testing.T) {
 					if installed {
 						installSkill(t, f.home, content)
 					}
-					builtWith(t, map[string]string{"equal": same, "different": strings.Repeat("0", 64), "empty": ""}[embedded])
+					f.builtSkill = map[string]string{"equal": same, "different": strings.Repeat("0", 64), "empty": ""}[embedded]
 					args := []string{}
 					if strict {
 						args = append(args, "--strict-skills")

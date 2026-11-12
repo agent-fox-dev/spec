@@ -11,11 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"text/tabwriter"
-	"time"
 )
-
-// now is specrun's clock; a test replaces it.
-var now = time.Now
 
 // The outcomes of a step.
 const (
