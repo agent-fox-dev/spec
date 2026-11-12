@@ -152,3 +152,36 @@ func TestMain_FilesTheIssuesAndTheTrailerOfALandedPackage(t *testing.T) {
 		t.Errorf("ledger line %v", l)
 	}
 }
+
+// A package lands with a data-loss defect and an item awaiting a package
+// that landed long ago: specrun relabels the item, stops without starting the
+// next package, and starts it once the person closed the defect.
+func TestMain_StopsOnADataLossDefectUntilItIsClosed(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "archive/00_old", "00", "done")
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	defect := f.forge.add("01_a: lost write", "open", "af:defect", "af:severity-data-loss", "af:from-01")
+	awaiting := f.forge.add("01_a: wire it in 00", "open", "af:awaits", "af:awaits-00", "af:from-01")
+	f.plan(t, land(0))
+
+	env, code, _ := runMain(t)
+	s := env.Result.Stopped
+	if code != 1 || s == nil || s.Reason != "serious defect" || len(s.Issues) != 1 || s.Issues[0].Number != defect {
+		t.Fatalf("the first call: code %d, stopped %+v; want a stop naming #%d", code, s, defect)
+	}
+	if got := strings.Join(f.forge.labelsOf(awaiting), ","); got != "af:defect,af:from-01,af:severity-correctness" || len(f.forge.comments[awaiting]) != 1 {
+		t.Errorf("the awaiting issue: %s, comments %q", got, f.forge.comments[awaiting])
+	}
+	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a" {
+		t.Errorf("sessions %v; want 01 alone", got)
+	}
+
+	f.forge.issue(defect).State = "closed"
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Fatalf("the second call: code %d\n%s", code, stderr)
+	}
+	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,.specs/02_b" {
+		t.Errorf("sessions %v; want 02 next", got)
+	}
+}
