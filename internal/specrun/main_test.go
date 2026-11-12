@@ -241,3 +241,46 @@ func TestMain_ReconcilesAfterAPackage(t *testing.T) {
 		t.Errorf("open deviations %+v; want one", env.Result.OpenDeviations)
 	}
 }
+
+// After a reconcile a defect and an untested item are repaired, each on a
+// merge of its own, before the next package.
+func TestMain_RepairsADefectAndAnUntestedItemAfterAReconcile(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "archive/00_zero", "00", "done")
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	item := f.forge.add("00_zero: the order is not tested", "open", "af:untested", "af:from-00")
+	defect := f.forge.add("00_zero: the order is wrong", "open", "af:defect", "af:severity-correctness", "af:from-00")
+	repairPlan(t, f, map[string]any{"merge": true, "outcome": "fixed", "close": true},
+		map[string]any{"merge": true, "outcome": "already_fixed", "close": true})
+
+	_, code, stderr := runMain(t, "--reconcile-every", "1", "--max", "2", "--repair-max", "5")
+	if code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	want := []string{".specs/01_a", "reconcile", fmt.Sprint("repair ", defect), fmt.Sprint("repair ", item), ".specs/02_b"}
+	if got := prompts(f.starts(t)); len(got) < 5 || strings.Join(got[:5], ",") != strings.Join(want, ",") {
+		t.Errorf("sessions %v; want %v first", got, want)
+	}
+	for _, n := range []int{defect, item} {
+		if f.forge.issue(n).State != "closed" {
+			t.Errorf("issue #%d is %s; want closed", n, f.forge.issue(n).State)
+		}
+	}
+	var got []string
+	for _, l := range repairLines(f, t) {
+		got = append(got, fmt.Sprint(l["subject"], ":", l["outcome"]))
+	}
+	if w := fmt.Sprintf("%d:fixed,%d:already_fixed", defect, item); strings.Join(got, ",") != w {
+		t.Errorf("repair lines %v; want %s", got, w)
+	}
+	merges := git(t, f.root, "log", "--merges", "--format=%(trailers:key=AF-Run,valueonly)", "main")
+	for _, n := range []int{defect, item} {
+		if !strings.Contains(merges, fmt.Sprintf(`"issue":%d`, n)) {
+			t.Errorf("no merge commit on main names repair #%d:\n%s", n, merges)
+		}
+	}
+	if s := git(t, f.root, "status", "--porcelain"); s != "" || git(t, f.root, "branch", "--show-current") != "main" {
+		t.Errorf("main is not checked out clean: %q", s)
+	}
+}
