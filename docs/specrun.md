@@ -77,6 +77,10 @@ Each step is **implement the next package**:
      --permission-mode bypassPermissions --disallowedTools ScheduleWakeup,CronCreate
    ```
 
+   `--unattended` asks af-impl to run each implement task in a subagent with
+   a fresh context, since nobody watches the session; the reconcile and
+   repair sessions are started without it.
+
    in a process group of its own, with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`
    set to the stall time in milliseconds, so that a session never waits on its
    subagents longer than `specrun` waits on the session. Timers are disallowed:
