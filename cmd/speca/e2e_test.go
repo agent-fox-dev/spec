@@ -385,3 +385,41 @@ func TestAnImplementerGatesATaskOnItsAffectedTestsAndFindsTheSuiteOverBudget(t *
 		t.Errorf("the gates wrote into the repository: %q", status)
 	}
 }
+
+// A spec author writes a handoff the wrong way, is told so, moves it to the
+// package that offers the hook, makes the receiver take it, and the
+// receiver's coder sees with the built specr what to wire.
+func TestASpecAuthorDeclaresAHandoffAndTheReceiversCoderSeesWhatToWire(t *testing.T) {
+	bin := specr(t)
+	root, dirs := handoffRoot(t)
+	setHandoffs(t, dirs["02"], [4]string{"H-1", "the after-landing hooks", "01", "REQ-1.1"})
+	if v := validation(t, root, dirs["02"]); v.Valid || !slices.Equal(checks(v.Errors), []string{"cross_spec_handoff_direction"}) {
+		t.Fatalf("02 with a handoff to 01: valid %v, errors %+v; want one cross_spec_handoff_direction", v.Valid, v.Errors)
+	}
+
+	setHandoffs(t, dirs["02"])
+	setHandoffs(t, dirs["01"], [4]string{"H-1", "the after-landing hooks", "02", "REQ-1.1"})
+	if v := validation(t, root, dirs["01"]); !v.Valid {
+		t.Fatalf("01 after the move: %+v", v.Errors)
+	}
+	v := validation(t, root, dirs["02"])
+	if !v.Valid || len(itemsOf(v.Warnings, "handoff_not_taken")) != 1 {
+		t.Fatalf("02 after the move: valid %v, warnings %+v; want valid with one handoff_not_taken", v.Valid, v.Warnings)
+	}
+
+	setTakes(t, dirs["02"], "01:H-1")
+	if v := validation(t, root, dirs["02"], "--strict-handoffs"); !v.Valid {
+		t.Fatalf("02 taking the handoff, strict: %+v", v.Errors)
+	}
+	md := runSpecr(t, bin, root, envelope.Next{Tool: "specr", Input: dirs["02"], Flags: []string{"--task", "1"}}).Result.Markdown
+	sender, err := afspec.LoadSpec(dirs["01"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentence := sender.Requirements.Requirements[0].Resolve(sender.Requirements.Requirements[0].Criteria[0]).RenderEARSSentence()
+	for _, want := range []string{"the after-landing hooks", sentence} {
+		if !strings.Contains(md, want) {
+			t.Errorf("the render of 02's task 1 lacks %q", want)
+		}
+	}
+}
