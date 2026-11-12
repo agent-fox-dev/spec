@@ -102,6 +102,8 @@ func act(action, specDir string) {
 	switch action {
 	case "branch":
 		git("switch", "-q", "-c", branch)
+	case "checkout":
+		git("switch", "-q", branch)
 	case "done", "done_one", "leave_pending":
 		var ids []int
 		for i, t := range spec.Plan() {
