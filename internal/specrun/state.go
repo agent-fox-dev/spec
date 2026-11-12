@@ -29,6 +29,10 @@ type state struct {
 	// posted: the next start posts them before anything else, since the
 	// issue they speak of no longer shows what was missing.
 	PendingComments []pendingComment `json:"pending_comments,omitempty"`
+	// LastLanded is the package that landed last: every start checks it for
+	// serious defects before it chooses a step, so a restart is not the way
+	// past a stop.
+	LastLanded string `json:"last_landed,omitempty"`
 }
 
 // pendingComment is a comment a label rule owes an issue.
@@ -187,6 +191,7 @@ func (r *run) resume() *afspec.NextPackage {
 		// the ledger, and neither in landed nor counted against --max.
 		fmt.Fprintf(r.stderr, "%s: %s %s landed before this run, as the repository shows\n", tool, run.Kind, run.Subject)
 		r.state.LabelCheck = run.SpecDir // its issues are checked like any landed package's
+		r.state.LastLanded = run.SpecDir
 		r.finishStep(run.Kind, run.Subject)
 		return nil
 	}
@@ -211,9 +216,13 @@ func (r *run) startStep(kind string, next *afspec.NextPackage, head string, star
 	r.saveState()
 }
 
-// finishStep moves the running step to the steps done.
+// finishStep moves the running step to the steps done, and records its
+// package as the last that landed.
 func (r *run) finishStep(kind, subject string) {
 	r.state.Done = append(r.state.Done, doneStep{Kind: kind, Subject: subject, EndedAt: now().UTC().Format(time.RFC3339)})
+	if r.state.Running != nil && kind == kindImplement {
+		r.state.LastLanded = r.state.Running.SpecDir
+	}
 	r.state.Running = nil
 	r.saveState()
 }

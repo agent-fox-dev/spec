@@ -11,6 +11,10 @@ is missing.
   their links. Every entry of the `unmet` list gets an issue, so the gap is
   tracked after the merge, not left in a commit message nobody reads again.
   For each:
+  0. For an `awaits` entry, ask `speca <MM>` about the receiving package
+     first. When it is sealed, or its last task is `done`, the entry is not
+     `awaits`: file it as a `defect` of severity `correctness`, with the
+     note "handoff to a package that has already landed".
   1. Look for one that exists: `issue --list --state all --limit 100`,
      followed through its `next` while `result.incomplete` is true, and
      reuse an issue whose title is the one below (a run continued after a
@@ -72,8 +76,10 @@ is missing.
   `baseline_full_seconds` and `last_full_seconds`. `open_items` holds
   `opened`, `closed`, `passed_on` and `reclassified`, each an object of
   counts keyed by kind, a defect as `defect:<severity>`; `closed`,
-  `passed_on` and `reclassified` are `{}` until af-impl reads open items
-  back.
+  `passed_on` and `reclassified` count what this run decided, before the
+  merge, to close, to pass on to a later package and to make a defect after
+  the push, which it then does; the open-items section lists each with its
+  issue link.
 - **Merge.** Switch to the base branch and bring it up to date with
   `git pull --ff-only`. Then `git merge --no-ff --no-commit <branch>`. A
   conflict stops the landing: `git merge --abort`, stay on the base branch,
@@ -87,6 +93,20 @@ is missing.
   merge, with `git commit -F <message file>`; any other verdict is
   `git merge --abort` and a report of what the checks returned, with the
   branch left as it is.
+- **Close what the branch resolved.** Before the merge, decide for each item
+  the survey listed whether the branch closes it, with evidence: the
+  production caller (`file:line`) and the test that exercises it. After the
+  merge is pushed, close each resolved item with
+  `issue <ref> --close --body <comment>`, the comment naming the merge
+  commit, the evidence and this package.
+- **Pass on what awaited this package.** After the merge is pushed, every
+  open item labelled `af:awaits-<this package>` that the branch did not
+  resolve is passed on: relabelled to the later package that now owns it
+  (`issue <ref> --edit --add-label af:awaits-<MM> --remove-label
+  af:awaits-<NN>`) with a comment saying why, or, when no package owns it,
+  relabelled `af:defect` with `af:severity-correctness` and a comment saying
+  so. specrun turns an item still awaiting a finished package into such a
+  defect itself (rule `awaits-finished`).
 - **Push the base branch** (`git push origin <base>`), unless the branch
   stays local. A rejected push is never forced: leave the merge commit in
   place and report the rejection. Stay on the base branch for the next

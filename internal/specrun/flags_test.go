@@ -33,7 +33,7 @@ func TestOptions_TakeTheirDefaultsFromTheEnvironment(t *testing.T) {
 			func(o *options) bool { return !o.strictSkills }},
 	} {
 		t.Run(name, func(t *testing.T) {
-			o, err := parseOptions(tc.argv, func(k string) string { return tc.env[k] })
+			o, err := parseOptions(tc.argv, envOf(tc.env))
 			if err != nil || !tc.check(o) {
 				t.Errorf("parseOptions(%v, %v) = %+v, %v", tc.argv, tc.env, o, err)
 			}
@@ -134,5 +134,60 @@ func TestMain_NamesTheVariableOfALogDirectoryItRefuses(t *testing.T) {
 	env, code, _ := runMain(t)
 	if code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "SPECRUN_LOG_DIR") {
 		t.Errorf("code %d, error %+v; want a usage error naming SPECRUN_LOG_DIR", code, env.Error)
+	}
+}
+
+// --stop-on is a comma-separated list of the four severities, the empty
+// string meaning never stop, SPECRUN_STOP_ON its default.
+func TestOptions_TakeTheSeveritiesToStopOn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		env  map[string]string
+		want []string
+		err  string
+	}{
+		"absent":                     {nil, nil, []string{"security", "data-loss"}, ""},
+		"minor":                      {[]string{"--stop-on", "minor"}, nil, []string{"minor"}, ""},
+		"two":                        {[]string{"--stop-on", "security,correctness"}, nil, []string{"security", "correctness"}, ""},
+		"empty":                      {[]string{"--stop-on", ""}, nil, []string{}, ""},
+		"the variable":               {nil, map[string]string{"SPECRUN_STOP_ON": "minor"}, []string{"minor"}, ""},
+		"the flag over the variable": {[]string{"--stop-on", "security"}, map[string]string{"SPECRUN_STOP_ON": "minor"}, []string{"security"}, ""},
+		"an unknown severity":        {[]string{"--stop-on", "severe"}, nil, nil, "severe"},
+		"an empty element":           {[]string{"--stop-on", "security,"}, nil, nil, "--stop-on"},
+		"a bad variable":             {nil, map[string]string{"SPECRUN_STOP_ON": "severe"}, nil, "SPECRUN_STOP_ON"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, err := parseOptions(tc.argv, envOf(tc.env))
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) || !strings.Contains(err.Error(), "data-loss") {
+					t.Errorf("err %v; want one naming %q and the four severities", err, tc.err)
+				}
+				return
+			}
+			if err != nil || strings.Join(o.stopOn, ",") != strings.Join(tc.want, ",") || o.stopOn == nil {
+				t.Errorf("stopOn %#v, %v; want %v", o, err, tc.want)
+			}
+		})
+	}
+}
+
+// envOf is a lookup over the variables in m, a variable set to "" being set.
+func envOf(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+}
+
+// Through Main, a severity outside the four is a usage error, and an empty
+// --stop-on lets a package with a security defect go on.
+func TestMain_TakesStopOnFromTheCall(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.forge.add("01_a: leak", "open", "af:defect", "af:severity-security", "af:from-01")
+	f.plan(t, land(0))
+	if env, code, _ := runMain(t, "--stop-on", "severe"); code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "severe") {
+		t.Errorf("--stop-on severe: code %d, error %+v; want a usage error naming it", code, env.Error)
+	}
+	if _, code, stderr := runMain(t, "--stop-on", ""); code != 0 || len(f.starts(t)) != 2 {
+		t.Errorf("--stop-on '': code %d, %d sessions; want both packages\n%s", code, len(f.starts(t)), stderr)
 	}
 }

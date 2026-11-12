@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ type options struct {
 	logDir       string
 	logDirFrom   string // what gave logDir: --log-dir, or its variable
 	strictSkills bool
+	stopOn       []string
+	stopOnText   string // --stop-on as given, or its default
 	dryRun       bool
 	ledger       bool
 	resetState   bool
@@ -50,9 +53,9 @@ func envName(name string) string {
 
 // parseOptions reads the settings from argv and the environment. Its error is
 // a usage error; flag.ErrHelp asks for the help.
-func parseOptions(argv []string, getenv func(string) string) (*options, error) {
-	o := &options{stall: DefaultStall}
-	if err := o.fromEnv(getenv); err != nil {
+func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, error) {
+	o := &options{stall: DefaultStall, stopOnText: defaultStopOn}
+	if err := o.fromEnv(lookup); err != nil {
 		return nil, err
 	}
 	fs := flag.NewFlagSet("specrun", flag.ContinueOnError)
@@ -71,6 +74,15 @@ func parseOptions(argv []string, getenv func(string) string) (*options, error) {
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	from := "--stop-on"
+	if _, ok := lookup(envName("stop-on")); !set["stop-on"] && ok {
+		from = envName("stop-on")
+	}
+	stopOn, err := parseSeverities(o.stopOnText, from)
+	if err != nil {
+		return nil, err
+	}
+	o.stopOn = stopOn
 	o.logDirFrom = "--log-dir"
 	if !set["log-dir"] && o.logDir != "" {
 		o.logDirFrom = envName("log-dir")
@@ -98,7 +110,8 @@ func parseOptions(argv []string, getenv func(string) string) (*options, error) {
 
 // fromEnv takes the defaults from the SPECRUN_ variables that are set. A
 // value its flag would refuse is a usage error naming the variable.
-func (o *options) fromEnv(getenv func(string) string) error {
+func (o *options) fromEnv(lookup func(string) (string, bool)) error {
+	getenv := func(k string) string { v, _ := lookup(k); return v }
 	var errs []error
 	if v := getenv(envName("max")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -115,6 +128,10 @@ func (o *options) fromEnv(getenv func(string) string) error {
 		o.stall = d
 	}
 	o.logDir = getenv(envName("log-dir"))
+	// Set to "", the variable stops on nothing: it is not unset.
+	if v, ok := lookup(envName("stop-on")); ok {
+		o.stopOnText = v
+	}
 	if v := getenv(envName("strict-skills")); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -130,6 +147,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.IntVar(&o.max, "max", o.max, "land at most this many packages in this run, a whole number greater than zero; default no limit ($SPECRUN_MAX)")
 	fs.DurationVar(&o.stall, "stall", o.stall, "end a session that writes no event for this long, a duration greater than zero ($SPECRUN_STALL)")
 	fs.StringVar(&o.logDir, "log-dir", o.logDir, "where the sessions' streams, final messages and the ledger go; default agent-fox/specrun/<repository> under the user's cache directory; never inside the working tree ($SPECRUN_LOG_DIR)")
+	fs.StringVar(&o.stopOnText, "stop-on", o.stopOnText, "stop the loop after a package that opened an open defect of one of these severities, comma-separated: security, data-loss, correctness, minor; '' never stops ($SPECRUN_STOP_ON)")
 	fs.BoolVar(&o.strictSkills, "strict-skills", o.strictSkills, "refuse to start when the installed af-impl skill is not the one specrun was built with ($SPECRUN_STRICT_SKILLS)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "say what the next step would be and change nothing: no branch switched, nothing pulled, no session, no state or log")
 	fs.BoolVar(&o.ledger, "ledger", false, "print the ledger as a table and start nothing")
@@ -142,6 +160,31 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, usageText)
 	fs := flag.NewFlagSet("specrun", flag.ContinueOnError)
 	fs.SetOutput(w)
-	(&options{stall: DefaultStall}).register(fs)
+	(&options{stall: DefaultStall, stopOnText: defaultStopOn}).register(fs)
 	fs.PrintDefaults()
+}
+
+// The severities of a defect, and those the loop stops on by default: a lost
+// write or a leak is what a later package silently builds on.
+var severities = []string{"security", "data-loss", "correctness", "minor"}
+
+const defaultStopOn = "security,data-loss"
+
+// parseSeverities reads a comma-separated list of severities; the empty
+// string is none. from names where the value came from.
+func parseSeverities(v, from string) ([]string, error) {
+	out := []string{}
+	if v == "" {
+		return out, nil
+	}
+	for _, s := range strings.Split(v, ",") {
+		if !slices.Contains(severities, s) {
+			return nil, fmt.Errorf("%s %q: %q is not a severity; the severities are %s, comma-separated, and '' stops on none",
+				from, v, s, strings.Join(severities, ", "))
+		}
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }

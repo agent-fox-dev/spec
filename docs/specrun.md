@@ -131,6 +131,40 @@ repository (see *State and resume*) gets its trailer read and its issues
 checked the same way. A package that has gone under `archive/` since is
 checked there; one found nowhere is left unchecked, with a note.
 
+### Items that await a finished package
+
+After the check above, `specrun` lists every open issue labelled
+`af:awaits`, whatever package opened it. One whose `af:awaits-<NN>` names a
+package that is finished (sealed, superseded or archived, under `archive/`,
+or with no task pending or in progress, as `afspec`'s `IsFinished` says), or
+names no package at all, will never be taken up: the rule `awaits-finished`
+removes `af:awaits` and `af:awaits-<NN>`, adds `af:defect` and
+`af:severity-correctness`, and comments, naming the package and the commit of
+the base branch. An item awaiting a package that is still open, or that is there
+but does not load (whether it is finished is not known), a closed issue, and
+one that is not `af:awaits` are not touched; the rule changes
+nothing the second time, and its forge failures stop the loop as the other
+rule's do.
+
+### Stopping on a serious defect
+
+After a package lands and the label rules ran, `specrun` lists its open
+issues labelled `af:defect` and `af:from-<NN>`. When one carries a severity in
+`--stop-on` (default `security,data-loss`), the loop stops with exit code 1 at
+stage `defect`: `result.stopped.reason` is `serious defect`, and
+`result.stopped.issues` names each issue (`number`, `url`, `title`,
+`severity`); the package's ledger line, outcome `landed`, holds them too. A
+deviation, an untested item and a defect of another severity never stop it,
+and `--stop-on ''`, or `SPECRUN_STOP_ON` set to the empty string, stops on
+none. A stop at the next start reports the same `result.stopped` as the one
+after the landing.
+
+The state records the last package that landed (`last_landed`), and every
+start makes the same check for it before it chooses a step, so starting
+`specrun` again is not the way past a stop. To go on, a person closes the
+issue, changes its severity label, or runs with a `--stop-on` that no longer
+holds it.
+
 ## What it runs
 
 At the start of a run `specrun` logs on stderr, and puts in
@@ -286,6 +320,7 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--max N` | `SPECRUN_MAX` | no limit | land at most N packages in this run; a whole number greater than zero |
 | `--stall D` | `SPECRUN_STALL` | `30m` | end a session that writes no event for D, a Go duration greater than zero |
 | `--log-dir DIR` | `SPECRUN_LOG_DIR` | `agent-fox/specrun/<repository>` under the cache directory | where the streams, the final messages and the ledger go; never inside the working tree |
+| `--stop-on LIST` | `SPECRUN_STOP_ON` | `security,data-loss` | stop after a package that left an open defect of one of these severities (`security`, `data-loss`, `correctness`, `minor`, comma-separated); `''` never stops |
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
 | `--ledger` | | | print the ledger as a table and start nothing |
@@ -327,6 +362,14 @@ step and the package `afspec` would choose, or the waiting packages, and exits
   }
 }
 ```
+
+With a forge client, a dry run also reports what the label rules would
+change as the labels now stand, for the last package that landed and for
+every `af:awaits` issue, and the issues the stop rule would name, writing
+nothing: `result.would_change` lists each change with `issue`, `rule`
+(`incomplete-labels`, `awaits-finished`), `add` and `remove`, and
+`result.would_stop` the defects as `result.stopped.issues` names them; both
+are `[]` when there are none, and absent without a forge.
 
 ## The output
 
@@ -382,7 +425,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open (`defect`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes

@@ -38,6 +38,9 @@ type ledgerLine struct {
 	// package's merge commit, as the trailer gave them; absent without one.
 	Gate      json.RawMessage `json:"gate,omitempty"`
 	OpenItems json.RawMessage `json:"open_items,omitempty"`
+	// Issues are the serious defects a landed package left open, which
+	// stopped the loop.
+	Issues []StopIssue `json:"issues,omitempty"`
 }
 
 // readLedger reads the ledger in dir; a missing ledger is no line, and a line
