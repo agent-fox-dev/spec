@@ -74,7 +74,7 @@ type run struct {
 	root     string // the repository's top level
 	specsDir string
 	base     string // the base branch
-	steps    int    // the steps this run took
+	logDir   string
 	result   *Result
 	warnings []envelope.Warning
 }
@@ -109,6 +109,9 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	}
 	if opts.dryRun {
 		return r.dryRun()
+	}
+	if opts.ledger {
+		return r.printLedger()
 	}
 	return r.loop()
 }
@@ -185,6 +188,9 @@ func (r *run) loop() int {
 		return r.emit(envelope.ExitFailed, "", failure("preflight", "environment",
 			"claude is not on PATH: every session is a claude -p process"))
 	}
+	if code, f := r.prepareLogDir(); f != nil {
+		return r.emit(code, "", f)
+	}
 	r.base = baseBranch(r.root)
 	for {
 		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
@@ -223,6 +229,20 @@ func stopStage(reason string) string {
 	return "land"
 }
 
+// printLedger is --ledger: the ledger as a table on stdout, which is for a
+// person, and nothing started.
+func (r *run) printLedger() int {
+	dir, err := logDirFor(r.opts, r.root)
+	if err == nil {
+		err = printLedger(r.stdout, dir)
+	}
+	if err != nil {
+		fmt.Fprintf(r.stderr, "%s: the ledger could not be read: %v\n", tool, err)
+		return envelope.ExitFailed
+	}
+	return envelope.ExitOK
+}
+
 // baseBranch is the branch refs/remotes/origin/HEAD names, else main.
 func baseBranch(root string) string {
 	if ref, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil && ref != "" {
@@ -250,26 +270,72 @@ func (r *run) syncBase() (string, *envelope.ErrorInfo) {
 	return head, nil
 }
 
-// implement runs the step that implements the package next: one session, then
-// the landing checks. It returns the stop, or nil when the package landed.
+// implement runs the step that implements the package next: one session,
+// its stream and final message saved, then the landing checks, and the
+// step's ledger line. It returns the stop, or nil when the package landed.
 func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
-	r.steps++
+	earlier, _ := readLedger(r.logDir)
 	subject := filepath.Base(next.Dir)
-	step := fmt.Sprintf("%04d-%s-%s", r.steps, kindImplement, subject)
-	s := &session{dir: r.root, stall: r.opts.stall}
+	step := stepName(len(earlier)+1, kindImplement, subject)
+	started := now().UTC().Truncate(time.Second)
+
 	reason := ""
-	if err := s.run(next.Dir); err != nil {
+	o, err := r.session(step).run(next.Dir)
+	switch {
+	case err != nil:
 		reason = reasonNoSession
-	} else {
+	case o.stalled:
+		reason = reasonStalled
+	default:
 		reason = r.landed(filepath.Join(r.root, filepath.FromSlash(next.Dir)), before)
 	}
+	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
+
+	ended := now().UTC().Truncate(time.Second)
+	line := ledgerLine{Kind: kindImplement, Subject: subject, StartedAt: started.Format(time.RFC3339),
+		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded}
+	switch reason {
+	case "":
+	case reasonStalled:
+		line.Outcome = outcomeStalled
+	default:
+		line.Outcome = outcomeStopped
+	}
+	if err := appendLedger(r.logDir, line); err != nil {
+		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
+	}
 	if reason != "" {
-		fmt.Fprintf(r.stderr, "%s: %s stopped: %s\n", tool, step, reason)
+		fmt.Fprintf(r.stderr, "%s: %s %s in %.1f min: %s\n", tool, step, line.Outcome, line.WallMinutes, reason)
 		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
 	}
-	fmt.Fprintf(r.stderr, "%s: %s landed\n", tool, step)
+	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min\n", tool, step, line.WallMinutes)
+	if median, slow := slowerThanUsual(earlier, line.WallMinutes); slow {
+		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",
+			tool, subject, line.WallMinutes, median)
+	}
 	r.result.Landed = append(r.result.Landed, subject)
 	return nil
+}
+
+// session is the session of the step, its stream going to <step>.jsonl.
+func (r *run) session(step string) *runningSession {
+	return &runningSession{session: session{dir: r.root, stall: r.opts.stall}, path: filepath.Join(r.logDir, step+".jsonl")}
+}
+
+// runningSession is a session whose stream is saved to a file.
+type runningSession struct {
+	session
+	path string
+}
+
+func (s *runningSession) run(specDir string) (outcome, error) {
+	f, err := os.Create(s.path)
+	if err != nil {
+		return outcome{}, err
+	}
+	defer f.Close()
+	s.stream = f
+	return s.session.run(specDir)
 }
 
 // emit writes the one envelope and returns its exit code. An empty summary is

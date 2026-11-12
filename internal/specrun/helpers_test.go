@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/agent-fox-dev/aflib/envelope"
 )
@@ -283,4 +285,77 @@ func realPath(t *testing.T, path string) string {
 func exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
+}
+
+// logDir is the log directory specrun uses for the fixture when --log-dir is
+// not given.
+func (f *fixture) logDir() string {
+	return filepath.Join(f.cache, "agent-fox", "specrun", filepath.Base(f.root))
+}
+
+// ledgerLines is the ledger in the default log directory, one map per line.
+func (f *fixture) ledgerLines(t *testing.T) []map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(f.logDir(), "ledger.jsonl"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("ledger line %q: %v", line, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// outcomes lists the outcome of each ledger line.
+func outcomes(lines []map[string]any) []string {
+	var out []string
+	for _, l := range lines {
+		out = append(out, fmt.Sprint(l["outcome"]))
+	}
+	return out
+}
+
+// pidsAlive reports which of the process ids the fake claude recorded in path
+// are still running, after giving them a moment to go.
+func pidsAlive(t *testing.T, path string) []int {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alive []int
+	for _, field := range strings.Fields(string(b)) {
+		pid, err := strconv.Atoi(field)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(5 * time.Second); processAlive(pid) && time.Now().Before(deadline); {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if processAlive(pid) {
+			alive = append(alive, pid)
+			if p, err := os.FindProcess(pid); err == nil {
+				_ = p.Kill()
+			}
+		}
+	}
+	return alive
+}
+
+// stubClock replaces specrun's clock for the rest of the test with one that
+// advances by step every time it is read.
+func stubClock(t *testing.T, step time.Duration) {
+	t.Helper()
+	was := now
+	at := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	now = func() time.Time { at = at.Add(step); return at }
+	t.Cleanup(func() { now = was })
 }

@@ -3,6 +3,7 @@ package specrun
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,14 +22,23 @@ func sessionArgs(specDir string) []string {
 
 // session is one claude -p process.
 type session struct {
-	dir   string        // the repository
-	stall time.Duration // how long it may write nothing
-	lines func(string)  // called with each line of its stdout, as it arrives
+	dir    string        // the repository
+	stall  time.Duration // how long it may write nothing
+	stream io.Writer     // where every line of its stdout goes
+}
+
+// outcome is how a session ended.
+type outcome struct {
+	stalled bool
+	final   string // the result text of its last result event
 }
 
 // run starts the session for the package in specDir and waits for it to end.
-// Its exit code decides nothing; the landing checks do.
-func (s *session) run(specDir string) error {
+// Every line it writes goes to the stream as it arrives; one that writes
+// nothing for the stall time is ended with every process it started. Its exit
+// code decides nothing: the landing checks do.
+func (s *session) run(specDir string) (outcome, error) {
+	var o outcome
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "claude", sessionArgs(specDir)...)
@@ -39,19 +49,49 @@ func (s *session) run(specDir string) error {
 	isolate(cmd)
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return o, err
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("claude could not start: %w", err)
+		return o, fmt.Errorf("claude could not start: %w", err)
 	}
-	sc := bufio.NewScanner(out)
-	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
-	for sc.Scan() {
-		if s.lines != nil {
-			s.lines(sc.Text())
+	lines := make(chan string)
+	go func() {
+		sc := bufio.NewScanner(out)
+		sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+		close(lines)
+	}()
+	timer := time.NewTimer(s.stall)
+	defer timer.Stop()
+read:
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				break read
+			}
+			timer.Reset(s.stall)
+			if s.stream != nil {
+				_, _ = io.WriteString(s.stream, line+"\n")
+			}
+			var ev struct {
+				Type   string `json:"type"`
+				Result string `json:"result"`
+			}
+			if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == "result" {
+				o.final = ev.Result
+			}
+		case <-timer.C:
+			o.stalled = true
+			_ = endGroup(cmd)
+			for range lines {
+			}
+			break read
 		}
 	}
 	_ = cmd.Wait()
 	_ = endGroup(cmd)
-	return nil
+	return o, nil
 }

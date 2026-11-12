@@ -1,6 +1,7 @@
 package specrun
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,4 +78,49 @@ func TestMain_RefusesACallThatCannotHold(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A log directory inside the working tree is refused, since af-impl refuses a
+// dirty tree, and one that cannot be written stops the run; without the flag
+// the directory is under the user's cache directory, named for the repository.
+func TestMain_RefusesALogDirectoryItCannotUse(t *testing.T) {
+	for name, tc := range map[string]struct {
+		dir  func(f *fixture) string
+		code int
+		says string
+	}{
+		"inside the working tree": {func(f *fixture) string { return filepath.Join(f.root, "logs") }, 2, "dirty"},
+		"under a regular file": {func(f *fixture) string {
+			file := filepath.Join(f.scratch, "file")
+			writeFile(t, file, "")
+			return filepath.Join(file, "logs")
+		}, 1, "log"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.plan(t, land(0))
+			env, code, _ := runMain(t, "--log-dir", tc.dir(f))
+			if code != tc.code || env.Error == nil || !strings.Contains(env.Error.Message, tc.says) {
+				t.Errorf("code %d, error %+v; want exit %d saying %q", code, env.Error, tc.code, tc.says)
+			}
+			if tc.code == 1 && env.Error != nil && env.Error.Stage != "preflight" {
+				t.Errorf("stage %q; want preflight", env.Error.Stage)
+			}
+			if len(f.starts(t)) != 0 {
+				t.Error("a session was started")
+			}
+		})
+	}
+	t.Run("the default", func(t *testing.T) {
+		f := newFixture(t)
+		f.addPackage(t, "01_a", "01", "pending")
+		f.plan(t, land(0))
+		if _, code, _ := runMain(t); code != 0 {
+			t.Fatalf("code %d", code)
+		}
+		if !exists(filepath.Join(f.cache, "agent-fox", "specrun", filepath.Base(f.root), "ledger.jsonl")) {
+			t.Error("no ledger under $XDG_CACHE_HOME/agent-fox/specrun/<repository>")
+		}
+	})
 }
