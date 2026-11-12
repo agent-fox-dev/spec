@@ -1,0 +1,206 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "21",
+  "spec_name": "open_item_labels",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Create the label scheme before the first step",
+      "rationale": "A session that files an issue with a label that does not exist loses the label, or the issue.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "`specrun` starts a run that is not a dry run",
+          "action": "create every label of the scheme before the first step: `af:awaits`, `af:defect`, `af:untested`, `af:deviation`, `af:severity-security`, `af:severity-data-loss`, `af:severity-correctness`, `af:severity-minor`, `af:accepted`, `af:rejected`, `af:repair-failed`, and `af:from-<NN>` and `af:awaits-<NN>` for every package under the spec root and its archive",
+          "contract": "each label exists on the forge before the first session starts; a label that exists already is left as it is and is not an error",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go (new): with packages 01 and 02 and an archived 00, and a forge that already has af:defect: run one step; assert the forge holds the 11 fixed labels and af:from-00, af:awaits-00, af:from-01, af:awaits-01, af:from-02, af:awaits-02; assert every CreateLabel call came before the session started; assert the conflict on af:defect raised no error and no warning"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "unwanted",
+          "condition": "no forge client can be made: no token is configured, the repository has no origin remote, or the forge is not supported",
+          "action": "refuse to start",
+          "contract": "exit code 1; `error.stage` is `preflight` and the message names `GITHUB_TOKEN`, `GH_TOKEN` and `GITLAB_TOKEN`, or the remote; no session started and nothing written to a forge",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go, a table over {no token in the environment, no origin remote}: assert exit code 1, error.stage == 'preflight', the fake claude never started"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "optional",
+          "condition": "`--dry-run` is given",
+          "action": "make no write to the forge, and go on with a warning when no forge client can be made",
+          "contract": "the forge records no `CreateLabel`, `AddLabels`, `RemoveLabel` or `AddComment` call; without a client `warnings` holds one `forge_unavailable` entry and the dry run still names the next step",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go, a table over {a forge client, none}: run --dry-run; assert exit code 0 and result.next_step; assert the in-memory forge recorded no write; assert codes(warnings) == ['forge_unavailable'] in the second case"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Check the labels of the issues a landed package opened",
+      "rationale": "The rules that follow filter on labels; an issue without them is invisible to every one of them.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "a package has landed and each of its open issues carries exactly one kind label, `af:from-<NN>`, one severity when it is a `defect` and one `af:awaits-<MM>` when it is `awaits`",
+          "action": "leave the issues as they are",
+          "contract": "the forge records no write for them",
+          "check": {
+            "same_as": "REQ-2.2"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "a package has landed and an open issue of it, found by its label `af:from-<NN>` or by a title that starts with `<NN_name>:`, lacks a kind, lacks `af:from-<NN>`, is a `defect` without a severity, or is `awaits` without `af:awaits-<MM>`",
+          "action": "make `af:deviation` its only kind label, add `af:from-<NN>` when it lacks it, and comment on it",
+          "contract": "after the step the issue carries `af:deviation`, no other kind label and `af:from-<NN>`; one comment names the rule `incomplete-labels`, what was missing and the commit of the base branch; an issue of another package and a closed issue are not touched",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go, a table over the open issues the fake session leaves for package 01: {complete defect with severity -> no write; complete awaits -> no write; no label at all, title '01_name: x' -> af:deviation + af:from-01 + comment; af:defect, af:from-01, no severity -> af:deviation, af:defect removed, comment; af:awaits, af:from-01, no af:awaits-MM -> af:deviation, af:awaits removed; two kinds -> af:deviation only; title '02_name: y' -> no write; a closed issue of 01 without labels -> no write}: assert the labels of each afterwards and that each comment contains 'incomplete-labels' and rev-parse(main)"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "ubiquitous",
+          "action": "for any issue the rule has already changed, change nothing when the rule runs again",
+          "contract": "a second run over the same issues records no forge write",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go: apply the rule of REQ-2.2 twice to the table's issues: assert the second application records no AddLabels, RemoveLabel or AddComment call"
+          }
+        },
+        {
+          "id": "REQ-2.4",
+          "pattern": "unwanted",
+          "condition": "a forge call of the rule fails",
+          "action": "stop the loop",
+          "contract": "exit code 1; `result.stopped.reason` names the rule and the forge's error; the package's ledger line is written with outcome `landed`; no further session starts; the next start applies the rule again before choosing a step",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/labels_test.go: with the in-memory forge failing AddLabels once: assert exit code 1, the reason contains 'incomplete-labels', the ledger's last outcome is 'landed' and package 02's session did not start; run again: assert the issue is relabelled and 02's session starts"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Read the AF-Run trailer into the ledger",
+      "rationale": "A count parsed from prose is wrong the first time the prose changes.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "a package has landed and its merge commit ends with an `AF-Run:` trailer holding one JSON object",
+          "action": "put the trailer's `gate` and `open_items` objects into the package's ledger line, and its full gate runs and seconds, reused gates and opened items into the short form",
+          "contract": "the ledger line holds `gate` and `open_items` as the trailer gave them; keys the trailer holds beyond those two are ignored",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/ledger_test.go, beside the existing ledger tests: a fake session whose merge commit ends 'AF-Run: {\"gate\":{\"full\":{\"runs\":3,\"seconds\":412.5,\"reused\":1},\"task\":{\"runs\":9,\"seconds\":95,\"reused\":0},\"baseline_full_seconds\":130.2,\"last_full_seconds\":141},\"open_items\":{\"opened\":{\"awaits\":1,\"defect:minor\":2},\"closed\":{},\"passed_on\":{},\"reclassified\":{}},\"extra\":1}': assert the ledger line's gate.full.runs == 3 and open_items.opened['defect:minor'] == 2 and no key extra; assert the stderr line contains '3 full', '412.5', '1 reused' and '3 opened'"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "unwanted",
+          "condition": "a package has landed and its merge commit has no `AF-Run:` trailer, or the trailer's value is not one JSON object",
+          "action": "count the package as landed and warn",
+          "contract": "the ledger line has outcome `landed` and neither `gate` nor `open_items`; `warnings` holds one `trailer_missing` entry naming the commit; the loop goes on",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one"
+            ],
+            "pseudocode": "in internal/specrun/ledger_test.go, a table over a merge commit {with no trailer, with 'AF-Run: not json', with 'AF-Run: [1]'}: assert outcome 'landed', the two keys absent, codes(warnings) == ['trailer_missing'] and the next package's session started"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "A package lands with an unlabelled issue and a trailer, and specrun files both",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "runs `specrun` with a forge token in the environment"
+        },
+        {
+          "actor": "specrun",
+          "action": "creates the labels of the scheme the repository lacks, then starts the session for the next package"
+        },
+        {
+          "actor": "session",
+          "action": "implements the package, opens one issue with its labels and one without, and asks speca for the gate report"
+        },
+        {
+          "actor": "speca",
+          "action": "answers `--gate-report` with the counts the session copies into the `AF-Run:` trailer of the merge commit"
+        },
+        {
+          "actor": "specrun",
+          "action": "checks the landing, lists the package's open issues and makes the unlabelled one a deviation, with a comment"
+        },
+        {
+          "actor": "specrun",
+          "action": "reads the trailer and writes the ledger line with the gate and open-item counts"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process",
+          "the label rules against the in-memory issuex client",
+          "the ledger on disk"
+        ],
+        "setup": [
+          "the fixture repository and fake claude of internal/specrun's helpers; an in-memory issuex.Client, added to those helpers, that records every call and can be told to fail one",
+          "a fake session that lands package 01 with a merge commit ending in an AF-Run trailer and leaves two open issues on the forge: one with af:defect, af:severity-minor and af:from-01, one titled '01_name: no caller' with no label"
+        ],
+        "end_state": [
+          "the forge holds every label of the scheme",
+          "the labelled issue is unchanged",
+          "the unlabelled issue carries af:deviation and af:from-01 and one comment naming the rule and the base commit",
+          "the ledger line of 01 holds the trailer's gate and open_items objects"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go, beside the existing end-to-end test: code = Main(['--max', '1']); assert code == 0; assert labels(issue 2) == {af:deviation, af:from-01} and len(comments(issue 2)) == 1; assert writes(issue 1) == 0; l = last(ledger); assert l.outcome == 'landed' and l.gate.full.runs == 3 and l.open_items.opened is present"
+      }
+    }
+  ]
+}
