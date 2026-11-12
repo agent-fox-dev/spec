@@ -24,10 +24,13 @@ type options struct {
 	strictSkills bool
 	stopOn       []string
 	stopOnText   string // --stop-on as given, or its default
-	dryRun       bool
-	ledger       bool
-	resetState   bool
-	version      bool
+	// reconcileEvery is the number of packages between reconciles; 0 leaves
+	// only the reconcile at the end.
+	reconcileEvery int
+	dryRun         bool
+	ledger         bool
+	resetState     bool
+	version        bool
 }
 
 const usageText = `specrun — run /af-impl on every open spec package, one fresh claude -p session each
@@ -54,7 +57,7 @@ func envName(name string) string {
 // parseOptions reads the settings from argv and the environment. Its error is
 // a usage error; flag.ErrHelp asks for the help.
 func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, error) {
-	o := &options{stall: DefaultStall, stopOnText: defaultStopOn}
+	o := &options{stall: DefaultStall, stopOnText: defaultStopOn, reconcileEvery: defaultReconcileEvery}
 	if err := o.fromEnv(lookup); err != nil {
 		return nil, err
 	}
@@ -91,6 +94,9 @@ func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, 
 	if set["max"] && o.max <= 0 {
 		errs = append(errs, fmt.Errorf("--max %d: the number of packages to land must be greater than zero", o.max))
 	}
+	if set["reconcile-every"] && o.reconcileEvery < 0 {
+		errs = append(errs, fmt.Errorf("--reconcile-every %d: the number of packages between reconciles must be 0 or more", o.reconcileEvery))
+	}
 	if set["stall"] && o.stall <= 0 {
 		errs = append(errs, fmt.Errorf("--stall %s: a session's stall time must be greater than zero", o.stall))
 	}
@@ -120,6 +126,13 @@ func (o *options) fromEnv(lookup func(string) (string, bool)) error {
 		}
 		o.max = n
 	}
+	if v := getenv(envName("reconcile-every")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			errs = append(errs, fmt.Errorf("%s=%s: the number of packages between reconciles must be a whole number, 0 or more", envName("reconcile-every"), v))
+		}
+		o.reconcileEvery = n
+	}
 	if v := getenv(envName("stall")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
@@ -147,6 +160,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.IntVar(&o.max, "max", o.max, "land at most this many packages in this run, a whole number greater than zero; default no limit ($SPECRUN_MAX)")
 	fs.DurationVar(&o.stall, "stall", o.stall, "end a session that writes no event for this long, a duration greater than zero ($SPECRUN_STALL)")
 	fs.StringVar(&o.logDir, "log-dir", o.logDir, "where the sessions' streams, final messages and the ledger go; default agent-fox/specrun/<repository> under the user's cache directory; never inside the working tree ($SPECRUN_LOG_DIR)")
+	fs.IntVar(&o.reconcileEvery, "reconcile-every", o.reconcileEvery, "run a reconcile after this many landed packages, 0 or more; 0 leaves only the reconcile at the end ($SPECRUN_RECONCILE_EVERY)")
 	fs.StringVar(&o.stopOnText, "stop-on", o.stopOnText, "stop the loop after a package that opened an open defect of one of these severities, comma-separated: security, data-loss, correctness, minor; '' never stops ($SPECRUN_STOP_ON)")
 	fs.BoolVar(&o.strictSkills, "strict-skills", o.strictSkills, "refuse to start when the installed af-impl skill is not the one specrun was built with ($SPECRUN_STRICT_SKILLS)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "say what the next step would be and change nothing: no branch switched, nothing pulled, no session, no state or log")
@@ -160,7 +174,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, usageText)
 	fs := flag.NewFlagSet("specrun", flag.ContinueOnError)
 	fs.SetOutput(w)
-	(&options{stall: DefaultStall, stopOnText: defaultStopOn}).register(fs)
+	(&options{stall: DefaultStall, stopOnText: defaultStopOn, reconcileEvery: defaultReconcileEvery}).register(fs)
 	fs.PrintDefaults()
 }
 

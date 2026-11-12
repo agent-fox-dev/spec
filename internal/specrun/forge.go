@@ -114,11 +114,13 @@ var kindLabels = []string{"af:awaits", "af:defect", "af:untested", "af:deviation
 // labelChange is what a label rule does to one issue: the labels it adds and
 // removes, and the comment that says why.
 type labelChange struct {
-	Issue   int      `json:"issue"`
-	Rule    string   `json:"rule"`
-	Add     []string `json:"add"`
-	Remove  []string `json:"remove"`
-	Comment string   `json:"-"`
+	Issue  int      `json:"issue"`
+	Rule   string   `json:"rule"`
+	Add    []string `json:"add"`
+	Remove []string `json:"remove"`
+	// Close closes the issue, the comment going with it.
+	Close   bool   `json:"close,omitempty"`
+	Comment string `json:"-"`
 }
 
 // The label rules, by name.
@@ -341,8 +343,23 @@ func (r *run) checkLabels(specDir string) error {
 	if err != nil {
 		return err
 	}
+	return r.apply(changes)
+}
+
+// apply makes the changes on the forge, each with its comment: a change's
+// comment is owed in the state before its labels change, so that one cut
+// short is posted later; a closing carries its own. A forge call that fails
+// returns its error, naming the rule.
+func (r *run) apply(changes []labelChange) error {
 	for _, c := range changes {
 		ref := issuex.IssueRef{Repo: r.repo, Number: c.Issue}
+		if c.Close {
+			if err := r.forge.CloseIssue(r.ctx, ref, c.Comment); err != nil {
+				return fmt.Errorf("%s: issue #%d: %w", c.Rule, c.Issue, err)
+			}
+			fmt.Fprintf(r.stderr, "%s: issue #%d: %s closed it\n", tool, c.Issue, c.Rule)
+			continue
+		}
 		r.state.PendingComments = append(r.state.PendingComments, pendingComment{Issue: c.Issue, Body: c.Comment})
 		r.saveState()
 		if len(c.Add) > 0 {
@@ -417,6 +434,10 @@ func (r *run) wouldDo() *envelope.ErrorInfo {
 			_ = json.Unmarshal(b, &st)
 		}
 	}
+	// Read, never written: a dry run has no state path and creates no log
+	// directory.
+	r.state = st
+	r.logDir, _ = logDirFor(r.opts, r.root)
 	// The package whose rules are owed, else the one that landed last.
 	pkg := st.LabelCheck
 	if pkg == "" {

@@ -33,6 +33,8 @@ type state struct {
 	// serious defects before it chooses a step, so a restart is not the way
 	// past a stop.
 	LastLanded string `json:"last_landed,omitempty"`
+	// SinceReconcile counts the packages landed since the last reconcile.
+	SinceReconcile int `json:"since_reconcile"`
 }
 
 // pendingComment is a comment a label rule owes an issue.
@@ -221,7 +223,10 @@ func (r *run) startStep(kind string, next *afspec.NextPackage, head string, star
 func (r *run) finishStep(kind, subject string) {
 	r.state.Done = append(r.state.Done, doneStep{Kind: kind, Subject: subject, EndedAt: now().UTC().Format(time.RFC3339)})
 	if r.state.Running != nil && kind == kindImplement {
+		// A package that landed counts towards the next reconcile, whether
+		// or not a rule after it stops the loop.
 		r.state.LastLanded = r.state.Running.SpecDir
+		r.state.SinceReconcile++
 	}
 	r.state.Running = nil
 	r.saveState()

@@ -187,7 +187,53 @@ func TestMain_TakesStopOnFromTheCall(t *testing.T) {
 	if env, code, _ := runMain(t, "--stop-on", "severe"); code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "severe") {
 		t.Errorf("--stop-on severe: code %d, error %+v; want a usage error naming it", code, env.Error)
 	}
-	if _, code, stderr := runMain(t, "--stop-on", ""); code != 0 || len(f.starts(t)) != 2 {
-		t.Errorf("--stop-on '': code %d, %d sessions; want both packages\n%s", code, len(f.starts(t)), stderr)
+	if _, code, stderr := runMain(t, "--stop-on", ""); code != 0 || len(specDirs(f.starts(t))) != 2 {
+		t.Errorf("--stop-on '': code %d, sessions %v; want both packages\n%s", code, specDirs(f.starts(t)), stderr)
+	}
+}
+
+// --reconcile-every is a whole number, 0 meaning only the reconcile at the
+// end, SPECRUN_RECONCILE_EVERY its default.
+func TestOptions_TakeTheReconcileInterval(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		env  map[string]string
+		want int
+		err  string
+	}{
+		"absent":         {nil, nil, 5, ""},
+		"3":              {[]string{"--reconcile-every", "3"}, nil, 3, ""},
+		"0":              {[]string{"--reconcile-every", "0"}, nil, 0, ""},
+		"the variable":   {nil, map[string]string{"SPECRUN_RECONCILE_EVERY": "2"}, 2, ""},
+		"-1":             {[]string{"--reconcile-every", "-1"}, nil, 0, "--reconcile-every"},
+		"often":          {[]string{"--reconcile-every", "often"}, nil, 0, "reconcile-every"},
+		"a bad variable": {nil, map[string]string{"SPECRUN_RECONCILE_EVERY": "often"}, 0, "SPECRUN_RECONCILE_EVERY"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, err := parseOptions(tc.argv, envOf(tc.env))
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Errorf("err %v; want one naming %s", err, tc.err)
+				}
+				return
+			}
+			if err != nil || o.reconcileEvery != tc.want {
+				t.Errorf("reconcileEvery %+v, %v; want %d", o, err, tc.want)
+			}
+		})
+	}
+}
+
+// Through Main a bad --reconcile-every is a usage error, exit code 2.
+func TestMain_RefusesABadReconcileInterval(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	for _, v := range []string{"-1", "often"} {
+		if env, code, _ := runMain(t, "--reconcile-every", v); code != 2 || env.Error == nil || !strings.Contains(env.Error.Message, "reconcile-every") {
+			t.Errorf("--reconcile-every %s: code %d, error %+v", v, code, env.Error)
+		}
+	}
+	if len(f.starts(t)) != 0 {
+		t.Error("a session started")
 	}
 }

@@ -134,7 +134,7 @@ func TestVersions_WarnOrRefuseOnASkillThatIsNotTheBuiltOne(t *testing.T) {
 							t.Errorf("warning %q does not name the path and both hashes", w.Message)
 						}
 					}
-					if code != 0 || len(f.starts(t)) != 1 {
+					if code != 0 || len(specDirs(f.starts(t))) != 1 {
 						t.Errorf("code %d, error %+v, %d sessions; want the run to go on", code, env.Error, len(f.starts(t)))
 					}
 					if strings.Join(codes, ",") != wantCode {

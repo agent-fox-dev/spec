@@ -49,6 +49,21 @@ type Result struct {
 	// stop rule would name.
 	WouldChange []labelChange `json:"would_change,omitzero"`
 	WouldStop   []StopIssue   `json:"would_stop,omitzero"`
+	// WouldAdopt is, under --dry-run, the issues a due reconcile would hand
+	// over for adoption.
+	WouldAdopt []adoptEntry `json:"would_adopt,omitzero"`
+	// OpenDeviations are the open deviations no person has settled, oldest
+	// first, after a reconcile.
+	OpenDeviations []OpenDeviation `json:"open_deviations,omitzero"`
+}
+
+// OpenDeviation is an open deviation that carries neither af:accepted nor
+// af:rejected.
+type OpenDeviation struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	CreatedAt string `json:"created_at"`
 }
 
 // Waiting is an open package that cannot start, as speca --next words it.
@@ -209,6 +224,12 @@ func (r *run) dryRun() int {
 	if f != nil && f.Stage != "waiting" {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
+	if r.forge != nil && r.reconcileDue(r.result.AllDone) {
+		if f := r.wouldReconcile(); f != nil {
+			return r.emit(envelope.ExitFailed, "", f)
+		}
+		return r.emit(envelope.ExitOK, fmt.Sprintf("%s: dry run; the next step is a reconcile, %d issue(s) to adopt", tool, len(r.result.WouldAdopt)), nil)
+	}
 	switch {
 	case next != nil:
 		r.result.NextStep = &NextStep{Kind: kindImplement, SpecDir: next.Dir}
@@ -245,7 +266,7 @@ func (r *run) loop() int {
 	for {
 		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
 			if _, f := r.choose(); f == nil && r.result.AllDone {
-				return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+				return r.finalReconcile()
 			}
 			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: landed %d, as --max %d asks", tool, len(r.result.Landed), r.opts.max), nil)
 		}
@@ -260,12 +281,23 @@ func (r *run) loop() int {
 			}
 			schemed = true
 		}
+		if run := r.state.Running; run != nil && run.Kind == kindReconcile {
+			if stop := r.reconcile(); stop != nil {
+				return r.stop(stop)
+			}
+		}
 		next := r.resume()
 		if stop := r.recheckLabels(); stop != nil {
 			return r.stop(stop)
 		}
 		if stop := r.recheckDefects(); stop != nil {
 			return r.stop(stop)
+		}
+		// A reconcile already due, as after a restart, comes before any package.
+		if next == nil && r.reconcileDue(false) {
+			if stop := r.reconcile(); stop != nil {
+				return r.stop(stop)
+			}
 		}
 		if next == nil {
 			var f *envelope.ErrorInfo
@@ -274,10 +306,15 @@ func (r *run) loop() int {
 			}
 		}
 		if next == nil {
-			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+			return r.finalReconcile()
 		}
 		if stop := r.implement(next, before); stop != nil {
 			return r.stop(stop)
+		}
+		if r.reconcileDue(false) {
+			if stop := r.reconcile(); stop != nil {
+				return r.stop(stop)
+			}
 		}
 	}
 }
@@ -346,8 +383,10 @@ func stopStage(reason string) string {
 	if strings.HasPrefix(reason, "serious defects:") {
 		return "forge"
 	}
-	if strings.HasPrefix(reason, ruleIncompleteLabels) || strings.HasPrefix(reason, ruleAwaitsFinished) {
-		return "forge"
+	for _, rule := range []string{ruleIncompleteLabels, ruleAwaitsFinished, ruleAdoptionUnsettled, ruleDeviationAccepted, ruleDeviationRejected, "reconcile:"} {
+		if strings.HasPrefix(reason, rule) {
+			return "forge"
+		}
 	}
 	switch reason {
 	case reasonStalled:
@@ -417,7 +456,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	r.startStep(kindImplement, next, before, started)
 
 	reason := ""
-	o, err := r.session(step).run(r.ctx, next.Dir)
+	o, err := r.session(step).run(r.ctx, "/af-impl "+next.Dir)
 	switch {
 	case err != nil:
 		reason = reasonNoSession
@@ -507,7 +546,7 @@ type runningSession struct {
 	base string
 }
 
-func (s *runningSession) run(ctx context.Context, specDir string) (outcome, error) {
+func (s *runningSession) run(ctx context.Context, prompt string) (outcome, error) {
 	stream, err := os.Create(s.base + ".jsonl")
 	if err != nil {
 		return outcome{}, err
@@ -519,7 +558,7 @@ func (s *runningSession) run(ctx context.Context, specDir string) (outcome, erro
 	}
 	defer errs.Close()
 	s.stream, s.errs = stream, errs
-	return s.session.run(ctx, specDir)
+	return s.session.run(ctx, prompt)
 }
 
 // emit writes the one envelope and returns its exit code. An empty summary is

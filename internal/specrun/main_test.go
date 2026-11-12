@@ -58,13 +58,13 @@ func TestMain_LandsEveryOpenPackageWithOneCall(t *testing.T) {
 			t.Errorf("no merge of %s on main:\n%s", dir, log)
 		}
 	}
-	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "landed,landed" {
+	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "landed,landed,reconciled" {
 		t.Errorf("ledger outcomes %v", got)
 	}
 	entries, _ := os.ReadDir(f.logDir())
 	var logs []string
 	for _, e := range entries {
-		if e.Name() != "ledger.jsonl" && (strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".log")) {
+		if strings.Contains(e.Name(), "-implement-") && (strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".log")) {
 			logs = append(logs, e.Name())
 		}
 	}
@@ -183,5 +183,61 @@ func TestMain_StopsOnADataLossDefectUntilItIsClosed(t *testing.T) {
 	}
 	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,.specs/02_b" {
 		t.Errorf("sessions %v; want 02 next", got)
+	}
+}
+
+// specrun reconciles after a package: the session adopts an old issue and
+// closes a resolved one, and specrun closes the deviation a person
+// accepted, counts it all and lists the deviation still open.
+func TestMain_ReconcilesAfterAPackage(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "archive/00_zero", "00", "done")
+	f.addPackage(t, "01_a", "01", "pending")
+	old := f.forge.add("00_zero: no caller", "open")
+	resolved := f.forge.add("00_zero: wire the cache", "open", "af:awaits", "af:awaits-01", "af:from-00")
+	accepted := f.forge.add("00_zero: kept the old order", "open", "af:deviation", "af:accepted", "af:from-00")
+	f.forge.issue(accepted).Body = "Recorded in docs/adr/03-x.md."
+	f.forge.add("00_zero: renamed a flag", "open", "af:deviation", "af:from-00")
+	b, _ := json.Marshal(map[string]any{"runs": []any{land(0)}, "reconcile": []any{map[string]any{"forge": []any{
+		map[string]any{"op": "add_labels", "issue": old, "labels": []string{"af:untested", "af:from-00"}},
+		map[string]any{"op": "close", "issue": resolved},
+	}}}})
+	writeFile(t, f.script, string(b))
+
+	env, code, stderr := runMain(t, "--reconcile-every", "1")
+	if code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	if got := prompts(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,reconcile" {
+		t.Errorf("sessions %v; want the package, then a reconcile", got)
+	}
+	adopt, _ := filepath.Glob(filepath.Join(f.logDir(), "*-adopt.json"))
+	if len(adopt) != 1 {
+		t.Fatalf("adopt files %v", adopt)
+	}
+	report := strings.TrimSuffix(adopt[0], "-adopt.json") + "-report.md"
+	if want := "/af-impl --reconcile " + adopt[0] + " --report " + report; f.starts(t)[1].Argv[1] != want {
+		t.Errorf("the reconcile's prompt %q; want %q", f.starts(t)[1].Argv[1], want)
+	}
+	if b, _ := os.ReadFile(adopt[0]); strings.Count(string(b), `"number"`) != 1 || !strings.Contains(string(b), fmt.Sprintf(`"number": %d`, old)) {
+		t.Errorf("the adopt file holds %s; want the one old issue", b)
+	}
+	if got := strings.Join(f.forge.labelsOf(old), ","); got != "af:from-00,af:untested" {
+		t.Errorf("the adopted issue carries %s", got)
+	}
+	for _, w := range f.forge.writes() {
+		if strings.Contains(w, fmt.Sprintf(" %d ", old)) || strings.HasSuffix(w, fmt.Sprintf(" %d", old)) {
+			t.Errorf("specrun wrote to the adopted issue: %s", w)
+		}
+	}
+	if f.forge.issue(accepted).State != "closed" || !strings.Contains(strings.Join(f.forge.comments[accepted], ""), "docs/adr/03-x.md") {
+		t.Errorf("the accepted deviation: %s, %q", f.forge.issue(accepted).State, f.forge.comments[accepted])
+	}
+	lines := f.ledgerLines(t)
+	if l := lines[len(lines)-1]; l["kind"] != "reconcile" || l["adopted"] != 1.0 || l["closed"] != 2.0 || l["settled"] != 1.0 {
+		t.Errorf("the reconcile's line %v", l)
+	}
+	if len(env.Result.OpenDeviations) != 1 {
+		t.Errorf("open deviations %+v; want one", env.Result.OpenDeviations)
 	}
 }

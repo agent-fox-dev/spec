@@ -9,7 +9,9 @@ import (
 	"testing"
 )
 
-// With nothing open, specrun ends at once: every package is done.
+// With nothing open, specrun starts no package: every package is done. The
+// one session is the reconcile due when no reconcile was ever recorded
+// (docs/errata/20_specrun_driver.md).
 func TestLoop_EndsWhenEveryPackageIsDone(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "done")
@@ -21,8 +23,11 @@ func TestLoop_EndsWhenEveryPackageIsDone(t *testing.T) {
 	if env.Summary != "specrun: every package is done, landed 0" {
 		t.Errorf("summary %q", env.Summary)
 	}
-	if len(f.starts(t)) != 0 {
-		t.Error("a session was started")
+	if got := prompts(f.starts(t)); strings.Join(got, ",") != "reconcile" {
+		t.Errorf("sessions %v; want the reconcile alone", got)
+	}
+	if _, code, _ := runMain(t); code != 0 || len(f.starts(t)) != 1 {
+		t.Errorf("a second call: code %d, %d sessions; want none, a reconcile being the last step", code, len(f.starts(t)))
 	}
 }
 
@@ -92,9 +97,11 @@ func TestLoop_DryRunChangesNothing(t *testing.T) {
 		"nothing can start": {func(f *fixture) {
 			f.addPackage(t, "02_b", "02", "pending", "07")
 		}, "", 1, false},
+		// The reconcile due when none was ever recorded
+		// (docs/errata/20_specrun_driver.md).
 		"every package done": {func(f *fixture) {
 			f.addPackage(t, "01_a", "01", "done")
-		}, "", 0, true},
+		}, "reconcile", 0, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
@@ -117,7 +124,9 @@ func TestLoop_DryRunChangesNothing(t *testing.T) {
 			next := ""
 			if r.NextStep != nil {
 				next = r.NextStep.SpecDir
-				if r.NextStep.Kind != "implement" {
+				if r.NextStep.Kind == "reconcile" {
+					next = "reconcile"
+				} else if r.NextStep.Kind != "implement" {
 					t.Errorf("next step kind %q", r.NextStep.Kind)
 				}
 			}
@@ -260,8 +269,8 @@ func TestLoop_EndsAfterMaxPackagesLanded(t *testing.T) {
 			if code != 0 || env.Result == nil || len(env.Result.Landed) != want || env.Result.AllDone != (want == 3) {
 				t.Fatalf("code %d, result %+v, error %+v; want %d landed", code, env.Result, env.Error, want)
 			}
-			if got := len(f.starts(t)); got != want {
-				t.Errorf("%d sessions; want %d", got, want)
+			if got := len(specDirs(f.starts(t))); got != want {
+				t.Errorf("%d package sessions; want %d", got, want)
 			}
 		})
 	}

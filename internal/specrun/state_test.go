@@ -45,7 +45,7 @@ func TestState_RecordsTheRunningStepAndThenTheDoneOne(t *testing.T) {
 		Running any              `json:"running"`
 	}
 	b, _ = os.ReadFile(f.statePath())
-	if err := json.Unmarshal(b, &after); err != nil || len(after.Done) != 1 || after.Done[0]["subject"] != "01_a" || after.Running != nil {
+	if err := json.Unmarshal(b, &after); err != nil || len(after.Done) == 0 || after.Done[0]["subject"] != "01_a" || after.Running != nil {
 		t.Errorf("the state after the run: %s (%v)", b, err)
 	}
 	if status := git(t, f.root, "status", "--porcelain"); status != "" {
@@ -98,7 +98,12 @@ func TestState_ResumesTheRunningStepFromTheRepository(t *testing.T) {
 			if got := specDirs(f.starts(t)); len(got) == 0 || got[0] != tc.first {
 				t.Errorf("the first session was for %v; want %s", got, tc.first)
 			}
-			lines := f.ledgerLines(t)
+			var lines []map[string]any
+			for _, l := range f.ledgerLines(t) {
+				if l["kind"] == "implement" {
+					lines = append(lines, l)
+				}
+			}
 			if len(lines) != tc.landed+1 {
 				t.Fatalf("%d ledger lines; want %d", len(lines), tc.landed+1)
 			}

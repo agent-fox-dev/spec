@@ -20,9 +20,20 @@ import (
 // trailer is the paragraph the merge commit of this start ends with.
 var trailer string
 
-// script is one plan per start; a start past the last uses the last.
+// script is one plan per start; a start past the last uses the last. A
+// reconcile session follows the reconcile plans, counted apart.
 type script struct {
-	Runs []run `json:"runs"`
+	Runs      []run       `json:"runs"`
+	Reconcile []reconcile `json:"reconcile"`
+}
+
+// reconcile is the plan of a reconcile session: what it does on the forge,
+// whether it writes its report, and how it misbehaves.
+type reconcile struct {
+	Forge    []json.RawMessage `json:"forge"`     // actions, appended to SPECRUN_FAKE_FORGE
+	NoReport bool              `json:"no_report"` // write no report
+	Actions  []string          `json:"actions"`   // commit, dirty, branch: misbehave on the repository
+	Silence  int               `json:"silence_s"`
 }
 
 type run struct {
@@ -52,7 +63,13 @@ func main() {
 		return
 	}
 	cwd, _ := os.Getwd()
-	starts := countLines(os.Getenv("SPECRUN_FAKE_RECORD"))
+	if len(os.Args) > 2 && strings.HasPrefix(os.Args[2], "/af-impl --reconcile ") {
+		appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
+			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
+		reconcileSession(os.Args[2])
+		return
+	}
+	starts := countLines(os.Getenv("SPECRUN_FAKE_RECORD")) - countReconciles(os.Getenv("SPECRUN_FAKE_RECORD"))
 	appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
 		WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
 
@@ -185,4 +202,53 @@ func appendLine(path, line string) {
 	}
 	defer f.Close()
 	fmt.Fprintln(f, line)
+}
+
+// reconcileSession follows the reconcile plan for this start: the forge
+// actions, the report at the path the prompt names, and any misbehaviour.
+func reconcileSession(prompt string) {
+	fields := strings.Fields(prompt)
+	report := ""
+	for i, f := range fields {
+		if f == "--report" && i+1 < len(fields) {
+			report = fields[i+1]
+		}
+	}
+	var p reconcile
+	if b, err := os.ReadFile(os.Getenv("SPECRUN_FAKE_SCRIPT")); err == nil {
+		var s script
+		if json.Unmarshal(b, &s) == nil && len(s.Reconcile) > 0 {
+			p = s.Reconcile[min(countReconciles(os.Getenv("SPECRUN_FAKE_RECORD"))-1, len(s.Reconcile)-1)]
+		}
+	}
+	fmt.Println(`{"type":"assistant","n":1}`)
+	for _, a := range p.Forge {
+		appendLine(os.Getenv("SPECRUN_FAKE_FORGE"), string(a))
+	}
+	for _, a := range p.Actions {
+		switch a {
+		case "commit":
+			_ = os.WriteFile("reconciled.txt", []byte("x"), 0o644)
+			git("add", "-A")
+			git("commit", "-q", "-m", "reconcile changed code")
+		case "dirty":
+			_ = os.WriteFile("stray.txt", []byte("x"), 0o644)
+		case "branch":
+			git("switch", "-q", "-c", "elsewhere")
+		}
+	}
+	if !p.NoReport && report != "" {
+		_ = os.WriteFile(report, []byte("# Reconcile\n\nNothing to report.\n"), 0o644)
+	}
+	time.Sleep(time.Duration(p.Silence) * time.Second)
+	fmt.Println(`{"type":"result","result":"reconciled"}`)
+}
+
+// countReconciles counts the reconcile sessions in the record file.
+func countReconciles(path string) int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(b), "/af-impl --reconcile ")
 }
