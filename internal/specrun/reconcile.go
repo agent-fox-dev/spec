@@ -197,7 +197,15 @@ func (r *run) reconcile() *Stopped {
 	}
 	r.state.SinceReconcile = 0
 	r.finishStep(kindReconcile, kindReconcile)
-	return nil
+	// The queue is built anew at every reconcile, from the labels as a person
+	// left them, and repaired before the next package.
+	queue, err := r.buildQueue()
+	if err != nil {
+		return stop(err.Error())
+	}
+	r.state.RepairQueue = queue
+	r.saveState()
+	return r.drainQueue()
 }
 
 // unmoved checks that a reconcile session, which changes no code, left the

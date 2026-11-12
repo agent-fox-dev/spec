@@ -237,3 +237,41 @@ func TestMain_RefusesABadReconcileInterval(t *testing.T) {
 		t.Error("a session started")
 	}
 }
+
+// --repair, --repair-on, --repair-max and --repair-security, each with its
+// SPECRUN_ variable.
+func TestOptions_TakeTheRepairSettings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv  []string
+		env   map[string]string
+		check func(o *options) bool
+		err   string
+	}{
+		"repair-on absent": {nil, nil, func(o *options) bool {
+			return strings.Join(o.repairOn, ",") == "security,data-loss,correctness,minor,untested"
+		}, ""},
+		"repair-on two":           {[]string{"--repair-on", "minor,untested"}, nil, func(o *options) bool { return strings.Join(o.repairOn, ",") == "minor,untested" }, ""},
+		"repair-on empty":         {[]string{"--repair-on", ""}, nil, func(o *options) bool { return o.repairOn != nil && len(o.repairOn) == 0 }, ""},
+		"repair-on bad":           {[]string{"--repair-on", "tests"}, nil, nil, "tests"},
+		"repair-max absent":       {nil, nil, func(o *options) bool { return o.repairMax == 5 }, ""},
+		"repair-max 0":            {[]string{"--repair-max", "0"}, nil, func(o *options) bool { return o.repairMax == 0 }, ""},
+		"repair-max -1":           {[]string{"--repair-max", "-1"}, nil, nil, "--repair-max"},
+		"SPECRUN_REPAIR_MAX":      {nil, map[string]string{"SPECRUN_REPAIR_MAX": "2"}, func(o *options) bool { return o.repairMax == 2 }, ""},
+		"SPECRUN_REPAIR_MAX bad":  {nil, map[string]string{"SPECRUN_REPAIR_MAX": "x"}, nil, "SPECRUN_REPAIR_MAX"},
+		"SPECRUN_REPAIR_SECURITY": {nil, map[string]string{"SPECRUN_REPAIR_SECURITY": "true"}, func(o *options) bool { return o.repairSecurity }, ""},
+		"SPECRUN_REPAIR":          {nil, map[string]string{"SPECRUN_REPAIR": "1"}, func(o *options) bool { return o.repair }, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, err := parseOptions(tc.argv, envOf(tc.env))
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Errorf("err %v; want one naming %s", err, tc.err)
+				}
+				return
+			}
+			if err != nil || !tc.check(o) {
+				t.Errorf("options %+v, %v", o, err)
+			}
+		})
+	}
+}

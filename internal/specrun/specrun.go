@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -285,6 +286,15 @@ func (r *run) loop() int {
 			if stop := r.reconcile(); stop != nil {
 				return r.stop(stop)
 			}
+		}
+		if run := r.state.Running; run != nil && run.Kind == kindRepair {
+			n, _ := strconv.Atoi(run.Subject)
+			if stop := r.repair(n); stop != nil {
+				return r.stop(stop)
+			}
+		}
+		if stop := r.drainQueue(); stop != nil {
+			return r.stop(stop)
 		}
 		next := r.resume()
 		if stop := r.recheckLabels(); stop != nil {

@@ -87,10 +87,14 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SPECRUN_FAKE_RECORD", f.record)
 	t.Setenv("SPECRUN_FAKE_SCRIPT", f.script)
-	for _, v := range []string{"SPECRUN_MAX", "SPECRUN_STALL", "SPECRUN_LOG_DIR", "SPECRUN_STRICT_SKILLS", "AF_SPEC_DIR"} {
+	for _, v := range []string{"SPECRUN_MAX", "SPECRUN_STALL", "SPECRUN_LOG_DIR", "SPECRUN_STRICT_SKILLS", "AF_SPEC_DIR",
+		"SPECRUN_STOP_ON", "SPECRUN_RECONCILE_EVERY", "SPECRUN_REPAIR", "SPECRUN_REPAIR_ON", "SPECRUN_REPAIR_SECURITY"} {
 		t.Setenv(v, "")
 		_ = os.Unsetenv(v)
 	}
+	// A reconcile repairs nothing unless a test asks it to, with --repair-max:
+	// the defects and untested items the other tests leave are theirs.
+	t.Setenv("SPECRUN_REPAIR_MAX", "0")
 	git(t, base, "init", "-q", "--bare", "-b", "main", f.origin)
 	git(t, base, "clone", "-q", f.origin, f.root)
 	writeFile(t, filepath.Join(f.root, "README.md"), "fixture\n")
@@ -191,7 +195,7 @@ func specDirs(starts []fakeStart) []string {
 	var out []string
 	for _, s := range starts {
 		for _, a := range s.Argv {
-			if strings.HasPrefix(a, "/af-impl ") && !strings.HasPrefix(a, "/af-impl --reconcile ") {
+			if strings.HasPrefix(a, "/af-impl ") && !strings.HasPrefix(a, "/af-impl --") {
 				out = append(out, strings.TrimPrefix(a, "/af-impl "))
 			}
 		}
@@ -407,6 +411,8 @@ func prompts(starts []fakeStart) []string {
 			switch {
 			case strings.HasPrefix(a, "/af-impl --reconcile "):
 				out = append(out, "reconcile")
+			case strings.HasPrefix(a, "/af-impl --repair "):
+				out = append(out, "repair "+strings.TrimPrefix(a, "/af-impl --repair "))
 			case strings.HasPrefix(a, "/af-impl "):
 				out = append(out, strings.TrimPrefix(a, "/af-impl "))
 			}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,21 @@ var trailer string
 type script struct {
 	Runs      []run       `json:"runs"`
 	Reconcile []reconcile `json:"reconcile"`
+	Repair    []repair    `json:"repair"`
+}
+
+// repair is the plan of a repair session: merge a fix branch into main, with
+// an AF-Run trailer naming an issue and an outcome or none; close the issue
+// or mark it failed on the forge; or misbehave.
+type repair struct {
+	Merge   bool   `json:"merge"`
+	Outcome string `json:"outcome"` // the trailer's repair.outcome; none when empty
+	For     int    `json:"for"`     // the issue the trailer names; the repaired one when 0
+	Close   bool   `json:"close"`
+	Fail    bool   `json:"fail"`
+	Stay    bool   `json:"stay_on_branch"`
+	Dirty   bool   `json:"dirty"`
+	Silence int    `json:"silence_s"`
 }
 
 // reconcile is the plan of a reconcile session: what it does on the forge,
@@ -63,13 +79,20 @@ func main() {
 		return
 	}
 	cwd, _ := os.Getwd()
+	if len(os.Args) > 2 && strings.HasPrefix(os.Args[2], "/af-impl --repair ") {
+		appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
+			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
+		repairSession(os.Args[2])
+		return
+	}
 	if len(os.Args) > 2 && strings.HasPrefix(os.Args[2], "/af-impl --reconcile ") {
 		appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
 			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
 		reconcileSession(os.Args[2])
 		return
 	}
-	starts := countLines(os.Getenv("SPECRUN_FAKE_RECORD")) - countReconciles(os.Getenv("SPECRUN_FAKE_RECORD"))
+	starts := countLines(os.Getenv("SPECRUN_FAKE_RECORD")) - countPrompts(os.Getenv("SPECRUN_FAKE_RECORD"), "/af-impl --reconcile ") -
+		countPrompts(os.Getenv("SPECRUN_FAKE_RECORD"), "/af-impl --repair ")
 	appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
 		WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
 
@@ -218,7 +241,7 @@ func reconcileSession(prompt string) {
 	if b, err := os.ReadFile(os.Getenv("SPECRUN_FAKE_SCRIPT")); err == nil {
 		var s script
 		if json.Unmarshal(b, &s) == nil && len(s.Reconcile) > 0 {
-			p = s.Reconcile[min(countReconciles(os.Getenv("SPECRUN_FAKE_RECORD"))-1, len(s.Reconcile)-1)]
+			p = s.Reconcile[min(countPrompts(os.Getenv("SPECRUN_FAKE_RECORD"), "/af-impl --reconcile ")-1, len(s.Reconcile)-1)]
 		}
 	}
 	fmt.Println(`{"type":"assistant","n":1}`)
@@ -244,11 +267,55 @@ func reconcileSession(prompt string) {
 	fmt.Println(`{"type":"result","result":"reconciled"}`)
 }
 
-// countReconciles counts the reconcile sessions in the record file.
-func countReconciles(path string) int {
+// countPrompts counts the sessions in the record file whose prompt starts
+// with prefix.
+func countPrompts(path, prefix string) int {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return 0
 	}
-	return strings.Count(string(b), "/af-impl --reconcile ")
+	return strings.Count(string(b), prefix)
+}
+
+// repairSession follows the repair plan for this start.
+func repairSession(prompt string) {
+	issue, _ := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(prompt, "/af-impl --repair ")))
+	var p repair
+	if b, err := os.ReadFile(os.Getenv("SPECRUN_FAKE_SCRIPT")); err == nil {
+		var s script
+		if json.Unmarshal(b, &s) == nil && len(s.Repair) > 0 {
+			p = s.Repair[min(countPrompts(os.Getenv("SPECRUN_FAKE_RECORD"), "/af-impl --repair ")-1, len(s.Repair)-1)]
+		}
+	}
+	fmt.Println(`{"type":"assistant","n":1}`)
+	branch := fmt.Sprintf("fix/%d-x", issue)
+	if p.Merge || p.Stay {
+		git("switch", "-q", "-c", branch)
+		_ = os.WriteFile(fmt.Sprintf("fix-%d.txt", issue), []byte("fixed"), 0o644)
+		git("add", "-A")
+		git("commit", "-q", "-m", fmt.Sprintf("fix: #%d", issue))
+	}
+	if p.Merge {
+		git("switch", "-q", "main")
+		args := []string{"merge", "-q", "--no-ff", "-m", "Merge " + branch}
+		if p.Outcome != "" {
+			n := p.For
+			if n == 0 {
+				n = issue
+			}
+			args = append(args, "-m", fmt.Sprintf(`AF-Run: {"repair":{"issue":%d,"outcome":%q}}`, n, p.Outcome))
+		}
+		git(append(args, branch)...)
+	}
+	if p.Close {
+		appendLine(os.Getenv("SPECRUN_FAKE_FORGE"), fmt.Sprintf(`{"op":"close","issue":%d}`, issue))
+	}
+	if p.Fail {
+		appendLine(os.Getenv("SPECRUN_FAKE_FORGE"), fmt.Sprintf(`{"op":"add_labels","issue":%d,"labels":["af:repair-failed"]}`, issue))
+	}
+	if p.Dirty {
+		_ = os.WriteFile("stray.txt", []byte("x"), 0o644)
+	}
+	time.Sleep(time.Duration(p.Silence) * time.Second)
+	fmt.Println(`{"type":"result","result":"repaired"}`)
 }
