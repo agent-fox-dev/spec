@@ -1066,6 +1066,46 @@
                 "type": "number",
                 "description": "the gate's wall-clock seconds, the sum of its commands' seconds, to the millisecond; 0 when a recorded pass was reused"
               },
+              "budget": {
+                "type": "object",
+                "description": "a full gate only, run or reused: the gate's seconds against the budget, gate_budget_seconds in the steering's frontmatter, else 120; a reused gate is measured by the seconds of the run it came from; absent for a task gate",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "the budget, in seconds: gate_budget_seconds in the steering's frontmatter, else 120"
+                  },
+                  "exceeded": {
+                    "type": "boolean",
+                    "description": "true when the gate took longer than the budget; a gate of exactly the budget has not exceeded it"
+                  },
+                  "over_by_seconds": {
+                    "type": "number",
+                    "description": "by how many seconds the gate exceeded the budget, to the millisecond; present exactly when exceeded"
+                  }
+                },
+                "required": [
+                  "seconds",
+                  "exceeded"
+                ]
+              },
+              "growth": {
+                "type": "object",
+                "description": "a full gate only: how much longer it took than the passing full gate recorded for the tree of the merge base of HEAD and the base branch (the branch refs/remotes/origin/HEAD names, else main), with the same commands and environment; absent when there is no such record, no base branch or no git work tree",
+                "properties": {
+                  "base_seconds": {
+                    "type": "number",
+                    "description": "the seconds of the passing full gate recorded for the tree of the merge base of HEAD and the base branch"
+                  },
+                  "grew_by": {
+                    "type": "number",
+                    "description": "the gate's seconds less base_seconds, divided by base_seconds, to four decimals: 0.5 for a gate half as long again, negative when it got faster"
+                  }
+                },
+                "required": [
+                  "base_seconds",
+                  "grew_by"
+                ]
+              },
               "slowest": {
                 "type": "array",
                 "description": "a full gate only: the five units of the all_tests output with the most seconds, slowest first, equal ones in output order; a unit is a Go test package (ok or FAIL lines with a duration); [] when the output holds none; for a reused pass, the recorded run's list; absent for a task gate",
@@ -1178,6 +1218,33 @@
                     "seconds"
                   ]
                 }
+              },
+              "test_cost": {
+                "type": "object",
+                "description": "the budget and the growth of the latest full gate counted, and whether they make a test-cost finding; absent when no full gate is counted",
+                "properties": {
+                  "budget_seconds": {
+                    "type": "integer",
+                    "description": "the budget the last full gate was measured against, in seconds"
+                  },
+                  "exceeded": {
+                    "type": "boolean",
+                    "description": "true when the last full gate took longer than the budget"
+                  },
+                  "grew_by": {
+                    "type": "number",
+                    "description": "the last full gate's growth over the base branch's tree; absent when none was measured"
+                  },
+                  "finding": {
+                    "type": "boolean",
+                    "description": "true when the last full gate exceeded the budget or grew by more than 0.5: the conformance pass then records a test-cost finding, a minor defect"
+                  }
+                },
+                "required": [
+                  "budget_seconds",
+                  "exceeded",
+                  "finding"
+                ]
               }
             },
             "required": [

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/agent-fox-dev/spec/envelope"
+	"github.com/agent-fox-dev/spec/internal/gate"
 )
 
 // twoUnits is a body for an all_tests script that prints two Go result lines.
@@ -213,5 +214,53 @@ func TestGateReport_RefusesWhatItCannotCountFrom(t *testing.T) {
 				t.Errorf("message %q", e.Message)
 			}
 		})
+	}
+}
+
+// The report's test_cost is the budget and the growth of the last full gate,
+// and a finding when it exceeded the budget or grew by more than half.
+func TestGateReport_SaysWhetherTheSuiteCostIsAFinding(t *testing.T) {
+	grew := func(f float64) *envelope.GateGrowth { return &envelope.GateGrowth{BaseSeconds: 50, GrewBy: f} }
+	for name, tc := range map[string]struct {
+		seconds  float64
+		growth   *envelope.GateGrowth
+		finding  bool
+		exceeded bool
+	}{
+		"100 s, grew 0.2":  {100, grew(0.2), false, false},
+		"130 s, grew 0.1":  {130, grew(0.1), true, true},
+		"100 s, grew 0.51": {100, grew(0.51), true, false},
+		"100 s, grew 0.5":  {100, grew(0.5), false, false},
+		"100 s, no growth": {100, nil, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := reportRepo(t)
+			base := git(t, g.root, "rev-parse", "HEAD")
+			top, err := gate.Top(g.root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := gate.OpenStore(top)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := gate.MeasureBudget(tc.seconds, 120)
+			if err := store.AppendRun(gate.Run{SpecID: "05", At: "2026-11-12T10:00:00Z", Commit: base, Level: "full",
+				Verdict: "pass", Seconds: tc.seconds, Budget: &b, Growth: tc.growth}); err != nil {
+				t.Fatal(err)
+			}
+			env, members := g.report(t, "05", "--since", base)
+			c := env.Result.GateReport.TestCost
+			if c == nil || c.BudgetSeconds != 120 || c.Exceeded != tc.exceeded || c.Finding != tc.finding {
+				t.Fatalf("test_cost %s; want exceeded %v, finding %v", members["test_cost"], tc.exceeded, tc.finding)
+			}
+			if (c.GrewBy == nil) != (tc.growth == nil) || (c.GrewBy != nil && *c.GrewBy != tc.growth.GrewBy) {
+				t.Errorf("grew_by %v; want %v", c.GrewBy, tc.growth)
+			}
+		})
+	}
+	g := reportRepo(t)
+	if _, members := g.report(t, "05", "--since", git(t, g.root, "rev-parse", "HEAD")); members["test_cost"] != nil {
+		t.Errorf("test_cost %s; want it absent with no full run", members["test_cost"])
 	}
 }

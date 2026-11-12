@@ -20,7 +20,15 @@ the whole diff from the base branch:
   are not one table; a test of an artefact rather than a behaviour (that a
   struct has a field, a constant has a value, a file mentions something, an
   import graph holds, a helper exists); a helper copied from the shared test
-  helpers. Each is fixed, not listed.
+  helpers; a new test that runs serially without a stated reason, or
+  rebuilds a fixture the shared helpers already build once. Each is fixed,
+  not listed.
+- **Test cost.** Run `speca <package> --gate-report --since <baseline
+  commit>`. When `result.gate_report.test_cost.finding` is true (the last
+  full gate exceeded the budget, or grew by more than half over the base
+  branch's tree), record a `test-cost` open item of kind `defect`, severity
+  `minor`, its evidence the report's numbers: `budget_seconds`, `exceeded`,
+  `grew_by`, `last_full_seconds` and `slowest`.
 - **Scope.** Any file outside the tasks' `touches`, the survey's decisions,
   documentation and the test files of the areas the tasks touch is a change
   the spec did not ask for: take it out, or list it as unmet.

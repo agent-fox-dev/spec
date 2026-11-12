@@ -12,8 +12,13 @@ import (
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 	"github.com/agent-fox-dev/spec/internal/gate"
+	"github.com/agent-fox-dev/spec/internal/project"
 	"github.com/agent-fox-dev/spec/internal/specpkg"
 )
+
+// gateClock is the clock the gate's commands are timed by; nil is
+// time.Now. A test replaces it.
+var gateClock func() time.Time
 
 // gateLevels are the gate's two levels, in the order the help names them.
 var gateLevels = []string{envelope.GateLevelTask, envelope.GateLevelFull}
@@ -84,7 +89,7 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if p, ok := lookup(store, key, recording); ok {
 		g = reusedPass(p)
 	} else {
-		runner := gate.Runner{Dir: c.root, Timeout: c.opts.timeout.value}
+		runner := gate.Runner{Dir: c.root, Timeout: c.opts.timeout.value, Now: gateClock}
 		if store != nil {
 			runner.LogDir = store.LogDir()
 		}
@@ -105,10 +110,22 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	g.Level, g.CleanEnv, g.Base = key.Level, key.CleanEnv, base
 	if key.Level != envelope.GateLevelFull {
 		g.Slowest = nil
+	} else if g.Verdict != envelope.GateVerdictNotRun {
+		// A full gate that failed is measured too: a suite over budget is
+		// over budget whatever its verdict.
+		seconds := g.Seconds
+		if g.Reused != nil {
+			seconds = g.Reused.Seconds
+		}
+		b := gate.MeasureBudget(seconds, gateBudget(c, true))
+		g.Budget = &b
+		if recording {
+			g.Growth = baseGrowth(store, tree.Top, key, seconds)
+		}
 	}
 	if recording && g.Verdict != envelope.GateVerdictNotRun {
 		r := gate.Run{SpecID: spec.SpecID, At: at.Format(time.RFC3339), Commit: tree.Commit, Level: g.Level, CleanEnv: g.CleanEnv,
-			Verdict: g.Verdict, Seconds: g.Seconds, Reused: g.Reused, Slowest: g.Slowest}
+			Verdict: g.Verdict, Seconds: g.Seconds, Reused: g.Reused, Slowest: g.Slowest, Budget: g.Budget, Growth: g.Growth}
 		if err := store.AppendRun(r); err != nil {
 			c.run.Warn(cli.WarnGateNotRecorded, "low", "the run could not be added to the run log under %s (%v): the gate report will not count it", store.Dir, err)
 		}
@@ -166,6 +183,38 @@ func runGate(runner gate.Runner, cmds []gate.Command, clean bool) envelope.GateR
 		runner.Env = gate.CleanEnv(os.Environ(), home)
 	}
 	return runner.Run(cmds)
+}
+
+// gateBudget is the seconds a full gate may take: the steering's
+// gate_budget_seconds, else the default. With warn, a steering frontmatter
+// that breaks a rule is a steering_malformed warning, since the budget may be
+// the rule it breaks.
+func gateBudget(c *call, warn bool) int {
+	s := project.ReadSteering(c.specsDir)
+	if msg := s.Malformed(c.specsDir); warn && msg != "" {
+		c.run.Warn(cli.WarnSteeringMalformed, "high", "%s", msg)
+	}
+	if s.GateBudgetSeconds > 0 {
+		return s.GateBudgetSeconds
+	}
+	return gate.DefaultBudgetSeconds
+}
+
+// baseGrowth is the growth of a full gate of seconds over the passing full
+// gate recorded for the base branch's tree under the same key otherwise; nil
+// when there is no such record or no base branch.
+func baseGrowth(store *gate.Store, top string, key gate.Key, seconds float64) *envelope.GateGrowth {
+	tree, err := gate.BaseTree(top)
+	if err != nil || tree == "" {
+		return nil
+	}
+	key.Tree = tree
+	p, ok := store.Lookup(key)
+	if !ok || p.Seconds <= 0 {
+		return nil
+	}
+	g := gate.MeasureGrowth(seconds, p.Seconds)
+	return &g
 }
 
 // affectedTests is the package's affected_tests command, "" when it names

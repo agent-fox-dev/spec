@@ -1390,7 +1390,7 @@ func TestRun_WarnsOnceAboutAMalformedSteeringRecord(t *testing.T) {
 	if len(malformed) != 1 || malformed[0].Severity != "high" || malformed[0].Stage != "preflight" {
 		t.Fatalf("steering_malformed warnings %+v; want one, high, at preflight", malformed)
 	}
-	if m := malformed[0].Message; !strings.Contains(m, "only version and amendments") || !strings.Contains(m, "YYYY-MM-DD") {
+	if m := malformed[0].Message; !strings.Contains(m, "only version, amendments and gate_budget_seconds") || !strings.Contains(m, "YYYY-MM-DD") {
 		t.Errorf("message %q does not name both broken rules", m)
 	}
 	if !slices.Contains(atFirstPhase, string(cli.WarnSteeringMalformed)) {

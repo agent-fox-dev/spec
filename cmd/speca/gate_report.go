@@ -35,7 +35,7 @@ func gateReport(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if err != nil {
 		return nil, &cli.ErrorInfo{Stage: "load", Category: "input", Message: fmt.Sprintf("the run log could not be read: %v", err)}
 	}
-	report := sumRuns(runs, spec.SpecID, in)
+	report := sumRuns(runs, spec.SpecID, in, gateBudget(c, false))
 	report.Since = since
 	return &Result{AdminResult: envelope.AdminResult{
 		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Status: spec.Status, GateReport: &report,
@@ -65,7 +65,8 @@ func sinceCommit(top string, since givenFlag) (string, *cli.ErrorInfo) {
 
 // sumRuns sums the runs of the package specID that ended in pass or fail at a
 // commit in the set, in the order they were logged.
-func sumRuns(runs []gate.Run, specID string, in map[string]bool) envelope.GateReport {
+// A last full run that recorded no budget is measured against budget.
+func sumRuns(runs []gate.Run, specID string, in map[string]bool, budget int) envelope.GateReport {
 	r := envelope.GateReport{Slowest: []envelope.GateUnit{}}
 	var lastFull *gate.Run
 	for _, run := range runs {
@@ -99,6 +100,13 @@ func sumRuns(runs []gate.Run, specID string, in map[string]bool) envelope.GateRe
 		if lastFull.Slowest != nil {
 			r.Slowest = lastFull.Slowest
 		}
+		// A run logged before budgets were recorded is measured now.
+		b := gate.MeasureBudget(d, budget)
+		if lastFull.Budget != nil {
+			b = *lastFull.Budget
+		}
+		cost := gate.TestCost(b, lastFull.Growth)
+		r.TestCost = &cost
 	}
 	return r
 }

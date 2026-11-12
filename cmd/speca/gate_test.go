@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -892,5 +893,110 @@ func TestGate_RefusesABaseItCannotUse(t *testing.T) {
 				t.Errorf("the scripts ran %v; want none", g.runs(t))
 			}
 		})
+	}
+}
+
+// stepClock makes every reading of the gate's clock step seconds after the
+// one before, so that each command takes step seconds.
+func stepClock(t *testing.T, step float64) {
+	t.Helper()
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	old := gateClock
+	gateClock = func() time.Time {
+		at = at.Add(time.Duration(step * float64(time.Second)))
+		return at
+	}
+	t.Cleanup(func() { gateClock = old })
+}
+
+// writeSteeringOf writes the spec root's steering, with lines in its
+// frontmatter beside a version.
+func (g *gateRepo) writeSteering(t *testing.T, lines string) {
+	t.Helper()
+	writeFile(t, filepath.Join(g.root, ".specs", "steering.md"), "---\nversion: 1.0.0\n"+lines+
+		"amendments:\n  - version: 1.0.0\n    date: 2026-10-15\n    change: A.\n---\n# Steering\n\nKeep tests fast.\n")
+}
+
+// A full gate, run or reused, is measured against the steering's budget,
+// 120 seconds when it sets none; a task gate is not.
+func TestGate_MeasuresAFullGateAgainstTheBudget(t *testing.T) {
+	g := newGateRepo(t)
+	g.writeSteering(t, "gate_budget_seconds: 1\n")
+	g.commit(t, "steering")
+	stepClock(t, 0.5) // two commands of 0.5 s each: 1 s, the budget
+	env, _ := g.gate(t, "full")
+	if b := env.Result.Gate.Budget; b == nil || b.Seconds != 1 || b.Exceeded {
+		t.Errorf("budget %+v; want 1 s, not exceeded at exactly 1 s", b)
+	}
+	writeFile(t, filepath.Join(g.root, "x.txt"), "x")
+	stepClock(t, 1)
+	env, _ = g.gate(t, "full")
+	b := env.Result.Gate.Budget
+	if b == nil || b.Seconds != 1 || !b.Exceeded || b.OverBySeconds == nil || *b.OverBySeconds != 1 {
+		t.Fatalf("budget %+v; want 1 s, exceeded by 1", b)
+	}
+	if again, _ := g.gate(t, "full"); again.Result.Gate.Reused == nil || !reflect.DeepEqual(again.Result.Gate.Budget, b) {
+		t.Errorf("the reused gate's budget %+v; want %+v", again.Result.Gate.Budget, b)
+	}
+	if task, members := g.gate(t, "task"); task.Result.Gate.Budget != nil || members["budget"] != nil {
+		t.Errorf("a task gate has a budget: %s", members["budget"])
+	}
+
+	os.Remove(filepath.Join(g.root, ".specs", "steering.md"))
+	stepClock(t, 0.01)
+	if env, _ := g.gate(t, "full"); env.Result.Gate.Budget == nil || env.Result.Gate.Budget.Seconds != 120 {
+		t.Errorf("budget %+v; want 120 s without a steering", env.Result.Gate.Budget)
+	}
+}
+
+// A budget that is no whole number above zero is the default, with a
+// steering_malformed warning naming it.
+func TestGate_TakesTheDefaultForABudgetItCannotRead(t *testing.T) {
+	g := newGateRepo(t)
+	g.writeSteering(t, "gate_budget_seconds: fast\n")
+	env, _ := g.gate(t, "full")
+	if b := env.Result.Gate.Budget; b == nil || b.Seconds != 120 {
+		t.Errorf("budget %+v; want 120 s", b)
+	}
+	var codes []string
+	for _, w := range env.Warnings {
+		codes = append(codes, string(w.Code))
+		if w.Code == cli.WarnSteeringMalformed && !strings.Contains(w.Message, "gate_budget_seconds") {
+			t.Errorf("warning %q does not name gate_budget_seconds", w.Message)
+		}
+	}
+	if !slices.Equal(codes, []string{string(cli.WarnSteeringMalformed)}) {
+		t.Errorf("warnings %v; want one steering_malformed", codes)
+	}
+}
+
+// A full gate's growth is measured against the passing full gate recorded
+// for the tree of the merge base of HEAD and the base branch.
+func TestGate_MeasuresTheGrowthOverTheBaseBranch(t *testing.T) {
+	g := newGateRepo(t)
+	stepClock(t, 5) // 10 s on main
+	g.gate(t, "full")
+	git(t, g.root, "switch", "-q", "-c", "feature")
+	writeFile(t, filepath.Join(g.root, "f.txt"), "f")
+	g.commit(t, "F")
+	stepClock(t, 8) // 16 s on the branch
+	env, _ := g.gate(t, "full")
+	if gr := env.Result.Gate.Growth; gr == nil || gr.BaseSeconds != 10 || gr.GrewBy != 0.6 {
+		t.Errorf("growth %+v; want base 10 s, grew by 0.6", gr)
+	}
+
+	// While a merge is uncommitted on main, main's tree before it is the base.
+	git(t, g.root, "switch", "-q", "main")
+	git(t, g.root, "merge", "-q", "--no-ff", "--no-commit", "feature")
+	if env, _ := g.gate(t, "full"); env.Result.Gate.Growth == nil || env.Result.Gate.Growth.BaseSeconds != 10 {
+		t.Errorf("growth during the merge %+v; want base 10 s", env.Result.Gate.Growth)
+	}
+
+	other := newGateRepo(t)
+	git(t, other.root, "switch", "-q", "-c", "feature")
+	writeFile(t, filepath.Join(other.root, "f.txt"), "f")
+	other.commit(t, "F")
+	if env, members := other.gate(t, "full"); env.Result.Gate.Growth != nil || members["growth"] != nil {
+		t.Errorf("growth %s; want it absent when main's tree was never gated", members["growth"])
 	}
 }

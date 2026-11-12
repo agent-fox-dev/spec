@@ -798,6 +798,8 @@ speca 16 --gate task --base 3f2a9c1     # the affected tests of the change since
 | `commands` | one entry per command that ran, in run order: `name` (`linter`, `all_tests`, or `affected_tests` for a task gate that ran it), `exit_code` (absent when it timed out), `seconds` (to the millisecond), `log` (absent when the file could not be written), `tail` (a failure only) and `timed_out`; `[]` when a pass was reused |
 | `seconds` | the sum of the commands' seconds; `0` when a pass was reused |
 | `slowest` | a full gate only: `{unit, seconds}`, at most five; `[]` when there are none |
+| `budget` | a full gate only, run or reused, whatever its verdict: `seconds` (`gate_budget_seconds` of the steering's frontmatter, else `120`), `exceeded` (more seconds than the budget; exactly the budget is not) and `over_by_seconds` (when exceeded); a reused gate is measured by its recorded run's seconds. A steering frontmatter that breaks a rule, a budget that is no whole number above zero among them, raises a high `steering_malformed` warning, and the default applies |
+| `growth` | a full gate only: `base_seconds`, the passing full gate recorded for the tree of the merge base of `HEAD` and the base branch with the same commands, directory and environment, and `grew_by`, the difference over `base_seconds` to four decimals (negative when faster); absent with no such record, no base branch or no git work tree |
 
 A full gate that passed, from a repository whose `all_tests` prints two Go
 result lines (the samples are the command's output, with the temporary state
@@ -816,6 +818,7 @@ absolute path):
       "log": "~/.local/state/agent-fox/speca/docrepo-348918aa290c4691/logs/20261112T165927Z-all_tests-3039488476.log" }
   ],
   "seconds": 0.285,
+  "budget": { "seconds": 120, "exceeded": false },
   "slowest": [
     { "unit": "github.com/acme/search", "seconds": 1.208 },
     { "unit": "github.com/acme/index", "seconds": 0.64 }
@@ -940,6 +943,7 @@ the commit its baseline ran on.
 | `baseline_full_seconds` | the seconds of the earliest full run counted; a reused run's are those of the run it came from; absent when none is counted |
 | `last_full_seconds` | the same, of the latest full run counted |
 | `slowest` | the slowest units of the latest full run counted; `[]` when there are none |
+| `test_cost` | the latest full run counted against the budget: `budget_seconds`, `exceeded`, `grew_by` (when a growth was measured) and `finding`, true when it exceeded the budget or `grew_by` is more than `0.5`; absent when no full run is counted. A run logged before budgets were recorded is measured against today's budget |
 
 With no run to count (no run log, no run of this package in the range, or only
 lines that cannot be parsed, which are skipped) every count is `0`, the two

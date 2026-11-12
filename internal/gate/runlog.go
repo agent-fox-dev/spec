@@ -13,15 +13,17 @@ import (
 // Run is one gate in the run log: every gate that ended in pass or fail,
 // reused ones included. A gate that could not run is not logged.
 type Run struct {
-	SpecID   string              `json:"spec_id"`
-	At       string              `json:"at"`
-	Commit   string              `json:"commit"`
-	Level    string              `json:"level"`
-	CleanEnv bool                `json:"clean_env"`
-	Verdict  string              `json:"verdict"`
-	Seconds  float64             `json:"seconds"`
-	Reused   *envelope.GateReuse `json:"reused,omitempty"`
-	Slowest  []envelope.GateUnit `json:"slowest,omitempty"`
+	SpecID   string               `json:"spec_id"`
+	At       string               `json:"at"`
+	Commit   string               `json:"commit"`
+	Level    string               `json:"level"`
+	CleanEnv bool                 `json:"clean_env"`
+	Verdict  string               `json:"verdict"`
+	Seconds  float64              `json:"seconds"`
+	Reused   *envelope.GateReuse  `json:"reused,omitempty"`
+	Slowest  []envelope.GateUnit  `json:"slowest,omitempty"`
+	Budget   *envelope.GateBudget `json:"budget,omitempty"`
+	Growth   *envelope.GateGrowth `json:"growth,omitempty"`
 }
 
 // Duration is how long the gate took to check its tree: its own seconds, or,

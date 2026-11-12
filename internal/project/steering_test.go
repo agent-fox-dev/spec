@@ -1,6 +1,7 @@
 package project
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -136,7 +137,7 @@ func TestReadSteering_NamesEveryRuleTheFrontmatterBreaks(t *testing.T) {
 		rules   []string // a phrase of each problem, in order
 	}{
 		{"well formed", front("2.0.0", two...), nil},
-		{"an unknown key", "---\nversion: 2.0.0\nowner: x\namendments:\n" + strings.Join(two, "") + "---\n", []string{"only version and amendments"}},
+		{"an unknown key", "---\nversion: 2.0.0\nowner: x\namendments:\n" + strings.Join(two, "") + "---\n", []string{"only version, amendments and gate_budget_seconds"}},
 		{"no version", front("", two...), []string{"version must be"}},
 		{"no amendments key", "---\nversion: 2.0.0\n---\n", []string{"at least one amendment"}},
 		{"an empty amendment list", "---\nversion: 2.0.0\namendments: []\n---\n", []string{"at least one amendment"}},
@@ -150,7 +151,7 @@ func TestReadSteering_NamesEveryRuleTheFrontmatterBreaks(t *testing.T) {
 		{"dates that increase", front("2.0.0", two[0], amendment("1.0.0", "2026-10-30", "A.")), []string{"must not increase"}},
 		{"a first amendment that is not the version", front("2.1.0", two...), []string{"first amendment"}},
 		{"three at once", "---\nversion: 02.0.0\nowner: x\namendments:\n" + two[0] + amendment("1.0.0", "2026-10-15", `""`) + "---\n",
-			[]string{"only version and amendments", "version must be", "every amendment must have a change"}},
+			[]string{"only version, amendments and gate_budget_seconds", "version must be", "every amendment must have a change"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for range 3 { // the order is the same every time
@@ -233,6 +234,34 @@ func TestReadSteering_MeasuresTheBodyAlone(t *testing.T) {
 			}
 			if s.Body != "" || s.Version != "" || len(s.Amendments) != 0 {
 				t.Errorf("got %+v; want nothing", s)
+			}
+		})
+	}
+}
+
+// gate_budget_seconds is a whole number above zero; anything else is a
+// problem naming the key, and leaves the budget unset.
+func TestReadSteering_ReadsTheGateBudget(t *testing.T) {
+	front := "---\nversion: 1.0.0\n%samendments:\n  - version: 1.0.0\n    date: 2026-10-15\n    change: A.\n---\n"
+	for name, tc := range map[string]struct {
+		line    string
+		budget  int
+		problem bool
+	}{
+		"90":     {"gate_budget_seconds: 90\n", 90, false},
+		"absent": {"", 0, false},
+		"0":      {"gate_budget_seconds: 0\n", 0, true},
+		"-5":     {"gate_budget_seconds: -5\n", 0, true},
+		"1.5":    {"gate_budget_seconds: 1.5\n", 0, true},
+		"fast":   {"gate_budget_seconds: fast\n", 0, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := ReadSteering(writeSteering(t, fmt.Sprintf(front, tc.line)+steeringBody))
+			if s.GateBudgetSeconds != tc.budget {
+				t.Errorf("budget %d; want %d", s.GateBudgetSeconds, tc.budget)
+			}
+			if tc.problem != (len(s.Problems) == 1 && strings.Contains(s.Problems[0], "gate_budget_seconds")) || (!tc.problem && len(s.Problems) > 0) {
+				t.Errorf("problems %q; want one naming gate_budget_seconds: %v", s.Problems, tc.problem)
 			}
 		})
 	}

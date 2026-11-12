@@ -75,6 +75,22 @@ the record; the spec is archived.
   tests that cover them is written in the commit that implements the task,
   not in the code.
 
+## Test Suite Cost
+
+The full test suite runs before anything lands, so its cost is paid on every
+package. Keep it proportional to the code, not to the history of the
+repository.
+
+- **Tests are independent and parallel-safe** unless they say why not: in Go
+  `t.Parallel()`, in Python safe under `pytest-xdist`, in JavaScript no shared
+  mutable state between files.
+- **An expensive fixture is built once** per process (a migrated database, a
+  repository, a key pair) and copied or cloned per test, not rebuilt.
+- **The full suite stays within the gate budget**, `gate_budget_seconds` in
+  this file's frontmatter (120 seconds when it sets none). A full gate over
+  the budget, or one that grew by more than half on a branch, is a test-cost
+  finding: a minor defect that reaches someone.
+
 ## Generated Docs
 
 `make doc` writes the API reference of every publicly accessible module of the

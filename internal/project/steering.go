@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,11 +43,16 @@ type Amendment struct {
 // frontmatter breaks, in the order the rules are checked, one sentence per
 // rule; a file that breaks any is unversioned, and its body is used all the
 // same.
+//
+// GateBudgetSeconds is the frontmatter's gate_budget_seconds, the seconds a
+// full gate may take before it is a finding; 0 when it sets none or sets one
+// that is no whole number above zero, which is then a problem.
 type SteeringFile struct {
-	Body       string
-	Version    string
-	Amendments []Amendment
-	Problems   []string
+	Body              string
+	Version           string
+	Amendments        []Amendment
+	Problems          []string
+	GateBudgetSeconds int
 }
 
 // Versioned reports whether the file has a version a package can record.
@@ -63,10 +69,38 @@ func (f SteeringFile) Malformed(specsDir string) string {
 		filepath.Join(specsDir, "steering.md"), len(f.Problems), strings.Join(f.Problems, "; "))
 }
 
-// steeringFrontmatter is the two keys a steering frontmatter may hold.
+// steeringFrontmatter is the keys a steering frontmatter may hold; the gate
+// budget is read from the raw keys, since it may be of any YAML type.
 type steeringFrontmatter struct {
 	Version    string      `yaml:"version"`
 	Amendments []Amendment `yaml:"amendments"`
+	gateBudget int
+}
+
+// gateBudgetKey is the frontmatter's key for the seconds a full gate may
+// take, and defaultGateBudget the budget when it sets none.
+const (
+	gateBudgetKey     = "gate_budget_seconds"
+	defaultGateBudget = 120
+)
+
+// wholeAboveZero is v as a whole number greater than zero, when it is one.
+func wholeAboveZero(v any) (int, bool) {
+	switch n := v.(type) {
+	case uint64:
+		if n > 0 && n <= math.MaxInt32 {
+			return int(n), true
+		}
+	case int64:
+		if n > 0 && n <= math.MaxInt32 {
+			return int(n), true
+		}
+	case int:
+		if n > 0 {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // ReadSteering reads <specsDir>/steering.md: its body, and its version and
@@ -117,6 +151,7 @@ func splitSteering(content string) SteeringFile {
 	}
 	f := SteeringFile{Body: body}
 	fm, problems := checkSteeringFrontmatter(block)
+	f.GateBudgetSeconds = fm.gateBudget
 	if len(problems) > 0 {
 		f.Problems = problems
 		return f
@@ -177,13 +212,20 @@ func checkSteeringFrontmatter(block string) (steeringFrontmatter, []string) {
 
 	var extra []string
 	for k := range keys {
-		if k != "version" && k != "amendments" {
+		if k != "version" && k != "amendments" && k != gateBudgetKey {
 			extra = append(extra, k)
 		}
 	}
 	if len(extra) > 0 {
 		slices.Sort(extra)
-		add("the frontmatter may hold only version and amendments, and it also holds %s", strings.Join(extra, ", "))
+		add("the frontmatter may hold only version, amendments and %s, and it also holds %s", gateBudgetKey, strings.Join(extra, ", "))
+	}
+	if v, ok := keys[gateBudgetKey]; ok {
+		if n, whole := wholeAboveZero(v); whole {
+			fm.gateBudget = n
+		} else {
+			add("%s must be a whole number of seconds greater than zero; it is %v, so the budget of %d seconds applies", gateBudgetKey, v, defaultGateBudget)
+		}
 	}
 	versionOK := IsVersion(fm.Version)
 	if !versionOK {
