@@ -3,9 +3,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -207,5 +210,234 @@ func TestGate_EndsACommandAndItsProcessesAtTheTimeout(t *testing.T) {
 	again, _ := g.gate(t, "full", "--timeout", "300ms")
 	if again.Result.Gate.Reused != nil {
 		t.Error("a gate that timed out was reused")
+	}
+}
+
+// numbered is a shell loop that prints n numbered lines, "line 1" to "line n".
+func numbered(n int) string {
+	return `i=1; while [ $i -le ` + strconv.Itoa(n) + ` ]; do echo "line $i"; i=$((i+1)); done`
+}
+
+// Each command's output, stdout and stderr together, goes to a log of its own
+// under the state directory, outside the repository, named in its entry.
+func TestGate_KeepsEachCommandsOutputInALogOfItsOwn(t *testing.T) {
+	g := newGateRepo(t)
+	g.setCommands(t, g.script(t, "linter", "echo out-1; echo err-1 >&2"), g.script(t, "all_tests", numbered(3000)))
+	env, _ := g.gate(t, "full")
+	r := env.Result.Gate
+	if r.Verdict != "pass" || len(r.Commands) != 2 {
+		t.Fatalf("verdict %q, commands %+v", r.Verdict, r.Commands)
+	}
+	for _, c := range r.Commands {
+		if !filepath.IsAbs(c.Log) || strings.HasPrefix(c.Log, g.root+string(filepath.Separator)) ||
+			!strings.HasPrefix(c.Log, g.state+string(filepath.Separator)) {
+			t.Errorf("%s's log %q is not an absolute path under the state directory %s and outside %s", c.Name, c.Log, g.state, g.root)
+		}
+	}
+	if r.Commands[0].Log == r.Commands[1].Log {
+		t.Fatalf("the two commands share the log %s", r.Commands[0].Log)
+	}
+	lint, err := os.ReadFile(r.Commands[0].Log)
+	if err != nil || !strings.Contains(string(lint), "out-1") || !strings.Contains(string(lint), "err-1") {
+		t.Errorf("the linter's log holds %q (%v); want out-1 and err-1", lint, err)
+	}
+	tests, err := os.ReadFile(r.Commands[1].Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(tests), "\n"), "\n")
+	if len(lines) != 3000 || lines[0] != "line 1" || lines[2999] != "line 3000" {
+		t.Errorf("all_tests' log holds %d lines, from %q; want the 3000 in order", len(lines), lines[0])
+	}
+	// A second gate writes logs of its own.
+	again, _ := g.gate(t, "full")
+	for i, c := range again.Result.Gate.Commands {
+		if c.Log == r.Commands[i].Log {
+			t.Errorf("two gates share the log %s", c.Log)
+		}
+	}
+}
+
+// A command that fails or times out carries the last 40 lines of its output,
+// all of them when there are fewer; a command that exits 0 carries none.
+func TestGate_PutsTheLastFortyLinesOfAFailureInTheVerdict(t *testing.T) {
+	last := func(from, to int) []string {
+		var out []string
+		for i := from; i <= to; i++ {
+			out = append(out, "line "+strconv.Itoa(i))
+		}
+		return out
+	}
+	for name, tc := range map[string]struct {
+		body    string
+		timeout []string
+		want    []string
+	}{
+		"no line":                       {"exit 1", nil, nil},
+		"one line":                      {numbered(1) + "; exit 1", nil, last(1, 1)},
+		"40 lines":                      {numbered(40) + "; exit 1", nil, last(1, 40)},
+		"41 lines":                      {numbered(41) + "; exit 1", nil, last(2, 41)},
+		"500 lines":                     {numbered(500) + "; exit 1", nil, last(461, 500)},
+		"41 lines, the last unfinished": {numbered(40) + `; printf "line 41"; exit 1`, nil, last(2, 41)},
+		"3 lines, then the timeout":     {numbered(3) + "; sleep 60", []string{"--timeout", "500ms"}, last(1, 3)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateRepo(t)
+			g.setCommands(t, g.script(t, "linter", "echo fine"), g.script(t, "all_tests", tc.body))
+			env, members := g.gate(t, append([]string{"full"}, tc.timeout...)...)
+			r := env.Result.Gate
+			if r.Verdict != "fail" || len(r.Commands) != 2 {
+				t.Fatalf("verdict %q, commands %+v", r.Verdict, r.Commands)
+			}
+			if r.Commands[0].Tail != nil {
+				t.Errorf("the passing linter carries a tail %q", *r.Commands[0].Tail)
+			}
+			c := r.Commands[1]
+			if c.Tail == nil {
+				t.Fatalf("the failing command has no tail; commands as written: %s", members["commands"])
+			}
+			var got []string
+			if *c.Tail != "" {
+				got = strings.Split(*c.Tail, "\n")
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("tail has %d lines %q; want %d lines %q", len(got), got, len(tc.want), tc.want)
+			}
+		})
+	}
+}
+
+// Whatever the commands print, and however much, speca's stdout is one JSON
+// object and holds none of it.
+func TestGate_KeepsTheCommandsOutputOffStdout(t *testing.T) {
+	g := newGateRepo(t)
+	g.setCommands(t, g.script(t, "linter", `echo '{"ok":false}'`),
+		g.script(t, "all_tests", `echo FIVE-MEGABYTES-FOLLOW; head -c 5000000 /dev/zero | tr '\0' 'x'; echo`))
+	var stdout, stderr bytes.Buffer
+	if code := Main([]string{"--dir", g.root, "05", "--gate", "full"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	dec := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	var first map[string]any
+	if err := dec.Decode(&first); err != nil {
+		t.Fatalf("stdout does not begin with a JSON object: %v", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		t.Errorf("stdout holds more than one JSON object (%v)", err)
+	}
+	if out := stdout.String(); strings.Contains(out, `{"ok":false}`) || strings.Contains(out, "FIVE-MEGABYTES-FOLLOW") || stdout.Len() > 100_000 {
+		t.Errorf("stdout (%d bytes) holds the commands' output", stdout.Len())
+	}
+	if strings.Contains(stderr.String(), "FIVE-MEGABYTES-FOLLOW") {
+		t.Error("stderr holds the commands' output")
+	}
+}
+
+// probeScript is an all_tests script that writes what it sees of its
+// environment to the probe file, one key=value line each.
+func probeScript(g *gateRepo, t *testing.T, probe string) string {
+	return g.script(t, "all_tests", `{
+echo "home=$HOME"
+echo "listing=$(ls -A "$HOME")"
+echo "prompt=$GIT_TERMINAL_PROMPT"
+echo "probe=$GATE_PROBE"
+echo "global=$(git config --global --list 2>/dev/null)"
+echo "system=$(git config --system --list 2>/dev/null)"
+} > '`+probe+`'`)
+}
+
+// readProbe reads the probe file as key=value lines.
+func readProbe(t *testing.T, path string) map[string]string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	key := ""
+	for _, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && slices.Contains([]string{"home", "listing", "prompt", "probe", "global", "system"}, k) {
+			key, out[k] = k, v
+		} else if key != "" {
+			out[key] += "\n" + line
+		}
+	}
+	return out
+}
+
+// With --clean-env the commands see an empty HOME made for the gate, no global
+// or system git configuration and GIT_TERMINAL_PROMPT=0, and everything else
+// speca had; without it they see speca's environment as it is.
+func TestGate_RunsTheCommandsInACleanEnvironmentOnRequest(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	for _, clean := range []bool{true, false} {
+		t.Run("clean "+strconv.FormatBool(clean), func(t *testing.T) {
+			g := newGateRepo(t)
+			home := t.TempDir()
+			writeFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Gate Probe\n")
+			t.Setenv("HOME", home)
+			t.Setenv("GATE_PROBE", "1")
+			t.Setenv("GIT_TERMINAL_PROMPT", "")
+			probe := filepath.Join(g.bin, "probe")
+			g.setCommands(t, g.script(t, "linter", ""), probeScript(g, t, probe))
+			args := []string{"full"}
+			if clean {
+				args = append(args, "--clean-env")
+			}
+			env, _ := g.gate(t, args...)
+			if r := env.Result.Gate; r.Verdict != "pass" || r.CleanEnv != clean {
+				t.Fatalf("verdict %q, clean_env %v", r.Verdict, r.CleanEnv)
+			}
+			p := readProbe(t, probe)
+			if p["probe"] != "1" {
+				t.Errorf("GATE_PROBE = %q; want it inherited", p["probe"])
+			}
+			if !clean {
+				if p["home"] != home || !strings.Contains(p["global"], "user.name=Gate Probe") {
+					t.Errorf("HOME %q, global configuration %q; want the test's", p["home"], p["global"])
+				}
+				return
+			}
+			if p["home"] == home || p["home"] == "" || p["listing"] != "" || p["prompt"] != "0" || p["global"] != "" || p["system"] != "" {
+				t.Errorf("the command saw %v; want an empty HOME of its own, GIT_TERMINAL_PROMPT 0 and no git configuration", p)
+			}
+			if strings.HasPrefix(p["home"], g.root) {
+				t.Errorf("the clean HOME %s is inside the repository", p["home"])
+			}
+		})
+	}
+}
+
+// The HOME a clean gate made is removed when the gate ends, whatever its
+// verdict, with what the commands wrote into it.
+func TestGate_RemovesTheCleanHomeWhateverTheVerdict(t *testing.T) {
+	for name, tc := range map[string]struct {
+		end     string
+		timeout []string
+		verdict string
+	}{
+		"a pass":    {"exit 0", nil, "pass"},
+		"a failure": {"exit 1", nil, "fail"},
+		"a timeout": {"sleep 60", []string{"--timeout", "500ms"}, "fail"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateRepo(t)
+			seen := filepath.Join(g.bin, "home")
+			g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests",
+				`echo "$HOME" > '`+seen+`'; touch "$HOME/file"; mkdir "$HOME/ro"; touch "$HOME/ro/f"; chmod 555 "$HOME/ro"; `+tc.end))
+			env, _ := g.gate(t, append([]string{"full", "--clean-env"}, tc.timeout...)...)
+			if v := env.Result.Gate.Verdict; v != tc.verdict {
+				t.Fatalf("verdict %q; want %s", v, tc.verdict)
+			}
+			b, err := os.ReadFile(seen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if home := strings.TrimSpace(string(b)); home == "" || exists(home) {
+				t.Errorf("the clean HOME %q is still there", home)
+			}
+		})
 	}
 }

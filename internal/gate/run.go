@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
+	"os"
 	"os/exec"
 	"time"
 
@@ -44,6 +44,9 @@ type Runner struct {
 	Timeout time.Duration
 	// Now is the clock; nil is time.Now. A test replaces it.
 	Now func() time.Time
+	// LogDir is the existing directory each command's log is written to; with
+	// none, or where a log cannot be created, the command runs without one.
+	LogDir string
 }
 
 // Run runs the commands in order and stops at the first that does not exit 0:
@@ -89,8 +92,17 @@ func (r *Runner) runOne(c Command) (envelope.GateCommand, string) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = r.Dir, r.Env, waitDelay
 	isolate(cmd)
-	// None of a command's output may reach the caller's stdout.
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	// None of a command's output reaches the caller's stdout: it goes to the
+	// command's log, and its last lines are kept for a failure.
+	out := &sink{}
+	if r.LogDir != "" {
+		pattern := time.Now().UTC().Format("20060102T150405Z") + "-" + c.Name + "-*.log"
+		if f, err := os.CreateTemp(r.LogDir, pattern); err == nil {
+			defer f.Close()
+			out.log, entry.Log = f, f.Name()
+		}
+	}
+	cmd.Stdout, cmd.Stderr = out, out
 
 	now := r.Now
 	if now == nil {
@@ -123,6 +135,10 @@ func (r *Runner) runOne(c Command) (envelope.GateCommand, string) {
 			code = -1
 		}
 		entry.ExitCode = &code
+	}
+	if entry.TimedOut || *entry.ExitCode != 0 {
+		tail := out.tail.String()
+		entry.Tail = &tail
 	}
 	return entry, ""
 }

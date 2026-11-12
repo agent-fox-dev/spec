@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -46,14 +49,47 @@ func executeGate(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	}
 	level := c.opts.gate.value
 	runner := gate.Runner{Dir: c.root, Timeout: c.opts.timeout.value}
-	g := runner.Run(gateCommands(spec))
-	g.Level = level
+	if logs, err := logDir(c.root); err == nil {
+		runner.LogDir = logs
+	}
+	var g envelope.GateResult
+	if home, remove, err := cleanHome(c.opts.cleanEnv); err != nil {
+		g = envelope.GateResult{Verdict: envelope.GateVerdictNotRun, Commands: []envelope.GateCommand{},
+			Reason: fmt.Sprintf("the clean environment could not be made: %v", err)}
+	} else {
+		defer remove()
+		if home != "" {
+			runner.Env = gate.CleanEnv(os.Environ(), home)
+		}
+		g = runner.Run(gateCommands(spec))
+	}
+	g.Level, g.CleanEnv = level, c.opts.cleanEnv
 	if level == envelope.GateLevelFull {
 		g.Slowest = []envelope.GateUnit{}
 	}
 	return &Result{AdminResult: envelope.AdminResult{
 		SpecDir: specpkg.Display(dir, c.root), SpecID: spec.SpecID, SpecName: spec.SpecName, Status: spec.Status, Gate: &g,
 	}}, nil
+}
+
+// cleanHome makes the empty HOME of a clean gate, and the function that removes
+// it when the gate ends; without --clean-env it makes nothing.
+func cleanHome(clean bool) (string, func(), error) {
+	if !clean {
+		return "", func() {}, nil
+	}
+	return gate.NewHome()
+}
+
+// logDir is the directory, under the state directory, that the commands' logs
+// of the repository at root are written to, created if need be.
+func logDir(root string) (string, error) {
+	state, err := gate.StateDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(gate.RepoDir(state, root), "logs")
+	return dir, os.MkdirAll(dir, 0o700)
 }
 
 // gateCommands are the package's linter and all_tests commands, in the order
