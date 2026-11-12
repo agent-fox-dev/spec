@@ -36,7 +36,7 @@ Do not write one. A full package's last task is derived by the tool: it depends 
 
 ## Test commands
 
-`test_commands.all_tests` and `test_commands.linter` are required and must be the project's real commands, taken from the language and tooling stated above — never a default from another ecosystem. `spec_tests` is optional and narrows the run to this spec's tests.
+`test_commands.all_tests` and `test_commands.linter` are required and must be the project's real commands, taken from the language and tooling stated above — never a default from another ecosystem. `spec_tests` is optional and narrows the run to this spec's tests. `affected_tests` is optional and written only when the project already has a command that runs the tests a change can affect from a base commit; it holds the placeholder `{base}` exactly once (for example `make test-affected BASE={base}`). Never invent one.
 
 ## Example
 

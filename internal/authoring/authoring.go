@@ -115,6 +115,9 @@ func ForeignTestCommands(t *afspec.TasksV3Json, profile project.Profile) []afspe
 	if t.TestCommands.SpecTests != nil {
 		commands["spec_tests"] = *t.TestCommands.SpecTests
 	}
+	if t.TestCommands.AffectedTests != nil {
+		commands["affected_tests"] = *t.TestCommands.AffectedTests
+	}
 	var out []afspec.ValidationEntry
 	for _, f := range profile.ForeignCommands(commands) {
 		msg := fmt.Sprintf("%s, but this project is %s (detected from %s)", f, profile.Language, profile.Manifest)

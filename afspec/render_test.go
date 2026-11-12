@@ -500,3 +500,19 @@ func TestRenderedBytes_AreTheSameEveryTime(t *testing.T) {
 		})
 	}
 }
+
+// The render lists the affected-tests command with the other test commands,
+// and a package without one renders as it did.
+func TestRenderTasks_ListsTheAffectedTestsCommand(t *testing.T) {
+	s := loadFixture(t, fixtureValidSpec)
+	before := s.RenderTasks()
+	affected := "make test-affected BASE={base}"
+	s.Tasks.TestCommands.AffectedTests = &affected
+	if out := s.RenderTasks(); !strings.Contains(out, "- **affected_tests:** `make test-affected BASE={base}`\n") {
+		t.Errorf("the render has no line for affected_tests:\n%s", out)
+	}
+	s.Tasks.TestCommands.AffectedTests = nil
+	if s.RenderTasks() != before {
+		t.Error("the render of a package without affected_tests changed")
+	}
+}

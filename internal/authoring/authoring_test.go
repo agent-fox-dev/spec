@@ -104,6 +104,18 @@ func TestForeignTestCommands_NamesTheFieldAndTheProjectsOwnCommand(t *testing.T)
 	}
 }
 
+// The affected-tests command is read as the other test commands are.
+func TestForeignTestCommands_ReadsTheAffectedTestsCommand(t *testing.T) {
+	for command, want := range map[string]int{"pytest --since {base}": 1, "make test-affected BASE={base}": 0} {
+		got := ForeignTestCommands(&afspec.TasksV3Json{TestCommands: afspec.TestCommands{
+			AllTests: "go test ./...", Linter: "go vet ./...", AffectedTests: &command,
+		}}, goProfile(t))
+		if len(got) != want || (want == 1 && (got[0].Check != CheckForeignTestCommand || got[0].EntityID != "test_commands.affected_tests")) {
+			t.Errorf("%q: hints %+v; want %d naming affected_tests", command, got, want)
+		}
+	}
+}
+
 // A clean package, a package missing its artifacts and a project of no known
 // language all give an empty list, never nil, so a caller can write it as [].
 func TestHints_IsEmptyWhenNothingIsFound(t *testing.T) {

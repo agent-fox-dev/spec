@@ -139,7 +139,8 @@ Then read the repository, read-only, over the files `git ls-files` lists:
 - **the checks**: the project's real test and lint commands, from its
   `Makefile`, `package.json`, `pyproject.toml` or CI config. They become
   `test_commands` in §7, and a command from another ecosystem is a defect in
-  the package;
+  the package. Look too for a command that runs only the tests a change can
+  affect, from a base commit: it becomes `affected_tests`;
 - **the external API**: for every library the work calls, the real signatures
   of the symbols it will call, read where they are defined (`go doc
   <pkg>.<Symbol>`, the installed package's source, the lockfile for the

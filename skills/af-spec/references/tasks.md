@@ -61,7 +61,10 @@ steps that say the behaviours to add, not the criterion ids to test.
 
 **`test_commands`** are the project's real commands, from §2: `all_tests`
 and `linter` are required, `spec_tests` is optional and narrows the run to
-this package's area. A default from another ecosystem makes the plan wrong
+this package's area. `affected_tests` is optional too, and written only when
+the project already has such a command: it runs the tests a change can
+affect from a base commit, which it takes as the placeholder `{base}`,
+exactly once (`make test-affected BASE={base}`); never invent one. A default from another ecosystem makes the plan wrong
 for the repository it will be run in.
 
 **`dependencies`** lists the packages the PRD's `## Dependencies` names, each

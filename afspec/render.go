@@ -630,6 +630,9 @@ func renderPlanContext(sb *strings.Builder, t *TasksV3Json) {
 	if t.TestCommands.SpecTests != nil && *t.TestCommands.SpecTests != "" {
 		sb.WriteString(fmt.Sprintf("- **spec_tests:** %s\n", code(*t.TestCommands.SpecTests)))
 	}
+	if t.TestCommands.AffectedTests != nil && *t.TestCommands.AffectedTests != "" {
+		sb.WriteString(fmt.Sprintf("- **affected_tests:** %s\n", code(*t.TestCommands.AffectedTests)))
+	}
 	sb.WriteString("\n## Dependencies\n\n")
 	if len(t.Dependencies) == 0 {
 		sb.WriteString("None: this spec depends on no other spec.\n\n")

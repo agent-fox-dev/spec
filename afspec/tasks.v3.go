@@ -60,6 +60,10 @@ type TasksV3Json struct {
 }
 
 type TestCommands struct {
+	// The command that runs the tests a change can affect, with the placeholder
+	// {base} exactly once for the commit the change starts from.
+	AffectedTests *string `json:"affected_tests,omitempty,omitzero" yaml:"affected_tests,omitempty" mapstructure:"affected_tests,omitempty"`
+
 	// AllTests corresponds to the JSON schema field "all_tests".
 	AllTests string `json:"all_tests" yaml:"all_tests" mapstructure:"all_tests"`
 
