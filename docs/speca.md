@@ -208,7 +208,7 @@ absent.
 
 The cross-spec rules (format v3 §10.3: an unknown dependency, a dependency
 cycle, a missing shared actor between two packages that both have execution
-paths) need every package of the spec root, so this form loads each `NN_name` directory that
+paths, and the handoff rules below) need every package of the spec root, so this form loads each `NN_name` directory that
 loads, adds the package itself when it is not among them — an archived package
 is not — builds the dependency graph and runs `afspec.ValidateCrossSpec`. `spec`
 gives every package it writes the same verdict (`specpkg.Verdict`), against the
@@ -216,10 +216,24 @@ spec root as it is then, before it activates the package. Of what that finds it 
 
 - the errors tagged with the package's `spec_id`, which the library gives to
   the downstream package that decides them (an unknown dependency, a missing
-  shared actor);
+  shared actor), and to the package that wrote a handoff or a take;
+- the `handoff_not_taken` warnings tagged with it, as the receiver;
 - the dependency cycle, which names no package, when the package has an edge
   in the graph — one from it or to it — since a package with no edge cannot be
   on a cycle.
+
+The handoff rules read the `handoffs` of `requirements.json` and the
+`takes_handoffs` of each task (format v3 §6.4.1):
+
+| Check | Of | When |
+|---|---|---|
+| `cross_spec_handoff_direction` | the sending package, on `requirements.json` | a handoff's `to` names no package under the spec root (an archived one included: it has landed), names the package itself, or names a package that does not depend on the sender, directly or transitively; the message names the handoff, its `to` and which it is |
+| `cross_spec_handoff_taken` | the taking package, on `tasks.json` | a `takes_handoffs` entry names a package that does not exist, a handoff that package does not declare, or one addressed to another package; the message names the task and the entry |
+| `handoff_not_taken` (a warning) | the receiving package, on `tasks.json` | a handoff another package addresses to it that no task takes, naming the sending package, the handoff's id and its `what` |
+
+With `--strict-handoffs` (which goes with `--validate` only, and stores
+nothing) each `handoff_not_taken` is an error instead, and `valid` is false
+while one is left; the same call without the flag warns again.
 
 A package under the root that fails to load is left out of the run. A spec root
 that cannot be read skips the cross-spec rules, with a `specs_dir_unreadable`
@@ -1330,6 +1344,7 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 | Flag | Default | Effect |
 |---|---|---|
 | `--validate` | off | give the format's full verdict on the package |
+| `--strict-handoffs` | off | with `--validate`: an inbound handoff no task takes is an error, not a warning |
 | `--list` | off | list every package under the spec root; takes no input |
 | `--next` | off | name the package to implement now, in dependency order; takes no input |
 | `--all` | off | with `--list`, also list the packages under `archive/`, marked archived; with `--render` or `--migrate` and no input, also render or convert them |

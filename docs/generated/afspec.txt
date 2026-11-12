@@ -51,6 +51,14 @@ const (
 )
     Schema file names for the four v3 artifacts.
 
+const (
+	CheckHandoffDirection = "cross_spec_handoff_direction"
+	CheckHandoffTaken     = "cross_spec_handoff_taken"
+	CheckHandoffNotTaken  = "handoff_not_taken"
+)
+    The checks of the cross-spec handoff rules, and of the warning that a
+    handoff is not taken.
+
 const AffectedTestsBase = "{base}"
     AffectedTestsBase is the placeholder the affected-tests command holds
     exactly once, for the commit a change starts from.
@@ -509,6 +517,10 @@ func (g *DependencyGraph) Dependencies(specID string) []DependencyEdge
 func (g *DependencyGraph) Dependents(specID string) []DependencyEdge
     Dependents returns all edges where other specs depend on the given spec
     (i.e., edges where ToSpec matches specID).
+
+func (g *DependencyGraph) DependsOn(from, to string) bool
+    DependsOn reports whether spec from depends on spec to, directly or through
+    other specs.
 
 func (g *DependencyGraph) TopologicalSort() ([]string, error)
     TopologicalSort returns spec IDs in topological order using Kahn's algorithm
@@ -1387,6 +1399,10 @@ type ValidationResult struct {
 }
     ValidationResult holds the results of spec validation. Valid is true if and
     only if Errors is empty; warnings never block.
+
+func StrictHandoffs(v ValidationResult) ValidationResult
+    StrictHandoffs is v with each handoff_not_taken warning made an error,
+    as a caller that will not start a package leaving a handoff untaken asks.
 
 func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult
     ValidateCrossSpec checks the rules that span specs: every declared

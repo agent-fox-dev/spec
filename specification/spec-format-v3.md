@@ -648,6 +648,14 @@ packages have execution paths, the downstream spec has at least one path step
 whose actor also appears in an upstream path (error). An actor matches by
 name, ignoring case. The v2 glossary comparison is gone with the glossary.
 
+The handoff rules (§6.4.1): a handoff's `to` names a package under the spec
+root, not the package itself, that depends on the sender directly or
+transitively (`cross_spec_handoff_direction`, an error of the sender); a
+`takes_handoffs` entry names a handoff its package declares to the taker
+(`cross_spec_handoff_taken`, an error of the taker); and an inbound handoff
+no task of the receiver takes is the warning `handoff_not_taken`, an error
+when the caller asks for strict handoffs.
+
 ### 10.4 Steering version
 
 As v2 §10.5.
