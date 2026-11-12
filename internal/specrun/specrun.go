@@ -245,7 +245,7 @@ func (r *run) loop() int {
 	for {
 		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
 			if _, f := r.choose(); f == nil && r.result.AllDone {
-				return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+				return r.finalReconcile()
 			}
 			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: landed %d, as --max %d asks", tool, len(r.result.Landed), r.opts.max), nil)
 		}
@@ -259,6 +259,11 @@ func (r *run) loop() int {
 				return r.emit(envelope.ExitFailed, "", f)
 			}
 			schemed = true
+		}
+		if run := r.state.Running; run != nil && run.Kind == kindReconcile {
+			if stop := r.reconcile(); stop != nil {
+				return r.stop(stop)
+			}
 		}
 		next := r.resume()
 		if stop := r.recheckLabels(); stop != nil {
@@ -274,10 +279,17 @@ func (r *run) loop() int {
 			}
 		}
 		if next == nil {
-			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+			return r.finalReconcile()
 		}
 		if stop := r.implement(next, before); stop != nil {
 			return r.stop(stop)
+		}
+		r.state.SinceReconcile++
+		r.saveState()
+		if r.reconcileDue(false) {
+			if stop := r.reconcile(); stop != nil {
+				return r.stop(stop)
+			}
 		}
 	}
 }
@@ -417,7 +429,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	r.startStep(kindImplement, next, before, started)
 
 	reason := ""
-	o, err := r.session(step).run(r.ctx, next.Dir)
+	o, err := r.session(step).run(r.ctx, "/af-impl "+next.Dir)
 	switch {
 	case err != nil:
 		reason = reasonNoSession
@@ -507,7 +519,7 @@ type runningSession struct {
 	base string
 }
 
-func (s *runningSession) run(ctx context.Context, specDir string) (outcome, error) {
+func (s *runningSession) run(ctx context.Context, prompt string) (outcome, error) {
 	stream, err := os.Create(s.base + ".jsonl")
 	if err != nil {
 		return outcome{}, err
@@ -519,7 +531,7 @@ func (s *runningSession) run(ctx context.Context, specDir string) (outcome, erro
 	}
 	defer errs.Close()
 	s.stream, s.errs = stream, errs
-	return s.session.run(ctx, specDir)
+	return s.session.run(ctx, prompt)
 }
 
 // emit writes the one envelope and returns its exit code. An empty summary is

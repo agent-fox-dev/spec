@@ -12,11 +12,11 @@ import (
 	"time"
 )
 
-// sessionArgs is the command line of a session for the package in specDir:
-// af-impl, headless, its stream as JSON, every permission granted, and no
-// timer that would keep a finished session alive.
-func sessionArgs(specDir string) []string {
-	return []string{"-p", "/af-impl " + specDir, "--output-format", "stream-json", "--verbose",
+// sessionArgs is the command line of a session with the prompt: headless,
+// its stream as JSON, every permission granted, and no timer that would keep
+// a finished session alive.
+func sessionArgs(prompt string) []string {
+	return []string{"-p", prompt, "--output-format", "stream-json", "--verbose",
 		"--permission-mode", "bypassPermissions", "--disallowedTools", "ScheduleWakeup,CronCreate"}
 }
 
@@ -39,9 +39,9 @@ type outcome struct {
 // Every line it writes goes to the stream as it arrives; one that writes
 // nothing for the stall time is ended with every process it started. Its exit
 // code decides nothing: the landing checks do.
-func (s *session) run(ctx context.Context, specDir string) (outcome, error) {
+func (s *session) run(ctx context.Context, prompt string) (outcome, error) {
 	var o outcome
-	cmd := exec.CommandContext(ctx, "claude", sessionArgs(specDir)...)
+	cmd := exec.CommandContext(ctx, "claude", sessionArgs(prompt)...)
 	cmd.Dir = s.dir
 	cmd.Env = append(os.Environ(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="+strconv.FormatInt(s.stall.Milliseconds(), 10))
 	cmd.Stderr = io.Discard

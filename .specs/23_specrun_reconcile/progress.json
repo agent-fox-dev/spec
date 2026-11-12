@@ -3,11 +3,11 @@
   "spec_id": "23",
   "spec_name": "specrun_reconcile",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-12T19:16:52Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

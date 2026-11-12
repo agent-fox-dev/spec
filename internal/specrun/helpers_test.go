@@ -99,6 +99,8 @@ func newFixture(t *testing.T) *fixture {
 	git(t, f.root, "remote", "set-head", "origin", "main")
 	f.forge = newMemForge()
 	f.forge.starts = func() int { return len(f.starts(t)) }
+	f.forge.actions = filepath.Join(f.scratch, "forge-actions.jsonl")
+	t.Setenv("SPECRUN_FAKE_FORGE", f.forge.actions)
 	was := newForge
 	newForge = func(string) (issuex.Client, issuex.Repo, error) {
 		return f.forge, issuex.Repo{Owner: "acme", Name: "widgets"}, nil
@@ -189,7 +191,7 @@ func specDirs(starts []fakeStart) []string {
 	var out []string
 	for _, s := range starts {
 		for _, a := range s.Argv {
-			if strings.HasPrefix(a, "/af-impl ") {
+			if strings.HasPrefix(a, "/af-impl ") && !strings.HasPrefix(a, "/af-impl --reconcile ") {
 				out = append(out, strings.TrimPrefix(a, "/af-impl "))
 			}
 		}
@@ -396,6 +398,23 @@ func processAlive(pid int) bool {
 	return err == nil && p.Signal(syscall.Signal(0)) == nil
 }
 
+// prompts is each session's prompt, a reconcile's shortened to
+// "reconcile", a package's to its spec_dir.
+func prompts(starts []fakeStart) []string {
+	var out []string
+	for _, s := range starts {
+		for _, a := range s.Argv {
+			switch {
+			case strings.HasPrefix(a, "/af-impl --reconcile "):
+				out = append(out, "reconcile")
+			case strings.HasPrefix(a, "/af-impl "):
+				out = append(out, strings.TrimPrefix(a, "/af-impl "))
+			}
+		}
+	}
+	return out
+}
+
 // memForge is an in-memory forge: it holds labels, issues and comments,
 // records every call in order, and fails a named call when told to.
 type memForge struct {
@@ -410,6 +429,55 @@ type memForge struct {
 	// records it, so a test can tell the labels came first.
 	starts         func() int
 	startsAtLabels []int
+	// actions is the file a fake session writes its forge actions to; they
+	// are applied before the next call, and are not the run's own calls.
+	actions string
+	applied int
+}
+
+// replay applies the actions a session wrote since the last call.
+func (m *memForge) replay() {
+	if m.actions == "" {
+		return
+	}
+	b, err := os.ReadFile(m.actions)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	for ; m.applied < len(lines); m.applied++ {
+		var a struct {
+			Op     string   `json:"op"`
+			Issue  int      `json:"issue"`
+			Labels []string `json:"labels"`
+		}
+		if json.Unmarshal([]byte(lines[m.applied]), &a) != nil {
+			continue
+		}
+		is := m.issue(a.Issue)
+		switch a.Op {
+		case "add_labels":
+			for _, l := range a.Labels {
+				if !slices.Contains(is.Labels, l) {
+					is.Labels = append(is.Labels, l)
+				}
+			}
+		case "close":
+			is.State = "closed"
+		}
+	}
+}
+
+func (m *memForge) CloseIssue(_ context.Context, ref issuex.IssueRef, comment string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.replay()
+	if err := m.call("CloseIssue", fmt.Sprint(ref.Number)); err != nil {
+		return err
+	}
+	m.issue(ref.Number).State = "closed"
+	m.comments[ref.Number] = append(m.comments[ref.Number], comment)
+	return nil
 }
 
 func newMemForge() *memForge {
@@ -419,6 +487,7 @@ func newMemForge() *memForge {
 func (m *memForge) Authenticated() bool { return true }
 
 func (m *memForge) call(name, detail string) error {
+	m.replay()
 	m.calls = append(m.calls, name+" "+detail)
 	if m.fail[name] > 0 {
 		m.fail[name]--
@@ -512,7 +581,9 @@ func (m *memForge) add(title, state string, labels ...string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := len(m.issues) + 1
-	m.issues = append(m.issues, issuex.Issue{Number: n, Title: title, State: state, Labels: labels})
+	m.issues = append(m.issues, issuex.Issue{Number: n, Title: title, State: state, Labels: labels,
+		HTMLURL:   fmt.Sprintf("https://forge.example/acme/widgets/issues/%d", n),
+		CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)})
 	return n
 }
 
@@ -533,6 +604,7 @@ func (m *memForge) writes() []string {
 func (m *memForge) labelsOf(n int) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.replay()
 	out := slices.Clone(m.issue(n).Labels)
 	slices.Sort(out)
 	return out

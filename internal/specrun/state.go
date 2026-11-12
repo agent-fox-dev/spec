@@ -33,6 +33,8 @@ type state struct {
 	// serious defects before it chooses a step, so a restart is not the way
 	// past a stop.
 	LastLanded string `json:"last_landed,omitempty"`
+	// SinceReconcile counts the packages landed since the last reconcile.
+	SinceReconcile int `json:"since_reconcile"`
 }
 
 // pendingComment is a comment a label rule owes an issue.
@@ -192,6 +194,7 @@ func (r *run) resume() *afspec.NextPackage {
 		fmt.Fprintf(r.stderr, "%s: %s %s landed before this run, as the repository shows\n", tool, run.Kind, run.Subject)
 		r.state.LabelCheck = run.SpecDir // its issues are checked like any landed package's
 		r.state.LastLanded = run.SpecDir
+		r.state.SinceReconcile++
 		r.finishStep(run.Kind, run.Subject)
 		return nil
 	}

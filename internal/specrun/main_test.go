@@ -58,13 +58,13 @@ func TestMain_LandsEveryOpenPackageWithOneCall(t *testing.T) {
 			t.Errorf("no merge of %s on main:\n%s", dir, log)
 		}
 	}
-	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "landed,landed" {
+	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "landed,landed,reconciled" {
 		t.Errorf("ledger outcomes %v", got)
 	}
 	entries, _ := os.ReadDir(f.logDir())
 	var logs []string
 	for _, e := range entries {
-		if e.Name() != "ledger.jsonl" && (strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".log")) {
+		if strings.Contains(e.Name(), "-implement-") && (strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".log")) {
 			logs = append(logs, e.Name())
 		}
 	}
