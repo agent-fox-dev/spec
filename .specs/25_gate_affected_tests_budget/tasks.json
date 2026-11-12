@@ -1,0 +1,130 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "25",
+  "spec_name": "gate_affected_tests_budget",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./cmd/speca/... ./internal/gate/... ./internal/project/... ./internal/authoring/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "19",
+      "reason": "extends its task gate, its verdict, its record and its gate report"
+    },
+    {
+      "spec": "21",
+      "reason": "a test-cost finding is filed with its defect kind and minor severity"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Carry an optional affected-tests command in the plan",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the validation table, the round trip, the render and the authoring hint as tests and confirm they fail",
+        "Add the optional string affected_tests, of at least one character, to test_commands in specification/schemas/tasks.v3.json and its copy afspec/schemas/tasks.v3.json, and regenerate the Go types with `make json-gen`; keep the key order all_tests, linter, spec_tests, affected_tests in the library's encoding",
+        "Add the rule affected_tests_base to the library's validation of a package: when the command is present it must contain {base} exactly once; the error names tasks.json and says how many it found",
+        "Render the command with the other test commands, and leave the render of a package without it byte for byte as it was",
+        "Make the foreign_test_command hint read affected_tests as it reads the other commands",
+        "Describe the field and its rule in specification/spec-format-v3.md beside the other test commands, and in docs/api.md; run `make doc` and commit docs/generated",
+        "In skills/af-spec/references/tasks.md and in the tasks prompt of specgen/templates say that affected_tests is written only when the project already has such a command, with {base} exactly once; in skills/af-spec/SKILL.md §2 add it to what the survey of the project's checks looks for"
+      ],
+      "touches": [
+        "specification/schemas/tasks.v3.json",
+        "afspec/schemas/tasks.v3.json",
+        "afspec/tasks.v3.go",
+        "afspec/validate.go",
+        "afspec/validate_test.go",
+        "afspec/marshal.go",
+        "afspec/render.go",
+        "afspec/render_test.go",
+        "internal/authoring/authoring.go",
+        "internal/authoring/authoring_test.go",
+        "specification/spec-format-v3.md",
+        "docs/api.md",
+        "docs/generated/",
+        "skills/af-spec/SKILL.md",
+        "skills/af-spec/references/tasks.md",
+        "specgen/templates/generation_user_tasks.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Run the affected tests in the task gate, from a base commit",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the task gate with and without affected_tests, the key table and the refused calls to cmd/speca/gate_test.go and confirm they fail",
+        "Add the flag --base to the gate form: it goes with --gate task only, and is refused as a usage error with the full level or without --gate",
+        "For a task gate of a package with affected_tests, resolve --base, HEAD when absent, to a full commit id with git; a value that names no commit, and a directory outside a git work tree, are usage errors. Replace {base} in the command by the id, then split and run it as every gate command, under the name affected_tests, in place of all_tests; put the id in the verdict's base",
+        "For a package without affected_tests the task gate is unchanged and base is absent",
+        "Use the command as it was run in the reuse key and in the record, so that two bases are two keys; the full level's key is unchanged",
+        "Describe --base and the new command name in speca's help, description and --schema, write the golden schema file again, and document them in docs/speca.md",
+        "In skills/af-impl/SKILL.md §5 note the commit each task starts from and pass it as `speca <package> --gate task --base <commit>`; say that the gate then runs the linter and the tests the task's change can affect, and that the full gate after the integration task catches what lies outside them"
+      ],
+      "touches": [
+        "cmd/speca/gate.go",
+        "cmd/speca/gate_test.go",
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "internal/gate/",
+        "envelope/gate_result.go",
+        "docs/speca.md",
+        "docs/generated/",
+        "skills/af-impl/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Hold the full gate to the steering's budget, measure its growth and report a test-cost finding",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the budget table, the growth cases, the malformed budget and the report table as tests and confirm they fail",
+        "Let the steering's frontmatter hold a third key, gate_budget_seconds, a whole number greater than zero; any other value is a problem of the frontmatter that names the key, reported through the existing steering_malformed warning, and leaves the budget unset. Document the key in docs/configuration.md beside the steering's other keys",
+        "For every full gate, run or reused, put into the verdict budget with seconds (the steering's, else 120), exceeded and over_by_seconds, measured on the gate's own seconds or, for a reused one, the recorded run's; keep the budget's result in the run log",
+        "For every full gate look up the passing full gate recorded for the tree of the merge base of HEAD and the base branch (the branch refs/remotes/origin/HEAD names, else main) under the same commands and environment; when there is one put growth with base_seconds and grew_by into the verdict and the run log; otherwise leave growth out",
+        "In the gate report add test_cost for the last full gate counted: budget_seconds, exceeded, grew_by when measured, and finding, true when it exceeded the budget or grew by more than 0.5",
+        "Add the new fields to the envelope types with their descriptions, to --schema and its golden file, and to docs/speca.md; run `make doc`",
+        "Add the section 'Test Suite Cost' to docs/templates/steering.md with the three directives of the PRD's section 4, and name gate_budget_seconds there",
+        "In skills/af-impl/references/conformance.md add to the Tests checklist 'a new test that runs serially without a stated reason, or rebuilds a fixture the shared helpers already build once', and say that when the gate report's test_cost.finding is true the pass records a test-cost finding, an open item of kind defect and severity minor, with the report's numbers as its evidence"
+      ],
+      "touches": [
+        "internal/project/steering.go",
+        "internal/project/steering_test.go",
+        "internal/gate/",
+        "cmd/speca/gate.go",
+        "cmd/speca/gate_test.go",
+        "cmd/speca/gate_report.go",
+        "cmd/speca/gate_report_test.go",
+        "cmd/speca/e2e_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "envelope/gate_result.go",
+        "docs/speca.md",
+        "docs/configuration.md",
+        "docs/generated/",
+        "docs/templates/steering.md",
+        "skills/af-impl/references/conformance.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}
