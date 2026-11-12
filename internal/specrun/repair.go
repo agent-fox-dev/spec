@@ -265,10 +265,10 @@ const (
 // af:repair-failed (failed, which stops the loop when its severity is in
 // --stop-on). Anything else is the reason the loop stops.
 func (r *run) repairLeft(issue int) (outcome string, failed *StopIssue, reason string) {
-	if branch, err := gitOutput(r.root, "branch", "--show-current"); err != nil || branch != r.base {
+	switch w, err := worktreeOf(r.root); {
+	case err != nil || w.branch != r.base:
 		return outcomeStopped, nil, reasonNotOnBase
-	}
-	if status, err := gitOutput(r.root, "status", "--porcelain"); err != nil || strings.TrimSpace(status) != "" {
+	case !w.clean:
 		return outcomeStopped, nil, reasonDirty
 	}
 	is, err := r.findIssue(issue)

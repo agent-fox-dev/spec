@@ -212,13 +212,13 @@ func (r *run) reconcile() *Stopped {
 // repository as it was: the base branch checked out, the tree clean, and
 // HEAD at the commit before it. It returns the first check that fails, or "".
 func (r *run) unmoved(before string) string {
-	if branch, err := gitOutput(r.root, "branch", "--show-current"); err != nil || branch != r.base {
+	w, err := worktreeOf(r.root)
+	switch {
+	case err != nil || w.branch != r.base:
 		return reasonNotOnBase
-	}
-	if status, err := gitOutput(r.root, "status", "--porcelain"); err != nil || strings.TrimSpace(status) != "" {
+	case !w.clean:
 		return reasonDirty
-	}
-	if head, err := gitOutput(r.root, "rev-parse", "HEAD"); err != nil || head != before {
+	case w.head != before:
 		return reasonHeadMoved
 	}
 	return ""

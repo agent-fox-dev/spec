@@ -1,8 +1,6 @@
 package specrun
 
 import (
-	"strings"
-
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
@@ -23,13 +21,13 @@ const (
 // the package has no task pending or in progress. It returns the first check
 // that fails, or "".
 func (r *run) landed(dir, before string) string {
-	if branch, err := gitOutput(r.root, "branch", "--show-current"); err != nil || branch != r.base {
+	w, err := worktreeOf(r.root)
+	switch {
+	case err != nil || w.branch != r.base:
 		return reasonNotOnBase
-	}
-	if status, err := gitOutput(r.root, "status", "--porcelain"); err != nil || strings.TrimSpace(status) != "" {
+	case !w.clean:
 		return reasonDirty
-	}
-	if head, err := gitOutput(r.root, "rev-parse", "HEAD"); err != nil || head == before {
+	case w.head == "" || w.head == before:
 		return reasonHeadStill
 	}
 	spec, err := afspec.LoadSpec(dir)
