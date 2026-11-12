@@ -1,0 +1,52 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "27",
+  "spec_name": "unattended_mode",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "20",
+      "reason": "changes the prompt of the package session specrun starts"
+    },
+    {
+      "spec": "23",
+      "reason": "its reconcile prompt must stay as it is"
+    },
+    {
+      "spec": "24",
+      "reason": "its repair prompt must stay as it is"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Start package sessions unattended, and give af-impl the mode",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Extend the tests of the three prompts and confirm the implement one fails",
+        "Append --unattended to the prompt of an implement step's session, and to nothing else; update the fake claude so that it accepts the argument, and the prompt docs/specrun.md shows",
+        "Add skills/af-impl/references/unattended.md and link it from SKILL.md: with the argument --unattended, after the package reference, each implement task of §5 runs in a subagent; without it af-impl runs as it does today",
+        "In that file, what the orchestrating session does for each task: claim it with speca; render it scoped with specr; start a subagent with the path of the brief, the path of the scoped render, the files the task touches and the progress lines so far; on its return check the gate verdict it reports against the table of §5, record the task done with speca, and commit the work and the state as one commit with the body the subagent returned. A subagent that returns no landable verdict is a failed attempt, handled as §5 says",
+        "In that file, what the subagent does and returns: steps 3 to 8 of §5 for its one task and the gate after it, then the task's progress line, the commit's subject and body, the gate verdict and the criterion-to-test map; it does not claim, record, commit or start another task, and it reads the brief, not the orchestrator's transcript",
+        "In that file, the brief: in unattended mode the survey writes it to a file outside the repository and keeps it within 600 lines, moving detail a single task needs into that task's entry; what a later task needs to know from an earlier one goes into the earlier task's commit body, which the next subagent is pointed at",
+        "In SKILL.md name the argument in the argument hint and in §1 in one sentence each, say in *Run to the end* that a subagent's return is not a stop, and keep the rendered body under the ceiling `make skills-check` enforces"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "docs/specrun.md",
+        "skills/af-impl/SKILL.md",
+        "skills/af-impl/references/unattended.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}
