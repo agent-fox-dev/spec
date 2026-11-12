@@ -986,12 +986,62 @@ type gateRepo struct {
 
 func newGateRepo(t *testing.T) *gateRepo {
 	t.Helper()
+	g := newGateDir(t)
+	gitInit(t, g.root)
+	return g
+}
+
+// newGateDir is newGateRepo without git: a directory with the package and no
+// .git.
+func newGateDir(t *testing.T) *gateRepo {
+	t.Helper()
 	g := &gateRepo{root: t.TempDir(), bin: t.TempDir(), state: t.TempDir()}
 	t.Setenv("XDG_STATE_HOME", g.state)
 	g.ran = filepath.Join(g.bin, "ran")
 	g.dir = addPackage(t, g.root, "05_gate", "05", "gate")
 	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", ""))
 	return g
+}
+
+// gitInit makes root a git repository on a branch main with everything in it
+// committed.
+func gitInit(t *testing.T, root string) {
+	t.Helper()
+	git(t, root, "init", "-q")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "base")
+}
+
+// git runs git in root with an identity, a default branch and no signing of
+// its own, so that it needs nothing of the machine's configuration and runs in
+// a clean environment, and returns its output, trimmed. It takes no optional
+// lock, so that reading the status does not rewrite the index.
+func git(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	cmd := exec.Command("git", append([]string{"-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false",
+		"-c", "user.name=Gate Test", "-c", "user.email=gate@example.com", "-c", "core.hooksPath=" + os.DevNull}, args...)...)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// allTestsRuns counts the times the all_tests script ran.
+func (g *gateRepo) allTestsRuns(t *testing.T) int {
+	t.Helper()
+	n := 0
+	for _, r := range g.runs(t) {
+		if r == "all_tests" {
+			n++
+		}
+	}
+	return n
 }
 
 // script writes an executable script called name to the scripts directory,

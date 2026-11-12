@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -250,7 +251,7 @@ func TestGate_KeepsEachCommandsOutputInALogOfItsOwn(t *testing.T) {
 		t.Errorf("all_tests' log holds %d lines, from %q; want the 3000 in order", len(lines), lines[0])
 	}
 	// A second gate writes logs of its own.
-	again, _ := g.gate(t, "full")
+	again, _ := g.gate(t, "task")
 	for i, c := range again.Result.Gate.Commands {
 		if c.Log == r.Commands[i].Log {
 			t.Errorf("two gates share the log %s", c.Log)
@@ -440,4 +441,249 @@ func TestGate_RemovesTheCleanHomeWhateverTheVerdict(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A gate that passed is recorded outside the repository, and the same gate
+// on the same tree is answered from the record, running nothing.
+func TestGate_ReusesARecordedPassForTheSameTree(t *testing.T) {
+	g := newGateRepo(t)
+	before := snapshot(t, g.root)
+	first, firstMembers := g.gate(t, "full")
+	f := first.Result.Gate
+	if f.Verdict != "pass" || f.Reused != nil || g.allTestsRuns(t) != 1 {
+		t.Fatalf("first gate %+v, all_tests ran %d times", f, g.allTestsRuns(t))
+	}
+	records, _ := filepath.Glob(filepath.Join(g.state, "agent-fox", "speca", "*", "*", "*.json"))
+	if len(records) == 0 {
+		t.Error("no record under the state directory")
+	}
+	if !maps.Equal(before, snapshot(t, g.root)) {
+		t.Error("the gate changed the repository")
+	}
+
+	second, members := g.gate(t, "full")
+	r := second.Result.Gate
+	if r.Verdict != "pass" || r.Reused == nil {
+		t.Fatalf("second gate %+v; want a reused pass", r)
+	}
+	if r.Reused.Commit != git(t, g.root, "rev-parse", "HEAD") || r.Reused.Seconds != f.Seconds {
+		t.Errorf("reused %+v; want the commit %s and the seconds %v", r.Reused, git(t, g.root, "rev-parse", "HEAD"), f.Seconds)
+	}
+	if _, err := time.Parse(time.RFC3339, r.Reused.At); err != nil {
+		t.Errorf("reused.at %q is not RFC 3339: %v", r.Reused.At, err)
+	}
+	if string(members["commands"]) != "[]" || r.Seconds != 0 || string(members["slowest"]) != string(firstMembers["slowest"]) {
+		t.Errorf("commands %s, seconds %v, slowest %s; want [], 0 and the first gate's %s",
+			members["commands"], r.Seconds, members["slowest"], firstMembers["slowest"])
+	}
+	if g.allTestsRuns(t) != 1 {
+		t.Errorf("all_tests ran %d times; want once", g.allTestsRuns(t))
+	}
+}
+
+// A gate runs again when one part of its key differs from every recorded
+// pass, and is reused when only what is not in the key changed: an ignored
+// file, or the commit holding the same tree.
+func TestGate_RunsAgainWhenThePartsOfItsKeyChange(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(t *testing.T, g *gateRepo) (flags []string, commit string)
+		reused bool
+	}{
+		"a tracked file edited": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			editFile(t, filepath.Join(g.dir, "prd.md"), "## Intent", "## Intent\n\nEdited.")
+			return nil, ""
+		}, false},
+		"an untracked file added": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			writeFile(t, filepath.Join(g.root, "notes.txt"), "notes")
+			return nil, ""
+		}, false},
+		"the task level": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			return []string{"task"}, ""
+		}, false},
+		"the all_tests string changed by one argument": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			g.setCommands(t, filepath.Join(g.bin, "linter"), filepath.Join(g.bin, "all_tests")+" -v")
+			return nil, ""
+		}, false},
+		"a clean environment": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			return []string{"full", "--clean-env"}, ""
+		}, false},
+		"an ignored file added": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			writeFile(t, filepath.Join(g.root, "x.log"), "ignored")
+			return nil, git(t, g.root, "rev-parse", "HEAD")
+		}, true},
+		"the change the pass covered committed": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			// The recorded pass is of an uncommitted change; committing it
+			// keeps the tree.
+			writeFile(t, filepath.Join(g.root, "change.txt"), "change")
+			before := git(t, g.root, "rev-parse", "HEAD")
+			g.gate(t, "full")
+			git(t, g.root, "add", "-A")
+			git(t, g.root, "commit", "-q", "-m", "the change")
+			return nil, before
+		}, true},
+		"a --no-ff merge of a tip that passed, the base not moved": {func(t *testing.T, g *gateRepo) ([]string, string) {
+			git(t, g.root, "switch", "-q", "-c", "feature")
+			writeFile(t, filepath.Join(g.root, "feature.txt"), "feature")
+			git(t, g.root, "add", "-A")
+			git(t, g.root, "commit", "-q", "-m", "feature")
+			g.gate(t, "full")
+			tip := git(t, g.root, "rev-parse", "HEAD")
+			git(t, g.root, "switch", "-q", "main")
+			git(t, g.root, "merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+			return nil, tip
+		}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateRepo(t)
+			writeFile(t, filepath.Join(g.root, ".gitignore"), "*.log\n")
+			git(t, g.root, "add", "-A")
+			git(t, g.root, "commit", "-q", "-m", "ignore logs")
+			g.gate(t, "full")
+			flags, commit := tc.change(t, g)
+			runs := g.allTestsRuns(t)
+			if len(flags) == 0 {
+				flags = []string{"full"}
+			}
+			env, _ := g.gate(t, flags...)
+			r := env.Result.Gate
+			if (r.Reused != nil) != tc.reused {
+				t.Fatalf("reused %+v; want reused %v", r.Reused, tc.reused)
+			}
+			ran := g.allTestsRuns(t) > runs
+			if ran == tc.reused {
+				t.Errorf("all_tests ran: %v; want %v", ran, !tc.reused)
+			}
+			if tc.reused && r.Reused.Commit != commit {
+				t.Errorf("reused.commit %s; want %s", r.Reused.Commit, commit)
+			}
+		})
+	}
+}
+
+// A failure and a gate that could not run are never reused.
+func TestGate_NeverReusesAFailureOrAGateThatDidNotRun(t *testing.T) {
+	for name, tc := range map[string]struct {
+		set     func(t *testing.T, g *gateRepo)
+		verdict string
+		runs    int
+	}{
+		"all_tests exits 1": {func(t *testing.T, g *gateRepo) {
+			g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", "exit 1"))
+		}, "fail", 2},
+		"the linter's program is missing": {func(t *testing.T, g *gateRepo) {
+			g.setCommands(t, filepath.Join(g.bin, "no-such-linter"), g.script(t, "all_tests", ""))
+		}, "not_run", 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := newGateRepo(t)
+			tc.set(t, g)
+			a, _ := g.gate(t, "full")
+			b, _ := g.gate(t, "full")
+			if a.Result.Gate.Verdict != tc.verdict || b.Result.Gate.Verdict != tc.verdict || b.Result.Gate.Reused != nil {
+				t.Errorf("verdicts %q and %q, second reused %+v; want %s twice, never reused",
+					a.Result.Gate.Verdict, b.Result.Gate.Verdict, b.Result.Gate.Reused, tc.verdict)
+			}
+			if n := g.allTestsRuns(t); n != tc.runs {
+				t.Errorf("all_tests ran %d times; want %d", n, tc.runs)
+			}
+		})
+	}
+}
+
+// Working out the tree changes nothing of the repository: not the index, not
+// the staged changes, not the object store.
+func TestGate_LeavesTheIndexAndTheObjectStoreAsTheyWere(t *testing.T) {
+	g := newGateRepo(t)
+	editFile(t, filepath.Join(g.dir, "prd.md"), "## Intent", "## Intent\n\nStaged.")
+	git(t, g.root, "add", filepath.Join(".specs", "05_gate", "prd.md"))
+	editFile(t, filepath.Join(g.dir, "tasks.json"), `"spec_id"`, `"spec_id" `)
+	writeFile(t, filepath.Join(g.root, "untracked.txt"), "untracked")
+	status := git(t, g.root, "status", "--porcelain")
+	before := snapshot(t, g.root)
+	contents := treeBytes(t, filepath.Join(g.root, ".git"))
+
+	env, _ := g.gate(t, "full")
+	if env.Result.Gate.Verdict != "pass" {
+		t.Fatalf("verdict %q", env.Result.Gate.Verdict)
+	}
+	if !maps.Equal(before, snapshot(t, g.root)) || !maps.Equal(contents, treeBytes(t, filepath.Join(g.root, ".git"))) {
+		t.Error("the gate changed a file under the repository")
+	}
+	if got := git(t, g.root, "status", "--porcelain"); got != status {
+		t.Errorf("status %q; want %q", got, status)
+	}
+	if got := git(t, g.root, "diff", "--cached", "--name-only"); got != ".specs/05_gate/prd.md" {
+		t.Errorf("staged %q; want the PRD alone", got)
+	}
+}
+
+// Without a tree id (no work tree, or no git) the gate runs and answers, and
+// a warning says it was not recorded.
+func TestGate_RunsButRecordsNothingWithoutATreeID(t *testing.T) {
+	for name, set := range map[string]func(t *testing.T) *gateRepo{
+		"no .git": newGateDir,
+		"no git on the path": func(t *testing.T) *gateRepo {
+			g := newGateRepo(t)
+			t.Setenv("PATH", t.TempDir())
+			return g
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := set(t)
+			for i := range 2 {
+				env, _ := g.gate(t, "full")
+				if r := env.Result.Gate; r.Verdict != "pass" || r.Reused != nil {
+					t.Errorf("gate %d: verdict %q, reused %+v; want a pass that ran", i+1, r.Verdict, r.Reused)
+				}
+				if codes := warningCodes(env); !slices.Equal(codes, []string{"gate_not_recorded"}) {
+					t.Errorf("gate %d: warnings %v; want gate_not_recorded", i+1, codes)
+				} else if w := env.Warnings[0]; !strings.Contains(w.Message, "tree id") {
+					t.Errorf("warning %q does not say there is no tree id", w.Message)
+				}
+			}
+			if n := g.allTestsRuns(t); n != 2 {
+				t.Errorf("all_tests ran %d times; want twice", n)
+			}
+		})
+	}
+}
+
+// A state directory that cannot be written does not stop the gate; a record
+// that cannot be read counts as none, and the next pass replaces it.
+func TestGate_RunsWhenTheStateDirectoryFailsIt(t *testing.T) {
+	t.Run("the state directory is a file", func(t *testing.T) {
+		g := newGateRepo(t)
+		file := filepath.Join(g.state, "file")
+		writeFile(t, file, "")
+		t.Setenv("XDG_STATE_HOME", file)
+		env, _ := g.gate(t, "full")
+		r := env.Result.Gate
+		if r.Verdict != "pass" || !slices.Equal(warningCodes(env), []string{"gate_not_recorded"}) {
+			t.Fatalf("verdict %q, warnings %v; want a pass and gate_not_recorded", r.Verdict, warningCodes(env))
+		}
+		if !strings.Contains(env.Warnings[0].Message, file) {
+			t.Errorf("warning %q does not name %s", env.Warnings[0].Message, file)
+		}
+		for _, c := range r.Commands {
+			if c.Log != "" {
+				t.Errorf("%s has the log %s", c.Name, c.Log)
+			}
+		}
+	})
+	t.Run("a record that cannot be parsed", func(t *testing.T) {
+		g := newGateRepo(t)
+		g.gate(t, "full")
+		records, _ := filepath.Glob(filepath.Join(g.state, "agent-fox", "speca", "*", "passes", "*.json"))
+		if len(records) != 1 {
+			t.Fatalf("records %v; want one", records)
+		}
+		writeFile(t, records[0], "not json")
+		b, _ := g.gate(t, "full")
+		if b.Result.Gate.Reused != nil || g.allTestsRuns(t) != 2 || len(b.Warnings) != 0 {
+			t.Errorf("reused %+v, all_tests ran %d times, warnings %v; want a run", b.Result.Gate.Reused, g.allTestsRuns(t), warningCodes(b))
+		}
+		if c, _ := g.gate(t, "full"); c.Result.Gate.Reused == nil {
+			t.Error("the pass did not replace the record that could not be parsed")
+		}
+	})
 }

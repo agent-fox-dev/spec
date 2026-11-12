@@ -39,6 +39,8 @@ const (
 	// speca's status form.
 	WarnTasksOpen             WarnCode = "tasks_open"
 	WarnSupersedesNotRecorded WarnCode = "supersedes_not_recorded"
+	// speca's gate form.
+	WarnGateNotRecorded WarnCode = "gate_not_recorded"
 	// specr's codes.
 	WarnSpecInvalid   WarnCode = "spec_invalid"
 	WarnSectionAbsent WarnCode = "section_absent"

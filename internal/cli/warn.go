@@ -43,6 +43,7 @@ const (
 	WarnTaskStateForced          = envelope.WarnTaskStateForced
 	WarnTasksOpen                = envelope.WarnTasksOpen
 	WarnSupersedesNotRecorded    = envelope.WarnSupersedesNotRecorded
+	WarnGateNotRecorded          = envelope.WarnGateNotRecorded
 )
 
 // warnStages is the one place a code's stage is decided.
@@ -81,6 +82,7 @@ var warnStages = map[WarnCode]string{
 	WarnTaskStateForced:          "task",
 	WarnTasksOpen:                "status",
 	WarnSupersedesNotRecorded:    "status",
+	WarnGateNotRecorded:          "gate",
 }
 
 // WarnStage returns the stage a code is recorded against, and whether the
