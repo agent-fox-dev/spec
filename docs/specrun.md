@@ -227,8 +227,23 @@ run at stage `preflight`.
   ```
 
   `outcome` is `landed`, `stopped` or `stalled`; `wall_minutes` is
-  `ended_at` less `started_at`, in minutes.
-- After each step the line is printed short on stderr. When a landed package
+  `ended_at` less `started_at`, in minutes. A landed package's line also holds
+  `gate` and `open_items`, copied as they are from the `AF-Run:` trailer of
+  its merge commit (the tip of the base branch after the landing):
+
+  ```
+  AF-Run: {"gate":{"full":{"runs":3,"seconds":412.5,"reused":1},"task":{"runs":9,"seconds":95,"reused":0},"baseline_full_seconds":130.2,"last_full_seconds":141},"open_items":{"opened":{"awaits":1,"defect:minor":2},"closed":{},"passed_on":{},"reclassified":{}}}
+  ```
+
+  `gate` is what `speca <package> --gate-report` counted; `open_items` holds
+  `opened`, `closed`, `passed_on` and `reclassified`, each counts by kind, a
+  defect as `defect:<severity>`. Other keys of the trailer are ignored. A
+  merge commit with no `AF-Run:` trailer, or one whose value is not one JSON
+  object, still counts as landed: its line holds neither object, and a low
+  `trailer_missing` warning names the commit.
+- After each step the line is printed short on stderr, a landed package's
+  with its trailer's counts (`landed in 12.0 min; gate 3 full in 412.5s, 1
+  reused; 3 opened`). When a landed package
   took more than twice the median wall minutes of the packages that landed
   before it in the ledger, a warning line follows; stopped and stalled steps
   are no part of the median.
@@ -370,6 +385,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | `skill_mismatch` | high | preflight | the installed af-impl skill's SHA-256 is not the one `specrun` was built with |
 | `skill_not_installed` | high | preflight | no af-impl skill is installed where a session here would load it |
 | `forge_unavailable` | low | preflight | a dry run has no forge client; it writes nothing to a forge anyway |
+| `trailer_missing` | low | land | a landed package's merge commit has no `AF-Run:` trailer holding one JSON object |
 
 ## What it leaves out
 

@@ -130,3 +130,67 @@ func TestLedger_PrintsTheLedgerAsATable(t *testing.T) {
 		t.Error("--ledger ran a step")
 	}
 }
+
+// landWith is a plan for a session that lands its package with a merge
+// commit ending in the paragraph trailer.
+func landWith(trailer string) map[string]any {
+	return map[string]any{"events": 1, "actions": []string{"land"}, "trailer": trailer}
+}
+
+// The AF-Run trailer of a landed package's merge commit goes into its ledger
+// line, its gate and open-item counts into the short form.
+func TestLedger_ReadsTheTrailerOfTheMergeCommit(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.plan(t, landWith(`AF-Run: {"gate":{"full":{"runs":3,"seconds":412.5,"reused":1},"task":{"runs":9,"seconds":95,"reused":0},"baseline_full_seconds":130.2,"last_full_seconds":141},"open_items":{"opened":{"awaits":1,"defect:minor":2},"closed":{},"passed_on":{},"reclassified":{}},"extra":1}`))
+	env, code, stderr := runMain(t)
+	if code != 0 || len(env.Warnings) != 0 {
+		t.Fatalf("code %d, warnings %+v\n%s", code, env.Warnings, stderr)
+	}
+	l := f.ledgerLines(t)[0]
+	gate, _ := l["gate"].(map[string]any)
+	full, _ := gate["full"].(map[string]any)
+	items, _ := l["open_items"].(map[string]any)
+	opened, _ := items["opened"].(map[string]any)
+	if full["runs"] != 3.0 || opened["defect:minor"] != 2.0 {
+		t.Errorf("ledger line %v", l)
+	}
+	if _, ok := l["extra"]; ok {
+		t.Error("the ledger line holds the trailer's other key")
+	}
+	for _, want := range []string{"3 full", "412.5", "1 reused", "3 opened"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr does not say %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// A landed package whose merge commit has no trailer, or one that is not a
+// JSON object, still counts as landed, with a warning.
+func TestLedger_WarnsWhenTheTrailerIsMissing(t *testing.T) {
+	for name, trailer := range map[string]string{"no trailer": "", "not json": "AF-Run: not json", "an array": "AF-Run: [1]"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.addPackage(t, "02_b", "02", "pending")
+			f.plan(t, landWith(trailer))
+			env, code, stderr := runMain(t)
+			if code != 0 || len(env.Result.Landed) != 2 {
+				t.Fatalf("code %d, result %+v\n%s", code, env.Result, stderr)
+			}
+			l := f.ledgerLines(t)[0]
+			_, hasGate := l["gate"]
+			_, hasItems := l["open_items"]
+			if l["outcome"] != "landed" || hasGate || hasItems {
+				t.Errorf("ledger line %v", l)
+			}
+			var codes []string
+			for _, w := range env.Warnings {
+				codes = append(codes, string(w.Code))
+			}
+			if strings.Join(codes, ",") != "trailer_missing,trailer_missing" {
+				t.Errorf("warnings %v; want trailer_missing for each package", codes)
+			}
+		})
+	}
+}

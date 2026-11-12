@@ -17,6 +17,9 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
+// trailer is the paragraph the merge commit of this start ends with.
+var trailer string
+
 // script is one plan per start; a start past the last uses the last.
 type script struct {
 	Runs []run `json:"runs"`
@@ -31,6 +34,8 @@ type run struct {
 	Child      bool     `json:"child"`          // start a child that sleeps, recording both pids
 	Detached   bool     `json:"detached_child"` // the same, the child in a process group of its own
 	Exit       int      `json:"exit"`
+	// Trailer is a paragraph the merge commit's message ends with.
+	Trailer string `json:"trailer"`
 }
 
 // record is one line of the record file.
@@ -62,6 +67,7 @@ func main() {
 			specDir = strings.TrimSpace(strings.TrimPrefix(a, "/af-impl "))
 		}
 	}
+	trailer = r.Trailer
 	for _, a := range r.Actions {
 		act(a, specDir)
 	}
@@ -123,7 +129,11 @@ func act(action, specDir string) {
 		git("commit", "-q", "-m", "feat: "+action+" "+specDir)
 	case "merge":
 		git("switch", "-q", "main")
-		git("merge", "-q", "--no-ff", "-m", "Merge "+branch, branch)
+		args := []string{"merge", "-q", "--no-ff", "-m", "Merge " + branch}
+		if trailer != "" {
+			args = append(args, "-m", trailer)
+		}
+		git(append(args, branch)...)
 	case "land":
 		act("branch", specDir)
 		act("done", specDir)

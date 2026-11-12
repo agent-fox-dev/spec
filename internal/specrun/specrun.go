@@ -368,8 +368,13 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	ended := now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindImplement, Subject: subject, StartedAt: started.Format(time.RFC3339),
 		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded}
+	short := ""
 	switch reason {
 	case "":
+		if t, ok := r.readTrailer(); ok {
+			line.Gate, line.OpenItems = t.Gate, t.OpenItems
+			short = trailerSummary(t)
+		}
 	case reasonStalled:
 		line.Outcome = outcomeStalled
 	default:
@@ -385,7 +390,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	}
 	r.finishStep(kindImplement, subject)
 	r.result.Landed = append(r.result.Landed, subject)
-	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min\n", tool, step, line.WallMinutes)
+	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min%s\n", tool, step, line.WallMinutes, short)
 	if median, slow := slowerThanUsual(earlier, line.WallMinutes); slow {
 		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",
 			tool, subject, line.WallMinutes, median)
