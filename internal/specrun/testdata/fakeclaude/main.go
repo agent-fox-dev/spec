@@ -56,8 +56,10 @@ func main() {
 		fmt.Printf(`{"type":"assistant","n":%d}`+"\n", i+1)
 	}
 	specDir := ""
-	if len(os.Args) > 1 {
-		specDir = strings.TrimSpace(strings.TrimPrefix(os.Args[1], "/af-impl"))
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "/af-impl ") {
+			specDir = strings.TrimSpace(strings.TrimPrefix(a, "/af-impl "))
+		}
 	}
 	for _, a := range r.Actions {
 		act(a, specDir)

@@ -174,8 +174,10 @@ type fakeStart struct {
 func specDirs(starts []fakeStart) []string {
 	var out []string
 	for _, s := range starts {
-		if len(s.Argv) > 0 {
-			out = append(out, strings.TrimPrefix(s.Argv[0], "/af-impl "))
+		for _, a := range s.Argv {
+			if strings.HasPrefix(a, "/af-impl ") {
+				out = append(out, strings.TrimPrefix(a, "/af-impl "))
+			}
 		}
 	}
 	return out
@@ -265,6 +267,17 @@ func editJSON(t *testing.T, path string, edit func(m map[string]any)) {
 		t.Fatal(err)
 	}
 	writeFile(t, path, string(out)+"\n")
+}
+
+// realPath is path with its symbolic links resolved, as a process sees its
+// working directory.
+func realPath(t *testing.T, path string) string {
+	t.Helper()
+	p, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 func exists(path string) bool {

@@ -1,8 +1,10 @@
 package specrun
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -136,6 +138,177 @@ func TestLoop_DryRunChangesNothing(t *testing.T) {
 					entries, _ := os.ReadDir(d)
 					t.Errorf("%s exists, holding %v", d, entries)
 				}
+			}
+		})
+	}
+}
+
+// land is a plan for one session that implements its package and merges it
+// into main, exiting with code.
+func land(code int) map[string]any {
+	return map[string]any{"events": 2, "actions": []string{"land"}, "result": "landed", "exit": code}
+}
+
+// The loop brings the base branch up to date and starts one session for the
+// package afspec names next, with af-impl's command line, in the repository.
+func TestLoop_StartsTheSessionForTheNextPackageOnAnUpToDateBase(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending", "01")
+	// origin moves on after the clone: the session must start on its commit.
+	other := filepath.Join(f.scratch, "other")
+	git(t, f.scratch, "clone", "-q", f.origin, other)
+	writeFile(t, filepath.Join(other, "later.txt"), "later")
+	git(t, other, "add", "-A")
+	git(t, other, "commit", "-q", "-m", "later")
+	git(t, other, "push", "-q")
+	upstream := git(t, other, "rev-parse", "HEAD")
+	f.plan(t, land(0))
+
+	env, code, stderr := runMain(t, "--max", "1")
+	if code != 0 || !env.OK {
+		t.Fatalf("code %d, error %+v\n%s", code, env.Error, stderr)
+	}
+	starts := f.starts(t)
+	if len(starts) != 1 {
+		t.Fatalf("%d sessions; want one", len(starts))
+	}
+	want := []string{"-p", "/af-impl .specs/01_a", "--output-format", "stream-json", "--verbose",
+		"--permission-mode", "bypassPermissions", "--disallowedTools", "ScheduleWakeup,CronCreate"}
+	if s := starts[0]; strings.Join(s.Argv, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("argv %q; want %q", s.Argv, want)
+	}
+	if cwd, _ := filepath.EvalSymlinks(starts[0].Cwd); cwd != realPath(t, f.root) {
+		t.Errorf("the session ran in %s; want %s", starts[0].Cwd, f.root)
+	}
+	if starts[0].WaitMS != "1800000" || starts[0].Head != upstream {
+		t.Errorf("wait %q, head %s; want 1800000 and origin's %s", starts[0].WaitMS, starts[0].Head, upstream)
+	}
+}
+
+// A step lands when the session leaves the base branch checked out and clean,
+// HEAD moved and no task open, whatever the session's exit code; the loop then
+// goes on to the next package.
+func TestLoop_GoesOnWhenAPackageLandedWhateverTheExitCode(t *testing.T) {
+	for _, exit := range []int{0, 1} {
+		t.Run(fmt.Sprint("exit ", exit), func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.addPackage(t, "02_b", "02", "pending", "01")
+			f.plan(t, land(exit))
+			env, code, stderr := runMain(t)
+			if code != 0 || env.Result == nil || strings.Join(env.Result.Landed, ",") != "01_a,02_b" || !env.Result.AllDone {
+				t.Fatalf("code %d, result %+v, error %+v\n%s", code, env.Result, env.Error, stderr)
+			}
+			if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,.specs/02_b" {
+				t.Errorf("sessions for %v", got)
+			}
+			if env.Summary != "specrun: every package is done, landed 2" {
+				t.Errorf("summary %q", env.Summary)
+			}
+		})
+	}
+}
+
+// A step that fails a landing check stops the loop, naming the check, and no
+// further session starts.
+func TestLoop_StopsAtTheFirstLandingCheckThatFails(t *testing.T) {
+	for name, tc := range map[string]struct {
+		actions []string
+		reason  string
+	}{
+		"stays on the feature branch":         {[]string{"branch", "done"}, "not on the base branch"},
+		"merges and leaves an untracked file": {[]string{"land", "dirty"}, "working tree not clean"},
+		"changes nothing":                     {nil, "HEAD did not move"},
+		"merges with a task left pending":     {[]string{"branch", "leave_pending", "merge"}, "tasks still open"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.addPackage(t, "02_b", "02", "pending")
+			f.plan(t, map[string]any{"events": 1, "actions": tc.actions, "exit": 0})
+			env, code, _ := runMain(t)
+			r := env.Result
+			if code != 1 || env.OK || r == nil || r.Stopped == nil || r.Stopped.Reason != tc.reason {
+				t.Fatalf("code %d, result %+v, error %+v; want a stop: %s", code, r, env.Error, tc.reason)
+			}
+			if r.Stopped.Kind != "implement" || r.Stopped.Subject != "01_a" || !strings.Contains(r.Stopped.Step, "implement-01_a") {
+				t.Errorf("stopped %+v", r.Stopped)
+			}
+			if n := len(f.starts(t)); n != 1 {
+				t.Errorf("%d sessions; want one", n)
+			}
+		})
+	}
+}
+
+// --max N ends the loop once N packages have landed in this run.
+func TestLoop_EndsAfterMaxPackagesLanded(t *testing.T) {
+	for _, n := range []int{1, 2, 5} {
+		t.Run(fmt.Sprint("max ", n), func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.addPackage(t, "02_b", "02", "pending")
+			f.addPackage(t, "03_c", "03", "pending")
+			f.plan(t, land(0))
+			env, code, _ := runMain(t, "--max", fmt.Sprint(n))
+			want := min(n, 3)
+			if code != 0 || env.Result == nil || len(env.Result.Landed) != want || env.Result.AllDone != (want == 3) {
+				t.Fatalf("code %d, result %+v, error %+v; want %d landed", code, env.Result, env.Error, want)
+			}
+			if got := len(f.starts(t)); got != want {
+				t.Errorf("%d sessions; want %d", got, want)
+			}
+		})
+	}
+}
+
+// A base branch that cannot be switched to or pulled, or a missing claude,
+// stops specrun before any session and changes nothing.
+func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, f *fixture)
+		says  string
+	}{
+		"a local main that diverged from origin": {func(t *testing.T, f *fixture) {
+			other := filepath.Join(f.scratch, "other")
+			git(t, f.scratch, "clone", "-q", f.origin, other)
+			writeFile(t, filepath.Join(other, "README.md"), "theirs\n")
+			git(t, other, "commit", "-q", "-am", "theirs")
+			git(t, other, "push", "-q")
+			writeFile(t, filepath.Join(f.root, "README.md"), "ours\n")
+			f.commit(t, "ours")
+		}, "git pull"},
+		"a dirty tree on another branch": {func(t *testing.T, f *fixture) {
+			git(t, f.root, "switch", "-q", "-c", "other")
+			writeFile(t, filepath.Join(f.root, "README.md"), "other\n")
+			f.commit(t, "other")
+			writeFile(t, filepath.Join(f.root, "README.md"), "uncommitted\n")
+		}, "git switch"},
+		"no claude on PATH": {func(t *testing.T, f *fixture) {
+			t.Setenv("PATH", strings.Join(slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(d string) bool {
+				return exists(filepath.Join(d, "claude"))
+			}), string(os.PathListSeparator)))
+		}, "claude"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.plan(t, land(0))
+			tc.setup(t, f)
+			head, status := git(t, f.root, "rev-parse", "HEAD"), git(t, f.root, "status", "--porcelain")
+			env, code, _ := runMain(t)
+			if code != 1 || env.Error == nil || env.Error.Stage != "preflight" || !strings.Contains(env.Error.Message, tc.says) {
+				t.Fatalf("code %d, error %+v; want stage preflight saying %q", code, env.Error, tc.says)
+			}
+			if len(f.starts(t)) != 0 {
+				t.Error("a session was started")
+			}
+			if git(t, f.root, "rev-parse", "HEAD") != head || git(t, f.root, "status", "--porcelain") != status {
+				t.Error("the repository changed")
+			}
+			if exists(filepath.Join(f.state, "agent-fox", "specrun")) {
+				t.Error("a state file was written")
 			}
 		})
 	}

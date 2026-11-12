@@ -73,6 +73,8 @@ type run struct {
 	started  time.Time
 	root     string // the repository's top level
 	specsDir string
+	base     string // the base branch
+	steps    int    // the steps this run took
 	result   *Result
 	warnings []envelope.Warning
 }
@@ -175,17 +177,99 @@ func (r *run) dryRun() int {
 	}
 }
 
-// loop chooses the next package and ends when there is none to start.
-// Running a session for one is the next part of the loop to be built.
+// loop runs one step at a time until every package is done, a step stops, or
+// --max packages have landed. Before every step the base branch is checked
+// out and pulled.
 func (r *run) loop() int {
-	next, f := r.choose()
-	if f != nil {
-		return r.emit(envelope.ExitFailed, "", f)
+	if _, err := exec.LookPath("claude"); err != nil {
+		return r.emit(envelope.ExitFailed, "", failure("preflight", "environment",
+			"claude is not on PATH: every session is a claude -p process"))
 	}
-	if next == nil {
-		return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+	r.base = baseBranch(r.root)
+	for {
+		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
+			if _, f := r.choose(); f == nil && r.result.AllDone {
+				return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+			}
+			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: landed %d, as --max %d asks", tool, len(r.result.Landed), r.opts.max), nil)
+		}
+		before, f := r.syncBase()
+		if f != nil {
+			return r.emit(envelope.ExitFailed, "", f)
+		}
+		next, f := r.choose()
+		if f != nil {
+			return r.emit(envelope.ExitFailed, "", f)
+		}
+		if next == nil {
+			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
+		}
+		if stop := r.implement(next, before); stop != nil {
+			r.result.Stopped = stop
+			return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, stop.Step, stop.Reason,
+				len(r.result.Landed)), failure(stopStage(stop.Reason), "input", "%s %s: %s", stop.Kind, stop.Subject, stop.Reason))
+		}
 	}
-	return r.emit(envelope.ExitFailed, "", failure("session", "internal", "the session for %s is not run: specrun runs no session yet", next.Dir))
+}
+
+// stopStage is the stage of the failure a stopped step is reported with.
+func stopStage(reason string) string {
+	switch reason {
+	case reasonStalled:
+		return "stall"
+	case reasonNoSession:
+		return "session"
+	}
+	return "land"
+}
+
+// baseBranch is the branch refs/remotes/origin/HEAD names, else main.
+func baseBranch(root string) string {
+	if ref, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil && ref != "" {
+		if _, branch, ok := strings.Cut(ref, "/"); ok {
+			return branch
+		}
+	}
+	return "main"
+}
+
+// syncBase checks out the base branch and pulls it with --ff-only, and
+// returns the commit HEAD is at then. A failure of either is the preflight's,
+// in git's own words.
+func (r *run) syncBase() (string, *envelope.ErrorInfo) {
+	if _, err := gitOutput(r.root, "switch", "--quiet", r.base); err != nil {
+		return "", failure("preflight", "input", "the base branch %s could not be checked out: %v", r.base, err)
+	}
+	if _, err := gitOutput(r.root, "pull", "--quiet", "--ff-only", "origin", r.base); err != nil {
+		return "", failure("preflight", "input", "the base branch %s could not be brought up to date: %v", r.base, err)
+	}
+	head, err := gitOutput(r.root, "rev-parse", "HEAD")
+	if err != nil {
+		return "", failure("preflight", "input", "%v", err)
+	}
+	return head, nil
+}
+
+// implement runs the step that implements the package next: one session, then
+// the landing checks. It returns the stop, or nil when the package landed.
+func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
+	r.steps++
+	subject := filepath.Base(next.Dir)
+	step := fmt.Sprintf("%04d-%s-%s", r.steps, kindImplement, subject)
+	s := &session{dir: r.root, stall: r.opts.stall}
+	reason := ""
+	if err := s.run(next.Dir); err != nil {
+		reason = reasonNoSession
+	} else {
+		reason = r.landed(filepath.Join(r.root, filepath.FromSlash(next.Dir)), before)
+	}
+	if reason != "" {
+		fmt.Fprintf(r.stderr, "%s: %s stopped: %s\n", tool, step, reason)
+		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
+	}
+	fmt.Fprintf(r.stderr, "%s: %s landed\n", tool, step)
+	r.result.Landed = append(r.result.Landed, subject)
+	return nil
 }
 
 // emit writes the one envelope and returns its exit code. An empty summary is
