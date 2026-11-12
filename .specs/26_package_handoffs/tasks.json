@@ -1,0 +1,148 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "26",
+  "spec_name": "package_handoffs",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./internal/specpkg/... ./cmd/speca/... ./cmd/specr/... ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "21",
+      "reason": "an untaken outbound handoff is filed with its awaits kind and af:awaits-<NN> label, and its path shares speca"
+    },
+    {
+      "spec": "20",
+      "reason": "specrun gains --strict-handoffs"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Add handoffs and takes_handoffs to the format",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the round trip and the table of malformed fields as tests and confirm they fail",
+        "Add the optional array handoffs to specification/schemas/requirements.v3.json and its copy under afspec/schemas: entries with id (H- and a number), what (at least one character), to (a spec id) and criteria (at least one criterion id, unique), no other key but x- keys. Add the optional array takes_handoffs to a task in tasks.v3.json: unique strings of a spec id, a colon and a handoff id. Regenerate the Go types with `make json-gen` and fix the library's key order for both",
+        "Extend the cross-file rules: a handoff id used twice is a C2 error, and a criterion of a handoff that is no criterion of this package is a C4 error, each naming the handoff",
+        "Keep a package without the fields byte for byte as it was in the encoding",
+        "Describe both fields, the id and the rules in specification/spec-format-v3.md, and add them to docs/api.md; run `make doc` and commit docs/generated"
+      ],
+      "touches": [
+        "specification/schemas/requirements.v3.json",
+        "specification/schemas/tasks.v3.json",
+        "afspec/schemas/requirements.v3.json",
+        "afspec/schemas/tasks.v3.json",
+        "afspec/requirements.v3.go",
+        "afspec/tasks.v3.go",
+        "afspec/marshal.go",
+        "afspec/validate.go",
+        "afspec/validate_test.go",
+        "specification/spec-format-v3.md",
+        "docs/api.md",
+        "docs/generated/"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Check a handoff's direction and what the receiver takes, across the spec root",
+      "criteria": [
+        "REQ-2",
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the direction table, the takes table, the warning, the strict flag and the refused combinations as tests and confirm they fail",
+        "Add to the cross-spec rules, reported for the sending package against requirements.json: cross_spec_handoff_direction for a handoff whose to names no package of the spec root, names the package itself, or names a package from which the sending package cannot be reached along the dependencies",
+        "Add cross_spec_handoff_taken, reported for the taking package against tasks.json: a takes_handoffs entry whose package does not exist, whose handoff that package does not declare, or whose handoff is addressed to another package",
+        "Add the warning handoff_not_taken, reported for the receiving package: one per handoff another package of the spec root addresses to it that none of its tasks takes, naming the sending package, the handoff's id and its what",
+        "Add the flag --strict-handoffs to speca: it goes with --validate and is a usage error otherwise; with it each handoff_not_taken is reported under errors instead of warnings and makes valid false. It writes nothing, and the verdict `spec` and every other caller get without it is unchanged",
+        "Describe the flag in speca's help, description and --schema, write the golden schema file again, and document the three rules and the flag in docs/speca.md"
+      ],
+      "touches": [
+        "afspec/validate.go",
+        "afspec/validate_test.go",
+        "afspec/graph.go",
+        "internal/specpkg/crossspec.go",
+        "internal/specpkg/crossspec_test.go",
+        "cmd/speca/verdict.go",
+        "cmd/speca/verdict_test.go",
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "docs/speca.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Render the handoffs, and tell a declared handoff from a gap in the integration task",
+      "criteria": [
+        "REQ-4",
+        "REQ-5"
+      ],
+      "steps": [
+        "Add the whole render, the scoped render, the Contracts entries and the derived steps as tests and confirm they fail",
+        "In the whole render and so in spec.md, list the package's own handoffs in a section Handoffs after the requirements and each task's takes_handoffs with the task, from the package's own files alone; a package with neither renders byte for byte as before",
+        "In specr's scoped render of a task, read the sending package of each handoff the task takes from the spec root and render its directory, the handoff's id and what, and each dependent criterion as its EARS sentence; a sending package that cannot be read is said to be unreadable and the render goes on",
+        "In specr's render of the integration task, add to the Contracts section each inbound handoff with its sending package, id, what and whether a task takes it, and each outbound handoff with its id, what, to and criteria; add one rendered step per inbound handoff: confirm by file and line that production code wires it, a handoff a task takes and the code does not wire failing the task",
+        "In the derived integration task add, after the step that traces the paths, one step per outbound handoff: a path step unwired only because this handoff is not yet taken does not fail the task, is filed as an awaits item for the handoff's to, and its criteria are covered by a test that calls the entry point directly",
+        "In skills/af-impl/references/test-first.md give the integration task's rule its one exception, a step unwired only because a declared outbound handoff is not yet taken, and say that every other path that is not live still fails the task; say that the receiver's integration task confirms each inbound handoff by file and line",
+        "In skills/af-impl/references/landing.md file each untaken outbound handoff as an awaits item with af:awaits-<to>, without waiting for the conformance pass to find it; in references/survey.md read the package's handoffs and the inbound ones the render shows before the spec's prose about wiring",
+        "Document the renders in docs/specr.md"
+      ],
+      "touches": [
+        "afspec/render.go",
+        "afspec/render_test.go",
+        "afspec/task.go",
+        "afspec/task_test.go",
+        "cmd/specr/render.go",
+        "cmd/specr/render_test.go",
+        "cmd/speca/e2e_test.go",
+        "skills/af-impl/references/test-first.md",
+        "skills/af-impl/references/landing.md",
+        "skills/af-impl/references/survey.md",
+        "docs/specr.md",
+        "docs/generated/"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Pass the strict answer through specrun, and have the spec writers declare handoffs",
+      "criteria": [
+        "REQ-6"
+      ],
+      "steps": [
+        "Add the table of the flag to the loop tests and the end-to-end test and confirm they fail",
+        "Add the flag --strict-handoffs to specrun with its SPECRUN_STRICT_HANDOFFS default. With it, before starting a package's session, validate the package in process with its own rules, the cross-spec rules and untaken inbound handoffs as errors, through a function of afspec that neither cmd/speca nor internal/specpkg has to be imported for; when it is not valid stop with reason 'package does not validate', the failing rules and the handoffs, and start no session",
+        "Under --dry-run report such a package in result.would_stop instead of stopping",
+        "In skills/af-spec/references/requirements.md and tasks.md describe handoffs and takes_handoffs: write a handoff wherever the PRD says another package will call, register or fill something this package offers, addressed to a package that depends on this one; list the handoffs a task takes; and in skills/af-spec/SKILL.md §2 read the inbound handoffs of the packages this one touches, and take the verdict with --strict-handoffs before activation",
+        "Say the same in the requirements and tasks prompts under specgen/templates, so that the `spec` generator writes them",
+        "Document the flag in docs/specrun.md and docs/configuration.md, and record the decision in a new ADR under docs/adr with the next free number, declare-handoffs-between-packages"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main_test.go",
+        "afspec/validate.go",
+        "skills/af-spec/SKILL.md",
+        "skills/af-spec/references/requirements.md",
+        "skills/af-spec/references/tasks.md",
+        "specgen/templates/generation_user_requirements.md",
+        "specgen/templates/generation_user_tasks.md",
+        "docs/specrun.md",
+        "docs/configuration.md",
+        "docs/adr/"
+      ],
+      "done_when": [
+        "`make skills-check` passes",
+        "`go list -deps ./cmd/specrun` names no package of agentkit-go"
+      ]
+    }
+  ]
+}

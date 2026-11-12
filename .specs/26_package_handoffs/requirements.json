@@ -1,0 +1,320 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "26",
+  "spec_name": "package_handoffs",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Declare a handoff, and the handoffs a task takes",
+      "rationale": "Wiring that exists only as prose is checked by nobody.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "a package's `requirements.json` holds `handoffs` entries with `id`, `what`, `to` and `criteria`, or a task of its `tasks.json` holds `takes_handoffs`",
+          "action": "accept the package's files, and keep both fields through a save and a load",
+          "contract": "the schemas pass; `Save` followed by `LoadSpec` returns the same entries in the same order; a package with neither field validates, saves and renders byte for byte as before",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/validate_test.go, beside the existing schema tests, with the v3_example fixture: add handoffs [{id: 'H-1', what: 'after-landing hooks of internal/land', to: '02', criteria: ['REQ-1.1']}] and takes_handoffs ['01:H-1'] on a task: assert ValidateSchema reports no error; assert a Save and LoadSpec round trip keeps both; assert the unchanged fixture still saves to the same bytes"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "unwanted",
+          "condition": "a handoff's `id` is not `H-` and a number or is used twice, its `what` is empty, its `criteria` is empty or names an id that is no criterion of this package, or a `takes_handoffs` entry is not a spec id, a colon and a handoff id",
+          "action": "report the package as invalid",
+          "contract": "`valid` is false; a malformed value is a `json_schema` error; a duplicate id is an error of rule `C2`, and a criterion that does not resolve an error of rule `C4`, each naming the handoff",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/validate_test.go, a table over one defect each: {id 'H1' -> json_schema; two entries 'H-1' -> C2 naming H-1; what '' -> json_schema; criteria [] -> json_schema; criteria ['REQ-9.9'] -> C4 naming H-1 and REQ-9.9; criteria ['REQ-1'] (a requirement id) -> json_schema; takes_handoffs ['H-1'] -> json_schema; takes_handoffs ['01:H-1', '01:H-1'] -> json_schema}: assert Valid == false and the check of each"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Refuse a handoff that points the wrong way",
+      "rationale": "A handoff to a package that lands first leaves nothing to wire it; this one rule would have caught every case seen.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --validate` is called for a package whose every handoff names a package that depends on it, directly or transitively",
+          "action": "report no error for the handoffs",
+          "contract": "`valid` is true when nothing else is wrong; a handoff from 01 to 03, where 03 depends on 02 and 02 on 01, is accepted",
+          "check": {
+            "same_as": "REQ-2.2"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "`speca <package> --validate` is called for a package with a handoff whose `to` names no package under the spec root, names the package itself, or names a package that does not depend on it directly or transitively",
+          "action": "report the package as invalid",
+          "contract": "`result.valid` is false; one error per such handoff has `check` `cross_spec_handoff_direction`, `artifact` `requirements.json`, and a message naming the handoff, its `to` and which of the three it is; exit code 0",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a temporary spec root built with the helpers of cmd/speca/helpers_test.go (addPackage, setDependencies, editJSON): packages 01, 02 depending on 01, and 03 depending on 02"
+            ],
+            "pseudocode": "in cmd/speca/verdict_test.go, beside the existing cross-spec cases, a table over a handoff declared in one package: {01 -> 02 valid; 01 -> 03 valid (transitive); 02 -> 01 error, 'does not depend'; 02 -> 02 error, 'itself'; 01 -> 09 error, 'no package'; 01 -> an archived 00 error, 'no package'; 03 -> 01 error}: env = run(pkg, '--validate'); assert valid and the checks of the errors; assert validating another package of the root reports nothing for the handoff"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "unwanted",
+          "condition": "`speca <package> --validate` is called for a package with a `takes_handoffs` entry that names a package that does not exist, a handoff that package does not declare, or a handoff whose `to` is another package",
+          "action": "report the package as invalid",
+          "contract": "`result.valid` is false; one error per such entry has `check` `cross_spec_handoff_taken`, `artifact` `tasks.json`, and a message naming the task and the entry",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a temporary spec root built with the helpers of cmd/speca/helpers_test.go (addPackage, setDependencies, editJSON): packages 01, 02 depending on 01, and 03 depending on 02"
+            ],
+            "pseudocode": "in cmd/speca/verdict_test.go, with 01 declaring H-1 to 02, a table over takes_handoffs on a task of 02 or 03: {02 takes '01:H-1' -> valid; 02 takes '01:H-2' -> error; 02 takes '09:H-1' -> error; 03 takes '01:H-1' -> error, addressed to 02}: assert valid and the check and message of each"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Tell the receiving package what it has not taken",
+      "rationale": "A receiver that does not know it is expected to wire something lands without wiring it.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "event_driven",
+          "condition": "`speca <package> --validate` is called for a package that another package under the spec root addresses a handoff to and none of its tasks takes it",
+          "action": "warn for each such handoff",
+          "contract": "`result.valid` is unchanged; `result.validation.warnings` holds one entry per untaken inbound handoff with `check` `handoff_not_taken`, naming the sending package, the handoff's id and its `what`; a handoff a task takes raises none",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a temporary spec root built with the helpers of cmd/speca/helpers_test.go (addPackage, setDependencies, editJSON): packages 01, 02 depending on 01, and 03 depending on 02"
+            ],
+            "pseudocode": "in cmd/speca/verdict_test.go, with 01 declaring H-1 and H-2 to 02 and 02's task 1 taking '01:H-1': env = run('02', '--validate'); assert valid == true; assert one warning with check 'handoff_not_taken' whose message contains '01', 'H-2' and the what text; assert run('01', '--validate') and run('03', '--validate') have no such warning"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "optional",
+          "condition": "`--strict-handoffs` is given with `--validate`",
+          "action": "report each untaken inbound handoff as an error instead of a warning",
+          "contract": "`result.valid` is false when one exists; the entry has the same `check`, `handoff_not_taken`, under `errors`; the package's files are not changed; the same call without the flag afterwards warns again",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a temporary spec root built with the helpers of cmd/speca/helpers_test.go (addPackage, setDependencies, editJSON): packages 01, 02 depending on 01, and 03 depending on 02"
+            ],
+            "pseudocode": "in cmd/speca/verdict_test.go, in the setup of REQ-3.1: before = snapshot(root); env = run('02', '--validate', '--strict-handoffs'); assert valid == false and checks(errors) == ['handoff_not_taken'] and no such warning; assert snapshot(root) == before; assert run('02', '--validate').result.valid == true; with every handoff taken: assert the strict call is valid"
+          }
+        },
+        {
+          "id": "REQ-3.3",
+          "pattern": "unwanted",
+          "condition": "`--strict-handoffs` is given without `--validate`",
+          "action": "refuse the call",
+          "contract": "exit code 2 and `error.category` `usage`, saying the flag goes with `--validate`",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/main_test.go, in the existing table of refused flag combinations: ['09', '--strict-handoffs'], ['--list', '--strict-handoffs'], ['09', '--task', '1', '--state', 'done', '--strict-handoffs']: assert exit code 2 and error.category == 'usage'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "title": "Render the handoffs where a coder reads them",
+      "rationale": "A list a coder never sees is wired by nobody.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "a package with handoffs, or with a task that takes some, is rendered whole, by `specr <package>` or into its `spec.md`",
+          "action": "list the package's own handoffs after its requirements, each with its id, `what`, `to` and criteria, and each task's `takes_handoffs` with the task",
+          "contract": "the render holds a `## Handoffs` section and a `takes handoffs` line on the task; it holds nothing read from another package, so the package's `spec.md` depends on the package's own files alone; a package with neither field renders as before",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/render_test.go, beside the existing render tests: render the fixture with one handoff and one task taking '01:H-1': assert the output has '## Handoffs' with H-1, its what, its to and its criteria, and that the task shows '01:H-1'; change the sending package's what in a sibling directory and assert the receiver's render is unchanged; assert the fixture without the fields renders byte-identically to before"
+          }
+        },
+        {
+          "id": "REQ-4.2",
+          "pattern": "event_driven",
+          "condition": "`specr <package> --task <N>` is called for a task that takes handoffs",
+          "action": "render each handoff the task takes with the sending package's `what` and the text of the sending package's criteria that depend on it",
+          "contract": "the Markdown has a section for the task's handoffs naming the sending package's directory, the handoff's id and `what`, and each dependent criterion as its EARS sentence; when the sending package cannot be read, the entry says so and the render goes on",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/specr/render_test.go, beside the existing scoped render tests, with 01 declaring H-1 (what 'after-landing hooks', criteria REQ-1.1) to 02 and 02's task 1 taking it: md = specr('02', '--task', '1'); assert md contains '01_', 'H-1', 'after-landing hooks' and the EARS sentence of 01's REQ-1.1; assert specr('02', '--task', '2') has no handoff section; with 01's requirements.json made unreadable: assert exit code 0 and the entry says the package could not be read"
+          }
+        },
+        {
+          "id": "REQ-4.3",
+          "pattern": "event_driven",
+          "condition": "`specr <package> --task <N+1>` is called for the integration task of a package with inbound or outbound handoffs",
+          "action": "list each inbound handoff and each outbound handoff in the `## Contracts` section",
+          "contract": "an inbound entry names the sending package, the handoff's id and `what`, and whether a task takes it; an outbound entry names the handoff's id, `what`, `to` and criteria",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/specr/render_test.go: with 01 declaring H-1 to 02 and 02 declaring H-1 to 03: md = specr('02', '--task', integration id); assert the Contracts section holds an inbound entry '01' 'H-1' and an outbound entry 'H-1' to '03'; for 01: only the outbound entry; for a package with no handoff: the section is as before"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-5",
+      "title": "Tell a declared handoff from a gap in the integration task",
+      "rationale": "A rule stricter than the format allows gets bypassed instead of followed.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-5.1",
+          "pattern": "event_driven",
+          "condition": "the integration task is derived for a package that declares outbound handoffs",
+          "action": "add one step per outbound handoff saying that a path step unwired only because that handoff is not yet taken does not fail the task, is filed as an `awaits` item for the handoff's `to`, and has the handoff's criteria covered by a test that calls the entry point directly",
+          "contract": "the derived task's `steps` hold that step, naming the handoff's id, `what`, `to` and criteria, after the step that traces the paths; a package with no outbound handoff has no such step",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/task_test.go, beside the existing tests of the derived integration task: for the fixture with H-1 to '02' on REQ-1.1: assert one step contains 'H-1', its what, '02', 'REQ-1.1' and 'awaits'; for the fixture without handoffs: assert the steps are exactly what they were"
+          }
+        },
+        {
+          "id": "REQ-5.2",
+          "pattern": "event_driven",
+          "condition": "`specr <package> --task <N+1>` is called for the integration task of a package that other packages address handoffs to",
+          "action": "add to the task's rendered steps one step per inbound handoff saying to confirm, by file and line, that production code wires it, and that a handoff a task takes and the code does not wire fails the task",
+          "contract": "the rendered integration task holds that step for each inbound handoff, naming the sending package and the handoff; the stored package and its `spec.md` do not hold it",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in cmd/specr/render_test.go: with 01 declaring H-1 to 02: md = specr('02', '--task', integration id); assert a step contains '01', 'H-1' and 'file:line'; assert 02's spec.md, rendered by speca --render, does not contain it and still validates as rendered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-6",
+      "title": "Let specrun ask for the strict answer before it starts a package",
+      "rationale": "A loop that runs unattended should not start a package that is about to leave a handoff unwired.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-6.1",
+          "pattern": "optional",
+          "condition": "`specrun --strict-handoffs` is given, with `SPECRUN_STRICT_HANDOFFS` as its default when set",
+          "action": "validate the next package with the cross-spec rules and with untaken inbound handoffs as errors before starting its session, and stop when it is not valid",
+          "contract": "for a package that is not valid: exit code 1; `result.stopped.reason` is `package does not validate` and lists the failing rules and the handoffs; no session starts; without the flag the session starts; under `--dry-run` the result says the step would stop",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository and fake claude of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, beside the existing loop tests, with 01 finished and declaring H-1 to 02, and 02 open: a table over {no flag -> 02's session starts; --strict-handoffs with H-1 untaken -> exit code 1, reason names handoff_not_taken and '01:H-1', no session; --strict-handoffs with a task of 02 taking it -> the session starts; SPECRUN_STRICT_HANDOFFS=true and no flag -> exit code 1; --dry-run --strict-handoffs -> exit code 0 and result.would_stop names the package}"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "A spec author declares a handoff the wrong way, corrects it, and the receiver's coder sees what to wire",
+      "steps": [
+        {
+          "actor": "spec author",
+          "action": "writes a handoff in package 02 addressed to package 01 and runs `speca 02 --validate`"
+        },
+        {
+          "actor": "speca",
+          "action": "reads every package of the spec root, finds that 01 does not depend on 02 and reports `cross_spec_handoff_direction`"
+        },
+        {
+          "actor": "spec author",
+          "action": "moves the handoff to package 01, addressed to 02, and validates both packages"
+        },
+        {
+          "actor": "speca",
+          "action": "accepts 01, and warns for 02 that no task takes the handoff"
+        },
+        {
+          "actor": "spec author",
+          "action": "adds the handoff to a task of 02 in `takes_handoffs`; `speca 02 --validate --strict-handoffs` is valid"
+        },
+        {
+          "actor": "implementer",
+          "action": "runs `specr 02 --task <N>` for that task"
+        },
+        {
+          "actor": "specr",
+          "action": "renders the task with the handoff's `what` and the criteria of 01 that depend on it"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "speca's Main",
+          "specr's built binary",
+          "afspec's validation and render",
+          "the packages on disk"
+        ],
+        "setup": [
+          "a temporary spec root built with the helpers of cmd/speca/helpers_test.go (addPackage, setDependencies, editJSON): packages 01, 02 depending on 01, and 03 depending on 02"
+        ],
+        "end_state": [
+          "the first validation of 02 is invalid with one cross_spec_handoff_direction error",
+          "after the move 01 is valid and 02 valid with one handoff_not_taken warning",
+          "after the task takes it the strict validation of 02 is valid",
+          "the scoped render of that task contains the sending package's what and criterion text"
+        ],
+        "pseudocode": "in cmd/speca/e2e_test.go, beside the existing end-to-end tests, with the built specr of helpers_test.go: a = run('02', '--validate'); assert checks(a.errors) == ['cross_spec_handoff_direction']; move the handoff; assert run('01', '--validate').valid; b = run('02', '--validate'); assert b.valid and checks(b.warnings) has 'handoff_not_taken'; add takes_handoffs; assert run('02', '--validate', '--strict-handoffs').valid; md = runSpecr('02', '--task', '1'); assert md contains the what and the criterion's sentence"
+      }
+    },
+    {
+      "id": "PATH-2",
+      "title": "specrun refuses to start a package that leaves an inbound handoff untaken",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "runs `specrun --strict-handoffs`"
+        },
+        {
+          "actor": "afspec",
+          "action": "names the next package, which another package addresses a handoff to"
+        },
+        {
+          "actor": "specrun",
+          "action": "validates it with untaken inbound handoffs as errors, finds one, and stops with exit code 1 before any session"
+        },
+        {
+          "actor": "operator",
+          "action": "has the package's plan corrected and runs `specrun --strict-handoffs` again"
+        },
+        {
+          "actor": "specrun",
+          "action": "finds the package valid and starts its session"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process"
+        ],
+        "setup": [
+          "the fixture repository and fake claude of internal/specrun's helpers, with 01 finished and declaring H-1 to the open package 02"
+        ],
+        "end_state": [
+          "the first call exits 1, names the handoff and starts no session",
+          "after a task of 02 takes the handoff the second call starts 02's session"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go, beside the existing end-to-end tests: a = Main(['--strict-handoffs']); assert a == 1 and the reason contains '01:H-1' and no session started; add takes_handoffs to 02's task and commit; b = Main(['--strict-handoffs', '--max', '1']); assert b == 0 and sessions started == ['02']"
+      }
+    }
+  ]
+}
