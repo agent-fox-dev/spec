@@ -3,11 +3,11 @@
   "spec_id": "21",
   "spec_name": "open_item_labels",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-12T18:29:31Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

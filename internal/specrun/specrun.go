@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-fox-dev/aflib/envelope"
+	"github.com/agent-fox-dev/aflib/issuex"
 	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/afspec"
 )
@@ -85,6 +86,8 @@ type run struct {
 	statePath string
 	state     state
 	holding   bool // this run holds the repository, as state.Owner says
+	forge     issuex.Client
+	repo      issuex.Repo
 	result    *Result
 	warnings  []envelope.Warning
 }
@@ -122,6 +125,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
 	if opts.dryRun {
+		_ = r.connect() // a dry run warns, and writes to no forge
 		return r.dryRun()
 	}
 	if opts.ledger {
@@ -209,6 +213,9 @@ func (r *run) loop() int {
 	if f := r.versions(); f != nil {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
+	if f := r.connect(); f != nil {
+		return r.emit(envelope.ExitFailed, "", f)
+	}
 	if f := r.loadState(); f != nil {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
@@ -216,6 +223,9 @@ func (r *run) loop() int {
 		return r.emit(code, "", f)
 	}
 	r.base = baseBranch(r.root)
+	if f := r.createScheme(r.ctx); f != nil {
+		return r.emit(envelope.ExitFailed, "", f)
+	}
 	for {
 		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
 			if _, f := r.choose(); f == nil && r.result.AllDone {

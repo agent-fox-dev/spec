@@ -23,9 +23,15 @@ is missing.
      URL on the forge, and the spec by its `NN_name`, its `spec_dir` and a
      link to that directory on the base branch, where it is after the merge.
   3. `issue --create --title "<NN_name>: <what is missing>" --body-file
-     <file> --dry-run`, then the same call without `--dry-run`. The title
-     says the gap in under 60 characters. `result.issue.html_url` is the
-     issue.
+     <file> --label af:<kind> --label af:from-<NN> [...] --dry-run`, then the
+     same call without `--dry-run`. The labels are `af:<kind>` and
+     `af:from-<NN>`, this package; for `awaits` also `af:awaits-<MM>`, the
+     package that must take it up, and for a `defect` its
+     `af:severity-<security|data-loss|correctness|minor>`. A label the
+     repository lacks is created first, with `issue --create-label
+     <name>`. The title says the gap in under 60 characters.
+     `result.issue.html_url` is the issue. The body's "What closes it"
+     names, for `awaits`, the receiving package by id.
 
   Entries that concern one criterion may share one issue; an entry that is
   fixed before the merge is not an open item and gets none.

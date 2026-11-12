@@ -160,6 +160,9 @@ It also reads:
 | `XDG_CACHE_HOME` | the default log directory is under it, else under the platform's cache directory (`~/Library/Caches`, `~/.cache`) |
 | `HOME` | the user's af-impl skill, `~/.claude/skills/af-impl/SKILL.md`, unless the repository has its own `.claude/skills/af-impl/SKILL.md` |
 | `PATH` | where `claude`, `git` and `issue` are found |
+| `GITHUB_TOKEN`, `GH_TOKEN` | the token of a GitHub origin, which `specrun` and the sessions' `issue` calls use; without one for the origin's forge a run refuses to start |
+| `GITLAB_TOKEN` | the same for a GitLab origin |
+| `GITHUB_API_URL`, `GITLAB_API_URL` | the API of a self-hosted forge, as `aflib/issuex` reads them |
 
 It sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` for each session to the stall
 time in milliseconds.

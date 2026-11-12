@@ -2,11 +2,13 @@ package specrun
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/agent-fox-dev/aflib/envelope"
+	"github.com/agent-fox-dev/aflib/issuex"
 )
 
 // example is the worked example of format v3 the fixture's packages copy, by
@@ -64,6 +67,7 @@ type fixture struct {
 	record                           string // what the fake claude was started with, one line per start
 	script                           string // the fake claude's plan
 	scratch                          string // a directory for the test's own files
+	forge                            *memForge
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -93,6 +97,13 @@ func newFixture(t *testing.T) *fixture {
 	f.commit(t, "base")
 	git(t, f.root, "push", "-q", "-u", "origin", "main")
 	git(t, f.root, "remote", "set-head", "origin", "main")
+	f.forge = newMemForge()
+	f.forge.starts = func() int { return len(f.starts(t)) }
+	was := newForge
+	newForge = func(string) (issuex.Client, issuex.Repo, error) {
+		return f.forge, issuex.Repo{Owner: "acme", Name: "widgets"}, nil
+	}
+	t.Cleanup(func() { newForge = was })
 	t.Chdir(f.root)
 	return f
 }
@@ -383,4 +394,168 @@ func (f *fixture) writeState(t *testing.T, specDir, head string, pid int) {
 func processAlive(pid int) bool {
 	p, err := os.FindProcess(pid)
 	return err == nil && p.Signal(syscall.Signal(0)) == nil
+}
+
+// memForge is an in-memory forge: it holds labels, issues and comments,
+// records every call in order, and fails a named call when told to.
+type memForge struct {
+	*issuex.NoOpClient
+	mu       sync.Mutex
+	labels   map[string]bool
+	issues   []issuex.Issue
+	comments map[int][]string
+	calls    []string
+	fail     map[string]int // a method's name, and how many of its calls fail
+	// starts, when set, counts the sessions started so far; CreateLabel
+	// records it, so a test can tell the labels came first.
+	starts         func() int
+	startsAtLabels []int
+}
+
+func newMemForge() *memForge {
+	return &memForge{NoOpClient: &issuex.NoOpClient{}, labels: map[string]bool{}, comments: map[int][]string{}, fail: map[string]int{}}
+}
+
+func (m *memForge) Authenticated() bool { return true }
+
+func (m *memForge) call(name, detail string) error {
+	m.calls = append(m.calls, name+" "+detail)
+	if m.fail[name] > 0 {
+		m.fail[name]--
+		return fmt.Errorf("%s: the forge said 502", name)
+	}
+	return nil
+}
+
+func (m *memForge) CreateLabel(_ context.Context, _ issuex.Repo, l issuex.Label) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.starts != nil {
+		m.startsAtLabels = append(m.startsAtLabels, m.starts())
+	}
+	if err := m.call("CreateLabel", l.Name); err != nil {
+		return err
+	}
+	if m.labels[l.Name] {
+		return issuex.ErrConflict
+	}
+	m.labels[l.Name] = true
+	return nil
+}
+
+func (m *memForge) ListIssues(_ context.Context, _ issuex.Repo, f issuex.IssueFilter) (issuex.IssueList, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.call("ListIssues", strings.Join(f.Labels, ",")); err != nil {
+		return issuex.IssueList{}, err
+	}
+	var out []issuex.Issue
+	for _, is := range m.issues {
+		if f.State != "" && f.State != "all" && is.State != f.State {
+			continue
+		}
+		if !hasAll(is.Labels, f.Labels) {
+			continue
+		}
+		out = append(out, is)
+	}
+	return issuex.IssueList{Issues: out}, nil
+}
+
+func (m *memForge) AddLabels(_ context.Context, ref issuex.IssueRef, labels []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.call("AddLabels", fmt.Sprint(ref.Number, labels)); err != nil {
+		return err
+	}
+	is := m.issue(ref.Number)
+	for _, l := range labels {
+		if !slices.Contains(is.Labels, l) {
+			is.Labels = append(is.Labels, l)
+		}
+	}
+	return nil
+}
+
+func (m *memForge) RemoveLabel(_ context.Context, ref issuex.IssueRef, label string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.call("RemoveLabel", fmt.Sprint(ref.Number, " ", label)); err != nil {
+		return err
+	}
+	is := m.issue(ref.Number)
+	is.Labels = slices.DeleteFunc(is.Labels, func(l string) bool { return l == label })
+	return nil
+}
+
+func (m *memForge) AddComment(_ context.Context, ref issuex.IssueRef, body string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.call("AddComment", fmt.Sprint(ref.Number)); err != nil {
+		return "", err
+	}
+	m.comments[ref.Number] = append(m.comments[ref.Number], body)
+	return fmt.Sprintf("https://forge.example/acme/widgets/issues/%d#c%d", ref.Number, len(m.comments[ref.Number])), nil
+}
+
+func (m *memForge) issue(n int) *issuex.Issue {
+	for i := range m.issues {
+		if m.issues[i].Number == n {
+			return &m.issues[i]
+		}
+	}
+	panic(fmt.Sprintf("no issue %d", n))
+}
+
+// add puts an issue on the forge, as a session would have opened it.
+func (m *memForge) add(title, state string, labels ...string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.issues) + 1
+	m.issues = append(m.issues, issuex.Issue{Number: n, Title: title, State: state, Labels: labels})
+	return n
+}
+
+// writes lists the calls that change the forge.
+func (m *memForge) writes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for _, c := range m.calls {
+		if !strings.HasPrefix(c, "ListIssues") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// labelsOf is the labels of the issue, sorted.
+func (m *memForge) labelsOf(n int) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := slices.Clone(m.issue(n).Labels)
+	slices.Sort(out)
+	return out
+}
+
+func hasAll(have, want []string) bool {
+	for _, w := range want {
+		if !slices.Contains(have, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// realForge makes specrun build its forge client as it does outside the
+// tests, from the origin remote and the token variables, none of them set.
+func realForge(t *testing.T) {
+	t.Helper()
+	was := newForge
+	newForge = defaultForge
+	t.Cleanup(func() { newForge = was })
+	for _, v := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GITHUB_API_URL", "GITLAB_API_URL"} {
+		t.Setenv(v, "")
+		_ = os.Unsetenv(v)
+	}
 }

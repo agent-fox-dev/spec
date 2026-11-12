@@ -37,6 +37,29 @@ specrun --reset-state           # forget the step that was running
 `--help` prints the help to stderr, `--version` the build identity and
 `--ledger` the ledger table to stdout; none of the three writes an envelope.
 
+## The forge
+
+`specrun` reaches the forge of the repository's origin remote, GitHub or
+GitLab, through `aflib/issuex`, with the token the `issue` command reads
+(`GITHUB_TOKEN` or `GH_TOKEN`, `GITLAB_TOKEN`): the sessions open their open
+items as issues with the same token, and the label rules decide what the
+loop does next. Without a client (no token, no origin remote naming a GitHub
+or GitLab repository, a forge that is not supported) a run refuses to start
+at stage `preflight`, naming the variables or the remote. A dry run goes on
+with a low `forge_unavailable` warning, and writes nothing to a forge in any
+case.
+
+Before its first step a run creates every label of the scheme the
+repository lacks; one that exists is left as it is (`issuex` lists no
+labels, so a conflict on creating one is how it is found):
+
+| Label | Meaning |
+|---|---|
+| `af:awaits`, `af:defect`, `af:untested`, `af:deviation` | the kind of an open item; an issue carries exactly one |
+| `af:severity-security`, `af:severity-data-loss`, `af:severity-correctness`, `af:severity-minor` | the severity of a `defect` |
+| `af:accepted`, `af:rejected`, `af:repair-failed` | what a person decided about a deviation, and a repair that did not land |
+| `af:from-<NN>`, `af:awaits-<NN>` | for every package under the spec root and `archive/`: the package that opened an item, and the package an `awaits` item waits for |
+
 ## The loop
 
 Each step is **implement the next package**:
@@ -323,9 +346,10 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 |---|---|---|---|
 | `skill_mismatch` | high | preflight | the installed af-impl skill's SHA-256 is not the one `specrun` was built with |
 | `skill_not_installed` | high | preflight | no af-impl skill is installed where a session here would load it |
+| `forge_unavailable` | low | preflight | a dry run has no forge client; it writes nothing to a forge anyway |
 
 ## What it leaves out
 
-`specrun` writes nothing to a forge and needs no token: labels, the checks on
-issues, the reconcile and repairs come with later packages. It runs one package
+The reconcile, repairs, and the rules that read the labels beyond the check
+after a landing come with later packages. It runs one package
 at a time, in dependency order, and has no `--schema` self-description.
