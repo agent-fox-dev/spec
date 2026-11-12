@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -113,6 +114,7 @@ func TestLabels_ADryRunWritesNothingToTheForge(t *testing.T) {
 func TestLabels_AnIncompleteIssueOfALandedPackageBecomesADeviation(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending") // open, so an item awaiting it is complete
 	type row struct {
 		n    int
 		want []string // nil: no write
@@ -128,7 +130,7 @@ func TestLabels_AnIncompleteIssueOfALandedPackageBecomesADeviation(t *testing.T)
 		"a closed issue of 01, no label": {f.forge.add("01_a: closed", "closed"), nil},
 	}
 	f.plan(t, land(0))
-	if _, code, stderr := runMain(t); code != 0 {
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
 		t.Fatalf("code %d\n%s", code, stderr)
 	}
 	base := git(t, f.root, "rev-parse", "main")
@@ -262,5 +264,84 @@ func TestLabels_ARecheckOfAMovedPackageDoesNotBlock(t *testing.T) {
 	f.plan(t, land(0))
 	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
 		t.Errorf("code %d\n%s", code, stderr)
+	}
+}
+
+// awaitsFixture is a repository with 01 archived, 02 about to land, 03 open
+// and no 09, and on the forge an awaits issue toward each, a closed one, and a
+// defect with a stray awaits label.
+func awaitsFixture(t *testing.T) (*fixture, map[string]int) {
+	t.Helper()
+	f := newFixture(t)
+	f.addPackage(t, "archive/01_a", "01", "done")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.addPackage(t, "03_c", "03", "pending")
+	return f, map[string]int{
+		"awaits a package that just landed": f.forge.add("01_a: x", "open", "af:awaits", "af:awaits-02", "af:from-01"),
+		"awaits an archived package":        f.forge.add("02_b: y", "open", "af:awaits", "af:awaits-01", "af:from-02"),
+		"awaits no package":                 f.forge.add("02_b: z", "open", "af:awaits", "af:awaits-09", "af:from-02"),
+		"awaits an open package":            f.forge.add("02_b: w", "open", "af:awaits", "af:awaits-03", "af:from-02"),
+		"closed":                            f.forge.add("02_b: v", "closed", "af:awaits", "af:awaits-02", "af:from-02"),
+		"a defect with a stray awaits":      f.forge.add("02_b: u", "open", "af:defect", "af:severity-minor", "af:awaits-02", "af:from-02"),
+	}
+}
+
+// An open awaits issue whose package is finished, or is no package, becomes a
+// correctness defect with a comment; one that awaits an open package, a closed
+// one and one that is not awaits are left alone.
+func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
+	f, issues := awaitsFixture(t)
+	f.plan(t, land(0))
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	base := git(t, f.root, "rev-parse", "main")
+	for name, want := range map[string]struct {
+		labels string
+		awaits string // the package the comment names; "" for no write
+	}{
+		"awaits a package that just landed": {"af:defect,af:from-01,af:severity-correctness", "02"},
+		"awaits an archived package":        {"af:defect,af:from-02,af:severity-correctness", "01"},
+		"awaits no package":                 {"af:defect,af:from-02,af:severity-correctness", "09"},
+		"awaits an open package":            {"", ""},
+		"closed":                            {"", ""},
+		"a defect with a stray awaits":      {"", ""},
+	} {
+		n := issues[name]
+		if want.awaits == "" {
+			for _, w := range f.forge.writes() {
+				if strings.HasPrefix(w, fmt.Sprintf("AddLabels %d ", n)) || strings.HasPrefix(w, fmt.Sprintf("RemoveLabel %d ", n)) || w == fmt.Sprintf("AddComment %d", n) {
+					t.Errorf("%s: written: %s", name, w)
+				}
+			}
+			continue
+		}
+		if got := strings.Join(f.forge.labelsOf(n), ","); got != want.labels {
+			t.Errorf("%s: labels %s; want %s", name, got, want.labels)
+		}
+		c := f.forge.comments[n]
+		if len(c) != 1 || !strings.Contains(c[0], "awaits-finished") || !strings.Contains(c[0], want.awaits) || !strings.Contains(c[0], base) {
+			t.Errorf("%s: comments %q", name, c)
+		}
+	}
+}
+
+// The relabelling changes nothing the second time it runs.
+func TestLabels_TheAwaitsRuleChangesNothingTheSecondTime(t *testing.T) {
+	f, _ := awaitsFixture(t)
+	r := &run{ctx: context.Background(), root: f.root, specsDir: filepath.Join(f.root, ".specs"), stderr: io.Discard,
+		forge: f.forge, repo: issuex.Repo{Owner: "acme", Name: "widgets"}}
+	if err := r.checkLabels(".specs/02_b"); err != nil {
+		t.Fatal(err)
+	}
+	before := len(f.forge.writes())
+	if before == 0 {
+		t.Fatal("the first application wrote nothing")
+	}
+	if err := r.checkLabels(".specs/02_b"); err != nil {
+		t.Fatal(err)
+	}
+	if after := f.forge.writes(); len(after) != before {
+		t.Errorf("the second run wrote %v", after[before:])
 	}
 }

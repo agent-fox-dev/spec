@@ -289,7 +289,7 @@ func (r *run) recheckLabels() *Stopped {
 
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
-	if strings.HasPrefix(reason, "incomplete-labels") {
+	if strings.HasPrefix(reason, ruleIncompleteLabels) || strings.HasPrefix(reason, ruleAwaitsFinished) {
 		return "forge"
 	}
 	switch reason {

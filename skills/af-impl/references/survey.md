@@ -22,6 +22,9 @@ written once and read at every step that needs it.
   `D-2`, … and written in the past tense as it will read in the merge commit
   ("Followed the code: …"). Prefer the code's reality when the spec is merely
   wrong about a detail; prefer the spec's intent when the code is what the
-  spec changes.
+  spec changes. Prose that hands work to another package ("package N
+  registers …") is checked with `speca <N>`: when N is sealed or its last
+  task is `done`, the handoff goes nowhere, and a numbered decision says
+  either "this package wires it" or "filed as a defect".
 - **What the tasks do not say.** Per task, what a coder needs to know that
   `steps` and `touches` leave out.

@@ -3,11 +3,11 @@
   "spec_id": "22",
   "spec_name": "open_items_read_back",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-12T18:49:03Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

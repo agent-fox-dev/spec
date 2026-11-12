@@ -184,6 +184,19 @@ func (s *Spec) IsLegacy() bool {
 	return s.SchemaVersion != 0 && s.SchemaVersion != SchemaVersion
 }
 
+// IsFinished reports whether nothing is left to implement in the package:
+// its status ends its work (sealed, superseded or archived), or it is in this
+// format version and none of its tasks is pending or in progress. The choice
+// of the next package and specrun's label rules both read it.
+func (s *Spec) IsFinished() bool {
+	switch s.Status {
+	case string(PrdFrontmatterV3JsonStatusSealed), string(PrdFrontmatterV3JsonStatusSuperseded),
+		string(PrdFrontmatterV3JsonStatusArchived):
+		return true
+	}
+	return !s.IsLegacy() && len(s.OpenTasks()) == 0
+}
+
 // OpenTasks are the tasks of the plan that are pending or in progress, the
 // derived integration task included, in plan order.
 func (s *Spec) OpenTasks() []PlannedTask {
@@ -233,10 +246,7 @@ func (n *nextNode) terminal() bool {
 // package that did not load, or whose tasks this version cannot read, is not
 // known to be finished.
 func (n *nextNode) finished() bool {
-	if n.spec == nil {
-		return false
-	}
-	return n.terminal() || !n.spec.IsLegacy() && len(n.spec.OpenTasks()) == 0
+	return n.spec != nil && n.spec.IsFinished()
 }
 
 // open reports whether the package is one to implement.

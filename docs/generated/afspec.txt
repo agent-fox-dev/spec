@@ -998,6 +998,12 @@ func (s *Spec) IntegrationTaskID() (int, bool)
     the highest task id of the plan. It is false for a lite package and for a
     package with no task (format v3 §8.4).
 
+func (s *Spec) IsFinished() bool
+    IsFinished reports whether nothing is left to implement in the package:
+    its status ends its work (sealed, superseded or archived), or it is in this
+    format version and none of its tasks is pending or in progress. The choice
+    of the next package and specrun's label rules both read it.
+
 func (s *Spec) IsLegacy() bool
     IsLegacy reports whether the package is in a format version other than the
     one this library reads. Such a package loads, but the v3 types read none of

@@ -131,6 +131,20 @@ repository (see *State and resume*) gets its trailer read and its issues
 checked the same way. A package that has gone under `archive/` since is
 checked there; one found nowhere is left unchecked, with a note.
 
+### Items that await a finished package
+
+After the check above, `specrun` lists every open issue labelled
+`af:awaits`, whatever package opened it. One whose `af:awaits-<NN>` names a
+package that is finished (sealed, superseded or archived, under `archive/`,
+or with no task pending or in progress, as `afspec`'s `IsFinished` says), or
+names no package at all, will never be taken up: the rule `awaits-finished`
+removes `af:awaits` and `af:awaits-<NN>`, adds `af:defect` and
+`af:severity-correctness`, and comments, naming the package and the commit of
+the base branch. An item awaiting a package that is still open, a closed
+issue, and one that is not `af:awaits` are not touched; the rule changes
+nothing the second time, and its forge failures stop the loop as the other
+rule's do.
+
 ## What it runs
 
 At the start of a run `specrun` logs on stderr, and puts in
