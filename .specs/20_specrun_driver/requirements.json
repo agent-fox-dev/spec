@@ -1,0 +1,494 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "20",
+  "spec_name": "specrun_driver",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Run the loop one step at a time",
+      "rationale": "The loop must do what the script does before the script can go.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "`specrun` is started and a package is open with every dependency finished",
+          "action": "switch to the base branch, pull it with `--ff-only`, and start one session for the package `afspec` names next",
+          "contract": "the session's command line is `claude -p \"/af-impl <spec_dir>\" --output-format stream-json --verbose --permission-mode bypassPermissions --disallowedTools ScheduleWakeup,CronCreate`, started in the repository with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` set to the stall time in milliseconds; the package is the one `speca --next` names",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH",
+              "the fake claude is a test binary built once per test run that reads a script named by an environment variable: the events to print, the pauses between them, and what to do to the repository (commit on a feature branch, mark tasks done through afspec, merge into main, leave the tree dirty, exit with a code)"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go (new): with two open packages 01 and 02, 02 depending on 01, and a fake claude that records its arguments, its working directory and that variable and lands the package: run the loop with --max 1; assert the recorded argv equals the contract's with spec_dir '.specs/01_…'; assert cwd is the repository and the variable is '1800000'; assert origin's new commit was pulled before the session started"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "a session ends and the base branch is checked out, the working tree is clean, `HEAD` is not the commit it was before the step and the package has no task `pending` or `in_progress`",
+          "action": "record the step as landed and go on to the next step, whatever the session's exit code",
+          "contract": "the ledger line's `outcome` is `landed`; the next package's session starts",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, a table over a fake claude that lands the package and exits {0, 1}: run the loop over two packages; assert both sessions ran in order, result.landed == ['01_…', '02_…'] and exit code 0"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "unwanted",
+          "condition": "a session ends and a landing check fails",
+          "action": "stop the loop and start no further session",
+          "contract": "exit code 1; `result.stopped` holds the step and `reason` names the failing check (`not on the base branch`, `working tree not clean`, `HEAD did not move`, `tasks still open`); the envelope's `ok` is false",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, a table over a fake claude that {stays on the feature branch; merges and leaves an untracked file; changes nothing; merges with one task left pending}: assert exit code 1, result.stopped.reason names the check of the case, and the second package's session never started"
+          }
+        },
+        {
+          "id": "REQ-1.4",
+          "pattern": "event_driven",
+          "condition": "no package under the spec root is open",
+          "action": "end without starting a session",
+          "contract": "exit code 0; `result.all_done` is true; `summary` is `specrun: every package is done, landed <n>`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go: with every package finished: assert exit code 0, result.all_done, no session started; and after a run that landed two: summary ends 'landed 2'"
+          }
+        },
+        {
+          "id": "REQ-1.5",
+          "pattern": "unwanted",
+          "condition": "packages are open and none can start: each waits on a dependency that is not finished, does not load, or the dependencies form a cycle",
+          "action": "stop without starting a session",
+          "contract": "exit code 1; `result.waiting` lists each such package with its `reason`, as `speca --next` words it; for a cycle `error.stage` is `graph` and the message names it",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, a table over {02 depends on a missing 07; a package with malformed JSON; 01 and 02 depending on each other}: assert exit code 1, no session started, and result.waiting or error as the contract says"
+          }
+        },
+        {
+          "id": "REQ-1.6",
+          "pattern": "optional",
+          "condition": "`--max N` is given",
+          "action": "end the loop once N packages have landed in this run",
+          "contract": "exit code 0 with `result.landed` holding N packages and `all_done` false when more are open; `--max 0` and a negative N are a usage error with exit code 2",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, a table over --max {1, 2, 5} with three open packages: assert len(result.landed) == min(N, 3) and the sessions started equal it; in internal/specrun/flags_test.go (new): --max 0 and --max -1 give exit code 2"
+          }
+        },
+        {
+          "id": "REQ-1.7",
+          "pattern": "unwanted",
+          "condition": "the base branch cannot be switched to or pulled with `--ff-only`, or `claude` or `git` is not on `PATH`",
+          "action": "stop before a session is started",
+          "contract": "exit code 1; `error.stage` is `preflight` and the message holds git's own words or names the missing command; the repository is as it was",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, a table over {a local main that diverged from origin; a dirty tree on another branch; PATH without claude}: assert exit code 1, error.stage == 'preflight', no session started and no state file written"
+          }
+        },
+        {
+          "id": "REQ-1.8",
+          "pattern": "ubiquitous",
+          "action": "write exactly one envelope to stdout when it ends, and one line per step to stderr as it goes",
+          "contract": "stdout decodes as one `aflib/envelope` envelope with `tool` `specrun`; nothing a session prints reaches stdout",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in cmd/specrun/main_test.go (new): run Main over one package with a fake claude that prints 200 events: assert stdout is one JSON object with tool == 'specrun' and stderr has one line naming the step"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Keep the state and resume after a crash",
+      "rationale": "A loop that runs for a day must survive a kill or a reboot without a person working out where it was.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "ubiquitous",
+          "action": "write its state after every change to one JSON file named after the repository under `agent-fox/specrun` in the user's state directory, through a temporary file that is renamed",
+          "contract": "the file holds the steps done, the running step with its `started_at` and the process id; it parses as JSON whenever it exists; no file is written under the repository",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/state_test.go (new): a fake claude that, mid-session, copies the state file aside: assert the copy parses and names the running step, its started_at and a pid; after the run assert the file lists the step as done and the repository snapshot holds no new untracked file"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "event_driven",
+          "condition": "`specrun` is started and its state records a running step",
+          "action": "check the step against the repository before choosing a step: count a package that has no open task and whose merge is on the base branch as landed; run the package again when its branch `feature/<NN>-<spec_name>` exists or when it cannot be checked",
+          "contract": "a landed package gets no second session and a ledger line with outcome `landed`; otherwise the next session is for the same package",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/state_test.go, a table over a state file naming 01 as running with the repository in the state {01 landed on main; branch feature/01-… exists with one task done; no branch and nothing done; the package directory removed}: assert which package the first session is for (02; 01; 01; the next one afspec names) and that the landed case adds one ledger line"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "event_driven",
+          "condition": "`specrun --reset-state` is called",
+          "action": "delete the state file and do nothing else",
+          "contract": "exit code 0; the file is gone; no session started; a missing file is not an error",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/state_test.go: with and without a state file: assert exit code 0, the file does not exist afterwards and the fake claude was never started"
+          }
+        },
+        {
+          "id": "REQ-2.4",
+          "pattern": "unwanted",
+          "condition": "the state file cannot be parsed, or the process id it records for a running step belongs to a live `specrun`",
+          "action": "refuse to start",
+          "contract": "exit code 1; `error.stage` is `state`; the message names the file and, for the unparsable one, `--reset-state`; the file is left as it is",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/state_test.go, a table over {a state file holding 'not json'; a state file whose running step records the test's own process id}: assert exit code 1, error.stage == 'state', the file's bytes unchanged and no session started"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Watch a session and end one that stalls",
+      "rationale": "A session that hangs holds the whole loop; nothing else notices.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "unwanted",
+          "condition": "a session writes no `stream-json` event for the time `--stall` gives, 30 minutes when the flag is absent",
+          "action": "end the session and every process it started, record the step as stalled and stop the loop",
+          "contract": "exit code 1; the ledger line's `outcome` is `stalled`; `result.stopped.reason` is `stalled`; no process of the session is alive when specrun returns",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/session_test.go (new): a fake claude that prints one event, starts a child and sleeps 60 s, recording both process ids: run with --stall 300ms; assert exit code 1, the ledger outcome 'stalled' and neither process alive; a second case printing an event every 100 ms for 1 s and then landing: assert it is not ended"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "unwanted",
+          "condition": "`--stall` is not a duration greater than zero",
+          "action": "refuse the call",
+          "contract": "exit code 2 and `error.category` `usage`, naming the flag",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/flags_test.go, a table over --stall {0s, -1m, soon}: assert exit code 2 and the message contains '--stall'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "title": "Keep the full log of every session and a ledger of every step",
+      "rationale": "The script kept four kilobytes per package, so a slowdown was only seen hours later.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "a session runs",
+          "action": "save every line it writes to stdout as `<step>.jsonl` in the log directory, and its final message as `<step>.log`",
+          "contract": "`<step>` is the step's number in the run log, its kind and its subject (`0003-implement-19_speca_gate`); the `.jsonl` file holds every line in order; the `.log` file holds the `result` text of the last event of type `result`, and is empty when there is none",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/session_test.go: a fake claude printing 3 events and a result event with result 'done': assert <log-dir>/0001-implement-01_….jsonl holds the 4 lines and the .log file holds 'done'; a second step is 0002-…; a session ended with no result event leaves an empty .log"
+          }
+        },
+        {
+          "id": "REQ-4.2",
+          "pattern": "event_driven",
+          "condition": "a step ends",
+          "action": "append one JSON line to `ledger.jsonl` in the log directory",
+          "contract": "the line holds `kind`, `subject`, `started_at` and `ended_at` (RFC 3339), `wall_minutes` and `outcome` (`landed`, `stopped` or `stalled`)",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/ledger_test.go (new), with a stubbed clock: after a landed step, a stopped one and a stalled one: assert ledger.jsonl has three lines that parse, with the contract's fields and wall_minutes equal to the clock's difference"
+          }
+        },
+        {
+          "id": "REQ-4.3",
+          "pattern": "event_driven",
+          "condition": "a step's ledger line is written",
+          "action": "print the line in short form on stderr, followed by a warning line when the step is a landed package whose wall minutes are more than twice the median of the packages that landed before it",
+          "contract": "the warning names the package, its minutes and the median; with no earlier landed package there is no warning; exactly twice the median is no warning",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/ledger_test.go, a table over earlier landed minutes and the new one: {[] , 50 -> none; [20], 41 -> warning; [20], 40 -> none; [20, 30, 100], 61 -> warning (median 30); [20, 30], 51 -> warning (median 25); stopped and stalled lines are not part of the median}"
+          }
+        },
+        {
+          "id": "REQ-4.4",
+          "pattern": "event_driven",
+          "condition": "`specrun --ledger` is called",
+          "action": "print the ledger as a table on stdout and start nothing",
+          "contract": "exit code 0; one row per ledger line with the step, its kind, subject, start, minutes and outcome, under a header; with no ledger the output says no step is recorded; a line that cannot be parsed is skipped",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/ledger_test.go: with a ledger of three lines and one line 'not json': assert stdout has a header and three rows; with no ledger file: assert exit code 0 and one sentence; assert no session started and no state written"
+          }
+        },
+        {
+          "id": "REQ-4.5",
+          "pattern": "unwanted",
+          "condition": "the log directory is inside the repository's working tree, or cannot be created or written",
+          "action": "refuse to start",
+          "contract": "exit code 2 for a directory inside the working tree, with a message saying af-impl refuses a dirty tree; exit code 1 with `error.stage` `preflight` for one that cannot be written; no session started",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/flags_test.go, a table over --log-dir {<repo>/logs, a path under a regular file}: assert the exit code of the case and that the fake claude never started; without the flag assert the directory is $XDG_CACHE_HOME/agent-fox/specrun/<repository name>"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-5",
+      "title": "Say what it runs",
+      "rationale": "The installed skill was older than the source once, and no log said so.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-5.1",
+          "pattern": "event_driven",
+          "condition": "`specrun` starts a run",
+          "action": "log its own version, the path and SHA-256 of the af-impl `SKILL.md` a session in this repository loads, and the versions of `claude` and `issue`",
+          "contract": "`result.versions` holds `specrun`, `skill_path`, `skill_sha256`, `built_skill_sha256`, `claude` and `issue`; the skill is `<repository>/.claude/skills/af-impl/SKILL.md` when it exists, else `~/.claude/skills/af-impl/SKILL.md`; an `issue` that is not installed is reported as `not installed`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/versions_test.go (new), a table over {skill in the user's directory; skill in both, the project's wins; no issue on PATH}: assert result.versions.skill_path and that skill_sha256 is the SHA-256 of that file; assert claude holds what the fake prints for --version; assert issue == 'not installed' in the third case"
+          }
+        },
+        {
+          "id": "REQ-5.2",
+          "pattern": "unwanted",
+          "condition": "the installed skill's SHA-256 differs from the one `specrun` was built with, or no af-impl skill is installed",
+          "action": "warn and go on",
+          "contract": "`warnings` holds one `skill_mismatch` or `skill_not_installed` entry naming the path and both hashes; the loop runs; a `specrun` built with no embedded hash raises neither and reports `built_skill_sha256` as `unknown`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/versions_test.go, a table over the embedded hash {equal, different, empty} and the installed file {present, absent}: without --strict-skills assert the warning codes of each case and that the session still started; with it assert exit code 1 at stage preflight and no session for every case but equal-and-present"
+          }
+        },
+        {
+          "id": "REQ-5.3",
+          "pattern": "optional",
+          "condition": "`--strict-skills` is given",
+          "action": "refuse to start when the installed skill's hash differs from the embedded one, when no skill is installed, or when no hash is embedded",
+          "contract": "exit code 1; `error.stage` is `preflight`; the message names the path and both hashes; no session started",
+          "check": {
+            "same_as": "REQ-5.2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-6",
+      "title": "Take every setting from a flag or the environment, and offer a dry run",
+      "rationale": "An unattended command is configured where it is started, and a person wants to see what it would do first.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-6.1",
+          "pattern": "ubiquitous",
+          "action": "for any of the flags `--max`, `--stall`, `--log-dir` and `--strict-skills`, take its default from the environment variable `SPECRUN_MAX`, `SPECRUN_STALL`, `SPECRUN_LOG_DIR` or `SPECRUN_STRICT_SKILLS` when it is set, the flag winning over it",
+          "contract": "a variable with a value its flag would refuse is a usage error with exit code 2 naming the variable",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/flags_test.go, a table per flag over {neither -> the built-in default; the variable alone; both -> the flag}, and SPECRUN_STALL=soon, SPECRUN_MAX=x, SPECRUN_STRICT_SKILLS=maybe -> exit code 2 with the variable's name in the message"
+          }
+        },
+        {
+          "id": "REQ-6.2",
+          "pattern": "optional",
+          "condition": "`--dry-run` is given",
+          "action": "report the next step and the package `afspec` would choose, or why none can start, and change nothing",
+          "contract": "exit code 0; `result.dry_run` is true and `result.next_step` holds `kind` `implement` and the package's `spec_dir`, or `result.waiting` the reasons; no session started, no branch switched, nothing pulled, no state or log written",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH"
+            ],
+            "pseudocode": "in internal/specrun/loop_test.go, a table over {an open package; nothing can start; every package done}, started on a feature branch: assert the result of each case, that the branch checked out is unchanged, origin was not fetched, the fake claude never started and neither the state file nor the log directory exists"
+          }
+        },
+        {
+          "id": "REQ-6.3",
+          "pattern": "unwanted",
+          "condition": "an unknown flag or a positional argument is given, or two of `--dry-run`, `--ledger` and `--reset-state` together",
+          "action": "refuse the call",
+          "contract": "exit code 2 and `error.category` `usage`; nothing was started or written",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/flags_test.go, a table over [--frobnicate], [19], [--dry-run, --ledger], [--ledger, --reset-state]: assert exit code 2 and error.category == 'usage'"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "An operator lands every open package with one call",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "runs `specrun` in a repository with two open packages, the second depending on the first"
+        },
+        {
+          "actor": "specrun",
+          "action": "logs what it runs, switches to the base branch and pulls it"
+        },
+        {
+          "actor": "afspec",
+          "action": "names the first package as next"
+        },
+        {
+          "actor": "specrun",
+          "action": "starts a session with `/af-impl` on it, saves its stream and writes the running step to the state file"
+        },
+        {
+          "actor": "session",
+          "action": "implements the package, merges it into the base branch and ends"
+        },
+        {
+          "actor": "specrun",
+          "action": "checks the four landing conditions, appends the ledger line and goes on to the second package the same way"
+        },
+        {
+          "actor": "specrun",
+          "action": "finds nothing open and writes one envelope saying every package is done"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process",
+          "the state, log and ledger files on disk"
+        ],
+        "setup": [
+          "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH",
+          "the fake claude is a test binary built once per test run that reads a script named by an environment variable: the events to print, the pauses between them, and what to do to the repository (commit on a feature branch, mark tasks done through afspec, merge into main, leave the tree dirty, exit with a code)"
+        ],
+        "end_state": [
+          "both packages have no open task and their merges are on main",
+          "the ledger has two lines with outcome landed",
+          "the log directory holds a .jsonl and a .log per step",
+          "the envelope has exit code 0, all_done true and two landed packages",
+          "the state file records no running step"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go: code = Main([]); assert code == 0; env = decode(stdout); assert env.result.all_done and len(env.result.landed) == 2; assert lines(ledger.jsonl) == 2 and each outcome == 'landed'; assert 4 files in the log directory besides the ledger; assert the state file has no running step"
+      }
+    },
+    {
+      "id": "PATH-2",
+      "title": "An operator restarts specrun after a session stalled",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "runs `specrun` and the first package's session stops writing events"
+        },
+        {
+          "actor": "specrun",
+          "action": "ends the session after the stall time, records the step as stalled and stops with exit code 1"
+        },
+        {
+          "actor": "operator",
+          "action": "runs `specrun` again"
+        },
+        {
+          "actor": "specrun",
+          "action": "reads the state, finds the package's branch and starts a session for the same package"
+        },
+        {
+          "actor": "session",
+          "action": "continues the branch and lands the package"
+        },
+        {
+          "actor": "specrun",
+          "action": "records the landing and goes on"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process",
+          "the state, log and ledger files on disk"
+        ],
+        "setup": [
+          "a fixture git repository with a bare origin, a branch main and packages under .specs; XDG_STATE_HOME, XDG_CACHE_HOME and HOME set to temporary directories; a fake claude first on PATH",
+          "a fake claude that on its first start creates the package's branch, commits one task and then writes nothing, and on its second start lands the package"
+        ],
+        "end_state": [
+          "the first call exits 1 with a stalled ledger line and no session process alive",
+          "the second call's first session is for the same package",
+          "the package is landed and the ledger holds a stalled line and a landed line for it"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go: a = Main(['--stall', '300ms']); assert a == 1 and last(ledger).outcome == 'stalled'; b = Main(['--max', '1']); assert b == 0; assert the fake's second start received the same spec_dir; assert outcomes(ledger) == ['stalled', 'landed']"
+      }
+    }
+  ]
+}

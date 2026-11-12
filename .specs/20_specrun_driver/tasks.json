@@ -1,0 +1,144 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "20",
+  "spec_name": "specrun_driver",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./cmd/speca/... ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Choose the next step without running it: flags, the environment and the dry run",
+      "criteria": [
+        "REQ-1.4",
+        "REQ-1.5",
+        "REQ-6"
+      ],
+      "steps": [
+        "Add the behaviours as tests and confirm they fail: the flag and environment tables, the dry run, nothing open and nothing able to start. Add the fixture helpers they need to one helpers file of internal/specrun: a git repository with a bare origin and packages copied from afspec/testdata",
+        "Move the choice of the next package out of cmd/speca/next.go into afspec as an exported function that reads the spec root and returns the next package, whether everything is done, the packages that wait with their reasons, and a cycle as an error; it needs what cmd/speca and internal/specpkg hold today about a finished, an open and a legacy package, so move that with it. `speca --next` calls the function and its output and tests stay as they are",
+        "Add github.com/agent-fox-dev/aflib to go.mod at a pseudo-version of its main branch, and use only its envelope package here",
+        "Add the package internal/specrun and the command cmd/specrun, whose main only calls it. Neither imports internal/cli, internal/specpkg, specgen or anything else that depends on agentkit-go: flag parsing is the standard library's",
+        "Parse the flags --max, --stall, --log-dir, --strict-skills, --dry-run, --ledger, --reset-state and --version, each default taken from its SPECRUN_ variable when set; refuse unknown flags, positional arguments, values a flag cannot hold and two of --dry-run, --ledger and --reset-state together, as usage errors with exit code 2",
+        "Write the answer as one aflib envelope with tool specrun and a result holding landed, all_done, waiting, stopped, dry_run, next_step and versions; exit code 0 when the loop ended on its own, 1 when it stopped or failed, 2 for a usage error",
+        "Implement --dry-run: ask afspec for the next package and report it, or the waiting packages, without switching a branch, pulling, or writing state or logs"
+      ],
+      "touches": [
+        "afspec/next.go",
+        "afspec/next_test.go",
+        "cmd/speca/next.go",
+        "cmd/speca/status_checks.go",
+        "internal/specpkg/",
+        "internal/specrun/",
+        "cmd/specrun/main.go",
+        "go.mod",
+        "go.sum",
+        "docs/generated/"
+      ],
+      "done_when": [
+        "`go list -deps ./cmd/specrun` names no package of agentkit-go"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Run a session for the next package and check that it landed",
+      "criteria": [
+        "REQ-1.1",
+        "REQ-1.2",
+        "REQ-1.3",
+        "REQ-1.6",
+        "REQ-1.7",
+        "REQ-1.8"
+      ],
+      "steps": [
+        "Add the fake claude: a small main package under internal/specrun's test data that the tests build once and put first on PATH, driven by a script file an environment variable names. Add the loop's behaviours as tests and confirm they fail",
+        "Before every step switch to the base branch, which is the branch refs/remotes/origin/HEAD names, else main, and pull it with --ff-only; a failure of either, and a missing claude or git, stop the run at stage preflight before any session",
+        "Start the session with the command line the first criterion gives, in the repository, with CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS set to the stall time in milliseconds, in a process group of its own",
+        "When the session ends, whatever its exit code, check that the base branch is checked out, the tree is clean, HEAD is not the commit it was before the step, and the package has no task pending or in progress, read through afspec; the first check that fails stops the loop and is named in result.stopped",
+        "Go on to the next step until nothing is open, nothing can start or --max packages have landed in this run",
+        "Keep stdout for the one envelope: a session's output never reaches it, and each step writes one line to stderr"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main.go",
+        "cmd/specrun/main_test.go"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Save every session's stream, keep the ledger and end a session that stalls",
+      "criteria": [
+        "REQ-3",
+        "REQ-4"
+      ],
+      "steps": [
+        "Add the behaviours as tests and confirm they fail: the two files per step, the ledger line with a stubbed clock, the median warning table, the ledger table, the refused log directories and the stall",
+        "Resolve the log directory: --log-dir, else agent-fox/specrun/<repository name> under the user's cache directory; refuse one inside the working tree as a usage error and one that cannot be written at stage preflight",
+        "Read the session's stdout line by line as it arrives; append each line to <step>.jsonl, where <step> is the four-digit number of the step in this ledger, its kind and its subject; when the session ends write the result text of its last event of type result to <step>.log",
+        "Restart a timer at every line; when it reaches --stall, signal the session's process group, wait for it to end, record the step as stalled and stop the loop",
+        "Append one JSON line per step to ledger.jsonl with kind, subject, started_at, ended_at, wall_minutes and outcome; print it in short form on stderr, and a warning line when a landed package took more than twice the median wall minutes of the packages landed before it in the ledger",
+        "Implement --ledger: print the ledger as a text table on stdout, skipping lines that do not parse, and start nothing"
+      ],
+      "touches": [
+        "internal/specrun/"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Keep the state file and resume from it",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the behaviours as tests and confirm they fail: the state copied mid-session, the resume table, --reset-state, and the refused starts",
+        "Write the state after every change, through a temporary file renamed over <repository name>.json under agent-fox/specrun in the state directory ($XDG_STATE_HOME, else ~/.local/state): the steps done, and the running step with its kind, subject, started_at, the commit HEAD was at and the process id of specrun",
+        "At start read the file. Refuse one that does not parse, naming --reset-state, and one whose running step records a process id of a live specrun",
+        "For a running implement step: when the package has no open task and the base branch has moved past the recorded commit, write its ledger line as landed and go on; when its feature branch exists, or nothing can be told, run the step again for the same package; when the package no longer exists, drop the step and choose anew",
+        "Implement --reset-state: remove the file, report it, and start nothing"
+      ],
+      "touches": [
+        "internal/specrun/"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Say what runs, install the command, document it and retire the script",
+      "criteria": [
+        "REQ-5"
+      ],
+      "steps": [
+        "Add the behaviours as tests and confirm they fail: the versions with the skill in the user's and the project's directory, the warning table and --strict-skills",
+        "At start find the af-impl SKILL.md a session here loads, the project's .claude/skills copy before the user's, hash it with SHA-256, run `claude --version` and `issue --version`, log all of it on stderr and put it in result.versions; a missing issue is 'not installed'",
+        "Compare the hash with the one the build embedded: warn skill_mismatch or skill_not_installed and go on, or with --strict-skills refuse at stage preflight; with no embedded hash report unknown, warn nothing, and refuse under --strict-skills",
+        "In the Makefile, make build install ./cmd/specrun beside the other three commands and pass the linker the SHA-256 of the af-impl SKILL.md as internal/skillgen renders it for the agent claude from skills/, and the same Version, Commit and BuildTime the others get",
+        "Write docs/specrun.md in the style of docs/speca.md: the loop, the landing checks, every flag and its SPECRUN_ variable, the state file and resume, the stall, the log directory and the ledger, the result and the exit codes, every sample copied from a test or the command's output; link it from docs/cli.md; add the command and internal/specrun to docs/architecture.md, the variables and directories to docs/configuration.md, and the afspec function to docs/api.md",
+        "Record the decision in a new ADR under docs/adr with the next free number, drive-the-implementation-loop-with-specrun: a Go driver on afspec and aflib, claude -p as the only model runtime, state in one JSON file, sessions checked and not trusted",
+        "Delete scripts/impl-specs.sh, and name specrun in the README and in every document that names the script",
+        "Run `make doc` and commit docs/generated"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main.go",
+        "Makefile",
+        "internal/skillgen/",
+        "docs/specrun.md",
+        "docs/cli.md",
+        "docs/architecture.md",
+        "docs/configuration.md",
+        "docs/api.md",
+        "docs/adr/",
+        "docs/generated/",
+        "README.md",
+        "scripts/impl-specs.sh"
+      ],
+      "done_when": [
+        "`make build` installs specrun",
+        "`go list -deps ./cmd/specrun` names no package of agentkit-go"
+      ]
+    }
+  ]
+}
