@@ -140,6 +140,30 @@ pass and the runs the gate report counts. `--clean-env` sets `HOME`,
 `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM` and
 `GIT_TERMINAL_PROMPT` for the gate's commands, and only for them.
 
+## specrun
+
+`specrun` takes every setting from a flag, whose default an environment
+variable sets ([specrun.md](specrun.md#configuration)):
+
+| Variable | Flag | Default |
+|---|---|---|
+| `SPECRUN_MAX` | `--max` | no limit |
+| `SPECRUN_STALL` | `--stall` | `30m` |
+| `SPECRUN_LOG_DIR` | `--log-dir` | `agent-fox/specrun/<repository name>` under the cache directory |
+| `SPECRUN_STRICT_SKILLS` | `--strict-skills` | off |
+
+It also reads:
+
+| Variable | Effect |
+|---|---|
+| `XDG_STATE_HOME` | the state file is `$XDG_STATE_HOME/agent-fox/specrun/<repository name>.json`, else under `~/.local/state` |
+| `XDG_CACHE_HOME` | the default log directory is under it, else under the platform's cache directory (`~/Library/Caches`, `~/.cache`) |
+| `HOME` | the user's af-impl skill, `~/.claude/skills/af-impl/SKILL.md`, unless the repository has its own `.claude/skills/af-impl/SKILL.md` |
+| `PATH` | where `claude`, `git` and `issue` are found |
+
+It sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` for each session to the stall
+time in milliseconds.
+
 ## The build
 
 The build reads no configuration. `go.mod` pins a released agentkit-go and

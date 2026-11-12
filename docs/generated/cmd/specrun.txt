@@ -1,0 +1,3 @@
+Command specrun drives the implementation loop: /af-impl on one spec package
+after another, each in a fresh claude -p session, until every package is done.
+See docs/specrun.md.

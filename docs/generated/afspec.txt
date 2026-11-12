@@ -141,6 +141,12 @@ func IsSpecName(s string) bool
     a spec directory name after the numeric prefix, so a name that passes it
     always makes a valid directory.
 
+func ListSpecDirs(root string) ([]string, error)
+    ListSpecDirs returns the names of the NN_name directories under root,
+    in the order of their numbers: the prefix compared as a number, so that 99_y
+    comes before 100_x, and a tie broken by the whole name. It lists directories
+    whether or not they hold a package that loads.
+
 func LoadDependentInterfaces(specID string, specRoot string) []map[string]any
     LoadDependentInterfaces loads interface summaries from the upstream specs
     that specID depends on: external API symbols and criterion contracts,
@@ -452,6 +458,16 @@ const CriterionPatternOptional CriterionPattern = "optional"
 const CriterionPatternStateDriven CriterionPattern = "state_driven"
 const CriterionPatternUbiquitous CriterionPattern = "ubiquitous"
 const CriterionPatternUnwanted CriterionPattern = "unwanted"
+type CycleError struct {
+	// Dirs is the packages of the cycle in turn, each depending on the next,
+	// the first repeated at the end, as the display function shows them.
+	Dirs []string
+}
+    CycleError says the packages under the spec root depend on one another in a
+    cycle, so that no order can satisfy them.
+
+func (e *CycleError) Error() string
+
 type Dependency struct {
 	// Reason corresponds to the JSON schema field "reason".
 	Reason string `json:"reason" yaml:"reason" mapstructure:"reason"`
@@ -630,6 +646,39 @@ type LoadError struct {
 func (e *LoadError) Error() string
 
 func (e *LoadError) Unwrap() error
+
+type NextChoice struct {
+	// Next is the package to implement now; nil when there is none.
+	Next *NextPackage
+	// AllDone is true when nothing is left to implement: no package is open
+	// and every one of them loads in this format version.
+	AllDone bool
+	// Waiting is the packages that are open and cannot start, or cannot be
+	// judged, in number order; empty when there are none.
+	Waiting []WaitingPackage
+	// ArchiveErr is why archive/ could not be read, when it exists and could
+	// not; a dependency on a package there is then not finished.
+	ArchiveErr error
+}
+    NextChoice is what ChooseNext found under a spec root.
+
+func ChooseNext(specsDir string, display func(string) string) (NextChoice, error)
+    ChooseNext chooses the package to implement now among the packages under
+    specsDir. They are ordered by the dependencies their tasks.json declare,
+    ties broken by number, so that a package comes after every package it
+    depends on; the next is the first in that order that is open (draft or
+    active, with a task pending or in progress) and whose every dependency
+    is finished (sealed, superseded or archived, with no task open, or under
+    archive/). display shows a package directory in the reasons and the result;
+    nil shows it as it is. A cycle among the packages is a *CycleError, and a
+    spec root that cannot be read a *SpecRootError.
+
+type NextPackage struct {
+	Dir  string
+	Spec *Spec
+}
+    NextPackage is the package to implement now: its directory, as the caller's
+    display function shows it, and the package as it loaded.
 
 type PartialSpec struct {
 	SpecID       string
@@ -949,6 +998,11 @@ func (s *Spec) IntegrationTaskID() (int, bool)
     the highest task id of the plan. It is false for a lite package and for a
     package with no task (format v3 §8.4).
 
+func (s *Spec) IsLegacy() bool
+    IsLegacy reports whether the package is in a format version other than the
+    one this library reads. Such a package loads, but the v3 types read none of
+    its progress and little of its plan. MigrateV2 converts a version 2 package.
+
 func (s *Spec) IsLite() bool
     IsLite reports whether the package carries the lite profile: at most three
     requirements, no execution path, no smoke check and no integration task
@@ -975,6 +1029,10 @@ func (s *Spec) NextTask() (*PlannedTask, bool)
     task in plan order, else the first task for which IsReady is true. It
     returns nil and false when there is none, which a nil receiver and an empty
     plan are.
+
+func (s *Spec) OpenTasks() []PlannedTask
+    OpenTasks are the tasks of the plan that are pending or in progress,
+    the derived integration task included, in plan order.
 
 func (s *Spec) Plan() []PlannedTask
     Plan is every task of the package in id order: the tasks of tasks.json, each
@@ -1131,6 +1189,16 @@ func LoadSpecLandscape(root string, includeArchive bool, currentSpecID string) (
 
     When includeArchive is true, archived specs from {root}/archive/ are
     included. When false, only non-archived spec directories are returned.
+
+type SpecRootError struct {
+	Err error
+}
+    SpecRootError says the spec root could not be read: an empty choice would
+    hide a mistyped root.
+
+func (e *SpecRootError) Error() string
+
+func (e *SpecRootError) Unwrap() error
 
 type Task struct {
 	// The requirement and criterion ids the task satisfies. A requirement id means
@@ -1314,4 +1382,20 @@ func ValidateGenerationStepComplete(step GenerationStep, partial PartialSpec) Va
     so a repair loop learns of every problem in one pass instead of one class
     per regenerated artifact. The schema errors come first, each with Category
     "schema"; a rule error may restate a consequence of one of them.
+
+type WaitingPackage struct {
+	// Dir is the package directory, as the display function shows it.
+	Dir string
+	// SpecID is empty when the package did not load.
+	SpecID string
+	// WaitsOn is the spec ids of its dependencies that are not finished, in
+	// the order its tasks.json names them; nil when it waits on nothing but
+	// itself.
+	WaitsOn []string
+	// Reason says why, in words.
+	Reason string
+}
+    WaitingPackage is a package under the spec root that is open but cannot
+    start yet, or that cannot be judged: it does not load, or is in another
+    format version.
 

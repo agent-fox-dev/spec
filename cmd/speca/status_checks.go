@@ -117,10 +117,8 @@ func (sc *statusCall) checkSealing() *cli.ErrorInfo {
 // integration task included, as "task N (state)", in plan order.
 func openTasks(spec *afspec.Spec) []string {
 	var out []string
-	for _, t := range spec.Plan() {
-		if t.State == afspec.TaskStatePending || t.State == afspec.TaskStateInProgress {
-			out = append(out, fmt.Sprintf("task %d (%s)", t.Id, t.State))
-		}
+	for _, t := range spec.OpenTasks() {
+		out = append(out, fmt.Sprintf("task %d (%s)", t.Id, t.State))
 	}
 	return out
 }

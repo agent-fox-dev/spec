@@ -1,11 +1,9 @@
 package specpkg
 
 import (
-	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -103,39 +101,9 @@ func isSpecDir(dir string) bool {
 }
 
 // List returns the names of the NN_name directories under root, in the order
-// of their numbers: the prefix compared as a number, so that 99_y comes before
-// 100_x, and a tie broken by the whole name. It lists directories whether or
-// not they hold a package that loads.
-func List(root string) ([]string, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() && afspec.IsSpecDirName(e.Name()) {
-			out = append(out, e.Name())
-		}
-	}
-	slices.SortFunc(out, compareDirs)
-	return out, nil
-}
-
-// compareDirs orders two NN_name directory names by their numbers. The
-// numbers are compared as digit strings without their leading zeros, shorter
-// first, so that a number too long for an int still orders.
-func compareDirs(a, b string) int {
-	na, _, _ := strings.Cut(a, "_")
-	nb, _, _ := strings.Cut(b, "_")
-	na, nb = strings.TrimLeft(na, "0"), strings.TrimLeft(nb, "0")
-	if c := cmp.Compare(len(na), len(nb)); c != 0 {
-		return c
-	}
-	if c := strings.Compare(na, nb); c != 0 {
-		return c
-	}
-	return strings.Compare(a, b)
-}
+// of their numbers, whether or not they hold a package that loads: the
+// library's ListSpecDirs.
+func List(root string) ([]string, error) { return afspec.ListSpecDirs(root) }
 
 // matching returns the directory names ref names: the whole name, its
 // number (compared as a number, so 9 and 09 are the same), or its name.
