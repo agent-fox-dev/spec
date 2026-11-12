@@ -39,6 +39,9 @@ func TestHelp_GoesToStderrAndDescribesEveryForm(t *testing.T) {
 				// The render form and the migrate form.
 				"speca <spec> --render", "speca --render", "spec.md",
 				"speca <spec> --migrate", "speca --migrate", "version 2", "version 3", "test_spec.json", "C1 to C8",
+				// The gate form and the gate report.
+				"speca <spec> --gate task|full", "--clean-env", "--timeout", "not_run", "tree id", "gate_not_recorded",
+				"XDG_STATE_HOME", "speca <spec> --gate-report", "--since", "MERGE_HEAD",
 			} {
 				if !strings.Contains(help, want) {
 					t.Errorf("the help does not say %q", want)
@@ -94,6 +97,7 @@ func TestUsageErrors(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "file")
 	writeFile(t, file, "")
 	statusHint := &cli.FixHint{Flag: "--status", Valid: wantStatusTargets}
+	gateHint := &cli.FixHint{Flag: "--gate", Valid: []string{"task", "full"}}
 	const in = "09_agent_mode"
 
 	for name, tc := range map[string]struct {
@@ -190,6 +194,38 @@ func TestUsageErrors(t *testing.T) {
 		"--migrate --force":          {[]string{in, "--migrate", "--force"}, []string{"--force has no effect with --migrate"}, nil},
 		"--migrate --all, one package": {[]string{in, "--migrate", "--all"},
 			[]string{"--all adds the archive to the sweep", "speca --migrate", "means nothing for one package"}, nil},
+
+		// The gate form. Its level is one of two, case-sensitive.
+		"--gate empty":      {[]string{in, "--gate", ""}, []string{"--gate", "task", "full"}, gateHint},
+		"--gate all":        {[]string{in, "--gate", "all"}, []string{"--gate", `"all"`, "task", "full"}, gateHint},
+		"--gate Full":       {[]string{in, "--gate", "Full"}, []string{"--gate", `"Full"`, "task", "full"}, gateHint},
+		"--gate --validate": {[]string{in, "--gate", "full", "--validate"}, []string{"--gate", "--validate", "two operations"}, nil},
+		"--gate --list":     {[]string{"--gate", "full", "--list"}, []string{"--gate", "--list", "two operations"}, nil},
+		"--gate --next":     {[]string{"--gate", "full", "--next"}, []string{"--gate", "--next", "two operations"}, nil},
+		"--gate, the task form": {[]string{in, "--gate", "full", "--task", "1", "--state", "done"},
+			[]string{"--gate", "--task", "two operations"}, nil},
+		"--gate, the status form":    {[]string{in, "--gate", "full", "--status", "sealed"}, []string{"--gate", "--status", "two operations"}, nil},
+		"--gate --render":            {[]string{in, "--gate", "full", "--render"}, []string{"--gate", "--render", "two operations"}, nil},
+		"--gate --migrate":           {[]string{in, "--gate", "full", "--migrate"}, []string{"--gate", "--migrate", "two operations"}, nil},
+		"--gate --gate-report":       {[]string{in, "--gate", "full", "--gate-report"}, []string{"--gate", "--gate-report", "two operations"}, nil},
+		"--gate without a package":   {[]string{"--gate", "full"}, []string{"--gate", "package"}, nil},
+		"--clean-env without --gate": {[]string{in, "--clean-env"}, []string{"--clean-env", "--gate"}, nil},
+		"--timeout without --gate":   {[]string{in, "--timeout", "1m"}, []string{"--timeout", "--gate"}, nil},
+		"--timeout 0s":               {[]string{in, "--gate", "full", "--timeout", "0s"}, []string{"--timeout", "greater than zero"}, nil},
+		"--timeout -1m":              {[]string{in, "--gate", "full", "--timeout", "-1m"}, []string{"--timeout", "greater than zero"}, nil},
+		"--timeout soon":             {[]string{in, "--gate", "full", "--timeout", "soon"}, []string{"timeout"}, nil},
+		"--since without the report": {[]string{in, "--since", "HEAD"}, []string{"--since", "--gate-report"}, nil},
+
+		// The gate report.
+		"--gate-report --validate":        {[]string{in, "--gate-report", "--validate"}, []string{"--gate-report", "--validate", "two operations"}, nil},
+		"--gate-report --list":            {[]string{"--gate-report", "--list"}, []string{"--gate-report", "--list", "two operations"}, nil},
+		"--gate-report --next":            {[]string{"--gate-report", "--next"}, []string{"--gate-report", "--next", "two operations"}, nil},
+		"--gate-report --render":          {[]string{in, "--gate-report", "--render"}, []string{"--gate-report", "--render", "two operations"}, nil},
+		"--gate-report --migrate":         {[]string{in, "--gate-report", "--migrate"}, []string{"--gate-report", "--migrate", "two operations"}, nil},
+		"--gate-report, the task form":    {[]string{in, "--gate-report", "--task", "1", "--state", "done"}, []string{"--gate-report", "--task", "two operations"}, nil},
+		"--gate-report, the status form":  {[]string{in, "--gate-report", "--status", "sealed"}, []string{"--gate-report", "--status", "two operations"}, nil},
+		"--gate-report without a package": {[]string{"--gate-report"}, []string{"--gate-report", "package"}, nil},
+		"--gate-report --clean-env":       {[]string{in, "--gate-report", "--clean-env"}, []string{"--clean-env", "--gate"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := refusedAsUsage(t, root, append([]string{"--dir", root}, tc.argv...), tc.want...)

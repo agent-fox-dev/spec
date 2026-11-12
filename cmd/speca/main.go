@@ -1,6 +1,6 @@
 // Command speca reports the state of a version 3 specification package, moves
-// the state of its tasks, moves the package through its lifecycle, and
-// converts a version 2 package to version 3.
+// the state of its tasks, moves the package through its lifecycle, converts a
+// version 2 package to version 3, and runs the package's gate.
 //
 //	speca [flags] <spec>
 //	speca <spec> --validate
@@ -12,6 +12,8 @@
 //	speca --render [--all] [--dry-run]
 //	speca <spec> --migrate [--dry-run]
 //	speca --migrate [--all] [--dry-run]
+//	speca <spec> --gate task|full [--clean-env] [--timeout <duration>]
+//	speca <spec> --gate-report [--since <commit>]
 //
 // It takes one input, a reference to a spec package, and writes exactly one
 // JSON object to stdout: the package's state, its verdict under --validate,
@@ -26,8 +28,11 @@
 // artifact of it and its spec.md, and moves an archived or superseded package
 // under archive/. The render form writes spec.md, the package's render, and no
 // other file. The migrate form rewrites a version 2 package as version 3 and
-// removes its test_spec.json. No form makes a model or network call or reads a
-// credential. Its siblings are spec, which writes a package from an idea, and
+// removes its test_spec.json. The gate form runs the package's linter and
+// all_tests commands and the gate report sums the gates that ran; neither
+// writes under --dir, and what the gate keeps (the commands' logs, the passes
+// it reuses, the run log) goes to the user's state directory. No form makes a
+// model or network call or reads a credential. Its siblings are spec, which writes a package from an idea, and
 // specr, which renders one as Markdown.
 package main
 
@@ -44,6 +49,7 @@ import (
 	"github.com/agent-fox-dev/spec"
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/cli"
+	"github.com/agent-fox-dev/spec/internal/gate"
 )
 
 const tool = "speca"
@@ -60,13 +66,16 @@ const description = "Reports the state of a specification package: its lifecycle
 	"moves the package through its lifecycle: activates, seals, archives " +
 	"or supersedes it (with --by, the package that replaces it), and moves an archived or superseded " +
 	"package under archive/. With --render it writes the package's spec.md, its render, and no other " +
-	"file. With --migrate it converts a version 2 package to version 3 in place. Without these it " +
-	"changes nothing. " + cli.SiblingCommands
+	"file. With --migrate it converts a version 2 package to version 3 in place. With --gate task or " +
+	"full it runs the package's linter, then its all_tests command, with no shell, and answers with one " +
+	"verdict, pass, fail or not_run, reusing a pass recorded for the same tree; with --gate-report it sums " +
+	"the package's gate runs since a commit. Without these it changes nothing. " + cli.SiblingCommands
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
 	"inside it, or a directory name, spec number or spec name under the spec root " +
-	"(16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package."
+	"(16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package; " +
+	"--gate and --gate-report need one."
 
 const usage = `speca — report the state of a specification package
 
@@ -82,6 +91,8 @@ Usage:
   speca --render [--all] [--dry-run] [flags]
   speca <spec> --migrate [--dry-run] [flags]
   speca --migrate [--all] [--dry-run] [flags]
+  speca <spec> --gate task|full [--clean-env] [--timeout <duration>] [flags]
+  speca <spec> --gate-report [--since <commit>] [flags]
 
 The spec is one reference to a package, tried in this order:
   a path to the package directory, or to a file inside it
@@ -166,6 +177,47 @@ Forms:
                            A package that cannot be converted is reported
                            failed with its reason, and the others are converted
                            all the same
+  speca <spec> --gate task|full
+                           the gate form: run the package's linter command,
+                           then its all_tests command, from its test_commands,
+                           in --dir, whatever its status. Each command string
+                           is split on white space, a quoted stretch kept as
+                           one argument, and started with no shell; the gate
+                           stops at the first command that does not exit 0.
+                           The verdict is pass, fail or not_run (a command
+                           could not start); a failing command's last 40
+                           lines are in tail, its whole output in its log.
+                           A pass is recorded under the tree id of the working
+                           tree (untracked files in, ignored ones out), --dir
+                           within it, the level, the two command strings and
+                           --clean-env, and
+                           the same gate is then answered from it, reused,
+                           running nothing; a failure is never reused. A full
+                           gate keeps the five slowest Go test packages. The
+                           logs, the passes and the run log are kept in
+                           agent-fox/speca under $XDG_STATE_HOME, else
+                           ~/.local/state; nothing is written under --dir.
+                           Without a tree id (no git work tree, no git) or a
+                           state directory that can be written, the gate runs
+                           and a gate_not_recorded warning says it was not
+                           recorded
+    --clean-env            with --gate: an empty temporary HOME, no global or
+                           system git configuration, GIT_TERMINAL_PROMPT=0
+    --timeout <duration>   with --gate: how long one command may run (default
+                           20m); it is then ended with every process it
+                           started, and the gate fails
+  speca <spec> --gate-report [--since <commit>]
+                           the gate report: the package's gate runs that ended
+                           in pass or fail, counted when the commit checked
+                           out at the run is --since or a descendant of it
+                           that HEAD reaches, or MERGE_HEAD while a merge is
+                           uncommitted: per level the runs, their seconds and
+                           how many were reused, the full gate's seconds at
+                           the baseline and on the last tree, and the last full
+                           gate's slowest units. Without --since, the merge
+                           base of HEAD and the base branch (the one
+                           refs/remotes/origin/HEAD names, else main). It
+                           writes nothing
     --dry-run              with the task, status, render or migrate form, run
                            every check and report what would change; write
                            nothing
@@ -225,10 +277,17 @@ Exit codes:
      conversion refuses or cannot be written (stage migrate), and the sweep
      when the spec root cannot be read (stage load); a package the sweep
      cannot convert is an entry, not a failure
+     The gate form exits 0 whatever its verdict (pass, fail or not_run), and
+     fails only when the package cannot be loaded; the gate report fails when
+     the package or the run log cannot be read (stage load), or the commits
+     since --since cannot be listed (stage git)
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have; --status
      draft, or a --by that names the package itself, no package or one with
-     its spec_id. Nothing was written
+     its spec_id; a --gate other than task or full, or a --timeout that is not
+     a duration greater than zero; a --since that names no commit, no --since
+     and no base branch, or a --gate-report outside a git work tree. Nothing
+     was written
 
 Examples:
   speca 16
@@ -246,6 +305,10 @@ Examples:
   speca --render --all --dry-run
   speca 09 --migrate --dry-run
   speca --migrate --all
+  speca 16 --gate full
+  speca 16 --gate task --timeout 10m
+  speca 16 --gate full --clean-env
+  speca 16 --gate-report --since 6b61d8e
 
 Flags:
 `
@@ -266,8 +329,14 @@ type options struct {
 	dryRun   bool
 	render   bool
 	migrate  bool
-	schema   bool
-	version  bool
+	gate     givenFlag
+	cleanEnv bool
+	timeout  givenDuration
+	// The gate report.
+	gateReport bool
+	since      givenFlag
+	schema     bool
+	version    bool
 }
 
 // taskForm reports whether the call asks for the form that changes tasks.
@@ -277,6 +346,10 @@ func (o *options) taskForm() bool { return len(o.tasks) > 0 || o.state != "" }
 // package's lifecycle status. --by alone asks for it, so that it is refused
 // where it stands rather than ignored.
 func (o *options) statusForm() bool { return o.status.given || o.by.given }
+
+// gateForm reports whether the call asks for the gate form. An empty --gate
+// asks for it, so that it is refused where it stands.
+func (o *options) gateForm() bool { return o.gate.given }
 
 func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
@@ -291,6 +364,12 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, the status form (--status), the render form (--render) or the migrate form (--migrate), run every check and report what would change, and write nothing")
 	fs.BoolVar(&o.render, "render", false, "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed")
 	fs.BoolVar(&o.migrate, "migrate", false, "the migrate form: convert a version 2 package to version 3 in place, whatever its status, by the rules of format v3 §13; a version 3 package is left alone; each package is reported written, unchanged or failed")
+	fs.Var(&o.gate, "gate", "the gate form: run the package's linter command, then its all_tests command, from its test_commands, in --dir, each started directly with no shell, and answer with one verdict, pass, fail or not_run; task or full, the gate's level, which is part of the answer; whatever the package's status, and writing nothing under --dir")
+	fs.BoolVar(&o.cleanEnv, "clean-env", false, "with --gate, run every command with an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0, every other variable inherited; the directory is removed when the gate ends")
+	o.timeout.value = gate.DefaultTimeout
+	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails")
+	fs.BoolVar(&o.gateReport, "gate-report", false, "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing")
+	fs.Var(&o.since, "since", "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
 	fs.StringVar(&o.dir, "dir", ".", "the repository the spec root and a relative reference are resolved against")
 	fs.BoolVar(&o.schema, "schema", false, "print the flags, the input and the output's JSON Schema as one JSON object, and exit")
@@ -352,6 +431,30 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			hint = statusHint
 		}
 	}
+	if o.gateForm() {
+		more, gateHint := o.gateErrors(ref)
+		errs = append(errs, more...)
+		if gateHint != nil {
+			hint = gateHint
+		}
+	} else {
+		for _, f := range []struct {
+			name  string
+			given bool
+		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given}} {
+			if f.given {
+				errs = append(errs, fmt.Errorf("%s goes with --gate: it applies to the gate form", f.name))
+			}
+		}
+	}
+	if o.gateReport {
+		errs = append(errs, o.gateReportErrors(ref)...)
+	} else if o.since.given {
+		errs = append(errs, errors.New("--since goes with --gate-report: it names the commit the gate runs are counted from"))
+	}
+	if o.timeout.given && o.timeout.value <= 0 {
+		errs = append(errs, fmt.Errorf("--timeout %s: a command's time limit must be greater than zero", o.timeout.value))
+	}
 	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate {
 		for _, f := range []struct {
 			name  string
@@ -384,6 +487,56 @@ func (o *options) nextErrors(ref string) []error {
 	} {
 		if f.given {
 			errs = append(errs, fmt.Errorf("--next and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
+}
+
+// gateErrors are the faults of a call that asks for the gate form: it needs a
+// package, is the only operation of the call, and its level is task or full.
+// The hint holds the two levels when it is neither.
+func (o *options) gateErrors(ref string) ([]error, *cli.FixHint) {
+	var errs []error
+	var hint *cli.FixHint
+	if !slices.Contains(gateLevels, o.gate.value) {
+		errs = append(errs, fmt.Errorf("--gate %q is not a gate level: the levels are task and full", o.gate.value))
+		hint = &cli.FixHint{Flag: "--gate", Valid: slices.Clone(gateLevels)}
+	}
+	if ref == "" {
+		errs = append(errs, errors.New("--gate needs a package: name the package whose test_commands to run"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+		{"--gate-report", o.gateReport},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--gate and %s are two operations: give one", f.name))
+		}
+	}
+	return errs, hint
+}
+
+// gateReportErrors are the faults of a call that asks for the gate report: it
+// needs a package and is the only operation of the call. Its clash with --gate
+// is named by gateErrors.
+func (o *options) gateReportErrors(ref string) []error {
+	var errs []error
+	if ref == "" {
+		errs = append(errs, errors.New("--gate-report needs a package: name the package whose gate runs to sum"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--gate-report and %s are two operations: give one", f.name))
 		}
 	}
 	return errs
@@ -502,7 +655,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.next && !o.render && !o.migrate {
+	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() && !o.gateReport {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage
@@ -569,14 +722,14 @@ func describe(fs *flag.FlagSet) selfDescription {
 			Description: inputDescription,
 			Examples:    []string{".specs/16_indexed_code_search", "16", "indexed_code_search", ".specs/16_indexed_code_search/tasks.json"},
 		},
-		Flags: cli.FlagsDocument(fs, map[string][]string{"state": taskStates, "status": statusTargets}),
+		Flags: cli.FlagsDocument(fs, map[string][]string{"state": taskStates, "status": statusTargets, "gate": gateLevels}),
 		// speca makes no model call and no forge write, and takes no
 		// classified input, so those envelope fields never appear.
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
-			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle",
-			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written",
+			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, what --migrate did to the package, the gate's verdict whatever it is (pass, fail or not_run), or the gate report",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read, or the commits since --since could not be listed (stage git)",
+			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree; nothing was written",
 		},
 	}
 }

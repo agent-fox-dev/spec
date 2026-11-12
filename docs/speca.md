@@ -10,6 +10,8 @@ speca <spec> --render                    write the package's spec.md, its render
 speca --render [--all]                   write the spec.md of every package
 speca <spec> --migrate                   convert a version 2 package to version 3
 speca --migrate [--all]                  convert every version 2 package
+speca <spec> --gate task|full            run the package's linter and all_tests → one verdict
+speca <spec> --gate-report               sum the package's gate runs since a commit
 ```
 
 `speca` is the spec admin command. It reads a version 3 package through
@@ -46,8 +48,12 @@ a call changes in content is the status, but formatting the encoding does not
 keep (a YAML comment in the frontmatter of `prd.md`, say) is lost, and the
 files are left with mode `0600`, because the temporary files are created
 private. Moving the directory under `archive/` is a rename: it rewrites no
-file. With `--dry-run` no form writes anything. `speca` makes no model call
-and no network call, and reads no credential.
+file. With `--dry-run` no form writes anything. The gate form starts the
+package's `linter` and `all_tests` commands as processes and keeps their logs,
+the passes it reuses and a run log in the user's state directory, outside the
+repository; it and the gate report write nothing under `--dir`. `speca` makes
+no model call and no network call, and reads no credential (what the gate's
+commands do is theirs).
 
 ```sh
 speca 16                                # the state of package 16
@@ -66,6 +72,8 @@ speca 16 --render                       # write spec.md, 16's render, and nothin
 speca --render --all --dry-run          # which packages' spec.md are not their render
 speca 16 --migrate                      # convert 16 from version 2 to version 3, in place
 speca --migrate --all --dry-run         # which packages, archive/ included, are still version 2
+speca 16 --gate full                    # run 16's linter and all_tests; reuse a pass of the same tree
+speca 16 --gate-report --since 4388b94  # the gates of 16 since that commit, summed
 speca --schema                          # the interface, as JSON Schema
 ```
 
@@ -76,7 +84,9 @@ bare invocation prints the help to stderr. `--help` exits 0 and writes nothing
 to stdout. A bare invocation exits 2; when stdout is not a terminal it also
 writes a usage envelope, so a program still gets one object to parse. An
 invocation that names flags but no input, and is not `--list`, `--next`,
-`--render` or `--migrate`, is a bare invocation.
+`--render`, `--migrate`, `--gate` or `--gate-report`, is a bare invocation;
+`--gate` and `--gate-report` with no input are usage errors that say they need
+a package.
 
 ## The input
 
@@ -120,6 +130,8 @@ Every one of these messages begins with `speca`.
 | `--migrate --dry-run` | the same, for a conversion that was not written: `dry_run` is true |
 | `--migrate` with no input | the sweep: `migrated` holds every package under the spec root, in the order of their numbers |
 | `--migrate --all` with no input | the same, then the packages under `archive/` |
+| `--gate task` or `--gate full` | `gate`: the verdict of the package's `linter`, then `all_tests`, or the recorded pass of the same tree reused |
+| `--gate-report` | `gate_report`: the package's gate runs since a commit, summed |
 
 A call names one operation. `--validate` with `--list`, the task form or the
 status form with either of them or with each other, `--next` with any other
@@ -129,7 +141,11 @@ with any of them or with each other, a positional input with `--list`, and
 input) are usage errors. `--force` with `--render` or `--migrate` is one too:
 neither form refuses anything `--force` could override; and so is `--all` with
 either and an input, since `--all` adds `archive/` to the sweep and means
-nothing for one package.
+nothing for one package. `--gate` and `--gate-report` take a package and go with
+no other operation, nor with each other; `--clean-env` and `--timeout` go with
+`--gate` and `--since` with `--gate-report`, and a `--gate` other than `task` or
+`full` (case-sensitive, with `fix_hint.valid` `["task", "full"]`) or a
+`--timeout` that is not a duration greater than zero is refused.
 
 ## The report: `speca <spec>`
 
@@ -691,6 +707,247 @@ package is reported `unchanged`, and a sweep over a converted root writes
 nothing. The decision is
 [ADR 19](adr/19-migrate-the-format-to-version-3.md).
 
+## The gate form: `speca <spec> --gate task|full`
+
+The gate decides whether a task or a branch may land: the package's own
+`linter` command, then its `all_tests` command, from `test_commands` in
+`tasks.json`. The gate form runs them in the repository `--dir` names,
+whatever the package's lifecycle status, and answers with one verdict in
+`result.gate`. The level, `task` (after an implement task) or `full` (the
+baseline, after the integration task, after the conformance fixes and on the
+merged tree), is part of the answer and of the key a pass is recorded under;
+both levels run the same two commands. The decision is
+[ADR 22](adr/22-run-the-gate-with-speca.md).
+
+```sh
+speca 16 --gate full                    # the baseline, or the merged tree
+speca 16 --gate task                    # after an implement task
+speca 16 --gate full --clean-env        # the conformance pass's clean environment
+speca 16 --gate task --timeout 10m      # end a command still running after 10 minutes
+```
+
+- **No shell.** Each command string is split on white space, a stretch inside
+  single or double quotes kept as one argument without its quotes, and the
+  program is started directly (`gate.Split`). A pipe, `&&`, a redirection,
+  `$VAR` or `*` reaches the program as a literal argument. `make test` and
+  `go test ./... -run 'A|B'` work; anything that needs a shell does not.
+- **First failure stops.** A command that exits with a code other than 0 ends
+  the gate with `fail`, and the commands after it do not start.
+- **`not_run`.** A command that cannot start ends the gate with `not_run`, and
+  `reason` names the command and why: its program is not found, its string
+  is empty or has an unterminated quote, or `test_commands` names no such
+  command. A command that could not start has no entry in `commands`.
+- **The timeout.** On Linux and macOS each command runs in a process group of
+  its own (elsewhere the timeout ends the command's own process only). One
+  still running when `--timeout` (a Go duration, default `20m`) has passed is
+  ended together with every process it started, its entry has `timed_out` and
+  no `exit_code`, and the gate ends with `fail`. A process a command left
+  running when it exited is ended too; if it held the command's output open,
+  `speca` waits two seconds for it, and the command's own exit code stands.
+- **The output.** Each command's stdout and stderr go together to a log file
+  of its own under the state directory, named in its `log`. None of it reaches
+  `speca`'s stdout, which stays one JSON object. A command that fails or times
+  out carries the last 40 lines of its output in `tail`, all of them when it
+  printed fewer, `""` when it printed nothing; the tail is kept as the output
+  is written, and the log is not read back. A command that exits 0 has no
+  `tail`.
+- **The units.** A full gate reads its `all_tests` output, as it is written,
+  for Go's per-package result lines: `ok <package> <n>s` and
+  `FAIL <package> <n>s`, with or without text after the duration. Lines with
+  `(cached)`, `[no test files]` or `[build failed]` are not units. The five with
+  the most seconds are `slowest`, slowest first, equal ones in output order;
+  for an output with no such line (pytest, Jest, a linter's) the list is `[]`.
+  A task gate has no `slowest`.
+- **The clean environment.** With `--clean-env`, every command runs with
+  `HOME` set to an empty directory made for this gate outside the repository,
+  `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` set to the null device,
+  `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`; every other variable is
+  inherited. The directory is removed when the gate ends, whatever its verdict,
+  a timeout included, with what the commands wrote into it (read-only
+  directories, such as Go's module cache, are made writable first). Without the
+  flag the commands inherit `speca`'s environment unchanged.
+
+`result.gate` holds:
+
+| Field | Meaning |
+|---|---|
+| `level` | `task` or `full` |
+| `verdict` | `pass`, `fail` or `not_run` |
+| `clean_env` | `true` when the commands ran with `--clean-env`; always written |
+| `reason` | why the gate is `not_run`; present exactly then |
+| `reused` | the recorded pass the gate was answered from: `commit` (checked out when it ran), `at` (RFC 3339) and `seconds` (its total); absent when the commands ran |
+| `commands` | one entry per command that ran, in run order: `name` (`linter`, `all_tests`), `exit_code` (absent when it timed out), `seconds` (to the millisecond), `log` (absent when the file could not be written), `tail` (a failure only) and `timed_out`; `[]` when a pass was reused |
+| `seconds` | the sum of the commands' seconds; `0` when a pass was reused |
+| `slowest` | a full gate only: `{unit, seconds}`, at most five; `[]` when there are none |
+
+A full gate that passed, from a repository whose `all_tests` prints two Go
+result lines (the samples are the command's output, with the temporary state
+directory they ran under written as `~/.local/state`; a real `log` is an
+absolute path):
+
+```json
+"gate": {
+  "level": "full",
+  "verdict": "pass",
+  "clean_env": false,
+  "commands": [
+    { "name": "linter", "exit_code": 0, "seconds": 0.137,
+      "log": "~/.local/state/agent-fox/speca/docrepo-348918aa290c4691/logs/20261112T165927Z-linter-61794451.log" },
+    { "name": "all_tests", "exit_code": 0, "seconds": 0.148,
+      "log": "~/.local/state/agent-fox/speca/docrepo-348918aa290c4691/logs/20261112T165927Z-all_tests-3039488476.log" }
+  ],
+  "seconds": 0.285,
+  "slowest": [
+    { "unit": "github.com/acme/search", "seconds": 1.208 },
+    { "unit": "github.com/acme/index", "seconds": 0.64 }
+  ]
+}
+```
+
+The same call again, on the same tree (`summary`
+`speca: 16_indexed_code_search full gate pass, reused from 4388b94`):
+
+```json
+"gate": {
+  "level": "full",
+  "verdict": "pass",
+  "clean_env": false,
+  "reused": { "commit": "4388b9495c00bde4933113a81f32c2aeb7e5ea1d", "at": "2026-11-12T16:59:27Z", "seconds": 0.285 },
+  "commands": [],
+  "seconds": 0,
+  "slowest": [
+    { "unit": "github.com/acme/search", "seconds": 1.208 },
+    { "unit": "github.com/acme/index", "seconds": 0.64 }
+  ]
+}
+```
+
+A task gate whose tests fail reads the failure from `tail`, without opening
+the log:
+
+```json
+{ "name": "all_tests", "exit_code": 1, "seconds": 0.003,
+  "log": "~/.local/state/agent-fox/speca/docrepo-348918aa290c4691/logs/20261112T165928Z-all_tests-250984260.log",
+  "tail": "--- FAIL: TestSearch (0.01s)\n    search_test.go:12: want 3 hits, got 2\nFAIL\nFAIL\tgithub.com/acme/search\t0.412s" }
+```
+
+### Reusing a pass
+
+Every gate that ends in `pass` in a git work tree is recorded, and a later
+gate with the same key is answered from the record: it starts no command and
+returns `pass` with `reused`. The key is:
+
+- the **tree id** of the working tree as it is: tracked and untracked files
+  included, ignored files left out. `speca` copies the index to a temporary
+  file and has git add the whole tree to the copy, writing the new objects to
+  a temporary object directory, then `git write-tree --missing-ok`. The user's
+  index, the staged changes and everything under `.git`, the modification
+  times of the objects included, are left as they were;
+- the **directory** the commands run in (`--dir`), as a path under the work
+  tree's top level, so that two directories of one repository run gates of
+  their own;
+- the **level**;
+- the exact `linter` and `all_tests` **command strings**;
+- whether the environment was **clean**.
+
+Two commits with the same tree are the same code, so committing the change a
+pass covered, or merging with `--no-ff` a branch whose tip passed while the
+base branch did not move, is answered from that pass, with `reused.commit` the
+commit that was checked out when it ran. A clean-environment run is never
+answered by a normal one, nor the other way round. A `fail` or a `not_run` is
+never recorded: a failure is cheap to run again and must be seen.
+
+### The state directory
+
+What the gate keeps lives outside every repository, in `agent-fox/speca` under
+`$XDG_STATE_HOME` when it is set to an absolute path, else under
+`~/.local/state`, on Linux and macOS alike
+([configuration.md](configuration.md#the-gates-state-directory)). Each
+repository has a directory of its own there, named after the base name of its
+top level and a hash of the top level's path (of `--dir` outside a git work
+tree):
+
+| Path | What it holds |
+|---|---|
+| `logs/<time>-<command>-<n>.log` | each command's complete output, one file per command and gate |
+| `passes/<sha256 of the key>.json` | a recorded pass: its key, the commit checked out, the time, the seconds and the slowest units; written through a temporary file that is renamed |
+| `runs.jsonl` | the run log: one line per gate that ended in `pass` or `fail`, reused ones included, with the package's spec id, the time, the commit, the level, `clean_env`, the verdict, the seconds, the run it reused and the slowest units. A `not_run` gate is not logged |
+
+Nothing is written under `--dir`. Two things can keep a gate from being
+recorded, and neither stops it: `--dir` is not inside a git work tree or git is
+not installed, so there is no tree id; or the state directory cannot be
+created or written, in which case the commands also run without a `log`. The
+gate runs and answers with its verdict, and a low `gate_not_recorded` warning
+says why. A record that cannot be parsed counts as none, and the next pass
+replaces it.
+
+The `summary` is `speca: <directory> <level> gate <verdict> in <n>s`,
+`speca: <directory> <level> gate pass, reused from <short commit>` for a
+reused pass, or `speca: <directory> <level> gate not_run: <reason>`. `next` is
+empty: what follows a gate is the caller's decision. The call exits 0 for
+every verdict, and fails (exit 1, stage `load`) only when the package cannot
+be read.
+
+## The gate report: `speca <spec> --gate-report [--since <commit>]`
+
+The gate report sums the gates recorded for the package, for the merge commit
+and an implementer's report: what the gates cost, measured, not remembered.
+It reads the run log of the repository and writes nothing.
+
+```sh
+speca 16 --gate-report --since 4388b94  # the runs since the baseline's commit
+speca 16 --gate-report                  # since the merge base with the base branch
+```
+
+A run counts when it is of this package (its `spec_id`), ended in `pass` or
+`fail` (a reused one included), and the commit that was checked out when it
+ran is `--since` itself, or a descendant of it that `HEAD` reaches, or, while
+a merge is uncommitted, that `MERGE_HEAD` reaches
+(`git rev-list --ancestry-path <since>..HEAD`, and `..MERGE_HEAD`). Runs are
+selected by ancestry, not by time, so a base branch that moved, or a gate on
+another branch, changes nothing; `MERGE_HEAD` is included because the gate on
+the merged tree runs before the merge is committed. Without `--since` the
+commit is the merge base of `HEAD` and the base branch: the branch
+`refs/remotes/origin/HEAD` names, else `main`. `af-impl` passes `--since`,
+the commit its baseline ran on.
+
+`result.gate_report` holds:
+
+| Field | Meaning |
+|---|---|
+| `since` | the full id of the commit counted from |
+| `full`, `task` | for each level: `runs`, `seconds` (the runs' own, a reused run adding `0`) and `reused` |
+| `baseline_full_seconds` | the seconds of the earliest full run counted; a reused run's are those of the run it came from; absent when none is counted |
+| `last_full_seconds` | the same, of the latest full run counted |
+| `slowest` | the slowest units of the latest full run counted; `[]` when there are none |
+
+With no run to count (no run log, no run of this package in the range, or only
+lines that cannot be parsed, which are skipped) every count is `0`, the two
+durations are absent and `slowest` is `[]`. After the full gate at the
+baseline, a reused full gate on the same tree and one failing task gate:
+
+```json
+"gate_report": {
+  "since": "4388b9495c00bde4933113a81f32c2aeb7e5ea1d",
+  "full": { "runs": 2, "seconds": 0.285, "reused": 1 },
+  "task": { "runs": 1, "seconds": 0.007, "reused": 0 },
+  "baseline_full_seconds": 0.285,
+  "last_full_seconds": 0.285,
+  "slowest": [
+    { "unit": "github.com/acme/search", "seconds": 1.208 },
+    { "unit": "github.com/acme/index", "seconds": 0.64 }
+  ]
+}
+```
+
+The `summary` is `speca: <directory> gate report: <n> full, <m> task, <k> reused`
+(`speca: 16_indexed_code_search gate report: 2 full, 1 task, 1 reused` above);
+`next` is empty. A `--since` that names no commit, no `--since` with neither
+`refs/remotes/origin/HEAD` nor a branch `main`, and a `--dir` outside a git work
+tree are usage errors with no result; a package or a run log that cannot be
+read fails the call (exit 1, stage `load`), and so does a `git rev-list` that
+fails (stage `git`, category `internal`).
+
 ## The output
 
 Report on package `09`, whose first task is done:
@@ -924,6 +1181,8 @@ One sentence per form, which the shell caps at 200 characters:
 | status form | `speca: activated <name>`, `speca: sealed <name>`, `speca: archived <name>, moved to <path>`, `speca: superseded <name> by <spec_id>, moved to <path>`, and `speca: moved <name> to <path>` for a call that only moves the package; `<name>` is the package's directory name, `<path>` where it went, as `spec_dir` shows it. An archive or a supersede that needs no move has no `, moved to` clause. Under `--dry-run` the sentence ends ` (dry run; nothing written)` (the task form's has a comma). After a move under `archive/` that failed, it says the status was written and the move was not. A refusal has no result, so its `summary` is the refusal's message |
 | render form | `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep; ` (dry run, nothing written)` is added under `--dry-run` |
 | migrate form | the same shape: `speca: <n> written, <n> unchanged, <n> failed`, for one package and for the sweep, with the dry-run clause |
+| gate form | `speca: <directory> <level> gate <verdict> in <n>s`; `speca: <directory> <level> gate pass, reused from <short commit>`; `speca: <directory> <level> gate not_run: <reason>` |
+| gate report | `speca: <directory> gate report: <n> full, <m> task, <k> reused` |
 | task form | `speca: <directory> task N <from> → <to>`, `speca: <directory> tasks N, M → <to>`, or `speca: <directory> no task changed`; ` (dry run, nothing written)` is added under `--dry-run`. A refusal has no sentence of its own: its `summary` is the refusal's message. The shell adds `; <n> high-severity warning(s)` to the sentence of any success that raised a high warning, so a call that used `--force` to set a state, or to write over keys, ends in `; 1 high-severity warning` |
 
 ### Reading it from Go
@@ -1015,9 +1274,9 @@ else.
 
 | Code | `status` | Meaning |
 |---|---|---|
-| `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already |
-| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`) |
-| `2` | `usage` | usage error — nothing was written |
+| `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already; or the gate ran or was reused, whatever its verdict (`pass`, `fail` or `not_run`); or the gate report summed the runs |
+| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`); or the package the gate form or the gate report reads could not be loaded (stage `load`), or the gate report's run log could not be read (stage `load`), or the commits since `--since` could not be listed (stage `git`) |
+| `2` | `usage` | usage error — nothing was written. Among them: a `--gate` other than `task` or `full`, a `--timeout` that is not a duration greater than zero, a `--since` that names no commit, no `--since` and no base branch, and a `--gate-report` outside a git work tree |
 
 ### Warning codes
 
@@ -1032,6 +1291,7 @@ else.
 | `supersedes_not_recorded` | low | status | superseding went through, but the old `spec_id` was not added to the replacing package's `supersedes`: it is sealed, its intent drifted, it holds keys the schema does not allow, or its save failed. The warning names the replacing package's directory, the id and the reason |
 | `task_not_ready` | low | task | a task moved to `in_progress` has a dependency that is not `done`, judged on the plan before the call. The warning names the task and the dependencies |
 | `task_state_forced` | high | task | `--force` set a state the machine would have refused. One for each such task, naming it and its two states |
+| `gate_not_recorded` | low | gate | the gate ran and answered, but its result is not recorded for reuse: there is no tree id (`--dir` is not in a git work tree, or git is not installed), or the state directory cannot be written (the message names the path, or says that neither `$XDG_STATE_HOME` nor the home directory is set; the commands ran without a `log`), or the pass or the run could not be written |
 
 The warnings of the task and status forms are raised when the call goes ahead: a
 refusal, or a write that fails, raises none, since they would speak of changes
@@ -1054,13 +1314,21 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 | `--dry-run` | off | with the task form, the status form, the render form or the migrate form: run every check and report the result, write nothing |
 | `--render` | off | the render form: write the package's `spec.md`, its render, and no other file |
 | `--migrate` | off | the migrate form: convert a version 2 package to version 3 in place, whatever its status, by format v3 §13; a version 3 package is left alone |
+| `--gate` | | the gate form: `task` or `full`, the level of the gate to run |
+| `--clean-env` | off | with `--gate`: run the commands with an empty temporary `HOME`, no global or system git configuration and `GIT_TERMINAL_PROMPT=0` |
+| `--timeout` | `20m` | with `--gate`: how long one command may run, a Go duration greater than zero |
+| `--gate-report` | off | the gate report: sum the package's gate runs since a commit |
+| `--since` | the merge base of `HEAD` and the base branch | with `--gate-report`: the commit the runs are counted from |
 | `--specs-dir` | `<dir>/.specs`, or `$AF_SPEC_DIR` | where `NN_name` packages live |
 | `--dir` | `.` | the repository the spec root and a relative reference are resolved against |
 | `--schema` | | print the self-description below and exit 0 |
 | `--version` | | print the build identity and exit 0 |
 
-Flags may come before or after the input. `$AF_SPEC_DIR` is the one environment
-variable `speca` reads; it reads no credential and no model variable.
+Flags may come before or after the input. `$AF_SPEC_DIR` is the environment
+variable every form reads; the gate form and the gate report also read
+`$XDG_STATE_HOME` (else `$HOME`) for the state directory, and the gate's
+commands inherit the environment. `speca` reads no credential and no model
+variable.
 
 ## Self-description (`--schema`)
 
@@ -1072,7 +1340,8 @@ It reads nothing — no package, no `--dir` — so it runs anywhere:
 - `input` — what the one positional input may be, with examples;
 - `flags` — a standalone JSON Schema (2020-12) document of the flags, each
   with its `type`, `default` and `description`, generated from the flag set;
-  `--state` is an `enum` of the four states and `--status` of the four targets.
+  `--state` is an `enum` of the four states, `--status` of the four targets and
+  `--gate` of the two levels.
   `--schema` and `--version` are not listed;
 - `result` — a standalone JSON Schema document of the envelope, with `result`
   replaced by `speca`'s own result type and every field described, generated
@@ -1144,6 +1413,15 @@ agents that claim the same task get the machine's answer: the second call is
 refused, with the states the task may move to and the package as it is on disk.
 The same loop in Go is [`examples/tasks`](../examples/tasks/main.go).
 
+The gate is a call of its own. `speca <package> --gate task` after each
+implement task and `--gate full` at the baseline, after the integration task,
+after the conformance fixes (`--gate full --clean-env` for the clean-environment
+run) and on the merged tree: `result.gate.verdict` is the answer, a failure is
+read from `tail`, and a tree that already passed is not checked again.
+`speca <package> --gate-report --since <baseline commit>` then gives the
+numbers for the merge commit. The verdict is not compared with a baseline:
+that, and what to do about a failure, are the caller's.
+
 The lifecycle has the same shape. A draft that validates is told by `next` to
 `speca <package> --status active`, whose `next` is the claim of its first task;
 an active package whose tasks are all finished is told to
@@ -1155,8 +1433,8 @@ package and changes nothing else.
 
 ## What it leaves out
 
-`speca` is a fast call, so the parts of `spec`'s shell that serve a long model
-run are absent: there is no model, no `--preflight`, no `--detail`, no `--output`
+`speca` is a fast call (the gate form takes as long as the package's commands),
+so the parts of `spec`'s shell that serve a long model run are absent: there is no model, no `--preflight`, no `--detail`, no `--output`
 and no progress on stderr. (`--dry-run` here is that of the task, status, render and migrate forms, not `spec`'s.)
 It changes nothing but the state of the tasks of a package, with the
 `updated_at` of its `progress.json`, its lifecycle status (with the
@@ -1164,7 +1442,8 @@ It changes nothing but the state of the tasks of a package, with the
 given) and where it lives, the `supersedes` of a replacing package, its
 `spec.md`, which every save writes and the render form writes alone, and the
 format version of a version 2 package, which the migrate form converts without
-changing what it says: not a package's content (requirements, checks, a task's
+changing what it says; and outside the repository, the gate's logs, passes and
+run log in the state directory, which it never prunes: not a package's content (requirements, checks, a task's
 title, steps or dependencies), and it creates no package and renders none to
 stdout, which are `spec`'s and `specr`'s. It does not move a package back to
 `draft`, reopen a sealed one, or take one out of `archive/`; it does not

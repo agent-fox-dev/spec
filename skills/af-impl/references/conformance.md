@@ -29,10 +29,12 @@ the whole diff from the base branch:
   `git diff <base> -- <package>` holds `progress.json` and nothing else (a
   new one counts; `git status` shows it); anything else is a change to the
   spec, and it comes out.
-- **A clean environment.** Run the gate once more with an empty `HOME`, no
-  global git configuration and `GIT_TERMINAL_PROMPT=0`. A test that passes
-  only on this machine's configuration (`git init` without `-b`, a commit
-  with no configured identity, a credential a dialog supplied) is a finding.
+- **A clean environment.** Run `speca <package> --gate full --clean-env`: the
+  gate once more with an empty `HOME`, no global git configuration and
+  `GIT_TERMINAL_PROMPT=0`. A test that passes only on this machine's
+  configuration (`git init` without `-b`, a commit with no configured
+  identity, a credential a dialog supplied) is a finding; read it from the
+  failing command's `tail`.
 - **Review.** Read the diff against the spec on a fresh footing — no task's
   report, and a new whole-package `specr <package>` render — and answer for every requirement and criterion of the done tasks,
   every path of the integration task and every survey decision, each criterion through the test its commit maps it to: `implemented`, `partial`, `missing` or `different`;
@@ -43,7 +45,8 @@ the whole diff from the base branch:
 `missing`, `different`, `tautological`, `no_assertions`, `not_followed`, a
 contradicted document and a clean-environment failure are blocking. Fix
 what can be fixed in one `fix: <subject>` commit with a `Spec: <NN_name>,
-conformance` trailer, landed only on checks that still pass; declare what
+conformance` trailer, landed only on a `speca <package> --gate full` that
+still passes (and `--gate full --clean-env`, when that run found it); declare what
 cannot, with a recorded decision, as above. Documentation findings and files out of
 scope can only be fixed. What remains is the `unmet` list, and the pull
 request must say the work is not complete while it is non-empty.

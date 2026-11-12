@@ -122,6 +122,24 @@ checks that the right one was bumped:
 | MINOR | a directive was added |
 | PATCH | a wording that changes no directive |
 
+## The gate's state directory
+
+`speca --gate` keeps what it records outside every repository: each command's
+log, the passes it reuses, and the run log `speca --gate-report` reads
+([speca.md](speca.md#the-state-directory)).
+
+| Variable | Effect |
+|---|---|
+| `XDG_STATE_HOME` | when set to an absolute path, the state directory is `$XDG_STATE_HOME/agent-fox/speca`; a relative value is ignored |
+| `HOME` | otherwise, the state directory is `~/.local/state/agent-fox/speca`, on Linux and macOS alike |
+
+Each repository has a directory of its own under it, `<name>-<hash>`, the base
+name and a hash of the path of its git top level. Nothing there is pruned:
+deleting the directory, or any file in it, loses only the logs, the reuse of a
+pass and the runs the gate report counts. `--clean-env` sets `HOME`,
+`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM` and
+`GIT_TERMINAL_PROMPT` for the gate's commands, and only for them.
+
 ## The build
 
 The build reads no configuration. `go.mod` pins a released agentkit-go and
@@ -182,3 +200,6 @@ that vendor's documentation, in
 | Warnings sent back for review | 25 listed, once per phase |
 | Old tool results pruned from the request | once it reaches 35% of the model's context window; the last 4 turns are kept whole |
 | `steering.md`, `AGENTS.md`, `CLAUDE.md` in a prompt | 24 KB each; larger files are left out |
+| One command of `speca --gate` | 20 minutes (`--timeout`), then it is ended with every process it started |
+| A failing gate command's output in the verdict | its last 40 lines (`tail`); the whole output is in its log |
+| A full gate's slowest units | 5 |

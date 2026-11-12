@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/agent-fox-dev/spec/afspec"
@@ -76,6 +77,10 @@ func (r *Result) Summary() string {
 	switch {
 	case r.sentence != "":
 		return r.sentence
+	case r.Gate != nil:
+		return r.gateSummary()
+	case r.GateReport != nil:
+		return r.gateReportSummary()
 	case r.taskForm:
 		return r.taskSummary()
 	case r.renderForm:
@@ -202,6 +207,31 @@ func (r *Result) migrateSummary() string {
 	return s
 }
 
+// gateSummary says the gate's level and verdict, and its seconds, or the
+// commit a reused pass came from, or why it could not run.
+func (r *Result) gateSummary() string {
+	g := r.Gate
+	s := fmt.Sprintf("%s: %s %s gate %s", tool, r.dirName(), g.Level, g.Verdict)
+	switch {
+	case g.Verdict == envelope.GateVerdictNotRun:
+		return s + ": " + g.Reason
+	case g.Reused != nil:
+		commit := g.Reused.Commit
+		if len(commit) > 7 {
+			commit = commit[:7]
+		}
+		return s + ", reused from " + commit
+	}
+	return s + " in " + strconv.FormatFloat(g.Seconds, 'f', -1, 64) + "s"
+}
+
+// gateReportSummary counts the runs the report counted.
+func (r *Result) gateReportSummary() string {
+	g := r.GateReport
+	return fmt.Sprintf("%s: %s gate report: %d full, %d task, %d reused", tool, r.dirName(),
+		g.Full.Runs, g.Task.Runs, g.Full.Reused+g.Task.Reused)
+}
+
 // refused is the result of a call that was refused or failed after the package
 // was read: the report of the package as it is, so that the caller sees its
 // tasks without another call. It has no sentence of its own, so the envelope's
@@ -243,13 +273,13 @@ func (r *Result) listSummary() string {
 }
 
 // Next suggests only calls that exist: rendering the task to work on with
-// specr. The verdict suggests none, and neither does a report or a list that
-// has no task to name.
+// specr. The verdict, the gate and the gate report suggest none, and neither
+// does a report or a list that has no task to name.
 func (r *Result) Next() []cli.Next {
 	switch {
 	case r.nextSet:
 		return r.callNext
-	case r.renderForm, r.migrateForm:
+	case r.renderForm, r.migrateForm, r.Gate != nil, r.GateReport != nil:
 		return nil
 	case r.nextForm:
 		return r.nextNext()

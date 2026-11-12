@@ -1,8 +1,8 @@
 {
   "tool": "speca",
-  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root; with --next, the package to implement now, the first open package in dependency order whose dependencies are finished, or that every package is done. With --task and --state it moves one or more tasks through the task state machine, every one or none, and writes the package's progress.json and no other file. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. With --migrate it converts a version 2 package to version 3 in place. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
+  "description": "Reports the state of a specification package: its lifecycle status, whether it validates, every task with its state and whether it is ready, the next task to work on, the lifecycle moves allowed from its status, and the packages it depends on and that depend on it. With --validate, the format's full verdict on the package; with --list, every package under the spec root; with --next, the package to implement now, the first open package in dependency order whose dependencies are finished, or that every package is done. With --task and --state it moves one or more tasks through the task state machine, every one or none, and writes the package's progress.json and no other file. With --status it moves the package through its lifecycle: activates, seals, archives or supersedes it (with --by, the package that replaces it), and moves an archived or superseded package under archive/. With --render it writes the package's spec.md, its render, and no other file. With --migrate it converts a version 2 package to version 3 in place. With --gate task or full it runs the package's linter, then its all_tests command, with no shell, and answers with one verdict, pass, fail or not_run, reusing a pass recorded for the same tree; with --gate-report it sums the package's gate runs since a commit. Without these it changes nothing. spec writes a package from an idea, specr renders one, speca reports and changes its state.",
   "input": {
-    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package.",
+    "description": "Exactly one reference to a spec package: a path to its directory or to a file inside it, or a directory name, spec number or spec name under the spec root (16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package; --gate and --gate-report need one.",
     "examples": [
       ".specs/16_indexed_code_search",
       "16",
@@ -24,6 +24,11 @@
         "default": "",
         "description": "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and when it can be saved its supersedes list gets this package's id"
       },
+      "clean-env": {
+        "type": "boolean",
+        "default": false,
+        "description": "with --gate, run every command with an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0, every other variable inherited; the directory is removed when the gate ends"
+      },
       "dir": {
         "type": "string",
         "default": ".",
@@ -38,6 +43,20 @@
         "type": "boolean",
         "default": false,
         "description": "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; with the status form (--status), skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not know would be dropped; it skips nothing else, and a high task_state_forced, spec_invalid or tasks_open warning says what it skipped"
+      },
+      "gate": {
+        "type": "string",
+        "enum": [
+          "task",
+          "full"
+        ],
+        "default": "",
+        "description": "the gate form: run the package's linter command, then its all_tests command, from its test_commands, in --dir, each started directly with no shell, and answer with one verdict, pass, fail or not_run; task or full, the gate's level, which is part of the answer; whatever the package's status, and writing nothing under --dir"
+      },
+      "gate-report": {
+        "type": "boolean",
+        "default": false,
+        "description": "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing"
       },
       "list": {
         "type": "boolean",
@@ -58,6 +77,11 @@
         "type": "boolean",
         "default": false,
         "description": "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed"
+      },
+      "since": {
+        "type": "string",
+        "default": "",
+        "description": "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main"
       },
       "specs-dir": {
         "type": "string",
@@ -90,6 +114,12 @@
         "type": "string",
         "default": "",
         "description": "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)"
+      },
+      "timeout": {
+        "type": "string",
+        "format": "duration",
+        "default": "20m0s",
+        "description": "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails"
       },
       "validate": {
         "type": "boolean",
@@ -942,6 +972,211 @@
                 "reason"
               ]
             }
+          },
+          "gate": {
+            "type": "object",
+            "description": "the gate's verdict: its level, pass, fail or not_run, every command that ran with its exit code, seconds and log, a failing command's tail, a reused pass, and for a full gate the slowest units; --gate only",
+            "properties": {
+              "level": {
+                "type": "string",
+                "description": "the gate's level: task (the gate after an implement task) or full (the baseline, after the integration task, after the conformance fixes and on the merged tree); both run linter, then all_tests"
+              },
+              "verdict": {
+                "type": "string",
+                "description": "pass (every command exited 0, or a recorded pass was reused), fail (a command exited with another code or ran past --timeout) or not_run (a command could not start: its program was not found, its string could not be split, or test_commands names no such command); exit code 0 carries every verdict"
+              },
+              "clean_env": {
+                "type": "boolean",
+                "description": "true when the commands ran with --clean-env: an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0"
+              },
+              "reason": {
+                "type": "string",
+                "description": "why the gate is not_run: the command that could not start and why; present exactly when verdict is not_run"
+              },
+              "reused": {
+                "type": "object",
+                "description": "the recorded pass this gate returned without running anything, because the tree, the directory of it the commands run in, the level, the two command strings and the clean environment matched it; absent when the commands ran",
+                "properties": {
+                  "commit": {
+                    "type": "string",
+                    "description": "the commit that was checked out when the recorded gate ran; empty when the repository had no commit"
+                  },
+                  "at": {
+                    "type": "string",
+                    "description": "when the recorded gate ran, RFC 3339"
+                  },
+                  "seconds": {
+                    "type": "number",
+                    "description": "the recorded gate's own seconds"
+                  }
+                },
+                "required": [
+                  "commit",
+                  "at",
+                  "seconds"
+                ]
+              },
+              "commands": {
+                "type": "array",
+                "description": "one entry per command that ran, in run order: linter, then all_tests; the gate stops at the first that does not exit 0, and a command that could not start has no entry; [] when a recorded pass was reused",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "which command it is: linter or all_tests"
+                    },
+                    "exit_code": {
+                      "type": "integer",
+                      "description": "the code the command exited with; absent when it ran past --timeout and was ended"
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "the command's wall-clock seconds, to the millisecond"
+                    },
+                    "log": {
+                      "type": "string",
+                      "description": "the absolute path of the file holding everything the command printed, stdout and stderr together, under the state directory; absent when the file could not be written"
+                    },
+                    "tail": {
+                      "type": "string",
+                      "description": "the last 40 lines of the command's output, all of them when it printed fewer, an empty string when it printed nothing; present exactly when the command exited with a code other than 0 or was ended by the timeout"
+                    },
+                    "timed_out": {
+                      "type": "boolean",
+                      "description": "true when the command was still running when --timeout had passed, and was ended with every process it started; absent otherwise"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "seconds"
+                  ]
+                }
+              },
+              "seconds": {
+                "type": "number",
+                "description": "the gate's wall-clock seconds, the sum of its commands' seconds, to the millisecond; 0 when a recorded pass was reused"
+              },
+              "slowest": {
+                "type": "array",
+                "description": "a full gate only: the five units of the all_tests output with the most seconds, slowest first, equal ones in output order; a unit is a Go test package (ok or FAIL lines with a duration); [] when the output holds none; for a reused pass, the recorded run's list; absent for a task gate",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "type": "string",
+                      "description": "the unit's name: for Go, the import path of the test package"
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "the seconds the tool reported for it"
+                    }
+                  },
+                  "required": [
+                    "unit",
+                    "seconds"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "level",
+              "verdict",
+              "clean_env",
+              "commands",
+              "seconds"
+            ]
+          },
+          "gate_report": {
+            "type": "object",
+            "description": "the package's gate runs since a commit: the full and task runs with their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; --gate-report only",
+            "properties": {
+              "since": {
+                "type": "string",
+                "description": "the full id of the commit the runs are counted from: --since, or the merge base of HEAD and the base branch (the branch refs/remotes/origin/HEAD names, else main)"
+              },
+              "full": {
+                "type": "object",
+                "description": "the full gates counted",
+                "properties": {
+                  "runs": {
+                    "type": "integer",
+                    "description": "the gates counted, reused ones included"
+                  },
+                  "seconds": {
+                    "type": "number",
+                    "description": "the sum of the gates' own seconds, a reused gate adding 0"
+                  },
+                  "reused": {
+                    "type": "integer",
+                    "description": "how many of them were answered from a recorded pass"
+                  }
+                },
+                "required": [
+                  "runs",
+                  "seconds",
+                  "reused"
+                ]
+              },
+              "task": {
+                "type": "object",
+                "description": "the task gates counted",
+                "properties": {
+                  "runs": {
+                    "type": "integer",
+                    "description": "the gates counted, reused ones included"
+                  },
+                  "seconds": {
+                    "type": "number",
+                    "description": "the sum of the gates' own seconds, a reused gate adding 0"
+                  },
+                  "reused": {
+                    "type": "integer",
+                    "description": "how many of them were answered from a recorded pass"
+                  }
+                },
+                "required": [
+                  "runs",
+                  "seconds",
+                  "reused"
+                ]
+              },
+              "baseline_full_seconds": {
+                "type": "number",
+                "description": "the seconds of the earliest full gate counted, the baseline; a reused gate's are those of the run it came from; absent when no full gate is counted"
+              },
+              "last_full_seconds": {
+                "type": "number",
+                "description": "the seconds of the latest full gate counted, the last tree; a reused gate's are those of the run it came from; absent when no full gate is counted"
+              },
+              "slowest": {
+                "type": "array",
+                "description": "the slowest units of the latest full gate counted, as its verdict held them; [] when none is counted or it held none",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "type": "string",
+                      "description": "the unit's name: for Go, the import path of the test package"
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "the seconds the tool reported for it"
+                    }
+                  },
+                  "required": [
+                    "unit",
+                    "seconds"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "since",
+              "full",
+              "task",
+              "slowest"
+            ]
           }
         },
         "required": []
@@ -1046,8 +1281,8 @@
     ]
   },
   "exit_codes": {
-    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, or what --migrate did to the package",
-    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle",
-    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id; nothing was written"
+    "0": "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, what --migrate did to the package, the gate's verdict whatever it is (pass, fail or not_run), or the gate report",
+    "1": "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read, or the commits since --since could not be listed (stage git)",
+    "2": "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree; nothing was written"
   }
 }

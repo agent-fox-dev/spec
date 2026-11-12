@@ -973,6 +973,193 @@ func envelopeSummary(r *Result) string {
 	return cli.NewRun(tool, "v").Envelope(cli.ExitOK, r, nil).Summary
 }
 
+// gateRepo is a repository with one package, 05_gate, whose linter and
+// all_tests commands are shell scripts in a directory outside the repository,
+// and a state directory of its own in $XDG_STATE_HOME.
+type gateRepo struct {
+	root  string // the repository
+	dir   string // the package
+	bin   string // the scripts, outside the repository
+	ran   string // the file each script appends its name to when it runs
+	state string // $XDG_STATE_HOME
+}
+
+func newGateRepo(t *testing.T) *gateRepo {
+	t.Helper()
+	g := newGateDir(t)
+	gitInit(t, g.root)
+	return g
+}
+
+// newGateDir is newGateRepo without git: a directory with the package and no
+// .git.
+func newGateDir(t *testing.T) *gateRepo {
+	t.Helper()
+	g := &gateRepo{root: t.TempDir(), bin: t.TempDir(), state: t.TempDir()}
+	t.Setenv("XDG_STATE_HOME", g.state)
+	g.ran = filepath.Join(g.bin, "ran")
+	g.dir = addPackage(t, g.root, "05_gate", "05", "gate")
+	g.setCommands(t, g.script(t, "linter", ""), g.script(t, "all_tests", ""))
+	return g
+}
+
+// gitInit makes root a git repository on a branch main with everything in it
+// committed.
+func gitInit(t *testing.T, root string) {
+	t.Helper()
+	git(t, root, "init", "-q")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "base")
+}
+
+// git runs git in root with an identity, a default branch and no signing of
+// its own, so that it needs nothing of the machine's configuration and runs in
+// a clean environment, and returns its output, trimmed. It takes no optional
+// lock, so that reading the status does not rewrite the index.
+func git(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	cmd := exec.Command("git", append([]string{"-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false",
+		"-c", "user.name=Gate Test", "-c", "user.email=gate@example.com", "-c", "core.hooksPath=" + os.DevNull}, args...)...)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// allTestsRuns counts the times the all_tests script ran.
+func (g *gateRepo) allTestsRuns(t *testing.T) int {
+	t.Helper()
+	n := 0
+	for _, r := range g.runs(t) {
+		if r == "all_tests" {
+			n++
+		}
+	}
+	return n
+}
+
+// script writes an executable script called name to the scripts directory,
+// which appends its name to the run file and then runs body, and returns its
+// path.
+func (g *gateRepo) script(t *testing.T, name, body string) string {
+	t.Helper()
+	path := filepath.Join(g.bin, name)
+	content := "#!/bin/sh\necho " + name + " >> '" + g.ran + "'\n" + body + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// setCommands names the package's linter and all_tests commands.
+func (g *gateRepo) setCommands(t *testing.T, linter, allTests string) {
+	t.Helper()
+	setCommandsOf(t, g.dir, linter, allTests)
+}
+
+// setCommandsOf names the linter and all_tests commands of the package in dir.
+func setCommandsOf(t *testing.T, dir, linter, allTests string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
+		m["test_commands"] = map[string]any{"linter": linter, "all_tests": allTests}
+	})
+}
+
+// gateOf runs speca's gate form on the package ref of the repository.
+func (g *gateRepo) gateOf(t *testing.T, ref string, args ...string) envelope.AdminEnvelope {
+	t.Helper()
+	env, code, _ := run(t, append([]string{"--dir", g.root, ref, "--gate"}, args...)...)
+	if code != cli.ExitOK || env.Result == nil || env.Result.Gate == nil {
+		t.Fatalf("%s --gate %v: code %d, error %+v", ref, args, code, env.Error)
+	}
+	return env
+}
+
+// report runs speca's gate report on the package ref of the repository and
+// returns the envelope and the members of gate_report as they were written.
+func (g *gateRepo) report(t *testing.T, ref string, args ...string) (envelope.AdminEnvelope, map[string]json.RawMessage) {
+	t.Helper()
+	env, raw, code, _ := runRaw(t, append([]string{"--dir", g.root, ref, "--gate-report"}, args...)...)
+	if code != cli.ExitOK || env.Result == nil || env.Result.GateReport == nil {
+		t.Fatalf("%s --gate-report %v: code %d, error %+v", ref, args, code, env.Error)
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw["gate_report"], &members); err != nil {
+		t.Fatal(err)
+	}
+	return env, members
+}
+
+// commit commits everything in the repository with the message, and returns
+// the commit.
+func (g *gateRepo) commit(t *testing.T, message string) string {
+	t.Helper()
+	git(t, g.root, "add", "-A")
+	git(t, g.root, "commit", "-q", "-m", message)
+	return git(t, g.root, "rev-parse", "HEAD")
+}
+
+// gate runs speca's gate form on the package with the flags after --gate, and
+// returns the envelope and the members of its gate as they were written.
+func (g *gateRepo) gate(t *testing.T, args ...string) (envelope.AdminEnvelope, map[string]json.RawMessage) {
+	t.Helper()
+	env, raw, code, _ := runRaw(t, append([]string{"--dir", g.root, "05", "--gate"}, args...)...)
+	if code != cli.ExitOK || !env.OK || env.Result == nil || env.Result.Gate == nil {
+		t.Fatalf("--gate %v: code %d, error %+v", args, code, env.Error)
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw["gate"], &members); err != nil {
+		t.Fatal(err)
+	}
+	return env, members
+}
+
+// runs lists the scripts that ran, in order, from the run file.
+func (g *gateRepo) runs(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(g.ran)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(b))
+}
+
+// numbered is a shell loop that prints n numbered lines, "line 1" to "line n".
+func numbered(n int) string {
+	return `i=1; while [ $i -le ` + strconv.Itoa(n) + ` ]; do echo "line $i"; i=$((i+1)); done`
+}
+
+// homeGitConfig makes git read its global configuration from $HOME for the
+// rest of the test, whatever the environment the tests run in says: a clean
+// environment points GIT_CONFIG_GLOBAL at the null device.
+func homeGitConfig(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"} {
+		t.Setenv(name, "") // restores the value when the test ends
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// commandNames lists the name of each command of a gate.
+func commandNames(cmds []envelope.GateCommand) []string {
+	var out []string
+	for _, c := range cmds {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if specrBinary.dir != "" {

@@ -176,8 +176,9 @@ Before reading any code in depth, check what would make the run pointless:
   project really has (`make`, `go test`, `pytest`, `npm test`), need no
   shell features, and belong to this project's ecosystem.
 
-Then run `linter` and `all_tests` once, on the unchanged tree, and record both
-results. This is the baseline. A red baseline is a fact, not a blocker: it
+Then read [references/gate.md](references/gate.md) in full, and run the
+baseline, `speca <package> --gate full`, on the unchanged tree; note its
+verdict and commit. A red baseline is a fact, not a blocker: it
 changes what a pass means later, so say so in the report and go on with the
 baseline as the bar; do not stop to ask. If the user asked for it to be fixed first, that is one
 commit of its own before any task — `fix: <subject>` with a
@@ -293,8 +294,8 @@ must all be `done` first):
    the delivered behaviour. A gap you declare is reported as one; a gap you
    bury in notes is reported as a defect.
 
-Then the gate. Run `linter`, then `all_tests`, and compare with the
-baseline:
+Then the gate, `speca <package> --gate task` (`full` after the integration
+task), its verdict compared with the baseline:
 
 | Before | After | Verdict | Land? |
 |---|---|---|---|
@@ -397,8 +398,8 @@ the fallbacks when `issue` is not installed.
   entry stays in the merge commit with `(no issue: <the reason>)`, and the
   report gives the call that opens it.
 - **Merge** the branch into the up-to-date base branch with `--no-ff`, and
-  commit the merge only when `linter` and `all_tests` give a landable verdict
-  on the merged tree. Its message holds what the run measured, open items
+  commit the merge only on a landable `--gate full`, then thorough target, on
+  the merged tree. Its message holds what the run measured, open items
   first, and every claim in it comes from something that ran. A conflict or a
   verdict that is not landable aborts the merge.
 - **Push the base branch**, unless the branch stays local, and stay on it.
@@ -450,6 +451,7 @@ commits in place.
 - The survey's decisions, and the deviations declared with the ADRs that
   record them.
 - The conformance findings, fixed and unmet.
+- The gate report.
 - The open items, each with its issue URL, or why it has none and the
   `issue --create` call that opens it.
 - Anything left unfinished, and the command that continues it.
