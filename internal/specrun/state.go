@@ -22,6 +22,9 @@ type state struct {
 	// Owner is the process id of the specrun whose loop works on the
 	// repository, from its first step to its end; absent otherwise.
 	Owner int `json:"owner,omitempty"`
+	// LabelCheck is the landed package whose label rules a forge call cut
+	// short: the next start applies them again before it chooses a step.
+	LabelCheck string `json:"label_check,omitempty"`
 }
 
 // doneStep is a step that landed.

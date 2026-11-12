@@ -101,6 +101,29 @@ cycle it stops at stage `graph`, naming the cycle. A base branch that cannot be
 checked out or pulled, and a missing `git` or `claude`, stop it at stage
 `preflight` before any session.
 
+### The check after a landing
+
+When a package has landed, `specrun` lists its open issues: those labelled
+`af:from-<NN>`, and those whose title starts with the package's directory
+name and a colon (`01_cache: …`), as af-impl titles an open item. Each must
+carry exactly one kind, `af:from-<NN>`, for a `defect` exactly one severity,
+and for `awaits` an `af:awaits-<MM>`. The rule `incomplete-labels` makes an
+issue that lacks any of these a `deviation`: its other kind labels are
+removed, `af:deviation` and, when missing, `af:from-<NN>` are added, and a
+comment names the rule, what was missing and the commit of the base branch,
+so that a person decides it:
+
+```
+specrun, rule incomplete-labels, on 4b1f0c2…: it has no kind; it lacks af:from-01. It is now af:deviation, for a person to decide.
+```
+
+A complete issue, an issue of another package and a closed issue are not
+touched, and the rule changes nothing the second time it runs. A forge call
+that fails stops the loop at stage `forge`, after the package's ledger line is
+written with outcome `landed`; the state remembers the package
+(`label_check`), and the next start applies the rule again before it chooses
+a step.
+
 ## What it runs
 
 At the start of a run `specrun` logs on stderr, and puts in
@@ -337,7 +360,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 | Code | `status` | Meaning |
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
-| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
+| `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
 
 ### Warning codes

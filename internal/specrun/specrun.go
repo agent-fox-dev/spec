@@ -238,6 +238,9 @@ func (r *run) loop() int {
 			return r.emit(envelope.ExitFailed, "", f)
 		}
 		r.hold()
+		if stop := r.recheckLabels(); stop != nil {
+			return r.stop(stop)
+		}
 		next := r.resume()
 		if next == nil {
 			var f *envelope.ErrorInfo
@@ -249,15 +252,38 @@ func (r *run) loop() int {
 			return r.emit(envelope.ExitOK, fmt.Sprintf("%s: every package is done, landed %d", tool, len(r.result.Landed)), nil)
 		}
 		if stop := r.implement(next, before); stop != nil {
-			r.result.Stopped = stop
-			return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, stop.Step, stop.Reason,
-				len(r.result.Landed)), failure(stopStage(stop.Reason), "input", "%s %s: %s", stop.Kind, stop.Subject, stop.Reason))
+			return r.stop(stop)
 		}
 	}
 }
 
+// stop ends the loop at the step.
+func (r *run) stop(s *Stopped) int {
+	r.result.Stopped = s
+	return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, s.Step, s.Reason,
+		len(r.result.Landed)), failure(stopStage(s.Reason), "input", "%s %s: %s", s.Kind, s.Subject, s.Reason))
+}
+
+// recheckLabels applies the label rules a forge call cut short in an earlier
+// run, before a step is chosen.
+func (r *run) recheckLabels() *Stopped {
+	dir := r.state.LabelCheck
+	if dir == "" {
+		return nil
+	}
+	if err := r.checkLabels(dir); err != nil {
+		return &Stopped{Step: "labels-" + filepath.Base(dir), Kind: "labels", Subject: filepath.Base(dir), Reason: err.Error()}
+	}
+	r.state.LabelCheck = ""
+	r.saveState()
+	return nil
+}
+
 // stopStage is the stage of the failure a stopped step is reported with.
 func stopStage(reason string) string {
+	if strings.HasPrefix(reason, "incomplete-labels") {
+		return "forge"
+	}
 	switch reason {
 	case reasonStalled:
 		return "stall"
@@ -358,12 +384,18 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
 	}
 	r.finishStep(kindImplement, subject)
+	r.result.Landed = append(r.result.Landed, subject)
 	fmt.Fprintf(r.stderr, "%s: %s landed in %.1f min\n", tool, step, line.WallMinutes)
 	if median, slow := slowerThanUsual(earlier, line.WallMinutes); slow {
 		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",
 			tool, subject, line.WallMinutes, median)
 	}
-	r.result.Landed = append(r.result.Landed, subject)
+	if err := r.checkLabels(next.Dir); err != nil {
+		r.state.LabelCheck = next.Dir
+		r.saveState()
+		fmt.Fprintf(r.stderr, "%s: %s: %v\n", tool, step, err)
+		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: err.Error()}
+	}
 	return nil
 }
 

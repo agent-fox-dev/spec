@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/agent-fox-dev/aflib/envelope"
 	"github.com/agent-fox-dev/aflib/issuex"
@@ -102,4 +104,141 @@ func (r *run) specIDs() []string {
 		}
 	}
 	return ids
+}
+
+// The kinds of an open item, one label each.
+var kindLabels = []string{"af:awaits", "af:defect", "af:untested", "af:deviation"}
+
+// labelChange is what a label rule does to one issue: the labels it adds and
+// removes, and the comment that says why.
+type labelChange struct {
+	Issue   int
+	Add     []string
+	Remove  []string
+	Comment string
+}
+
+// incompleteLabels is the rule incomplete-labels over the open issues of the
+// package id: an issue that lacks a kind, carries two, lacks af:from-<id>, is
+// a defect without exactly one severity, or is awaits without an
+// af:awaits-<MM>, becomes a deviation (a person decides it), keeps or gains
+// af:from-<id>, and gets a comment naming the rule, what was missing and the
+// base commit. A complete issue gets no change, so the rule changes nothing
+// the second time.
+func incompleteLabels(issues []issuex.Issue, id, base string) []labelChange {
+	var out []labelChange
+	for _, is := range issues {
+		var kinds, severities []string
+		awaits := false
+		for _, l := range is.Labels {
+			switch {
+			case slices.Contains(kindLabels, l):
+				kinds = append(kinds, l)
+			case strings.HasPrefix(l, "af:severity-"):
+				severities = append(severities, l)
+			case strings.HasPrefix(l, "af:awaits-"):
+				awaits = true
+			}
+		}
+		from := "af:from-" + id
+		var missing []string
+		switch {
+		case len(kinds) == 0:
+			missing = append(missing, "it has no kind")
+		case len(kinds) > 1:
+			missing = append(missing, "it has "+strings.Join(kinds, " and ")+", two kinds")
+		case kinds[0] == "af:defect" && len(severities) != 1:
+			missing = append(missing, "it is a defect without exactly one af:severity- label")
+		case kinds[0] == "af:awaits" && !awaits:
+			missing = append(missing, "it is awaits without an af:awaits-<NN> label naming the package that takes it up")
+		}
+		if !slices.Contains(is.Labels, from) {
+			missing = append(missing, "it lacks "+from)
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		c := labelChange{Issue: is.Number}
+		for _, k := range kinds {
+			if k != "af:deviation" {
+				c.Remove = append(c.Remove, k)
+			}
+		}
+		for _, l := range []string{"af:deviation", from} {
+			if !slices.Contains(is.Labels, l) {
+				c.Add = append(c.Add, l)
+			}
+		}
+		c.Comment = fmt.Sprintf("specrun, rule incomplete-labels, on %s: %s. It is now af:deviation, for a person to decide.",
+			base, strings.Join(missing, "; "))
+		out = append(out, c)
+	}
+	return out
+}
+
+// packageIssues lists the open issues of the package: those labelled
+// af:from-<id>, and those whose title starts with its directory name and a
+// colon, as af-impl titles an open item; a listing that is incomplete is
+// asked for again with a higher limit.
+func (r *run) packageIssues(id, dirName string) ([]issuex.Issue, error) {
+	list := func(labels []string) ([]issuex.Issue, error) {
+		for limit := 100; ; limit *= 4 {
+			l, err := r.forge.ListIssues(r.ctx, r.repo, issuex.IssueFilter{State: "open", Labels: labels, Limit: limit})
+			if err != nil {
+				return nil, err
+			}
+			if !l.Incomplete || limit >= 25600 {
+				return l.Issues, nil
+			}
+		}
+	}
+	labelled, err := list([]string{"af:from-" + id})
+	if err != nil {
+		return nil, err
+	}
+	all, err := list(nil)
+	if err != nil {
+		return nil, err
+	}
+	out := labelled
+	for _, is := range all {
+		if strings.HasPrefix(is.Title, dirName+":") && !slices.ContainsFunc(out, func(o issuex.Issue) bool { return o.Number == is.Number }) {
+			out = append(out, is)
+		}
+	}
+	slices.SortFunc(out, func(a, b issuex.Issue) int { return a.Number - b.Number })
+	return out, nil
+}
+
+// checkLabels applies the label rules to the open issues of the package in
+// specDir, which has landed. A forge call that fails returns its error: the
+// rules after it would decide on labels that are not known.
+func (r *run) checkLabels(specDir string) error {
+	spec, err := afspec.LoadSpec(filepath.Join(r.root, filepath.FromSlash(specDir)))
+	if err != nil {
+		return fmt.Errorf("incomplete-labels: the package %s could not be read: %w", specDir, err)
+	}
+	issues, err := r.packageIssues(spec.SpecID, filepath.Base(specDir))
+	if err != nil {
+		return fmt.Errorf("incomplete-labels: listing the issues of %s: %w", specDir, err)
+	}
+	base, _ := gitOutput(r.root, "rev-parse", "HEAD")
+	for _, c := range incompleteLabels(issues, spec.SpecID, base) {
+		ref := issuex.IssueRef{Repo: r.repo, Number: c.Issue}
+		if len(c.Add) > 0 {
+			if err := r.forge.AddLabels(r.ctx, ref, c.Add); err != nil {
+				return fmt.Errorf("incomplete-labels: issue #%d: %w", c.Issue, err)
+			}
+		}
+		for _, l := range c.Remove {
+			if err := r.forge.RemoveLabel(r.ctx, ref, l); err != nil {
+				return fmt.Errorf("incomplete-labels: issue #%d: %w", c.Issue, err)
+			}
+		}
+		if _, err := r.forge.AddComment(r.ctx, ref, c.Comment); err != nil {
+			return fmt.Errorf("incomplete-labels: issue #%d: %w", c.Issue, err)
+		}
+		fmt.Fprintf(r.stderr, "%s: issue #%d of %s is now af:deviation (incomplete-labels)\n", tool, c.Issue, filepath.Base(specDir))
+	}
+	return nil
 }
