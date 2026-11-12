@@ -49,16 +49,18 @@ at stage `preflight`, naming the variables or the remote. A dry run goes on
 with a low `forge_unavailable` warning, and writes nothing to a forge in any
 case.
 
-Before its first step a run creates every label of the scheme the
-repository lacks; one that exists is left as it is (`issuex` lists no
-labels, so a conflict on creating one is how it is found):
+Before its first step, once the base branch is pulled, a run creates every
+label of the scheme the repository lacks; one that exists is left as it is
+(`issuex` lists no labels, so a conflict on creating one is how it is found),
+and a label that cannot be created otherwise refuses the run at stage
+`preflight`:
 
 | Label | Meaning |
 |---|---|
 | `af:awaits`, `af:defect`, `af:untested`, `af:deviation` | the kind of an open item; an issue carries exactly one |
 | `af:severity-security`, `af:severity-data-loss`, `af:severity-correctness`, `af:severity-minor` | the severity of a `defect` |
 | `af:accepted`, `af:rejected`, `af:repair-failed` | what a person decided about a deviation, and a repair that did not land |
-| `af:from-<NN>`, `af:awaits-<NN>` | for every package under the spec root and `archive/`: the package that opened an item, and the package an `awaits` item waits for |
+| `af:from-<NN>`, `af:awaits-<NN>` | for every package under the spec root and `archive/` that loads: the package that opened an item, and the package an `awaits` item waits for |
 
 ## The loop
 
@@ -118,11 +120,16 @@ specrun, rule incomplete-labels, on 4b1f0c2…: it has no kind; it lacks af:from
 ```
 
 A complete issue, an issue of another package and a closed issue are not
-touched, and the rule changes nothing the second time it runs. A forge call
-that fails stops the loop at stage `forge`, after the package's ledger line is
-written with outcome `landed`; the state remembers the package
-(`label_check`), and the next start applies the rule again before it chooses
-a step.
+touched, and the rule changes nothing the second time it runs. The check is
+owed in the state (`label_check`) from the landing until it is done, and a
+change's comment is owed (`pending_comments`) from before its labels change
+until it is posted. A forge call that fails stops the loop at stage `forge`,
+after the package's ledger line is written with outcome `landed`, and a crash
+leaves the same: the next start posts the owed comments and applies the rule
+again before it chooses a step. A landing the next start finds in the
+repository (see *State and resume*) gets its trailer read and its issues
+checked the same way. A package that has gone under `archive/` since is
+checked there; one found nowhere is left unchecked, with a note.
 
 ## What it runs
 

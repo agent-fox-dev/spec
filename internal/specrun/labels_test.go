@@ -155,13 +155,19 @@ func TestLabels_AnIncompleteIssueOfALandedPackageBecomesADeviation(t *testing.T)
 func TestLabels_TheRuleChangesNothingTheSecondTime(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
+	f.forge.add("01_a: complete", "open", "af:untested", "af:from-01")
 	f.forge.add("01_a: no caller", "open")
 	f.forge.add("x", "open", "af:defect", "af:untested", "af:from-01")
+	f.forge.add("y", "open", "af:defect", "af:from-01")
+	f.forge.add("z", "open", "af:awaits", "af:from-01")
 	r := &run{ctx: context.Background(), root: f.root, stderr: io.Discard, forge: f.forge, repo: issuex.Repo{Owner: "acme", Name: "widgets"}}
 	if err := r.checkLabels(".specs/01_a"); err != nil {
 		t.Fatal(err)
 	}
 	before := len(f.forge.writes())
+	if before == 0 {
+		t.Fatal("the first application wrote nothing")
+	}
 	if err := r.checkLabels(".specs/01_a"); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +186,8 @@ func TestLabels_AFailedForgeCallStopsTheLoopAndIsAppliedAgain(t *testing.T) {
 	f.forge.fail["AddLabels"] = 1
 	f.plan(t, land(0))
 	env, code, _ := runMain(t)
-	if code != 1 || env.Result == nil || env.Result.Stopped == nil || !strings.Contains(env.Result.Stopped.Reason, "incomplete-labels") {
+	if code != 1 || env.Result == nil || env.Result.Stopped == nil || !strings.Contains(env.Result.Stopped.Reason, "incomplete-labels") ||
+		!strings.Contains(env.Result.Stopped.Reason, "the forge said 502") {
 		t.Fatalf("code %d, result %+v, error %+v; want a stop at incomplete-labels", code, env.Result, env.Error)
 	}
 	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "landed" {
@@ -197,5 +204,63 @@ func TestLabels_AFailedForgeCallStopsTheLoopAndIsAppliedAgain(t *testing.T) {
 	}
 	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,.specs/02_b" {
 		t.Errorf("sessions %v; want 02_b next", got)
+	}
+}
+
+// A comment whose post failed after its labels were set is posted on the
+// next start, once.
+func TestLabels_ACommentThatFailedIsPostedOnTheNextStart(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	n := f.forge.add("01_a: no caller", "open")
+	f.forge.fail["AddComment"] = 1
+	f.plan(t, land(0))
+	if _, code, _ := runMain(t); code != 1 {
+		t.Fatalf("code %d; want the failed comment to stop the loop", code)
+	}
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Fatalf("the second call: code %d\n%s", code, stderr)
+	}
+	if c := f.forge.comments[n]; len(c) != 1 || !strings.Contains(c[0], "it has no kind") {
+		t.Errorf("comments %q; want the one that failed, posted once", c)
+	}
+}
+
+// A package whose landing the next start finds in the repository gets the
+// label check and its trailer read, as one that landed in the run does.
+func TestLabels_AResumedLandingIsCheckedToo(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	head := git(t, f.root, "rev-parse", "HEAD")
+	git(t, f.root, "switch", "-q", "-c", "feature/01-a")
+	done(t, f, "01_a")
+	git(t, f.root, "switch", "-q", "main")
+	git(t, f.root, "merge", "-q", "--no-ff", "-m", "merge 01", "-m", minimalTrailer, "feature/01-a")
+	git(t, f.root, "push", "-q")
+	f.writeState(t, ".specs/01_a", head, 0)
+	n := f.forge.add("01_a: no caller", "open")
+	f.plan(t, land(0))
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+	if got := f.forge.labelsOf(n); strings.Join(got, ",") != "af:deviation,af:from-01" {
+		t.Errorf("labels %v; want the resumed package's issue checked", got)
+	}
+	if l := f.ledgerLines(t)[0]; l["subject"] != "01_a" || l["gate"] == nil {
+		t.Errorf("the resumed landing's line %v; want its trailer", l)
+	}
+}
+
+// A label check left for a package that has since gone under archive/ does
+// not block the next start.
+func TestLabels_ARecheckOfAMovedPackageDoesNotBlock(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "02_b", "02", "pending")
+	writeFile(t, f.statePath(), `{"done":[],"label_check":".specs/01_gone"}`)
+	f.plan(t, land(0))
+	if _, code, stderr := runMain(t, "--max", "1"); code != 0 {
+		t.Errorf("code %d\n%s", code, stderr)
 	}
 }

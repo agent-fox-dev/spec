@@ -190,6 +190,8 @@ func TestLedger_WarnsWhenTheTrailerIsMissing(t *testing.T) {
 			}
 			if strings.Join(codes, ",") != "trailer_missing,trailer_missing" {
 				t.Errorf("warnings %v; want trailer_missing for each package", codes)
+			} else if head := git(t, f.root, "rev-parse", "main"); !strings.Contains(env.Warnings[1].Message, head) {
+				t.Errorf("warning %q does not name the merge commit %s", env.Warnings[1].Message, head)
 			}
 		})
 	}

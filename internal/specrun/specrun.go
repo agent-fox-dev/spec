@@ -223,9 +223,7 @@ func (r *run) loop() int {
 		return r.emit(code, "", f)
 	}
 	r.base = baseBranch(r.root)
-	if f := r.createScheme(r.ctx); f != nil {
-		return r.emit(envelope.ExitFailed, "", f)
-	}
+	schemed := false // the scheme is made from the spec root the first pull brings
 	for {
 		if r.opts.max > 0 && len(r.result.Landed) >= r.opts.max {
 			if _, f := r.choose(); f == nil && r.result.AllDone {
@@ -238,10 +236,16 @@ func (r *run) loop() int {
 			return r.emit(envelope.ExitFailed, "", f)
 		}
 		r.hold()
+		if !schemed {
+			if f := r.createScheme(r.ctx); f != nil {
+				return r.emit(envelope.ExitFailed, "", f)
+			}
+			schemed = true
+		}
+		next := r.resume()
 		if stop := r.recheckLabels(); stop != nil {
 			return r.stop(stop)
 		}
-		next := r.resume()
 		if next == nil {
 			var f *envelope.ErrorInfo
 			if next, f = r.choose(); f != nil {
@@ -268,10 +272,14 @@ func (r *run) stop(s *Stopped) int {
 // run, before a step is chosen.
 func (r *run) recheckLabels() *Stopped {
 	dir := r.state.LabelCheck
-	if dir == "" {
+	if dir == "" && len(r.state.PendingComments) == 0 {
 		return nil
 	}
-	if err := r.checkLabels(dir); err != nil {
+	err := r.postPending()
+	if err == nil && dir != "" {
+		err = r.checkLabels(dir)
+	}
+	if err != nil {
 		return &Stopped{Step: "labels-" + filepath.Base(dir), Kind: "labels", Subject: filepath.Base(dir), Reason: err.Error()}
 	}
 	r.state.LabelCheck = ""
@@ -395,12 +403,20 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 		fmt.Fprintf(r.stderr, "%s: warning: %s took %.1f min, more than twice the median of %.1f min of the packages landed before it\n",
 			tool, subject, line.WallMinutes, median)
 	}
+	// The check is owed until it is done, so a crash in it leaves it to the
+	// next start.
+	r.state.LabelCheck = next.Dir
+	r.saveState()
 	if err := r.checkLabels(next.Dir); err != nil {
-		r.state.LabelCheck = next.Dir
-		r.saveState()
-		fmt.Fprintf(r.stderr, "%s: %s: %v\n", tool, step, err)
-		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: err.Error()}
+		reason := err.Error()
+		if r.ctx.Err() != nil {
+			reason = reasonInterrupted
+		}
+		fmt.Fprintf(r.stderr, "%s: %s: %s\n", tool, step, reason)
+		return &Stopped{Step: step, Kind: kindImplement, Subject: subject, Reason: reason}
 	}
+	r.state.LabelCheck = ""
+	r.saveState()
 	return nil
 }
 

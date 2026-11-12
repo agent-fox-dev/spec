@@ -133,7 +133,8 @@ func TestMain_FilesTheIssuesAndTheTrailerOfALandedPackage(t *testing.T) {
 		}
 	}
 	for _, w := range f.forge.writes() {
-		if strings.HasPrefix(w, fmt.Sprintf("AddLabels %d ", labelled)) || w == fmt.Sprintf("AddComment %d", labelled) {
+		if strings.HasPrefix(w, fmt.Sprintf("AddLabels %d ", labelled)) || strings.HasPrefix(w, fmt.Sprintf("RemoveLabel %d ", labelled)) ||
+			w == fmt.Sprintf("AddComment %d", labelled) {
 			t.Errorf("the labelled issue was written: %s", w)
 		}
 	}

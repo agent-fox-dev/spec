@@ -211,12 +211,21 @@ func (r *run) packageIssues(id, dirName string) ([]issuex.Issue, error) {
 }
 
 // checkLabels applies the label rules to the open issues of the package in
-// specDir, which has landed. A forge call that fails returns its error: the
-// rules after it would decide on labels that are not known.
+// specDir, which has landed; a package that has since gone under archive/ is
+// found there, and one found nowhere is left unchecked, with a note. A
+// change's comment is recorded as pending in the state before its labels
+// change, so that a comment cut short is posted later. A forge call that
+// fails returns its error: the rules after it would decide on labels that are
+// not known.
 func (r *run) checkLabels(specDir string) error {
-	spec, err := afspec.LoadSpec(filepath.Join(r.root, filepath.FromSlash(specDir)))
+	dir := filepath.Join(r.root, filepath.FromSlash(specDir))
+	spec, err := afspec.LoadSpec(dir)
+	if err != nil && r.specsDir != "" {
+		spec, err = afspec.LoadSpec(filepath.Join(r.specsDir, "archive", filepath.Base(specDir)))
+	}
 	if err != nil {
-		return fmt.Errorf("incomplete-labels: the package %s could not be read: %w", specDir, err)
+		fmt.Fprintf(r.stderr, "%s: the package %s is gone, and its issues are not checked\n", tool, specDir)
+		return nil
 	}
 	issues, err := r.packageIssues(spec.SpecID, filepath.Base(specDir))
 	if err != nil {
@@ -225,6 +234,8 @@ func (r *run) checkLabels(specDir string) error {
 	base, _ := gitOutput(r.root, "rev-parse", "HEAD")
 	for _, c := range incompleteLabels(issues, spec.SpecID, base) {
 		ref := issuex.IssueRef{Repo: r.repo, Number: c.Issue}
+		r.state.PendingComments = append(r.state.PendingComments, pendingComment{Issue: c.Issue, Body: c.Comment})
+		r.saveState()
 		if len(c.Add) > 0 {
 			if err := r.forge.AddLabels(r.ctx, ref, c.Add); err != nil {
 				return fmt.Errorf("incomplete-labels: issue #%d: %w", c.Issue, err)
@@ -235,10 +246,23 @@ func (r *run) checkLabels(specDir string) error {
 				return fmt.Errorf("incomplete-labels: issue #%d: %w", c.Issue, err)
 			}
 		}
-		if _, err := r.forge.AddComment(r.ctx, ref, c.Comment); err != nil {
-			return fmt.Errorf("incomplete-labels: issue #%d: %w", c.Issue, err)
+		if err := r.postPending(); err != nil {
+			return err
 		}
 		fmt.Fprintf(r.stderr, "%s: issue #%d of %s is now af:deviation (incomplete-labels)\n", tool, c.Issue, filepath.Base(specDir))
+	}
+	return nil
+}
+
+// postPending posts the comments the state owes, each removed once posted.
+func (r *run) postPending() error {
+	for len(r.state.PendingComments) > 0 {
+		p := r.state.PendingComments[0]
+		if _, err := r.forge.AddComment(r.ctx, issuex.IssueRef{Repo: r.repo, Number: p.Issue}, p.Body); err != nil {
+			return fmt.Errorf("incomplete-labels: the comment on issue #%d: %w", p.Issue, err)
+		}
+		r.state.PendingComments = r.state.PendingComments[1:]
+		r.saveState()
 	}
 	return nil
 }
