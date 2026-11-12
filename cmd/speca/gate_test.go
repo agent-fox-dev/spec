@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
 
@@ -779,23 +778,6 @@ func TestGate_KeepsTheGatesOfTwoDirectoriesOfARepositoryApart(t *testing.T) {
 	}
 }
 
-// setAffected names the package's affected_tests command: a script that
-// records its arguments in the scripts directory, with argument after it.
-func (g *gateRepo) setAffected(t *testing.T, argument string) {
-	t.Helper()
-	script := g.script(t, "affected_tests", `printf '%s' "$*" > '`+filepath.Join(g.bin, "affected-args")+`'`)
-	editJSON(t, filepath.Join(g.dir, afspec.TasksFileName), func(m map[string]any) {
-		m["test_commands"].(map[string]any)["affected_tests"] = script + " " + argument
-	})
-}
-
-// affectedArgs is what the affected_tests script was last given.
-func (g *gateRepo) affectedArgs(t *testing.T) string {
-	t.Helper()
-	b, _ := os.ReadFile(filepath.Join(g.bin, "affected-args"))
-	return string(b)
-}
-
 // With affected_tests, the task gate runs the linter, then that command with
 // the full id of the base commit in place of {base}, and not all_tests.
 func TestGate_RunsTheAffectedTestsFromABaseCommit(t *testing.T) {
@@ -907,14 +889,6 @@ func stepClock(t *testing.T, step float64) {
 		return at
 	}
 	t.Cleanup(func() { gateClock = old })
-}
-
-// writeSteeringOf writes the spec root's steering, with lines in its
-// frontmatter beside a version.
-func (g *gateRepo) writeSteering(t *testing.T, lines string) {
-	t.Helper()
-	writeFile(t, filepath.Join(g.root, ".specs", "steering.md"), "---\nversion: 1.0.0\n"+lines+
-		"amendments:\n  - version: 1.0.0\n    date: 2026-10-15\n    change: A.\n---\n# Steering\n\nKeep tests fast.\n")
 }
 
 // A full gate, run or reused, is measured against the steering's budget,

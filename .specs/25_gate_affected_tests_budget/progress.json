@@ -3,7 +3,7 @@
   "spec_id": "25",
   "spec_name": "gate_affected_tests_budget",
   "schema_version": 3,
-  "updated_at": "2026-11-12T20:34:20Z",
+  "updated_at": "2026-11-12T20:36:44Z",
   "tasks": [
     {
       "id": 1,
@@ -19,7 +19,7 @@
     },
     {
       "id": 4,
-      "state": "pending"
+      "state": "done"
     }
   ]
 }
