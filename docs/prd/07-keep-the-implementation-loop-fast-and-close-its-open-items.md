@@ -15,14 +15,18 @@ never read. Gaps meant for a later package are not handed to it. Gaps that a
 later package closes stay open. Real defects pile up unfixed, and later
 packages build on top of them or copy code around them.
 
-This plan changes the runner, the af-impl skill, the af-spec skill, the
-steering template and `speca`:
+This plan replaces the runner script with a Go command, `specrun`, built in
+this repository on `afspec` and `aflib`. It also changes the af-impl skill,
+the af-spec skill, the steering template and `speca`:
 
 - the loop's cost grows with the size of a change, not the size of the
   repository;
 - every open item has a kind, an owner and a way to close;
 - the loop reads the open items back, closes the ones it resolves, and stops
-  or repairs before it builds on a serious defect.
+  or repairs before it builds on a serious defect;
+- the work that needs no judgement is done by a program, not by a model:
+  running gates, keeping labels consistent, choosing what to repair, and
+  scheduling.
 
 The evidence comes from one long run, on the `parley` repository. The remedies
 are general: they hold for any project and any language the format supports.
@@ -56,20 +60,25 @@ are general: they hold for any project and any language the format supports.
   - Items that await it but are still open after its landing are passed on
     or reclassified, never left pointing at a package that is done.
 - **Every open item has a path to closed.**
-  - The runner stops, or runs a repair, after a package opens a defect at or
+  - The driver stops, or runs a repair, after a package opens a defect at or
     above a configured severity.
   - Every few packages, and at the end, it reconciles every open item
     against the base branch.
   - The other defects and the untested criteria are repaired in batches at
     each reconcile.
-  - A person settles a deviation with one label, and the next reconcile
-    acts on it.
+  - A person settles a deviation with one label, and the next reconcile acts
+    on it.
   - Issues opened before this change are adopted into the same lifecycle.
 - **Cross-package wiring is declared.** A package that leaves an extension
   point for another package to fill declares it as a handoff. `speca` refuses
   a handoff to a package that lands earlier, and warns when the receiving
   package does not take it.
-- **Observable runs.** The runner keeps the full session log of every package
+- **A driver that can be tested and resumed.**
+  - `specrun` replaces `scripts/impl-specs.sh`.
+  - Its decisions are covered by tests that need no model and no forge.
+  - It resumes after a crash where it stopped.
+  - It kills a session that has stopped making progress.
+- **Observable runs.** The driver keeps the full session log of every package
   and a ledger of durations, so a slowdown shows up before it reaches an hour.
 
 ## Non-goals
@@ -83,12 +92,20 @@ are general: they hold for any project and any language the format supports.
   failing first, and every task still lands only on a passing gate. Only the
   scope of the between-task gate changes.
 - **Running packages in parallel.** The loop stays sequential in dependency
-  order (`speca --next`).
-- **Repairing defects without a person when they are about security.** A
-  repair session may fix one, but the runner's default for `security` is to
-  stop (decision 9).
-- **Any other change to the v3 format.** The `handoffs` field (requirement 4)
-  is the one format change, and it is optional.
+  order.
+- **Another model runtime.** Every piece of work that needs a model runs in a
+  Claude Code session started with `claude -p`, with the skills of this
+  repository. `specrun` starts, watches and checks those sessions; it never
+  calls a model API itself.
+- **Dependencies beyond this module and `aflib`.** `specrun` is built from
+  the spec module's own packages, `aflib` and the Go standard library. The
+  module's `agentkit-go` dependency, which the `spec` generator uses, is not
+  one of them (5.1).
+- **Repairing security defects without a person.** A repair session may fix
+  one, but the default for `security` is to stop (decision 9).
+- **Any other change to the v3 format.** `handoffs`, `takes_handoffs` and
+  `test_commands.affected_tests` are the format's only additions, and all
+  three are optional.
 
 ## Background
 
@@ -206,13 +223,38 @@ with an issue that says "lacks production callers". The rule is stricter than
 the format allows, so it gets bypassed instead of followed. A spec has no way
 to say "this part is unwired on purpose, and package N wires it".
 
-### The runner keeps little
+### The runner is a shell script
 
-`impl-specs.sh` saves only the session's final message, about 4 KB per
-package. Durations, gate results and what the session did are only in Claude's
-own transcripts, outside the project. The installed af-impl skill also differed
-from the source in `skills/af-impl` (`speca --list` against `speca --next`),
-and nothing in the log said which version ran.
+`impl-specs.sh` is about 100 lines of bash: a loop over `speca --next`, a
+`claude -p` call, and four checks that the package landed. That is the right
+size for bash. What this plan adds is not:
+
+- stop and repair decisions;
+- a repair queue with an order and a cap;
+- a reconcile every few packages;
+- label rules;
+- a ledger, and parsing a trailer;
+- version checks;
+- resuming after a crash.
+
+Together these are a state machine. In bash its decisions could only be
+tested by a real run of several hours, and every JSON answer would go
+through `jq`.
+
+The script also keeps little. It saves only the session's final message,
+about 4 KB per package. Durations, gate results and what the session did are
+only in Claude's own transcripts, outside the project. The installed af-impl
+skill differed from the source in `skills/af-impl` (`speca --list` against
+`speca --next`), and nothing in the log said which version ran.
+
+Much of what the loop needs is already Go in this repository and in `aflib`:
+
+- `afspec` answers the dependency graph, the next package and a package's
+  state;
+- `aflib/issuex` lists, labels, comments on and closes issues on GitHub and
+  GitLab, and has a no-op client for tests;
+- `aflib/envelope` holds the JSON answer the `issue` command writes, as Go
+  types.
 
 ## Requirements
 
@@ -238,12 +280,11 @@ levels.
 contains the placeholder `{base}` exactly once. Before running it,
 `speca --gate` (1.8) replaces `{base}` with the id of the commit the task
 started from, so the command runs the tests that the diff from that commit
-can affect. An example
-is `make test-affected BASE={base}`. A command without `{base}`, or with it
-more than once, fails validation. The project's tool works out the changed
-paths itself, new and untracked files included. The project decides what
-"affected" means: reverse dependencies, a test-impact tool, or a directory
-map.
+can affect. An example is `make test-affected BASE={base}`. A command
+without `{base}`, or with it more than once, fails validation. The project's
+tool works out the changed paths itself, new and untracked files included.
+The project decides what "affected" means: reverse dependencies, a
+test-impact tool, or a directory map.
 
 When `affected_tests` is absent, the task gate runs `all_tests`, as today.
 `spec` and af-spec write `affected_tests` only when the project already has
@@ -296,8 +337,8 @@ exceeded the budget, and by how much it grew. When the full gate on the
 merged tree exceeds the budget, or grew by more than half over this branch,
 the conformance pass records a `test-cost` finding. It is filed as a
 `defect` of severity `minor` (requirement 3), so it reaches someone instead
-of disappearing into a commit message. The reconcile's repair queue (5.2)
-then picks it up like any other minor defect.
+of disappearing into a commit message. The repair queue (5.3) then picks it
+up like any other minor defect.
 
 1.7 **A test-cost directive in the steering template.**
 
@@ -361,11 +402,11 @@ gate of the package and answers in speca's JSON envelope.
   - the slowest units of the last full gate.
 
   af-impl copies this report into the merge commit and its `AF-Run:`
-  trailer (5.5).
+  trailer (5.10).
 
 af-impl compares the verdict with the baseline using the table of §5, as it
 does today. Only the running and the bookkeeping move into `speca`. A repair
-(5.2) runs the full gate through the same command.
+(5.5) runs the full gate through the same command.
 
 ### 2. The session's context stays bounded
 
@@ -384,8 +425,8 @@ criterion-to-test map. The orchestrating session claims, records and commits
 as today. The commit discipline and the state machine do not change, and only
 where the work happens moves.
 
-Without the argument, af-impl runs as today, for a person watching. The
-runner passes `--unattended`.
+Without the argument, af-impl runs as today, for a person watching.
+`specrun` passes `--unattended`.
 
 2.2 **The brief is the hand-off.**
 
@@ -410,13 +451,16 @@ exactly one kind:
 - `deviation`: the code deliberately does something other than the spec,
   recorded in an ADR, and a person must accept it or change the spec.
 
-3.2 **Labels.** The issue for an open item carries these labels, created on
-first use with `issue --create-label`:
+3.2 **Labels.** The issue for an open item carries these labels:
 
 - `af:<kind>`;
 - `af:from-<NN>`, the package that opened it;
 - for `awaits`, `af:awaits-<NN>`;
 - for `defect`, `af:severity-<s>`.
+
+`specrun` creates every label of the scheme before its first session (5.3).
+af-impl run on its own creates a missing label on first use, with
+`issue --create-label`.
 
 The issue body's "What closes it" section stays, and for `awaits` it names
 the receiving package by id.
@@ -427,7 +471,8 @@ Before filing an `awaits` item, af-impl asks `speca <NN>` about the receiving
 package. If that package is sealed, or its last task is `done`, the item is
 not `awaits`. It is a `defect` of severity `correctness`, with the note
 "handoff to a package that has already landed". This is the wiring nobody
-owns, and it is filed as such.
+owns, and it is filed as such. `specrun` checks the same rule again after
+every landing (5.3).
 
 The same check runs when the survey reads a spec's prose about wiring
 ("package N registers …"). Prose that hands work to a landed package is
@@ -459,21 +504,23 @@ the evidence and this package.
 
 af-impl's "Never" rule changes accordingly. af-impl may comment on and close
 an issue labelled `af:*` whose closing condition this branch meets. A
-reconcile may also label the issues it adopts (5.3). af-impl still never
+reconcile may also label the issues it adopts (5.6). af-impl still never
 closes, edits or comments on any other issue.
 
 3.6 **Nothing is left awaiting a package that is done.**
 
-An `af:awaits-<this package>` item that the branch did not resolve is, after
-the merge:
+An `af:awaits-<this package>` item that the branch did not resolve is passed
+on by af-impl after the merge, because choosing the new owner takes
+judgement. It is either:
 
 - relabelled to the later package that now owns it, with a comment saying
   why; or
 - relabelled `af:defect` with severity `correctness`, with a comment saying
   that no package owns it.
 
-When this package's landing ends, no open issue carries
-`af:awaits-<this package>`.
+`specrun` then enforces the result (5.3). Any open issue that still carries
+`af:awaits-<this package>` when the landing ends is relabelled as a
+`correctness` defect by `specrun`, with a comment that the session left it.
 
 3.7 **The report and the merge commit count items by kind.**
 
@@ -485,13 +532,13 @@ reclassified, per kind and severity, with the issue links.
 A deviation waits for a person. To settle it, the person adds one label to
 the issue:
 
-- `af:accepted`: the deviation stands. The next reconcile closes the issue
-  with a comment naming the ADR that records it. The spec is not edited. The
-  ADR and the closed issue are the record.
-- `af:rejected`: the code must do what the spec says. The next reconcile
-  relabels the issue `af:defect` with severity `correctness`, with a comment
-  saying a person rejected the deviation. It is then repaired like any other
-  defect (5.2).
+- `af:accepted`: the deviation stands. `specrun` closes the issue at the next
+  reconcile, with a comment naming the ADR that the issue cites. The spec is
+  not edited. The ADR and the closed issue are the record.
+- `af:rejected`: the code must do what the spec says. `specrun` relabels the
+  issue `af:defect` with severity `correctness` at the next reconcile, with a
+  comment saying a person rejected the deviation. It is then repaired like
+  any other defect (5.5).
 
 A deviation with neither label stays open, and every reconcile report lists
 it, oldest first.
@@ -529,8 +576,7 @@ warning does not make the package invalid.
 
 `speca --validate --strict-handoffs` turns each such warning into an error.
 The flag stores nothing; the caller decides each time. CI, a person, af-spec
-when it writes a package, or af-impl when the runner asks for it can each
-pass the flag.
+when it writes a package, or `specrun` (5.12) can each pass the flag.
 
 `specr <package> --task <N>` renders a task's handoffs with the sending
 package's text, so the coder sees what to wire.
@@ -555,42 +601,121 @@ lists each inbound handoff. The integration task confirms that production
 code wires each one, by `file:line`. A handoff the package takes but does not
 wire fails the task.
 
-### 5. The runner stops, repairs and reconciles
+### 5. `specrun` drives the loop
 
-5.1 **Stop on serious defects.**
+5.1 **A Go command in this repository.**
 
-After each package lands, the runner lists open issues labelled
-`af:from-<NN>` and `af:defect`. If any carries a severity listed in `STOP_ON`
-(default `security,data-loss`), the runner stops and names them. The next
-package is not started on top of them.
+`cmd/specrun` builds `specrun`. It is built from:
 
-A `deviation` never stops the runner. The ledger line and the merge commit
-count it, and every reconcile report (5.3) lists the open deviations, so a
-person can settle them in a batch (3.8).
+- the spec module's own packages: `afspec` for the dependency graph, the next
+  package, a package's state and its validation, in process, with no
+  subprocess;
+- `aflib/issuex` for every forge operation: list, label, comment, close and
+  create labels, on GitHub and GitLab;
+- `aflib/envelope` for its JSON answer;
+- the Go standard library.
 
-`STOP_ON` decides only when the runner halts. What it repairs is decided
-separately, by `REPAIR` and `REPAIR_ON` (5.2).
+It starts Claude Code sessions with `claude -p` for the work that needs a
+model:
 
-5.2 **Repair as its own unit of work.**
+- `/af-impl <package> --unattended`;
+- `/af-impl --reconcile`;
+- `/af-impl --repair <issue>`.
 
-The runner runs `/af-impl --repair <issue>` at two moments:
+It runs `git` for the repository. Its answer is one envelope on stdout when
+it ends. Progress goes to stderr, one line per step.
 
-- **Instead of stopping.** With `REPAIR=1`, after a package that opened
-  defects whose severity is in `STOP_ON`, it repairs each of them, most
-  severe first, before the next package.
-- **At every reconcile.** After each reconcile (5.3), it repairs the open
-  items the reconcile put in its repair queue, most severe first, at most
-  `REPAIR_MAX` (default 5) per reconcile. The queue holds:
-  - every `af:defect` whose severity is in `REPAIR_ON` (default
+`specrun` imports no package that depends on `agentkit-go`. The module's
+packages built on it (`specgen`, `internal/agentrun`, `internal/cli`,
+`internal/repomap`, `internal/skillgen`) are not used. What `specrun` needs
+from them, such as flag parsing or envelope output, it gets from the
+standard library and `aflib`, or from a package of this module that is free
+of `agentkit-go`.
+
+`make build` installs it with `spec`, `specr` and `speca`, and
+`docs/cli.md` documents it.
+
+5.2 **The loop.**
+
+`specrun` runs one step at a time, until every package is done, a stop rule
+fires (5.4), or `--max` packages have landed. Before every step it switches
+to the base branch and pulls it with `--ff-only`. A step is one of:
+
+- **implement the next package**: the package `afspec` names next in
+  dependency order;
+- **reconcile**: after every `--reconcile-every` landed packages, and once
+  more when every package is done (5.6);
+- **repair one issue**: from the repair queue (5.3, 5.5).
+
+After an implement step, `specrun` checks that the package landed, as the
+script does today:
+
+- the base branch is checked out;
+- the working tree is clean;
+- `HEAD` moved;
+- the package has no task `pending` or `in_progress`.
+
+A step that fails these checks stops the loop. When no package can start,
+because the open packages wait on something no run can finish or depend on
+one another in a cycle, `specrun` reports why and stops.
+
+5.3 **What `specrun` does without a model.**
+
+These rules need no judgement, so `specrun` applies them itself, through
+`issuex`, instead of asking a session to:
+
+- **Labels.** Before the first step, it creates every label of the scheme
+  (3.2, 3.8, and `af:repair-failed`) that the repository lacks.
+- **After every landing:**
+  - It relabels any open `af:awaits-<NN>` whose package `NN` is now done as a
+    `correctness` defect, with a comment (3.3, 3.6).
+  - It checks that every issue the session opened carries a kind, its
+    origin and, for a defect, a severity. An issue that lacks one gets
+    `af:deviation` and a comment, so a person decides it.
+- **Deviations.** At each reconcile, it closes the `af:accepted` deviations
+  and turns the `af:rejected` ones into defects (3.8).
+- **The repair queue.** At each reconcile, it builds the queue from labels:
+  - every open `af:defect` whose severity is in `--repair-on` (default
     `security,data-loss,correctness,minor`);
-  - every `af:untested` item, when `REPAIR_ON` holds `untested` (it does by
-    default).
+  - every open `af:untested` item, when `--repair-on` holds `untested` (it
+    does by default).
 
-  Items not repaired this time stay queued for the next reconcile. This is
-  how `correctness` and `minor` defects, `test-cost` findings and untested
-  criteria get closed without stopping the loop.
+  It leaves out every issue labelled `af:repair-failed`, and every
+  `security` defect unless `--repair-security` is set. It orders the queue
+  most severe first, then oldest first, and takes at most `--repair-max`
+  (default 5) per reconcile.
 
-A `security` defect is repaired only when `REPAIR_SECURITY=1` is also set,
+Every change `specrun` makes to an issue carries a comment that says which
+rule made it and on which commit of the base branch.
+
+5.4 **Stop on serious defects.**
+
+After each package lands, `specrun` lists the open `af:defect` issues
+labelled `af:from-<NN>`. If any carries a severity in `--stop-on` (default
+`security,data-loss`), it stops and names them, unless `--repair` is set
+(5.5). The next package is not started on top of them.
+
+A `deviation` never stops `specrun`. The ledger line and the merge commit
+count it, and every reconcile report lists the open deviations, so a person
+can settle them in a batch (3.8).
+
+`--stop-on` decides only when `specrun` halts. What it repairs is decided
+separately, by `--repair` and `--repair-on` (5.3, 5.5).
+
+5.5 **Repair as its own unit of work.**
+
+`specrun` runs a repair session at two moments:
+
+- **Instead of stopping.** With `--repair`, after a package that opened
+  defects whose severity is in `--stop-on`, it repairs each of them, most
+  severe first, before the next package.
+- **At every reconcile.** After the reconcile, it repairs the issues of the
+  repair queue (5.3), one session each, in queue order. Issues not repaired
+  this time stay for the next reconcile. This is how `correctness` and
+  `minor` defects, `test-cost` findings and untested criteria get closed
+  without stopping the loop.
+
+A `security` defect is repaired only when `--repair-security` is also set,
 whichever of the two moments it comes up at.
 
 A repair of a defect:
@@ -602,8 +727,8 @@ A repair of a defect:
   defect is already gone, probably fixed in passing by a later package. The
   repair commits only the test, with a `test:` commit that says so, and
   closes the issue with that test as evidence;
-- passes the full gate and, when the issue's package has `test_commands`,
-  that package's commands;
+- passes the full gate (`speca --gate full`) and, when the issue's package
+  has `test_commands`, that package's commands;
 - merges `--no-ff` and closes the issue with the merge commit as evidence.
 
 A repair of an `untested` item is a test-only repair. It writes the test the
@@ -629,22 +754,26 @@ A repair can fail in two ways:
 - it cannot fix the defect in two attempts.
 
 Either way, the repair comments on the issue with what it tried, adds the
-label `af:repair-failed` and leaves the issue open. The runner stops when the
-issue's severity is in `STOP_ON`. Otherwise it goes on, and later reconciles
-leave the issue out of their repair queue until a person removes the label.
+label `af:repair-failed` and leaves the issue open. `specrun` then checks
+what the session left:
 
-5.3 **Reconcile periodically.**
+- it is back on a clean base branch;
+- the issue is either closed or labelled `af:repair-failed`.
 
-Every `RECONCILE_EVERY` packages (default 5), and once more when every
-package is done, the runner runs `/af-impl --reconcile`. That session first
-adopts the issues opened before this change, then checks every open `af:*`
-issue against the base branch.
+It stops when the issue's severity is in `--stop-on`. Otherwise it goes on,
+and later queues leave the issue out until a person removes the label.
+
+5.6 **Reconcile: the judgement part.**
+
+A reconcile session (`/af-impl --reconcile`) does only what needs a model.
+`specrun` does the rest before and after it (5.3).
 
 **Adopting older issues.** An open issue with no `af:` label is adopted when
 its title starts with `<NN_name>:` and `NN_name` is a package under the spec
-root. That is the title af-impl has always given an open item. The reconcile
-reads the issue's body, which already says what is missing, why, the
-evidence and what closes it, and assigns:
+root. That is the title af-impl has always given an open item. `specrun`
+selects these issues by title and hands them to the session. The session
+reads each body, which already says what is missing, why, the evidence and
+what closes it, and assigns:
 
 - its kind;
 - `af:from-<NN>`;
@@ -654,58 +783,130 @@ evidence and what closes it, and assigns:
 It adds those labels with a comment saying the issue was adopted and why it
 got that kind. An issue whose kind the body does not settle is labelled
 `af:deviation`, so a person decides it (3.8). An issue whose title does not
-match is never touched. Adoption runs at every reconcile, so issues opened
-by an older af-impl during a mixed run are picked up too.
+match is never handed to the session. Adoption runs at every reconcile, so
+issues opened by an older af-impl during a mixed run are picked up too.
 
-**Checking the `af:*` issues.** The reconcile then:
+**Checking closing conditions.** For every open `af:*` issue, the session
+decides whether the condition in its "What closes it" holds on the base
+branch. It closes those that hold, with evidence (`file:line`, a test). It
+changes no code.
 
-- closes those whose closing condition holds on the base branch, with
-  evidence;
-- relabels an `awaits` whose receiver has landed (3.6);
-- closes an `af:accepted` deviation, and turns an `af:rejected` one into a
-  defect (3.8);
-- builds the repair queue (5.2);
-- lists the rest by kind and severity, deviations oldest first.
+The session writes its report to the log directory as Markdown. The report
+lists what it adopted, what it closed, and the rest by kind and severity,
+deviations oldest first. `specrun` then applies 5.3 and builds the repair
+queue from the labels as they now stand.
 
-The reconcile changes no code. Its report goes to the runner's log directory
-as Markdown, with the repair queue as JSON beside it. The runner reads the
-queue and runs the repairs (5.2).
+5.7 **State and resume.**
 
-5.4 **Full logs and a ledger.**
+`specrun` keeps its state in one JSON file under the user's state directory,
+named after the repository: the steps done, the step running with its start
+time, the packages since the last reconcile and the repair queue. It writes
+the file atomically after every change.
 
-- The runner saves each session's full stream
-  (`claude -p … --output-format stream-json`) as `<package>.jsonl` beside the
-  final message in `<package>.log`.
-- It appends one line per package to `ledger.tsv`, with these columns:
-  - the package;
-  - start and end time;
-  - wall minutes;
-  - landed or stopped;
-  - full gate runs and seconds, reused gates, task gate runs and seconds
-    (read from the merge commit's trailer, see 5.5);
-  - open items opened, closed and passed on.
+Started again after a crash, a kill or a reboot, it reads the file and
+resumes:
 
-  A reconcile and each repair also get a line, with their kind in place of
-  the package and, for a repair, the issue and its outcome (fixed,
-  already fixed, failed).
-- After each package it prints that line. When a package's wall time is more
-  than twice the median of the packages before it, it also prints a warning.
+- A step recorded as running is checked against the repository first.
+  - A package that landed counts as done.
+  - A package branch that exists is continued, as af-impl already does with
+    an existing branch.
+  - A repair whose issue is closed counts as done.
+- A step that cannot be checked is run again.
 
-5.5 **A machine-readable trailer.**
+`specrun --reset-state` discards the file.
+
+5.8 **A session that stops making progress is ended.**
+
+`specrun` reads each session's `stream-json` output as it arrives. When no
+event arrives for `--stall` (default 30 minutes), it ends the session,
+records the step as stalled in the ledger and stops the loop. The timeout of
+a single gate stays below the stall time, so a long gate is not mistaken for
+a stall.
+
+5.9 **Full logs and a ledger.**
+
+- `specrun` saves each session's full stream as `<step>.jsonl` in the log
+  directory (`--log-dir`, default under the user's cache directory), beside
+  the final message in `<step>.log`.
+- It appends one JSON line per step to `ledger.jsonl`. Each line holds:
+  - the step's kind and subject (a package, a reconcile, a repair's issue);
+  - start and end time, and wall minutes;
+  - the outcome: landed, stopped, stalled; for a repair: fixed, already
+    fixed, failed;
+  - for a package: the full gate runs and seconds, the reused gates, and
+    the task gate runs and seconds, read from the merge commit's trailer
+    (5.10);
+  - the open items opened, closed and passed on.
+- After each step it prints the line in short form. When a package's wall
+  time is more than twice the median of the packages before it, it also
+  prints a warning.
+
+`specrun --ledger` prints the ledger as a table.
+
+5.10 **A machine-readable trailer.**
 
 The merge commit ends with an `AF-Run:` trailer: one line of JSON with the
-counts of 1.5 and 3.7. The runner and the ledger read it rather than parsing
+counts of 1.5 and 3.7. `specrun` and the ledger read it, rather than parsing
 prose.
 
-5.6 **The runner says what it runs.**
+5.11 **`specrun` says what it runs.**
 
-At start, the runner logs:
+At start, `specrun` logs:
 
-- the af-impl skill's version, or the hash of its `SKILL.md`, and its path;
-- the versions of `speca`, `specr` and `issue`.
+- its own version;
+- the af-impl skill it will run: its path and the hash of its `SKILL.md`;
+- the versions of `claude` and `issue`.
 
-When the installed skill's hash differs from the source in the `spec`
-repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
+`specrun` is built from the same repository as the skills. It embeds the
+hash of the af-impl skill it was built with. When the installed skill's hash
+differs, it warns, and with `--strict-skills` it refuses to start. That is
+the mismatch the background describes: the installed skill was older than
+the source.
+
+5.12 **Configuration and a dry run.**
+
+Every setting is a flag:
+
+- `--max`, `--stop-on`, `--repair`, `--repair-on`, `--repair-max`,
+  `--repair-security`, `--reconcile-every` (default 5), `--stall`,
+  `--log-dir`, `--strict-skills`;
+- `--strict-handoffs`, which `specrun` passes to every validation it runs.
+
+An environment variable of the same name in upper case, prefixed `SPECRUN_`,
+sets a flag's default.
+
+`specrun --dry-run` changes nothing and starts no session. It prints:
+
+- the next step;
+- the package `afspec` would choose, or why none can start;
+- the repair queue as the labels now stand;
+- what 5.3 would change.
+
+5.13 **The driver is tested without a model or a forge.**
+
+`specrun`'s decisions are tested by table-driven tests that run with:
+
+- a fake `claude`: a test binary that replays a recorded stream and changes
+  the repository as a session would;
+- the no-op or an in-memory `issuex` client;
+- a fixture repository.
+
+The tests cover:
+
+- choosing the step;
+- the landing checks;
+- every rule of 5.3;
+- the stop rules;
+- the queue order and cap;
+- resuming from every state of 5.7;
+- the stall timeout.
+
+5.14 **The script is retired.**
+
+`scripts/impl-specs.sh` stays as it is until `specrun` does everything it
+does: the loop, the landing checks, the stop on a package that did not land.
+In the change that reaches that point, the script is deleted, and the docs
+and the README name `specrun` instead.
 
 ## Design Decisions
 
@@ -736,7 +937,7 @@ repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
    af-impl writes them for a session resumed after a gap.
 6. **Classify at creation, by the run that knows.** The conformance reviewer
    has the evidence when it builds the unmet list. A later classification
-   would have to rebuild it from prose. Labels let the runner and the next
+   would have to rebuild it from prose. Labels let `specrun` and the next
    survey filter without reading bodies.
 7. **The run that resolves an item closes it.** Only the run that wired the
    caller can cite the caller. A periodic reconcile catches what slips
@@ -745,15 +946,15 @@ repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
    label marks the ones that are its own.
 8. **A handoff is format data, checked by `speca`.** The wrong-direction
    handoffs were all in prose, and no tool reads prose. The check that
-   matters, "the receiver lands later", is a graph question `speca` already
-   answers for `--next`. An `x-` key would carry the data, but the format
-   gives `x-` keys no meaning, so the validator could not check them.
+   matters, "the receiver lands later", is a graph question `afspec`
+   already answers for `--next`. An `x-` key would carry the data, but the
+   format gives `x-` keys no meaning, so the validator could not check them.
 9. **Repairs are separate merges, and `security` stops by default.** A
    repair edits code another package landed. Doing it inside a package's
    branch would break that package's scope and its traceability. A security
    fix is the kind a person should see before the loop builds further on
    it.
-10. **Data-loss defects stop the runner by default, correctness defects do
+10. **Data-loss defects stop the loop by default, correctness defects do
     not.** A correctness gap is usually local, and the next package rarely
     depends on it. A lost write or a leaked object is the kind of defect a
     later package silently builds on.
@@ -795,18 +996,18 @@ repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
     mechanical step. One call per gate, with a JSON verdict, also gives
     interactive runs, unattended runs and repairs the same gate.
 17. **Stopping and repairing are configured separately.** What is dangerous
-    to build on (`STOP_ON`) and what the loop may fix by itself (`REPAIR_ON`)
-    are different questions. Tying them together left every `correctness`
-    and `minor` defect open forever, which is the backlog this plan exists
-    to end. Batching repairs at reconciles, with a cap, keeps the time they
-    take bounded and visible in the ledger.
+    to build on (`--stop-on`) and what the loop may fix by itself
+    (`--repair-on`) are different questions. Tying them together left every
+    `correctness` and `minor` defect open forever, which is the backlog this
+    plan exists to end. Batching repairs at reconciles, with a cap, keeps the
+    time they take bounded and visible in the ledger.
 18. **An untested criterion is closed by a test.** The cheapest way to
     settle "believed to work" is to write the missing test. Either it
     passes, and the issue closes with the test as evidence, or it fails,
     and the item was a defect all along and is repaired as one in the same
     session.
 19. **A person settles a deviation where it is tracked, with a label.**
-    Labels are the one thing the runner, the reconcile and the forge's own
+    Labels are the one thing `specrun`, the sessions and the forge's own
     filters all read. Accepting needs no spec edit, because the ADR already
     records the rule the code follows. Rejecting turns the item into an
     ordinary defect, so the repair path needs nothing new.
@@ -817,6 +1018,45 @@ repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
     from every issue a person opened. When the body does not settle the
     kind, `deviation` puts the decision in front of a person instead of
     guessing.
+21. **The driver is Go, in this repository.** The loop becomes a state
+    machine with rules that must hold across hours of unattended work.
+    - In Go they are tested in seconds against a fake session and a fake
+      forge; in bash only a real run tests them.
+    - The facts the loop decides on (the dependency graph, the next package,
+      a package's state) come from `afspec` in process, the same code
+      `speca` uses, rather than from parsing `speca`'s output.
+    - The forge comes through `issuex`, the same code the `issue` command
+      the sessions use is built on.
+
+    It lives here because it is built with the format, the skills and
+    `speca`. The hash of the skill it was built with (5.11) is only
+    meaningful when the two come from one tree. It stays off `agentkit-go`,
+    which the module carries for the `spec` generator, so that the driver
+    has no model runtime of its own (decision 23).
+22. **A model runs only where judgement is needed.** Choosing a step,
+    checking a landing, keeping labels consistent, ordering the repair queue
+    and settling labelled deviations follow from labels, the dependency
+    graph and git. Each is a rule `specrun` applies the same way every
+    time, at no model cost. A session is started only to write code, to
+    classify an issue from its prose, or to decide whether a closing
+    condition holds. This is decision 16 applied to the loop.
+23. **Claude Code stays the model runtime, through `claude -p`.** The skills
+    are written for Claude Code sessions: their subagents, the tools they
+    expect and their run-to-the-end rules. `specrun` starts, watches and
+    checks those sessions, which keeps one way of running a model rather
+    than two.
+24. **State is one JSON file, not a database.** `specrun` runs one step at a
+    time in one process. What it must survive is a crash between steps or
+    within one. The repository records most of the truth (branches, merges,
+    task states, labels), and the file holds only the rest: the running
+    step, the counter and the queue. A durable job queue, with retries,
+    serialization and an SQLite store, would solve problems this loop does
+    not have, at the price of a new dependency for the spec module.
+25. **`specrun` checks its sessions and does not trust them.** A session's
+    final message is the model's account of what happened. The landing
+    checks, the label rules and the repair outcome checks read the
+    repository and the forge instead, so a session that ends early,
+    stalls or claims too much is caught by the same code every time.
 
 ## Sequencing
 
@@ -828,15 +1068,18 @@ Three steps. Each lands on its own and is useful without the next.
      without `affected_tests`: the task gate is then the full suite, but
      baselines and identical merged trees are not run again.
    - Gate measurement (1.5).
-   - Runner logs, ledger and versions (5.4, 5.6).
+   - `specrun` doing what the script does (5.1, 5.2), with state and resume
+     (5.7), the stall timeout (5.8), logs and ledger (5.9), versions (5.11),
+     configuration and dry run (5.12), and its tests (5.13). The script is
+     retired at the end of this step (5.14).
    - Kinds and labels (3.1, 3.2, 3.7).
    - Closing what the branch resolved (3.5).
 2. **The loop reads back.**
    - The no-dead-handoffs check (3.3), the survey reading open items (3.4)
      and passing on what remains (3.6).
-   - Stop, repair and reconcile (5.1–5.3), with `REPAIR_ON` and the
-     test-only repair, adopting older issues, and the trailer (5.5).
-   - Settling deviations by label (3.8).
+   - `specrun`'s rules (5.3), stop and repair (5.4, 5.5), and reconcile
+     with adoption (5.6).
+   - Settling deviations by label (3.8) and the trailer (5.10).
    - `affected_tests` (1.2), the budget (1.6) and the steering directive
      (1.7).
 3. **Format and context.**
@@ -849,15 +1092,28 @@ Three steps. Each lands on its own and is useful without the next.
 
 ## Dependencies
 
-- `speca --next` and the dependency graph (`feature/speca-next`), for 3.3 and
-  4.2.
+- `afspec`: the dependency graph and `speca --next` (`feature/speca-next`),
+  for 3.3, 4.2 and 5.2; package state and validation for 5.2 and 5.12.
 - `speca`'s JSON envelope and exit-code conventions (`docs/speca.md`), which
   `--gate` and `--gate-report` follow.
-- `issue` from `aflib`, which already supports `--list --label`,
-  `--create-label`, `--edit --add-label/--remove-label`, `--comment` and
-  `--close`.
+- `aflib`, a new dependency of the spec module:
+  - `issuex` (`Client`: `ListIssues`, `ReadIssue`, `AddLabels`,
+    `RemoveLabel`, `CreateLabel`, `AddComment`, `CloseIssue`, and the no-op
+    client) for 5.3 to 5.6 and 5.13;
+  - `envelope` for `specrun`'s answer.
+
+  The module's own `internal/issuex` covers only reading an issue and its
+  comments and adding a comment, which is what the `spec` CLI needs. It
+  cannot list, label or close an issue. `specrun` uses `aflib/issuex`
+  rather than growing a second copy of the same client. Moving the `spec`
+  CLI onto `aflib/issuex` and deleting `internal/issuex` is a separate
+  change.
+- The `issue` command from `aflib`, which the sessions use. It already
+  supports `--list --label`, `--create-label`,
+  `--edit --add-label/--remove-label`, `--comment` and `--close`.
 - The v3 format (PRD 06, ADR 19). `handoffs`, `takes_handoffs` and
   `test_commands.affected_tests` are additions to its schemas.
 - The steering template `docs/templates/steering.md` and the "Quality
   Commands" section of the project template `docs/templates/AGENTS.md`.
-- `claude -p --output-format stream-json`, for 5.4.
+- Claude Code's `claude -p`, with `--output-format stream-json`,
+  `--permission-mode` and `--disallowedTools`, for 5.1, 5.8 and 5.9.
