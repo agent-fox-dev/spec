@@ -1,7 +1,7 @@
 ---
 name: af-impl
 description: Implement a version 3 specification package with the user watching. Reads the spec's three artefacts, surveys how they map onto the code, then implements the tasks in order on one branch, each claimed with speca, test-first, verified by the spec's own checks, and recorded done with speca before it is committed, and runs from the survey to the merge into the base branch on its own, without waiting to be told to continue. Opens an issue for every open item the merge leaves, linked both ways, with the issue command. Never edits the spec, and merges only on checks that pass on the merged tree.
-argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search] | --reconcile <adopt file> --report <report file> | --repair <issue>"
+argument-hint: "[path to a spec package, e.g. .specs/16_indexed_code_search] | --reconcile <adopt file> --report <report file> | --repair <issue> | <package> --unattended"
 disable-model-invocation: false
 ---
 
@@ -45,6 +45,7 @@ conformance, the merge, the report. Nobody has to say "continue". The
 person watching reads what you write as it appears and may interrupt; you do
 not wait for them. If their request asks for a stop (after the survey, after
 task N), stop there and say which command continues; otherwise go to the end.
+A subagent's return is not a stop.
 
 You stop short of the end, and report how far you got (§8), for these
 reasons and no others:
@@ -80,7 +81,9 @@ write does, and what to do without them.
 
 `--reconcile <adopt file> --report <report file>` and `--repair <issue>`
 implement no package: follow [references/reconcile.md](references/reconcile.md)
-or [references/repair.md](references/repair.md) instead.
+or [references/repair.md](references/repair.md) instead. `--unattended`, after
+the package, runs each implement task in a subagent:
+[references/unattended.md](references/unattended.md).
 
 The argument the skill was given is a path to a spec package, such as
 `.specs/16_indexed_code_search`. It may also be a bare id (`16`), a name, or a
@@ -111,18 +114,15 @@ In `result`: `spec_dir` is the package's directory, and it is `<package>` from
 here on, in every `speca` and `specr` call and in the report; `status`, `valid`
 with `failing_rules` and `intent_drift` are what §2 checks; `tasks`,
 `task_counts` and `next_task` are the plan and where to start; `depends_on` is
-the spec ids the package's own `dependencies` name. `next` may also suggest a
-lifecycle call, `speca <package> --status active` or `--status sealed`. Those
-moves belong to the spec's owner, not to this run (see *Never*); the task calls
-in `next` are the ones you follow.
+the spec ids the package's own `dependencies` name. A lifecycle call `next`
+suggests (`--status active`, `--status sealed`) is the owner's (see *Never*);
+follow its task calls.
 
 With no argument, run `speca --next` and implement `result.next_spec`, saying
 which. With none, report why (`result.all_done`, `result.waiting`, or a
 dependency cycle at stage `graph`) and stop.
 
-Render the package with `specr` and read the rendering; do not read the JSON
-files and scope them by hand. `specr` gathers a task's criteria, their checks
-and the paths those name more reliably than reading them does:
+Render the package with `specr` and read the rendering, not the JSON files:
 
 ```sh
 specr <package> --markdown-file "${TMPDIR:-/tmp}/af-impl-<NN>.md" > "${TMPDIR:-/tmp}/af-impl-<NN>.json"

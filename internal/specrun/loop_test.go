@@ -186,7 +186,7 @@ func TestLoop_StartsTheSessionForTheNextPackageOnAnUpToDateBase(t *testing.T) {
 	if len(starts) != 1 {
 		t.Fatalf("%d sessions; want one", len(starts))
 	}
-	want := []string{"-p", "/af-impl .specs/01_a", "--output-format", "stream-json", "--verbose",
+	want := []string{"-p", "/af-impl .specs/01_a --unattended", "--output-format", "stream-json", "--verbose",
 		"--permission-mode", "bypassPermissions", "--disallowedTools", "ScheduleWakeup,CronCreate"}
 	if s := starts[0]; strings.Join(s.Argv, "\x00") != strings.Join(want, "\x00") {
 		t.Errorf("argv %q; want %q", s.Argv, want)

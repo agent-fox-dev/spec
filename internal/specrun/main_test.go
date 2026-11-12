@@ -216,7 +216,7 @@ func TestMain_ReconcilesAfterAPackage(t *testing.T) {
 		t.Fatalf("adopt files %v", adopt)
 	}
 	report := strings.TrimSuffix(adopt[0], "-adopt.json") + "-report.md"
-	if want := "/af-impl --reconcile " + adopt[0] + " --report " + report; f.starts(t)[1].Argv[1] != want {
+	if want := "/af-impl --reconcile " + adopt[0] + " --report " + report; f.starts(t)[1].Argv[1] != want || strings.Contains(f.starts(t)[1].Argv[1], "--unattended") {
 		t.Errorf("the reconcile's prompt %q; want %q", f.starts(t)[1].Argv[1], want)
 	}
 	if b, _ := os.ReadFile(adopt[0]); strings.Count(string(b), `"number"`) != 1 || !strings.Contains(string(b), fmt.Sprintf(`"number": %d`, old)) {

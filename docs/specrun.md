@@ -73,7 +73,7 @@ Each step is **implement the next package**:
 3. Start the session in the repository:
 
    ```
-   claude -p "/af-impl <spec_dir>" --output-format stream-json --verbose \
+   claude -p "/af-impl <spec_dir> --unattended" --output-format stream-json --verbose \
      --permission-mode bypassPermissions --disallowedTools ScheduleWakeup,CronCreate
    ```
 
