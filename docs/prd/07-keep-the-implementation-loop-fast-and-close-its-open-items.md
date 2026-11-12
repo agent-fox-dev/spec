@@ -223,9 +223,12 @@ levels.
 1.2 **The affected-tests command is the project's.**
 
 `tasks.json` `test_commands` gets an optional `affected_tests`: a command that
-takes the base commit as its one argument and runs the tests the diff from
-that commit can affect. Examples are a Makefile target such as
-`make test-affected BASE=<sha>`, or a script. The project decides what
+contains the placeholder `{base}` exactly once. Before running it, af-impl
+replaces `{base}` with the id of the commit the task started from, so the
+command runs the tests that the diff from that commit can affect. An example
+is `make test-affected BASE={base}`. A command without `{base}`, or with it
+more than once, fails validation. The project's tool works out the changed
+paths itself, new and untracked files included. The project decides what
 "affected" means: reverse dependencies, a test-impact tool, or a directory
 map.
 
@@ -430,9 +433,15 @@ wrong-direction handoff seen so far.
 4.3 **The receiving package takes the handoff.**
 
 A task may list the handoffs it takes, in `takes_handoffs` (`"24:H-1"`).
-`speca --validate` on the receiving package warns, without failing, for each
-inbound handoff (found by scanning the other packages under the spec root)
-that no task takes. The warning names the sending package and the handoff.
+`speca --validate` on the receiving package warns for each inbound handoff
+(found by scanning the other packages under the spec root) that no task
+takes. The warning names the sending package and the handoff. By default a
+warning does not make the package invalid.
+
+`speca --validate --strict-handoffs` turns each such warning into an error.
+The flag stores nothing; the caller decides each time. CI, a person, af-spec
+when it writes a package, or af-impl when the runner asks for it can each
+pass the flag.
 `specr <package> --task <N>` renders a task's handoffs with the sending
 package's text, so the coder sees what to wire.
 
@@ -465,6 +474,10 @@ After each package lands, the runner lists open issues labelled
 (default `security,data-loss`), the runner stops and names them. The next
 package is not started on top of them.
 
+A `deviation` never stops the runner. The ledger line and the merge commit
+count it, and every reconcile report (5.3) lists the open deviations, so a
+person can accept or reject them in a batch.
+
 5.2 **Repair as its own unit of work.**
 
 With `REPAIR=1`, the runner runs `/af-impl --repair <issue>` instead of
@@ -473,11 +486,20 @@ stopping, for each such defect, in severity order.
 A repair:
 
 - branches `fix/<issue>-<slug>` from the base branch;
-- writes a regression test that fails on the base branch, and fixes the
-  code;
+- writes the regression test first and runs it on the unchanged code;
+- when the test fails, fixes the code until the test passes;
+- when the test passes on the unchanged code, does not fix anything: the
+  defect is already gone, probably fixed in passing by a later package. The
+  repair commits only the test, with a `test:` commit that says so, and
+  closes the issue with that test as evidence;
 - passes the full gate and, when the issue's package has `test_commands`,
   that package's commands;
 - merges `--no-ff` and closes the issue with the merge commit as evidence.
+
+A repair whose test cannot reproduce the issue as it is described, for
+example because the issue names code that no longer exists, does not guess.
+It comments on the issue with what it tried, leaves it open, and the runner
+stops.
 
 A repair touches only what the fix needs. It is not a package task and moves
 no task state. It may edit a landed package's code, because the defect is its
@@ -579,6 +601,33 @@ repository, where that is known through `AF_SKILLS_SRC`, the runner warns.
     not.** A correctness gap is usually local, and the next package rarely
     depends on it. A lost write or a leaked object is the kind of defect a
     later package silently builds on.
+11. **`affected_tests` takes the base commit, as `{base}`.** One argument
+    that cannot get long. The project's tool computes the changed paths from
+    git, so it handles new, untracked, deleted and renamed files in one place
+    instead of af-impl deciding what counts as changed. A placeholder rather
+    than an appended argument lets the commit go wherever the command needs
+    it (`BASE={base}`, `--since {base}`).
+12. **An untaken handoff is a warning, and an error only on request.** Spec
+    roots written before handoffs existed must still validate. A flag rather
+    than a stored setting keeps the format free of a new configuration
+    place: whoever needs the strict answer (CI, a gate before activation)
+    asks for it.
+13. **Deviations are listed, not stopped on.** A deviation is decided,
+    recorded in an ADR, and leaves the code consistent. It needs a person's
+    acceptance, not an immediate one, and stopping on each would halt the
+    loop after most packages. A person reviews them in batches from the
+    reconcile report.
+14. **A repair proves the defect before it fixes it.** Writing the
+    regression test first is the test-first gate applied to a repair. The
+    same run also answers whether a later package already fixed the defect.
+    A test that passes on the unchanged code is kept as the evidence, and
+    nothing else changes.
+15. **Defaults: reconcile every 5 packages, a 120-second budget.** In the
+    measured run, five packages took 4 to 6 hours, so a reconcile every 5
+    keeps the issue list at most a few hours out of date. The full suite
+    crossed 120 s around the fifteenth package, when the slowdown first
+    showed in wall time. Both can be set by the project; neither is
+    switched off by default.
 
 ## Sequencing
 
@@ -601,7 +650,10 @@ Three steps. Each lands on its own and is useful without the next.
 3. **Format and context.**
    - Handoffs (4.1–4.5), with a format revision and the af-spec and `spec`
      generator changes.
-   - Unattended mode (2.1, 2.2).
+   - Unattended mode (2.1, 2.2). It comes last on purpose: the ledger of
+     step 1 measures model time per package after the gate changes. If the
+     remaining model time no longer grows with the repository, unattended
+     mode can be dropped from this plan.
 
 ## Dependencies
 
@@ -615,18 +667,3 @@ Three steps. Each lands on its own and is useful without the next.
 - The steering template `docs/templates/steering.md` and the project
   template's "Quality Commands" section.
 - `claude -p --output-format stream-json`, for 5.4.
-
-## Open Questions
-
-1. Should `affected_tests` take the base commit, or the list of changed
-   paths? A commit is one argument and lets the tool compute paths itself.
-   A list of paths suits tools that do not read git.
-2. Should 4.3, "an inbound handoff no task takes", be an error rather than a
-   warning once every package in a spec root declares its handoffs? A
-   warning lets old packages validate.
-3. Who accepts a `deviation`? It needs a person by definition. Should the
-   runner stop on it as it does on `security`, or only list it in the
-   ledger?
-4. Should a repair also check, before it is attempted, that the defect still
-   reproduces on the base branch? This applies when a later package may have
-   fixed it in passing.
