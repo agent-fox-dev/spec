@@ -1,0 +1,85 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "23",
+  "spec_name": "specrun_reconcile",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "22",
+      "reason": "runs its label rules again after the session and extends its dry run; af-impl's closing of items is the base the reconcile mode builds on"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Schedule the reconcile step and start its session with the issues it may adopt",
+      "criteria": [
+        "REQ-1",
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the scheduling table, the restart cases, the selection table and the session checks as tests and confirm they fail; teach the fake claude a reconcile script: write labels, close issues, write the report, or misbehave",
+        "Add the flag --reconcile-every with its SPECRUN_RECONCILE_EVERY default: an integer, default 5, 0 meaning only the reconcile at the end; refuse a negative number or a non-integer as a usage error",
+        "Keep in the state file the number of packages landed since the last reconcile. When it reaches the flag's value, and when every package is done and a package landed since the last reconcile or the ledger holds no reconcile, the next step is a reconcile; a reconcile recorded as running at start is run again",
+        "At the start of a reconcile list the open issues, following an incomplete listing to its end, and select those with no label starting af: whose title starts with a package's directory name and a colon, for the packages under the spec root and its archive; write them as a JSON array of number, title, url and package to <step>-adopt.json in the log directory",
+        "Start the session with the prompt `/af-impl --reconcile <adopt file> --report <log dir>/<step>-report.md` and everything else as for a package: the flags, the process group, the stream files and the stall rule",
+        "After the session check that the base branch is checked out, the tree is clean and HEAD is the commit it was; a failure stops the loop with the check as the reason and applies no rule. A report file that does not exist is the warning reconcile_report_missing"
+      ],
+      "touches": [
+        "internal/specrun/"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Apply the rules after the session and report the reconcile",
+      "criteria": [
+        "REQ-3",
+        "REQ-4"
+      ],
+      "steps": [
+        "Add the unsettled adoption, the deviation table, the ledger line and the dry run as tests and confirm they fail",
+        "Add the rule adoption-unsettled: an issue of the adopt file that is still open with no kind label gets af:deviation and af:from-<NN> of the package its title names, with a comment",
+        "Add the rules deviation-accepted and deviation-rejected over the open issues labelled af:deviation: accepted and not rejected is closed with a comment naming the first docs/adr path in its body, or saying none is cited; rejected and not accepted loses af:deviation and af:rejected and gains af:defect and af:severity-correctness, with a comment; both labels is left alone with the warning deviation_conflict",
+        "Then apply incomplete-labels and awaits-finished to every open af: issue. Every change carries a comment with its rule and the commit of the base branch, each rule is a function to a list of changes like the earlier ones, and a forge failure stops the loop",
+        "Write the ledger line with kind reconcile, outcome reconciled and the numbers adopted, closed and settled; put the open deviations with neither label, oldest first, in result.open_deviations and print them on stderr; return the count of packages since the last reconcile to 0",
+        "Under --dry-run report a due reconcile as the next step, the selection as result.would_adopt and the deviation changes in result.would_change, writing no file and nothing to the forge",
+        "Document the reconcile in docs/specrun.md: when it runs, the adopt file and the report, the checks, each rule, the ledger line, and how a person settles a deviation with af:accepted or af:rejected; add the flag and its variable to docs/configuration.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main_test.go",
+        "docs/specrun.md",
+        "docs/configuration.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Give af-impl its reconcile mode",
+      "criteria": [
+        "REQ-2.1"
+      ],
+      "steps": [
+        "Extend the fake session's reconcile script and the end-to-end test so that the prompt specrun sends is the one the skill documents, and confirm the test fails before the prompt is final",
+        "Add skills/af-impl/references/reconcile.md and link it from SKILL.md: `/af-impl --reconcile <adopt file> --report <report file>` implements no package; it reads the two paths from its arguments and stops with a report when either is missing",
+        "Adopting, in that file: for each issue of the adopt file read its body, which says what is missing, why, the evidence and what closes it; assign its kind, af:from-<NN>, af:awaits-<NN> when it awaits a package and a severity when it is a defect; add the labels with `issue <ref> --edit --add-label` and a comment saying the issue was adopted and why it got that kind; label an issue whose kind the body does not settle af:deviation; touch no issue that is not in the file and carries no af: label",
+        "Checking closing conditions, in that file: list every open af:* issue; for each decide whether the condition in 'What closes it' holds on the base branch; close those that hold with `issue <ref> --close --body`, the comment giving the evidence as file and line and a test; change no code, create no branch and commit nothing",
+        "The report, in that file: Markdown written to the report path, listing what was adopted with the kind given, what was closed with its evidence, and the rest by kind and severity, deviations oldest first",
+        "In SKILL.md name the mode in the argument hint and in §1, and extend the last rule of *Never*: in a reconcile af-impl may label the issues of the adopt file; keep the rendered body under the ceiling `make skills-check` enforces"
+      ],
+      "touches": [
+        "skills/af-impl/SKILL.md",
+        "skills/af-impl/references/reconcile.md",
+        "internal/specrun/",
+        "cmd/specrun/main_test.go"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}
