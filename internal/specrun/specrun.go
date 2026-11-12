@@ -483,13 +483,16 @@ func baseBranch(root string) string {
 	return "main"
 }
 
-// syncBase checks out the base branch and pulls it with --ff-only, and
-// returns the commit HEAD is at then. A failure of either is the preflight's,
+// syncBase checks out the base branch, when it is not checked out already,
+// and pulls it with --ff-only, and returns the commit HEAD is at then. A failure of either is the preflight's,
 // in git's own words.
 func (r *run) syncBase() (string, *envelope.ErrorInfo) {
-	was, _ := gitOutput(r.root, "branch", "--show-current")
-	if _, err := gitOutput(r.root, "switch", "--quiet", r.base); err != nil {
-		return "", failure("preflight", "input", "the base branch %s could not be checked out: %v", r.base, err)
+	at, _ := worktreeOf(r.root)
+	was := at.branch
+	if was != r.base {
+		if _, err := gitOutput(r.root, "switch", "--quiet", r.base); err != nil {
+			return "", failure("preflight", "input", "the base branch %s could not be checked out: %v", r.base, err)
+		}
 	}
 	if _, err := gitOutput(r.root, "pull", "--quiet", "--ff-only", "origin", r.base); err != nil {
 		// The repository is left as it was found.
@@ -666,6 +669,42 @@ func shorten(s string, n int) string {
 
 // gitOutput runs git in dir (the working directory when empty) and returns
 // its output, trimmed; the error holds git's own words.
+// worktree is where a repository stands: the branch checked out ("" when
+// HEAD is detached), the commit at HEAD ("" before the first), and whether
+// the working tree is clean, an untracked file counting and an ignored one
+// not.
+type worktree struct {
+	branch, head string
+	clean        bool
+}
+
+// worktreeOf reads where the repository at dir stands in one git process,
+// where asking for the branch, the status and HEAD apart takes three.
+func worktreeOf(dir string) (worktree, error) {
+	out, err := gitOutput(dir, "status", "--porcelain=v2", "--branch", "--no-ahead-behind")
+	if err != nil {
+		return worktree{}, err
+	}
+	w := worktree{clean: true}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "# branch.oid "):
+			if oid := strings.TrimPrefix(line, "# branch.oid "); oid != "(initial)" {
+				w.head = oid
+			}
+		case strings.HasPrefix(line, "# branch.head "):
+			if b := strings.TrimPrefix(line, "# branch.head "); b != "(detached)" {
+				w.branch = b
+			}
+		case strings.HasPrefix(line, "#"):
+		default:
+			w.clean = false
+		}
+	}
+	return w, nil
+}
+
 func gitOutput(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir

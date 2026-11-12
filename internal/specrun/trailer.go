@@ -23,8 +23,9 @@ type runTrailer struct {
 // commit at the tip of the base branch. It warns trailer_missing, naming the
 // commit, when there is none or its value is not one JSON object.
 func (r *run) readTrailer() (runTrailer, bool) {
-	commit, _ := gitOutput(r.root, "rev-parse", "HEAD")
-	value, err := gitOutput(r.root, "log", "-1", "--format=%(trailers:key=AF-Run,valueonly,unfold)", "HEAD")
+	// The commit and its trailer in one git process.
+	out, err := gitOutput(r.root, "log", "-1", "--format=%H%n%(trailers:key=AF-Run,valueonly,unfold)", "HEAD")
+	commit, value, _ := strings.Cut(out, "\n")
 	var t runTrailer
 	value = strings.TrimSpace(value)
 	if line, _, _ := strings.Cut(value, "\n"); err == nil {
