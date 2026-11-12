@@ -1,0 +1,113 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "24",
+  "spec_name": "specrun_repair",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./cmd/specrun/... ./internal/specrun/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "23",
+      "reason": "the repair queue is built after its reconcile, and its rejected deviations become the defects repaired here"
+    },
+    {
+      "spec": "22",
+      "reason": "--repair replaces the stop of its stop rule, and a failed repair is judged by its --stop-on"
+    },
+    {
+      "spec": "19",
+      "reason": "a repair runs speca --gate full"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Build the repair queue after a reconcile and run it",
+      "criteria": [
+        "REQ-1",
+        "REQ-2.1"
+      ],
+      "steps": [
+        "Add the queue table, the session order after a reconcile, the restart with a rest of a queue and the flag tables as tests and confirm they fail; teach the fake claude a repair script: merge a fix branch with or without a trailer, close the issue, add af:repair-failed, or misbehave",
+        "Add the flags --repair, --repair-on, --repair-max and --repair-security with their SPECRUN_ variables: --repair-on a comma-separated list of the four severities and untested, default all five, the empty string none; --repair-max an integer, default 5, 0 none; refuse other values as usage errors",
+        "Add the function that builds the queue from the open issues and the flags: defects whose one severity is in --repair-on, untested items when it holds untested, without af:repair-failed, without security unless --repair-security; ordered security, data-loss, correctness, minor, untested, then by creation time; cut to --repair-max",
+        "After the rules of a reconcile build the queue, write it to the state file, and make the next steps one repair per issue in order, removing each from the stored queue as its step ends; at the next reconcile the queue is built anew",
+        "Start a repair step's session with the prompt `/af-impl --repair <issue number>` and everything else as for a package; name the step <n>-repair-<issue number>"
+      ],
+      "touches": [
+        "internal/specrun/"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Check what a repair session left and record its outcome",
+      "criteria": [
+        "REQ-2.2",
+        "REQ-2.3",
+        "REQ-2.4",
+        "REQ-2.5"
+      ],
+      "steps": [
+        "Add the outcome table, the failed repairs, the misbehaving sessions and the restart cases as tests and confirm they fail",
+        "When a repair session ends, check that the base branch is checked out and the tree is clean, then read the issue from the forge: closed is a repair done, open with af:repair-failed is a failed one, anything else stops the loop with what was left as the reason and outcome stopped",
+        "For a repair done, read the AF-Run trailer of the commit at the tip of the base branch; when its repair object names this issue with outcome already_fixed the ledger outcome is already_fixed, else fixed. Write the ledger line with kind repair and the issue number as subject",
+        "For a failed repair write outcome failed; stop the loop with reason 'repair failed' and the issue when it carries a severity in --stop-on, else go on",
+        "At start, a repair step recorded as running is done when its issue is closed, with a ledger line of outcome fixed, and is run again when it is open",
+        "Document the repair step, its checks and its three outcomes in docs/specrun.md"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "docs/specrun.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Repair instead of stopping, and show the queue in the dry run",
+      "criteria": [
+        "REQ-3",
+        "REQ-4"
+      ],
+      "steps": [
+        "Add the --repair tables and the dry-run case as tests and confirm they fail",
+        "With --repair, where the stop rule would stop after a landing, take the issues it names instead, ordered most severe first then oldest first, and run a repair step for each, without the cap; when one of them is a security defect and --repair-security is not given, stop as the stop rule does, before any repair",
+        "After those repairs make the stop check again for the package: an issue that is still open stops the loop",
+        "Under --dry-run report the queue the labels give as result.repair_queue, in order and capped, an empty list when there is none; start nothing and write nothing",
+        "Document --repair, --repair-on, --repair-max and --repair-security and their variables in docs/specrun.md and docs/configuration.md, with what each default means"
+      ],
+      "touches": [
+        "internal/specrun/",
+        "cmd/specrun/main_test.go",
+        "docs/specrun.md",
+        "docs/configuration.md"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Give af-impl its repair mode",
+      "criteria": [
+        "REQ-2.1"
+      ],
+      "steps": [
+        "Extend the fake session's repair script and the end-to-end test so that the prompt and the trailer are the ones the skill documents",
+        "Add skills/af-impl/references/repair.md and link it from SKILL.md: `/af-impl --repair <issue>` implements no package and moves no task state; it reads the issue with `issue <ref>`, refuses one that is closed or carries neither af:defect nor af:untested, and may edit a landed package's code, because the defect is its scope",
+        "A defect, in that file: branch fix/<issue>-<slug> from the up-to-date base branch; write the regression test first and run it on the unchanged code, keeping the command and its output; when it fails, fix the code until it passes, touching only what the fix needs; when it passes on the unchanged code, fix nothing, commit only the test as `test: <subject>` saying the defect was already gone, and close the issue with that test as evidence",
+        "Then, in that file: pass `speca <package> --gate full` for the issue's package and, when that package has test_commands, those commands; merge --no-ff into the base branch on a passing gate on the merged tree; push; close the issue with `issue <ref> --close --body` naming the merge commit and the test; end the merge commit message with `AF-Run: {\"repair\":{\"issue\":<number>,\"outcome\":\"fixed\"}}`, or already_fixed",
+        "An untested item, in that file: write the test the criterion is missing on a fix/<issue>-<slug> branch and run it on the unchanged code; when it passes, commit it as `test:`, pass the full gate, merge and close the issue with the test as evidence, outcome already_fixed; when it fails, relabel the issue af:defect with af:severity-correctness and a comment holding the failure, and go on as a repair of that defect in the same session",
+        "Failing, in that file: when the test cannot reproduce the issue as it is described, for example because it names code that no longer exists, do not guess; when the defect is not fixed after two attempts, stop. Either way comment on the issue with what was tried, add af:repair-failed, leave the issue open, discard the branch's uncommitted work and return to a clean base branch",
+        "In SKILL.md name the mode in the argument hint and in §1, and extend the last rule of *Never* to the issue a repair was given; keep the rendered body under the ceiling `make skills-check` enforces"
+      ],
+      "touches": [
+        "skills/af-impl/SKILL.md",
+        "skills/af-impl/references/repair.md",
+        "internal/specrun/",
+        "cmd/specrun/main_test.go"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}

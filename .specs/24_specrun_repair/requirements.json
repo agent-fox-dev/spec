@@ -1,0 +1,249 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "24",
+  "spec_name": "specrun_repair",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Build the repair queue from labels",
+      "rationale": "What to repair, and in what order, follows from labels; a model deciding it would decide differently every time.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "the rules of a reconcile have been applied",
+          "action": "queue every open issue labelled `af:defect` whose severity is in `--repair-on`, and every open `af:untested` issue when `--repair-on` holds `untested`, leaving out the issues labelled `af:repair-failed` and, unless `--repair-security` is given, the `security` defects",
+          "contract": "the queue is ordered `security`, `data-loss`, `correctness`, `minor`, then `untested`, and within one of them oldest first by creation time; it holds at most `--repair-max` issues, 5 when the flag is absent; the issues beyond the cap are not repaired before the next reconcile",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/repair_test.go (new), a table over open issues and flags for the function that builds the queue: {minor (day 1), data-loss (day 3), correctness (day 2), untested (day 0), security (day 4), defaults -> [data-loss, correctness, minor, untested]; the same with --repair-security -> security first; two correctness of day 5 and day 2 -> day 2 first; --repair-on correctness,minor -> no data-loss and no untested; a defect labelled af:repair-failed -> left out; seven minor defects, default cap -> the five oldest; --repair-max 2 -> two; --repair-max 0 -> none; a closed defect -> left out; a deviation -> left out; a defect with no severity -> left out}"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "a repair queue has been built and is not empty",
+          "action": "run one repair step per issue, in queue order, before the next package",
+          "contract": "the sessions after the reconcile are the repairs in order, then the next package; the rest of the queue is in the state file while it runs, and a restart goes on with it",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go: with --reconcile-every 1, two open packages, and open defects minor and correctness: assert the session prompts are [01, reconcile, repair <correctness>, repair <minor>, 02, …]; stop the run after the first repair with --max and a state copy: assert the state file's queue holds the minor defect and a second run starts with its repair"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "optional",
+          "condition": "`--repair-on`, `--repair-max` or `--repair-security` is given",
+          "action": "take the kinds to repair, the cap per reconcile and whether security defects are repaired from them, each with its `SPECRUN_` variable as its default when set",
+          "contract": "`--repair-on` is a comma-separated list of `security`, `data-loss`, `correctness`, `minor` and `untested`, the empty string meaning none; a value outside those, a negative `--repair-max` or one that is no integer is a usage error with exit code 2 naming the flag or the variable",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/specrun/flags_test.go, beside the existing flag tables: {--repair-on absent -> all five; 'minor,untested'; '' -> []; 'tests' -> exit code 2; --repair-max absent -> 5; 0; -1 -> exit code 2; SPECRUN_REPAIR_MAX=2 -> 2; SPECRUN_REPAIR_SECURITY=true -> set; SPECRUN_REPAIR=1 -> --repair set}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Run a repair as a step of its own and check what it left",
+      "rationale": "A session's last message is its own account; the forge and the repository are what happened.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "a repair step starts for an issue",
+          "action": "start one session with the prompt `/af-impl --repair <issue number>`",
+          "contract": "the session has the flags, the process group, the stream files and the stall rule of every session; its step name is `<n>-repair-<issue number>`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go: a queue holding issue 7: assert the fake claude's prompt is '/af-impl --repair 7' with the flags of a package session, and that <log dir>/000N-repair-7.jsonl exists"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "event_driven",
+          "condition": "a repair session ends, the base branch is checked out, the working tree is clean and the issue is closed",
+          "action": "record the repair as done and go on",
+          "contract": "the ledger line has kind `repair`, the issue number as its subject and outcome `already_fixed` when the merge commit at the tip of the base branch carries an `AF-Run:` trailer whose `repair.outcome` says so for this issue, else `fixed`",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go, a table over a fake repair session that closes the issue and {merges with trailer repair.outcome 'fixed'; merges with 'already_fixed'; merges with no trailer; merges with a trailer naming another issue}: assert the ledger outcome is fixed, already_fixed, fixed, fixed, and the next step starts"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "event_driven",
+          "condition": "a repair session ends, the base branch is checked out, the working tree is clean and the issue is open and labelled `af:repair-failed`",
+          "action": "record the repair as failed, and stop the loop when the issue carries a severity in `--stop-on`",
+          "contract": "the ledger outcome is `failed`; with a severity in `--stop-on` the exit code is 1 and `result.stopped` names the issue with reason `repair failed`; otherwise the next step starts, and no later queue holds the issue while it keeps the label",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go, a table over a fake repair session that adds af:repair-failed to {a minor defect; a data-loss defect with the default --stop-on; a data-loss defect with --stop-on ''}: assert outcome 'failed' in each; assert exit code 1 and result.stopped only for the second; assert the next reconcile's queue leaves the issue out"
+          }
+        },
+        {
+          "id": "REQ-2.4",
+          "pattern": "unwanted",
+          "condition": "a repair session ends and the base branch is not checked out, the working tree is not clean, or the issue is open without `af:repair-failed`",
+          "action": "stop the loop",
+          "contract": "exit code 1; `result.stopped.reason` names what the session left (`not on the base branch`, `working tree not clean`, `issue neither closed nor marked failed`); the ledger outcome is `stopped`; no further session starts",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go, a table over a fake repair session that {ends on fix/7-x; leaves an untracked file; returns to a clean main with the issue untouched; writes nothing until the stall time}: assert exit code 1, the reason of the case (the last is 'stalled') and that no further session started"
+          }
+        },
+        {
+          "id": "REQ-2.5",
+          "pattern": "event_driven",
+          "condition": "`specrun` is started and its state records a repair step as running",
+          "action": "count the repair as done when its issue is closed, and run it again otherwise",
+          "contract": "a closed issue gets a ledger line with outcome `fixed` and no session; an open one gets a session with the same prompt",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go, a table over a state file naming a repair of issue 7 as running with the issue {closed, open}: assert no session and one ledger line in the first case, and the first session's prompt '/af-impl --repair 7' in the second"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Repair a serious defect instead of stopping",
+      "rationale": "Stopping is right when nobody is there to decide; with permission to repair, the loop can clear the defect and go on.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "optional",
+          "condition": "`--repair` is given and a package has landed with open defects of a severity in `--stop-on`",
+          "action": "repair each of them, most severe first then oldest first, before the next package, and make the stop check again afterwards",
+          "contract": "the sessions after the package are one repair per such defect, with no cap; when every one is closed the next package starts; a defect that is still open after its repair stops the loop as the stop rule does",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go, a table with --repair and --repair-security over what the fake session of 01 leaves and what the repairs do: {data-loss and security, both fixed -> prompts [01, repair security, repair data-loss, 02]; data-loss, repair marks it failed -> exit code 1 after one repair; a correctness defect alone -> no repair, 02 starts}"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "unwanted",
+          "condition": "`--repair` is given without `--repair-security` and a package has landed with an open `security` defect",
+          "action": "stop the loop without repairing it",
+          "contract": "exit code 1 with the stop rule's `result.stopped`; no repair session starts for the security defect",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go: with --repair and a fake session of 01 that leaves a security defect and a data-loss defect: assert exit code 1, result.stopped.issues names the security defect, and no session started after 01"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "title": "Show the repair queue in a dry run",
+      "rationale": "A person deciding whether to allow repairs wants to see what would be repaired.",
+      "system": "specrun",
+      "criteria": [
+        {
+          "id": "REQ-4.1",
+          "pattern": "optional",
+          "condition": "`--dry-run` is given and a forge client can be made",
+          "action": "report the repair queue as the labels now stand",
+          "contract": "`result.repair_queue` lists each issue with its number, title, URL and severity or `untested`, in queue order and capped by `--repair-max`; it is `[]` when the queue is empty; no session starts and the forge records no write",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers"
+            ],
+            "pseudocode": "in internal/specrun/repair_test.go: with open defects minor and correctness and an untested item: run --dry-run --repair-max 2; assert result.repair_queue names the correctness and the minor defect in that order; assert no session and no forge write"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "specrun repairs a defect and an untested item after a reconcile",
+      "steps": [
+        {
+          "actor": "operator",
+          "action": "runs `specrun --reconcile-every 1` with an open correctness defect and an open untested item on the forge"
+        },
+        {
+          "actor": "specrun",
+          "action": "lands the next package, runs the reconcile and builds the repair queue from the labels: the defect, then the untested item"
+        },
+        {
+          "actor": "specrun",
+          "action": "starts a repair session for the defect"
+        },
+        {
+          "actor": "session",
+          "action": "branches, writes the regression test, sees it fail, fixes the code, passes the full gate that speca runs, merges and closes the issue"
+        },
+        {
+          "actor": "speca",
+          "action": "runs the full gate for the repair and answers `pass`"
+        },
+        {
+          "actor": "specrun",
+          "action": "checks the base branch and the issue, records `fixed`, and starts the repair of the untested item"
+        },
+        {
+          "actor": "session",
+          "action": "writes the missing test, sees it pass on the unchanged code, commits it, merges and closes the issue with an `already_fixed` trailer"
+        },
+        {
+          "actor": "specrun",
+          "action": "records `already_fixed` and goes on to the next package"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "specrun's Main",
+          "afspec",
+          "git",
+          "the fake claude as a real process",
+          "the queue and the repair checks against the in-memory issuex client",
+          "the ledger on disk"
+        ],
+        "setup": [
+          "the fixture repository, the fake claude and the in-memory issuex client of internal/specrun's helpers",
+          "two open packages; on the forge an open issue with af:defect, af:severity-correctness, af:from-00 and an older open issue with af:untested, af:from-00; fake repair sessions that merge a fix branch into main, close their issue and end the merge commit with an AF-Run trailer naming the issue and the outcome"
+        ],
+        "end_state": [
+          "the session prompts are the package, the reconcile, the repair of the defect, the repair of the untested item, then the second package",
+          "both issues are closed",
+          "the ledger holds a repair line with outcome fixed and one with already_fixed",
+          "main holds both merge commits and the tree is clean"
+        ],
+        "pseudocode": "in cmd/specrun/main_test.go, beside the existing end-to-end tests: code = Main(['--reconcile-every', '1', '--max', '2']); assert prompts[:5] == ['/af-impl .specs/01_…', '/af-impl --reconcile …', '/af-impl --repair <defect>', '/af-impl --repair <untested>', '/af-impl .specs/02_…']; assert both issues closed; assert outcomes of the repair lines == ['fixed', 'already_fixed']; assert git status is clean on main"
+      }
+    }
+  ]
+}
