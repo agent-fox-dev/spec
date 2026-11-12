@@ -18,7 +18,7 @@ func TestMain_WritesOneEnvelopeAndOneLinePerStep(t *testing.T) {
 	f.addPackage(t, "01_a", "01", "pending")
 	f.plan(t, map[string]any{"events": 200, "actions": []string{"land"}, "result": "done"})
 	var stdout, stderr bytes.Buffer
-	if code := Main(nil, &stdout, &stderr); code != 0 {
+	if code := runOn(f.host(), nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("code %d\n%s", code, stderr.String())
 	}
 	dec := json.NewDecoder(&stdout)
@@ -88,7 +88,7 @@ func TestMain_TakesUpAStalledPackageWhenStartedAgain(t *testing.T) {
 	f.addPackage(t, "01_a", "01", "pending")
 	f.addPackage(t, "02_b", "02", "pending")
 	pids := filepath.Join(f.scratch, "pids")
-	t.Setenv("SPECRUN_FAKE_PIDS", pids)
+	f.setenv("SPECRUN_FAKE_PIDS", pids)
 	f.plan(t, map[string]any{"events": 1, "actions": []string{"branch", "done_one"}, "child": true, "silence_s": 60},
 		map[string]any{"events": 1, "actions": []string{"checkout", "done", "merge"}})
 

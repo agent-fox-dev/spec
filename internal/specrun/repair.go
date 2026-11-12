@@ -204,7 +204,7 @@ func (r *run) repair(issue int) *Stopped {
 		return &Stopped{Step: step, Kind: kindRepair, Subject: subject, Reason: reason}
 	}
 	head, _ := gitOutput(r.root, "rev-parse", "HEAD")
-	started := now().UTC().Truncate(time.Second)
+	started := r.host.now().UTC().Truncate(time.Second)
 	r.state.Running = &runningStep{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), Head: head, PID: os.Getpid()}
 	r.saveState()
 
@@ -222,7 +222,7 @@ func (r *run) repair(issue int) *Stopped {
 		outcome, failedIssue, reason = r.repairLeft(issue)
 	}
 	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
-	ended := now().UTC().Truncate(time.Second)
+	ended := r.host.now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), EndedAt: ended.Format(time.RFC3339),
 		WallMinutes: ended.Sub(started).Minutes(), Outcome: outcome}
 	switch reason {
@@ -346,7 +346,7 @@ func (r *run) rerunRepair(issue int) *Stopped {
 	earlier, _ := readLedger(r.logDir)
 	step := stepName(len(earlier)+1, kindRepair, subject)
 	record := func(outcome string) {
-		ended := now().UTC().Truncate(time.Second)
+		ended := r.host.now().UTC().Truncate(time.Second)
 		if err := appendLedger(r.logDir, ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: r.state.Running.StartedAt,
 			EndedAt: ended.Format(time.RFC3339), Outcome: outcome}); err != nil {
 			fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)

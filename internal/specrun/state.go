@@ -67,23 +67,23 @@ type runningStep struct {
 // statePath is the state file of the repository at root: <its name>.json
 // under agent-fox/specrun in the user's state directory ($XDG_STATE_HOME when
 // it is an absolute path, else ~/.local/state).
-func statePath(root string) (string, error) {
-	dir := os.Getenv("XDG_STATE_HOME")
+func (r *run) statePathOf() (string, error) {
+	dir := r.host.getenv("XDG_STATE_HOME")
 	if dir == "" || !filepath.IsAbs(dir) {
-		home, err := os.UserHomeDir()
+		home, err := r.host.homeDir()
 		if err != nil {
 			return "", err
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "agent-fox", "specrun", filepath.Base(root)+".json"), nil
+	return filepath.Join(dir, "agent-fox", "specrun", filepath.Base(r.root)+".json"), nil
 }
 
 // loadState reads the state file. A missing one is an empty state; one that
 // cannot be parsed, or whose running step belongs to a live process, refuses
 // the start.
 func (r *run) loadState() *envelope.ErrorInfo {
-	path, err := statePath(r.root)
+	path, err := r.statePathOf()
 	if err != nil {
 		return failure("state", "environment", "the state file could not be found: %v", err)
 	}
@@ -145,7 +145,7 @@ func writeAtomic(path string, v any) error {
 
 // resetState is --reset-state: the state file removed, and nothing else.
 func (r *run) resetState() int {
-	path, err := statePath(r.root)
+	path, err := r.statePathOf()
 	if err != nil {
 		return r.emit(envelope.ExitFailed, "", failure("state", "environment", "the state file could not be found: %v", err))
 	}
@@ -177,7 +177,7 @@ func (r *run) resume() *afspec.NextPackage {
 		return nil
 	}
 	if len(spec.OpenTasks()) == 0 && r.movedPast(run.Head) {
-		ended := now().UTC().Truncate(time.Second)
+		ended := r.host.now().UTC().Truncate(time.Second)
 		started, perr := time.Parse(time.RFC3339, run.StartedAt)
 		minutes := 0.0
 		if perr == nil {
@@ -223,7 +223,7 @@ func (r *run) startStep(kind string, next *afspec.NextPackage, head string, star
 // finishStep moves the running step to the steps done, and records its
 // package as the last that landed.
 func (r *run) finishStep(kind, subject string) {
-	r.state.Done = append(r.state.Done, doneStep{Kind: kind, Subject: subject, EndedAt: now().UTC().Format(time.RFC3339)})
+	r.state.Done = append(r.state.Done, doneStep{Kind: kind, Subject: subject, EndedAt: r.host.now().UTC().Format(time.RFC3339)})
 	if r.state.Running != nil && kind == kindImplement {
 		// A package that landed counts towards the next reconcile, whether
 		// or not a rule after it stops the loop.

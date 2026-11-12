@@ -138,7 +138,7 @@ func (r *run) reconcile() *Stopped {
 	for _, is := range openNow {
 		openBefore[is.Number] = true
 	}
-	started := now().UTC().Truncate(time.Second)
+	started := r.host.now().UTC().Truncate(time.Second)
 	r.state.Running = &runningStep{Kind: kindReconcile, Subject: kindReconcile, StartedAt: started.Format(time.RFC3339),
 		Head: before, PID: os.Getpid()}
 	r.saveState()
@@ -180,7 +180,7 @@ func (r *run) reconcile() *Stopped {
 	default:
 		line.Outcome = outcomeStopped
 	}
-	ended := now().UTC().Truncate(time.Second)
+	ended := r.host.now().UTC().Truncate(time.Second)
 	line.EndedAt, line.WallMinutes = ended.Format(time.RFC3339), ended.Sub(started).Minutes()
 	if err := appendLedger(r.logDir, line); err != nil {
 		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)

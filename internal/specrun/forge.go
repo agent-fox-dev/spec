@@ -15,14 +15,12 @@ import (
 	"github.com/agent-fox-dev/spec/afspec"
 )
 
-// newForge makes the forge client of the repository at root: the forge of
-// its origin remote, with the token the issue command reads. A test replaces
-// it with an in-memory forge.
-var newForge = defaultForge
-
 // errNoForge is why a forge client could not be made.
 var errNoForge = errors.New("no forge")
 
+// defaultForge makes the forge client of the repository at root: the forge
+// of its origin remote, with the token the issue command reads. A test gives
+// its run an in-memory forge instead.
 func defaultForge(root string) (issuex.Client, issuex.Repo, error) {
 	repo, ok := issuex.DetectRepo(root)
 	if !ok {
@@ -45,7 +43,7 @@ const warnForgeUnavailable envelope.WarnCode = "forge_unavailable"
 // the label rules decide what the loop does next; a dry run warns and goes
 // on, and writes to no forge in any case.
 func (r *run) connect() *envelope.ErrorInfo {
-	c, repo, err := newForge(r.root)
+	c, repo, err := r.host.newForge(r.root)
 	if err != nil {
 		if r.opts.dryRun {
 			r.warnings = append(r.warnings, envelope.Warning{Code: warnForgeUnavailable, Severity: envelope.SeverityLow,
@@ -429,7 +427,7 @@ func (r *run) wouldDo() *envelope.ErrorInfo {
 	}
 	r.result.WouldChange, r.result.WouldStop = []labelChange{}, []StopIssue{}
 	var st state
-	if path, err := statePath(r.root); err == nil {
+	if path, err := r.statePathOf(); err == nil {
 		if b, err := os.ReadFile(path); err == nil {
 			_ = json.Unmarshal(b, &st)
 		}
@@ -437,7 +435,7 @@ func (r *run) wouldDo() *envelope.ErrorInfo {
 	// Read, never written: a dry run has no state path and creates no log
 	// directory.
 	r.state = st
-	r.logDir, _ = logDirFor(r.opts, r.root)
+	r.logDir, _ = r.logDirFor()
 	// The package whose rules are owed, else the one that landed last.
 	pkg := st.LabelCheck
 	if pkg == "" {

@@ -17,7 +17,7 @@ func TestSession_IsEndedWhenItStalls(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	pids := filepath.Join(f.scratch, "pids")
-	t.Setenv("SPECRUN_FAKE_PIDS", pids)
+	f.setenv("SPECRUN_FAKE_PIDS", pids)
 	f.plan(t, map[string]any{"events": 1, "child": true, "silence_s": 60})
 	env, code, _ := runMain(t, "--stall", "300ms")
 	if code != 1 || env.Result == nil || env.Result.Stopped == nil || env.Result.Stopped.Reason != "stalled" {
@@ -81,7 +81,7 @@ func TestSession_IsEndedWhenAProcessOutsideItsGroupHoldsItsOutput(t *testing.T) 
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	pids := filepath.Join(f.scratch, "pids")
-	t.Setenv("SPECRUN_FAKE_PIDS", pids)
+	f.setenv("SPECRUN_FAKE_PIDS", pids)
 	f.plan(t, map[string]any{"events": 1, "detached_child": true, "silence_s": 60})
 	start := time.Now()
 	_, code, _ := runMain(t, "--stall", "300ms")
@@ -94,10 +94,10 @@ func TestSession_IsEndedWhenAProcessOutsideItsGroupHoldsItsOutput(t *testing.T) 
 // An interrupt ends the session with what it started, records the step as
 // stopped, and leaves it to be taken up again.
 func TestSession_IsEndedWhenSpecrunIsInterrupted(t *testing.T) {
-	f := newFixture(t)
+	f := newSerialFixture(t) // the interrupt goes to the whole test process
 	f.addPackage(t, "01_a", "01", "pending")
 	pids := filepath.Join(f.scratch, "pids")
-	t.Setenv("SPECRUN_FAKE_PIDS", pids)
+	f.setenv("SPECRUN_FAKE_PIDS", pids)
 	f.plan(t, map[string]any{"events": 1, "child": true, "silence_s": 60})
 	go func() {
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {

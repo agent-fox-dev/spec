@@ -44,12 +44,12 @@ const (
 
 // skillPath is the af-impl SKILL.md a session in the repository at root
 // loads: the project's own copy before the user's.
-func skillPath(root string) string {
-	project := filepath.Join(root, ".claude", "skills", "af-impl", "SKILL.md")
+func (r *run) skillPath() string {
+	project := filepath.Join(r.root, ".claude", "skills", "af-impl", "SKILL.md")
 	if _, err := os.Stat(project); err == nil {
 		return project
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := r.host.homeDir()
 	return filepath.Join(home, ".claude", "skills", "af-impl", "SKILL.md")
 }
 
@@ -57,8 +57,8 @@ func skillPath(root string) string {
 // against the one specrun was built with: a warning, or under
 // --strict-skills a refusal.
 func (r *run) versions() *envelope.ErrorInfo {
-	v := &Versions{Specrun: spec.Identity(), SkillPath: skillPath(r.root), BuiltSkillSHA256: builtSkillSHA256,
-		Claude: commandVersion("claude"), Issue: commandVersion("issue")}
+	v := &Versions{Specrun: spec.Identity(), SkillPath: r.skillPath(), BuiltSkillSHA256: r.host.builtSkill,
+		Claude: r.commandVersion("claude"), Issue: r.commandVersion("issue")}
 	installed := false
 	if b, err := os.ReadFile(v.SkillPath); err == nil {
 		sum := sha256.Sum256(b)
@@ -76,11 +76,11 @@ func (r *run) versions() *envelope.ErrorInfo {
 	var code envelope.WarnCode
 	var problem string
 	switch {
-	case builtSkillSHA256 == "":
+	case r.host.builtSkill == "":
 		problem = "specrun was built with no af-impl hash (make build embeds one), so the skill cannot be checked"
 	case !installed:
 		code, problem = warnSkillNotInstalled, "no af-impl skill is installed"
-	case v.SkillSHA256 != builtSkillSHA256:
+	case v.SkillSHA256 != r.host.builtSkill:
 		code, problem = warnSkillMismatch, "the installed af-impl skill is not the one specrun was built with; make install-skills installs this tree's"
 	default:
 		return nil
@@ -98,11 +98,14 @@ func (r *run) versions() *envelope.ErrorInfo {
 
 // commandVersion is what the command prints for --version, its first line,
 // or "not installed".
-func commandVersion(name string) string {
-	if _, err := exec.LookPath(name); err != nil {
+func (r *run) commandVersion(name string) string {
+	path, err := r.host.lookPath(name)
+	if err != nil {
 		return notInstalled
 	}
-	out, err := exec.Command(name, "--version").Output()
+	cmd := exec.Command(path, "--version")
+	cmd.Env = r.host.env
+	out, err := cmd.Output()
 	if err != nil {
 		return unknown
 	}

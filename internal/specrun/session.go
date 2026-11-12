@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -22,6 +22,7 @@ func sessionArgs(prompt string) []string {
 
 // session is one claude -p process.
 type session struct {
+	host   host          // whose PATH finds claude, and whose environment it inherits
 	dir    string        // the repository
 	stall  time.Duration // how long it may write nothing
 	stream io.Writer     // where every line of its stdout goes
@@ -41,9 +42,13 @@ type outcome struct {
 // code decides nothing: the landing checks do.
 func (s *session) run(ctx context.Context, prompt string) (outcome, error) {
 	var o outcome
-	cmd := exec.CommandContext(ctx, "claude", sessionArgs(prompt)...)
+	claude, err := s.host.lookPath("claude")
+	if err != nil {
+		return o, fmt.Errorf("claude could not start: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, claude, sessionArgs(prompt)...)
 	cmd.Dir = s.dir
-	cmd.Env = append(os.Environ(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="+strconv.FormatInt(s.stall.Milliseconds(), 10))
+	cmd.Env = append(slices.Clone(s.host.env), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="+strconv.FormatInt(s.stall.Milliseconds(), 10))
 	cmd.Stderr = io.Discard
 	if s.errs != nil {
 		cmd.Stderr = s.errs

@@ -12,18 +12,21 @@ import (
 // logDirFor is the log directory: --log-dir, else agent-fox/specrun/<the
 // repository's name> under the user's cache directory ($XDG_CACHE_HOME when it
 // is an absolute path). It is not created here.
-func logDirFor(o *options, root string) (string, error) {
-	if o.logDir != "" {
-		return filepath.Abs(o.logDir)
+func (r *run) logDirFor() (string, error) {
+	if r.opts.logDir != "" {
+		if filepath.IsAbs(r.opts.logDir) {
+			return filepath.Clean(r.opts.logDir), nil
+		}
+		return filepath.Join(r.host.dir, r.opts.logDir), nil
 	}
-	cache := os.Getenv("XDG_CACHE_HOME")
+	cache := r.host.getenv("XDG_CACHE_HOME")
 	if cache == "" || !filepath.IsAbs(cache) {
 		var err error
 		if cache, err = os.UserCacheDir(); err != nil {
 			return "", err
 		}
 	}
-	return filepath.Join(cache, "agent-fox", "specrun", filepath.Base(root)), nil
+	return filepath.Join(cache, "agent-fox", "specrun", filepath.Base(r.root)), nil
 }
 
 // inside reports whether path is root or under it, symbolic links resolved as
@@ -53,7 +56,7 @@ func resolve(path string) string {
 // tree and the first log would stop the first package; one that cannot be
 // written stops the run at stage preflight.
 func (r *run) prepareLogDir() (int, *envelope.ErrorInfo) {
-	dir, err := logDirFor(r.opts, r.root)
+	dir, err := r.logDirFor()
 	if err != nil {
 		return envelope.ExitFailed, failure("preflight", "environment", "the log directory could not be found: %v", err)
 	}
