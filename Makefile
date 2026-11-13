@@ -127,7 +127,8 @@ SKILLS_SRC ?= skills
 SKILLS_OUT ?= build/skills
 SKILLGEN   := go run ./internal/skillgen --source $(SKILLS_SRC)
 
-# AGENT is the agent to install for: claude, codex, cursor or copilot.
+# AGENT is the agent to install for: claude, codex, cursor, copilot, pi or
+# opencode.
 # PROJECT installs into that repository instead of the user's directory, and
 # SKILLS_DIR overrides both. See docs/configuration.md.
 AGENT ?= claude

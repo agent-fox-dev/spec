@@ -66,6 +66,8 @@ make install-skills                      # Claude Code, into ~/.claude/skills
 make install-skills AGENT=codex          # Codex, into $CODEX_HOME/skills
 make install-skills AGENT=cursor         # Cursor, into ~/.cursor/skills
 make install-skills AGENT=copilot        # Copilot, into ~/.copilot/skills
+make install-skills AGENT=pi             # pi, into ~/.pi/agent/skills
+make install-skills AGENT=opencode       # opencode, into ~/.config/opencode/skills
 ```
 
 `PROJECT=<path>` installs into that repository instead, so a team can commit
@@ -78,7 +80,13 @@ agent is recorded, with the date it was confirmed, in
 
 A Claude Code install already reaches Copilot, which reads `~/.claude/skills`
 too, so installing for Copilot as well makes it load each skill twice; the
-install says so and goes ahead.
+install says so and goes ahead. opencode reads `~/.claude/skills` and
+`~/.agents/skills` the same way, and pi reads `~/.agents/skills`.
+
+Each agent starts another skill in its own syntax, which the render writes:
+`/af-impl` for Claude Code, Cursor and Copilot, `$af-impl` for Codex,
+`/skill:af-impl` for pi, and `@af-impl` for opencode, where a skill is named
+in the prompt rather than run as a slash command.
 
 ## Make targets
 

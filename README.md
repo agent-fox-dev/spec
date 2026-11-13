@@ -74,8 +74,8 @@ changes what the tools can promise.
 The same choices have a price, and it is worth knowing before adopting it.
 
 - The generator runs on Claude only, and the commands need a Go toolchain.
-  The skills render for Claude Code, Codex, Cursor and Copilot, but the
-  unattended run is one vendor's.
+  The skills render for Claude Code, Codex, Cursor, Copilot, pi and
+  opencode, but the unattended run is one vendor's.
 - Three of a package's files are JSON. A rendered `spec.md` is committed
   beside them so a reviewer can read the diff, but the contract itself is
   data, not prose.
@@ -134,7 +134,7 @@ loop without parsing prose.
 | `cmd/spec/`, `specgen/` | The `spec` command and its generation pipeline |
 | `cmd/specr/`, `cmd/speca/` | The `specr` render and the `speca` admin commands |
 | `cmd/specrun/`, `internal/specrun/` | The `specrun` loop: `/af-impl` on every open package, each in a `claude -p` session, checked from the repository |
-| `skills/` | The `af-prd`, `af-spec` and `af-impl` skills, one source rendered for four agents |
+| `skills/` | The `af-prd`, `af-spec` and `af-impl` skills, one source rendered for six agents |
 | [`examples/`](examples/README.md) | Programs that create, validate and work through a package with the library |
 | `docs/` | The reference docs, the decisions (ADRs), the errata and this kit's comparison with others |
 
@@ -143,7 +143,7 @@ loop without parsing prose.
 ```bash
 git clone https://github.com/agent-fox-dev/spec && cd spec
 make build              # spec, specr, speca and specrun into $GOBIN
-make install-skills     # the three skills into ~/.claude/skills (AGENT=codex|cursor|copilot for the others)
+make install-skills     # the three skills into ~/.claude/skills (AGENT=codex|cursor|copilot|pi|opencode for the others)
 ```
 
 `spec` reaches Claude through `ANTHROPIC_API_KEY`, Vertex AI or Amazon

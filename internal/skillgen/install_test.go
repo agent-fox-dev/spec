@@ -16,33 +16,41 @@ func TestResolveInstall_ResolvesEachAgentsDirectory(t *testing.T) {
 	project := t.TempDir()
 	elsewhere := t.TempDir()
 	codexHome := t.TempDir()
+	piDir := t.TempDir()
 
 	for name, tc := range map[string]struct {
 		opts      options
 		codexHome string
+		piDir     string
 		want      string
 	}{
-		"claude, no project":  {options{agent: "claude"}, "", filepath.Join(home, ".claude/skills")},
-		"codex, no project":   {options{agent: "codex"}, "", filepath.Join(home, ".codex/skills")},
-		"codex, CODEX_HOME":   {options{agent: "codex"}, codexHome, filepath.Join(codexHome, "skills")},
-		"cursor, no project":  {options{agent: "cursor"}, "", filepath.Join(home, ".cursor/skills")},
-		"copilot, no project": {options{agent: "copilot"}, "", filepath.Join(home, ".copilot/skills")},
+		"claude, no project":      {options{agent: "claude"}, "", "", filepath.Join(home, ".claude/skills")},
+		"codex, no project":       {options{agent: "codex"}, "", "", filepath.Join(home, ".codex/skills")},
+		"codex, CODEX_HOME":       {options{agent: "codex"}, codexHome, "", filepath.Join(codexHome, "skills")},
+		"cursor, no project":      {options{agent: "cursor"}, "", "", filepath.Join(home, ".cursor/skills")},
+		"copilot, no project":     {options{agent: "copilot"}, "", "", filepath.Join(home, ".copilot/skills")},
+		"pi, no project":          {options{agent: "pi"}, "", "", filepath.Join(home, ".pi/agent/skills")},
+		"pi, PI_CODING_AGENT_DIR": {options{agent: "pi"}, "", piDir, filepath.Join(piDir, "skills")},
+		"opencode, no project":    {options{agent: "opencode"}, "", "", filepath.Join(home, ".config/opencode/skills")},
+		"claude in a project":     {options{agent: "claude", project: project}, "", "", filepath.Join(project, ".claude/skills")},
+		"codex in a project":      {options{agent: "codex", project: project}, "", "", filepath.Join(project, ".agents/skills")},
+		"cursor in a project":     {options{agent: "cursor", project: project}, "", "", filepath.Join(project, ".cursor/skills")},
+		"copilot in a project":    {options{agent: "copilot", project: project}, "", "", filepath.Join(project, ".github/skills")},
+		"pi in a project":         {options{agent: "pi", project: project}, "", "", filepath.Join(project, ".pi/skills")},
+		"opencode in a project":   {options{agent: "opencode", project: project}, "", "", filepath.Join(project, ".opencode/skills")},
 
-		"claude in a project":  {options{agent: "claude", project: project}, "", filepath.Join(project, ".claude/skills")},
-		"codex in a project":   {options{agent: "codex", project: project}, "", filepath.Join(project, ".agents/skills")},
-		"cursor in a project":  {options{agent: "cursor", project: project}, "", filepath.Join(project, ".cursor/skills")},
-		"copilot in a project": {options{agent: "copilot", project: project}, "", filepath.Join(project, ".github/skills")},
+		// Neither CODEX_HOME nor PI_CODING_AGENT_DIR reaches a project install,
+		// which is the repository's own directory and not the user's.
+		"codex in a project with CODEX_HOME set":       {options{agent: "codex", project: project}, codexHome, "", filepath.Join(project, ".agents/skills")},
+		"pi in a project with PI_CODING_AGENT_DIR set": {options{agent: "pi", project: project}, "", piDir, filepath.Join(project, ".pi/skills")},
 
-		// CODEX_HOME does not reach a project install, which is the repository's
-		// own directory and not the user's.
-		"codex in a project with CODEX_HOME set": {options{agent: "codex", project: project}, codexHome, filepath.Join(project, ".agents/skills")},
-
-		"an explicit directory":                 {options{agent: "claude", skillsDir: elsewhere}, "", elsewhere},
-		"an explicit directory beats a project": {options{agent: "copilot", project: project, skillsDir: elsewhere}, "", elsewhere},
+		"an explicit directory":                 {options{agent: "claude", skillsDir: elsewhere}, "", "", elsewhere},
+		"an explicit directory beats a project": {options{agent: "copilot", project: project, skillsDir: elsewhere}, "", "", elsewhere},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("HOME", home)
 			t.Setenv("CODEX_HOME", tc.codexHome)
+			t.Setenv("PI_CODING_AGENT_DIR", tc.piDir)
 			_, got, err := resolveInstall(tc.opts)
 			if err != nil {
 				t.Fatalf("resolveInstall: %v", err)
@@ -63,9 +71,9 @@ func TestResolveInstall_RefusesAnUnknownAgentOrAProjectThatIsNotADirectory(t *te
 		opts options
 		want string
 	}{
-		"an agent outside the four": {
+		"an agent outside the table": {
 			options{agent: "gemini"},
-			`unknown agent "gemini"; one of: claude, codex, cursor, copilot`,
+			`unknown agent "gemini"; one of: claude, codex, cursor, copilot, pi, opencode`,
 		},
 		"a PROJECT that does not exist": {
 			options{agent: "claude", project: filepath.Join(home, "nowhere")},
@@ -246,7 +254,7 @@ func TestMain_RefusesAnUnknownAgentOrABadProjectWithoutWriting(t *testing.T) {
 	}{
 		"an unknown agent": {
 			[]string{"--agent", "gemini"},
-			`unknown agent "gemini"; one of: claude, codex, cursor, copilot`,
+			`unknown agent "gemini"; one of: claude, codex, cursor, copilot, pi, opencode`,
 		},
 		"a project that does not exist": {
 			[]string{"--project", filepath.Join(source, "nowhere")},
