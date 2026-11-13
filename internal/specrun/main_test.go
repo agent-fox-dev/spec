@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestMain_LandsEveryOpenPackageWithOneCall(t *testing.T) {
 	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "landed,landed,reconciled" {
 		t.Errorf("ledger outcomes %v", got)
 	}
-	entries, _ := os.ReadDir(f.logDir())
+	entries, _ := os.ReadDir(f.runDirs(t)[0])
 	var logs []string
 	for _, e := range entries {
 		if strings.Contains(e.Name(), "-implement-") && (strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".log")) {
@@ -211,7 +212,7 @@ func TestMain_ReconcilesAfterAPackage(t *testing.T) {
 	if got := prompts(f.starts(t)); strings.Join(got, ",") != ".specs/01_a,reconcile" {
 		t.Errorf("sessions %v; want the package, then a reconcile", got)
 	}
-	adopt, _ := filepath.Glob(filepath.Join(f.logDir(), "*-adopt.json"))
+	adopt, _ := filepath.Glob(filepath.Join(f.logDir(), "runs", "*", "*-adopt.json"))
 	if len(adopt) != 1 {
 		t.Fatalf("adopt files %v", adopt)
 	}
@@ -304,5 +305,56 @@ func TestMain_RefusesAPackageThatLeavesAHandoffUntakenUntilItsPlanTakesIt(t *tes
 	}
 	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/02_b" {
 		t.Errorf("sessions %v; want 02 started", got)
+	}
+}
+
+// Each run has a run ID: its sessions' files and its run.json, with the
+// envelope it ended with, go in a directory of its own under runs/, its
+// sessions are given the ID as SPECRUN_RUN_ID, and stderr and the envelope
+// name it.
+func TestMain_KeepsEachRunInADirectoryOfItsOwn(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.plan(t, land(0))
+	var ids []string
+	for i := range 2 {
+		env, code, stderr := runMain(t, "--max", "1")
+		if code != 0 {
+			t.Fatalf("run %d: code %d\n%s", i+1, code, stderr)
+		}
+		id := env.Result.RunID
+		if !regexp.MustCompile(`^\d{8}T\d{6}Z-[0-9a-f]{4}$`).MatchString(id) || slices.Contains(ids, id) {
+			t.Fatalf("run %d has the ID %q after %v", i+1, id, ids)
+		}
+		if want := filepath.Join(f.logDir(), "runs", id); env.Result.RunDir != want || !strings.Contains(stderr, "run "+id) {
+			t.Errorf("run %d: run_dir %q; want %q, named on stderr:\n%s", i+1, env.Result.RunDir, want, stderr)
+		}
+		var rec struct {
+			RunID    string         `json:"run_id"`
+			EndedAt  string         `json:"ended_at"`
+			Settings map[string]any `json:"settings"`
+			Envelope map[string]any `json:"envelope"`
+		}
+		b, err := os.ReadFile(filepath.Join(env.Result.RunDir, "run.json"))
+		if err != nil || json.Unmarshal(b, &rec) != nil {
+			t.Fatalf("run %d: run.json %v\n%s", i+1, err, b)
+		}
+		if rec.RunID != id || rec.EndedAt == "" || rec.Settings["max"] != float64(1) || rec.Envelope["summary"] != env.Summary {
+			t.Errorf("run %d: run.json %s", i+1, b)
+		}
+		ids = append(ids, id)
+	}
+	if got := f.runDirs(t); len(got) != 2 || filepath.Base(got[0]) != ids[0] || filepath.Base(got[1]) != ids[1] {
+		t.Errorf("runs %v; want %v, oldest first", got, ids)
+	}
+	for i, name := range []string{"0001-implement-01_a.jsonl", "0002-implement-02_b.jsonl"} {
+		if got := f.stepFile(t, name); filepath.Base(filepath.Dir(got)) != ids[i] {
+			t.Errorf("%s is at %q; want it in run %s", name, got, ids[i])
+		}
+	}
+	starts := f.starts(t)
+	if starts[0].RunID != ids[0] || starts[1].RunID != ids[1] {
+		t.Errorf("the sessions were given SPECRUN_RUN_ID %q and %q; want %v", starts[0].RunID, starts[1].RunID, ids)
 	}
 }

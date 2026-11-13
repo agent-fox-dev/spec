@@ -3,22 +3,24 @@ package specrun
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// Every step adds one ledger line with its kind, subject, times, wall minutes
-// and outcome.
+// Every step adds one ledger line with the run that wrote it, its kind,
+// subject, times, wall minutes and outcome, and the session_id of its claude
+// stream when the stream gave one.
 func TestLedger_HasOneLinePerStep(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
 	f.addPackage(t, "02_b", "02", "pending")
 	f.addPackage(t, "03_c", "03", "pending")
 	f.stubClock(time.Minute)
-	f.plan(t, land(0), map[string]any{"events": 1}, map[string]any{"events": 1, "silence_s": 30})
+	landing := land(0)
+	landing["session_id"] = "sess-1"
+	f.plan(t, landing, map[string]any{"events": 1}, map[string]any{"events": 1, "silence_s": 30})
 	runMain(t)                     // 01 lands, 02 changes nothing and stops
 	runMain(t, "--stall", "300ms") // 02 again, and it stalls
 	lines := f.ledgerLines(t)
@@ -44,6 +46,12 @@ func TestLedger_HasOneLinePerStep(t *testing.T) {
 	}
 	if lines[0]["kind"] != "implement" || lines[0]["subject"] != "01_a" || lines[2]["subject"] != "02_b" {
 		t.Errorf("kinds and subjects %v", lines)
+	}
+	if lines[0]["run_id"] == nil || lines[0]["run_id"] != lines[1]["run_id"] || lines[2]["run_id"] == lines[0]["run_id"] {
+		t.Errorf("run IDs %v, %v, %v; want the first two steps' run, then the second run's", lines[0]["run_id"], lines[1]["run_id"], lines[2]["run_id"])
+	}
+	if lines[0]["claude_session_id"] != "sess-1" || lines[1]["claude_session_id"] != nil {
+		t.Errorf("claude session IDs %v, %v; want sess-1, then none", lines[0]["claude_session_id"], lines[1]["claude_session_id"])
 	}
 }
 
@@ -102,8 +110,9 @@ func TestLedger_IsPrintedOnStderrWithItsWarning(t *testing.T) {
 	}
 }
 
-// --ledger prints the ledger as a table, skipping a line that does not parse,
-// and starts nothing.
+// --ledger prints the ledger as a table with the run of each step, skipping
+// a line that does not parse, and starts nothing; --run keeps one run's
+// steps, each with its number in the whole ledger.
 func TestLedger_PrintsTheLedgerAsATable(t *testing.T) {
 	f := newFixture(t)
 	f.addPackage(t, "01_a", "01", "pending")
@@ -111,23 +120,35 @@ func TestLedger_PrintsTheLedgerAsATable(t *testing.T) {
 	if code := runOn(f.host(), []string{"--ledger"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "no step is recorded") {
 		t.Errorf("with no ledger: code %d, stdout %q", code, stdout.String())
 	}
-	line := func(subject, outcome string) string {
-		return `{"kind":"implement","subject":"` + subject + `","started_at":"2026-11-12T08:00:00Z","ended_at":"2026-11-12T08:12:00Z","wall_minutes":12,"outcome":"` + outcome + `"}` + "\n"
+	line := func(run, subject, outcome string) string {
+		return `{"run_id":"` + run + `","kind":"implement","subject":"` + subject + `","started_at":"2026-11-12T08:00:00Z","ended_at":"2026-11-12T08:12:00Z","wall_minutes":12,"outcome":"` + outcome + `"}` + "\n"
 	}
-	writeFile(t, filepath.Join(f.logDir(), "ledger.jsonl"), line("01_a", "landed")+"not json\n"+line("02_b", "stopped")+line("02_b", "stalled"))
-	stdout.Reset()
-	if code := runOn(f.host(), []string{"--ledger"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("code %d", code)
+	writeFile(t, filepath.Join(f.logDir(), "ledger.jsonl"),
+		line("", "01_a", "landed")+"not json\n"+line("20261112T080000Z-aaaa", "02_b", "stopped")+line("20261112T090000Z-bbbb", "02_b", "stalled"))
+	table := func(argv ...string) []string {
+		t.Helper()
+		stdout.Reset()
+		if code := runOn(f.host(), argv, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: code %d", argv, code)
+		}
+		return strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	}
-	rows := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(rows) != 4 || !strings.Contains(rows[0], "OUTCOME") || !strings.Contains(rows[3], "stalled") {
+	rows := table("--ledger")
+	if len(rows) != 4 || !strings.Contains(rows[0], "RUN") || !strings.Contains(rows[0], "OUTCOME") ||
+		!strings.Contains(rows[1], "0001  -") || !strings.Contains(rows[3], "20261112T090000Z-bbbb") || !strings.Contains(rows[3], "stalled") {
 		t.Errorf("table:\n%s", stdout.String())
+	}
+	if rows := table("--ledger", "--run", "20261112T080000Z-aaaa"); len(rows) != 2 || !strings.HasPrefix(rows[1], "0002") || !strings.Contains(rows[1], "stopped") {
+		t.Errorf("one run's table:\n%s", stdout.String())
+	}
+	if rows := table("--ledger", "--run", "20261112T100000Z-cccc"); len(rows) != 1 || !strings.Contains(rows[0], "no step of run 20261112T100000Z-cccc") {
+		t.Errorf("an unknown run's table:\n%s", stdout.String())
 	}
 	if len(f.starts(t)) != 0 || exists(filepath.Join(f.state, "agent-fox", "specrun")) {
 		t.Error("--ledger started a session or wrote state")
 	}
-	if _, err := os.Stat(filepath.Join(f.logDir(), "0001-implement-01_a.jsonl")); err == nil {
-		t.Error("--ledger ran a step")
+	if exists(filepath.Join(f.logDir(), "runs")) {
+		t.Error("--ledger started a run")
 	}
 }
 

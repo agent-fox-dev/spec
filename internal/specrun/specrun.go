@@ -59,6 +59,11 @@ type Result struct {
 	// OpenDeviations are the open deviations no person has settled, oldest
 	// first, after a reconcile.
 	OpenDeviations []OpenDeviation `json:"open_deviations,omitzero"`
+	// RunID names this run, and RunDir is the directory of the log
+	// directory that holds its sessions' files; both absent before the log
+	// directory is ready, and under --dry-run.
+	RunID  string `json:"run_id,omitempty"`
+	RunDir string `json:"run_dir,omitempty"`
 }
 
 // OpenDeviation is an open deviation that carries neither af:accepted nor
@@ -121,7 +126,12 @@ type run struct {
 	root     string // the repository's top level
 	specsDir string
 	base     string // the base branch
-	logDir   string
+	// logDir holds the ledger of every run; runDir, under it, this run's
+	// files, and runID names this run.
+	logDir    string
+	runDir    string
+	runID     string
+	runRecord *runRecord
 	// statePath is the state file, and state what it holds.
 	statePath string
 	state     state
@@ -464,7 +474,7 @@ func stopStage(reason string) string {
 func (r *run) printLedger() int {
 	dir, err := r.logDirFor()
 	if err == nil {
-		err = printLedger(r.stdout, dir)
+		err = printLedger(r.stdout, dir, r.opts.run)
 	}
 	if err != nil {
 		fmt.Fprintf(r.stderr, "%s: the ledger could not be read: %v\n", tool, err)
@@ -536,11 +546,12 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	default:
 		reason = r.landed(filepath.Join(r.root, filepath.FromSlash(next.Dir)), before)
 	}
-	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
+	_ = os.WriteFile(filepath.Join(r.runDir, step+".log"), []byte(o.final), 0o644)
 
 	ended := r.host.now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindImplement, Subject: subject, StartedAt: started.Format(time.RFC3339),
-		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded}
+		EndedAt: ended.Format(time.RFC3339), WallMinutes: ended.Sub(started).Minutes(), Outcome: outcomeLanded,
+		ClaudeSessionID: o.sessionID}
 	short := ""
 	var labelErr error
 	var serious []StopIssue
@@ -557,9 +568,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	default:
 		line.Outcome = outcomeStopped
 	}
-	if err := appendLedger(r.logDir, line); err != nil {
-		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
-	}
+	r.record(line)
 	if reason != "" {
 		r.releaseStep()
 		fmt.Fprintf(r.stderr, "%s: %s %s in %.1f min: %s\n", tool, step, line.Outcome, line.WallMinutes, reason)
@@ -608,9 +617,10 @@ func (r *run) afterLanding(specDir string) ([]StopIssue, error) {
 }
 
 // session is the session of the step, its stream going to <step>.jsonl and
-// its stderr to <step>.stderr.
+// its stderr to <step>.stderr in the run's directory.
 func (r *run) session(step string) *runningSession {
-	return &runningSession{session: session{dir: r.root, stall: r.opts.stall, host: r.host}, base: filepath.Join(r.logDir, step)}
+	return &runningSession{session: session{dir: r.root, stall: r.opts.stall, host: r.host, runID: r.runID},
+		base: filepath.Join(r.runDir, step)}
 }
 
 // runningSession is a session whose stream and stderr are saved to files.
@@ -656,6 +666,7 @@ func (r *run) emit(code int, summary string, f *envelope.ErrorInfo) int {
 		return envelope.ExitFailed
 	}
 	_, _ = r.stdout.Write(b)
+	r.endRunRecord(b)
 	return code
 }
 

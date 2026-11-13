@@ -3,7 +3,7 @@
 ```
 specrun [--max N] [--stall D] [--log-dir DIR] [--strict-skills]   implement every open package, one session each
 specrun --dry-run                                                 the next step, and nothing changed
-specrun --ledger                                                  every step so far, as a table
+specrun --ledger [--run ID]                                       every step so far, or one run's, as a table
 specrun --reset-state                                             discard the state file
 ```
 
@@ -15,8 +15,10 @@ starts and watches the session, and then checks from the repository that the
 package landed instead of trusting the session's account. It keeps its state
 in one file outside the repository, so that it resumes after a crash, ends a
 session that has stopped making progress, and keeps every session's full
-stream and a ledger of what each step took. The decision is
-[ADR 23](adr/23-drive-the-implementation-loop-with-specrun.md).
+stream, grouped by the run that started it, and a ledger of what each step
+took. The decision is
+[ADR 23](adr/23-drive-the-implementation-loop-with-specrun.md); the grouping by
+run is [ADR 25](adr/25-group-specrun-logs-by-run.md).
 
 It runs in the repository it is started in (the git work tree of the working
 directory), with the spec root `afspec` resolves there (`.specs`, or
@@ -31,6 +33,7 @@ specrun --max 1                 # land one package, then stop
 specrun --dry-run               # which package would be next, or why none can start
 specrun --stall 45m             # end a session that writes nothing for 45 minutes
 specrun --ledger                # what every step took
+specrun --ledger --run 20261113T142530Z-7f3a   # what one run's steps took
 specrun --reset-state           # forget the step that was running
 ```
 
@@ -83,7 +86,8 @@ Each step is **implement the next package**:
 
    in a process group of its own, with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`
    set to the stall time in milliseconds, so that a session never waits on its
-   subagents longer than `specrun` waits on the session. Timers are disallowed:
+   subagents longer than `specrun` waits on the session, and `SPECRUN_RUN_ID`
+   set to the [run's ID](#runs), so that what the session writes can name it. Timers are disallowed:
    a pending one would keep a finished headless session alive.
 4. When the session ends, **whatever its exit code**, check that the package
    landed:
@@ -187,10 +191,10 @@ open issues with no label starting `af:` whose title starts with the
 directory name of a package under the spec root or its archive and a colon,
 as af-impl titled an open item before the label scheme. It writes them as a
 JSON array of `{number, title, url, package}` to `<step>-adopt.json` in the
-log directory (`[]` when there are none) and starts
+run's directory (`[]` when there are none) and starts
 
 ```
-claude -p "/af-impl --reconcile <log dir>/<step>-adopt.json --report <log dir>/<step>-report.md" …
+claude -p "/af-impl --reconcile <run dir>/<step>-adopt.json --report <run dir>/<step>-report.md" …
 ```
 
 with the flags, process group, stream files and stall of every session. The
@@ -305,7 +309,7 @@ The state is one JSON file, `agent-fox/specrun/<repository name>.json` under
 the user's state directory (`$XDG_STATE_HOME`, else `~/.local/state`), written
 through a temporary file that is renamed after every change. It holds the
 steps that landed and the step running, with its package, when it started, the
-commit `HEAD` was at and the process id of `specrun`:
+commit `HEAD` was at, the process id of `specrun` and the run that started it:
 
 ```json
 {
@@ -318,21 +322,24 @@ commit `HEAD` was at and the process id of `specrun`:
     "spec_dir": ".specs/02_search",
     "started_at": "2026-11-12T18:00:47Z",
     "head": "4b1f0c2…",
-    "pid": 0
+    "pid": 0,
+    "run_id": "20261112T180047Z-7f3a"
   }
 }
 ```
 
 A step that stops or stalls stays as `running`, its `pid` 0, so that the next
 run takes it up. From its first step to its end, a loop also records itself as
-`owner`, so that a second `specrun` is refused between steps too. Started again, after a stop, a crash, a kill or a reboot,
+`owner`, with its run ID as `owner_run`, so that a second `specrun` is refused
+between steps too; the refusal names that run. Started again, after a stop, a crash, a kill or a reboot,
 `specrun` reads the file and, once the base branch is up to date, checks the
 running step against the repository before it chooses one:
 
 - a package with no open task, whose base branch moved past the recorded
   commit, landed: its ledger line is written with outcome `landed` and no
   session starts for it (it is not counted in this run's `landed`, nor against
-  `--max`);
+  `--max`); the line carries this run's `run_id` and, as `resumed_from`, the
+  run that started the step, whose directory holds its session's files;
 - a package that still exists is run again: af-impl continues its branch
   `feature/<NN>-<spec_name>` when there is one;
 - a package that no longer exists is dropped, and the next one is chosen.
@@ -371,20 +378,65 @@ repository's working tree is refused as a usage error, exit code 2, since
 af-impl refuses a dirty tree; one that cannot be created or written stops the
 run at stage `preflight`.
 
-- Each session's stream is saved, every line in order, as `<step>.jsonl`,
-  where `<step>` is the step's number in the ledger, its kind and its subject
-  (`0001-implement-01_cache`). `<step>.log` holds the `result` text of the
+```
+<log dir>/
+  ledger.jsonl                          every step of every run
+  runs/
+    20261112T180047Z-7f3a/              one run
+      run.json
+      0001-implement-01_cache.jsonl
+      0001-implement-01_cache.log
+      0001-implement-01_cache.stderr
+      0002-implement-02_search.…
+    20261113T091502Z-c01e/              the next run
+      run.json
+      0003-reconcile-reconcile.…
+```
+
+### Runs
+
+Every loop is a run, and has a run ID: the UTC time it started, to the second,
+then four hex digits drawn at random (`20261112T180047Z-7f3a`), so that the
+runs sort by when they started. Once the log directory is ready the run makes
+its directory, `runs/<run ID>`, and says on stderr where it is
+(`specrun: run 20261112T180047Z-7f3a; its logs are in …`). A dry run, the
+ledger table and `--reset-state` are no run: they get no ID and make no
+directory. Logs written before runs had IDs stay where they are, in the log
+directory itself.
+
+`run.json` is written when the run starts, with `run_id`, `started_at`, the
+`pid`, the `settings` it runs with (each flag as its variable and default
+resolved it, and the log directory) and the `versions`. It is written again
+when the run ends, with `ended_at` and the whole `envelope` the run wrote to
+stdout. A `run.json` with no `ended_at` belongs to a run that never ended, as
+after a crash, a kill or a reboot.
+
+### Step files and the ledger
+
+- Each session's stream is saved, every line in order, as `<step>.jsonl` in
+  the directory of the run that started the session, where `<step>` is the
+  step's number in the ledger, its kind and its subject
+  (`0001-implement-01_cache`). A step's number counts across runs, so a file
+  name is the same in every run's directory it could be in and matches the
+  ledger. `<step>.log` holds the `result` text of the
   stream's last event of type `result`, and is empty when there is none.
   `<step>.stderr` holds what the session wrote to stderr: a `claude` that
   fails at once, for want of a login, says so there.
-- Each step appends one JSON line to `ledger.jsonl`:
+- Each step appends one JSON line to `ledger.jsonl`, which stays one file for
+  every run, since the median, the reconcile that is due and the stop a
+  restart repeats are read from all of it:
 
   ```json
-  {"kind":"implement","subject":"01_cache","started_at":"2026-11-12T18:00:47Z","ended_at":"2026-11-12T18:00:47Z","wall_minutes":0,"outcome":"landed"}
+  {"run_id":"20261112T180047Z-7f3a","kind":"implement","subject":"01_cache","started_at":"2026-11-12T18:00:47Z","ended_at":"2026-11-12T18:00:47Z","wall_minutes":0,"outcome":"landed","claude_session_id":"5f0c…"}
   ```
 
-  `outcome` is `landed`, `stopped` or `stalled`; `wall_minutes` is
-  `ended_at` less `started_at`, in minutes. A landed package's line also holds
+  `run_id` is the run that wrote the line. `outcome` is `landed`, `stopped`
+  or `stalled`; `wall_minutes` is `ended_at` less `started_at`, in minutes.
+  `claude_session_id` is the first `session_id` the session's stream gave
+  (its `init` event), which `claude --resume` takes to open the session
+  again; it is absent when the stream gave none. A line that records what a
+  session of an earlier run did, a landing or a repair found on restart,
+  holds that run as `resumed_from`. A landed package's line also holds
   `gate` and `open_items`, copied as they are from the `AF-Run:` trailer of
   its merge commit (the tip of the base branch after the landing):
 
@@ -406,15 +458,19 @@ run at stage `preflight`.
   are no part of the median.
 
 `specrun --ledger` prints the ledger as a table on stdout, skipping a line that
-does not parse, and starts nothing:
+does not parse, and starts nothing. `RUN` is `-` for a line written before runs
+had IDs:
 
 ```
-STEP  KIND       SUBJECT    STARTED               MINUTES  OUTCOME
-0001  implement  01_cache   2026-11-12T18:00:47Z  0.0      landed
-0002  implement  02_search  2026-11-12T18:00:47Z  0.0      landed
+STEP  RUN                    KIND       SUBJECT    STARTED               MINUTES  OUTCOME
+0001  20261112T180047Z-7f3a  implement  01_cache   2026-11-12T18:00:47Z  0.0      landed
+0002  20261112T180047Z-7f3a  implement  02_search  2026-11-12T18:00:47Z  0.0      landed
 ```
 
 With no ledger it prints one sentence: `no step is recorded in <path>`.
+`specrun --ledger --run <run ID>` prints only that run's steps, each keeping
+its number in the whole ledger; with none it prints
+`no step of run <run ID> is recorded in <path>`.
 
 A run over two packages, the second depending on the first, writes on stderr
 (the installed skill being older than the tree `specrun` was built from):
@@ -422,6 +478,7 @@ A run over two packages, the second depending on the first, writes on stderr
 ```
 specrun: v1.5.1-57-g25ce0b9 (commit 25ce0b9, built 2026-11-12T18:00:42Z); af-impl ~/.claude/skills/af-impl/SKILL.md sha256 cd159ab9… (built with d41f18c7…); claude 2.1.322 (Claude Code); issue issue 76b8216 (commit 76b8216, built 2026-10-23T09:42:50Z)
 specrun: warning: the installed af-impl skill is not the one specrun was built with; make install-skills installs this tree's: ~/.claude/skills/af-impl/SKILL.md has sha256 cd159ab9…, specrun was built with d41f18c7…
+specrun: run 20261112T180047Z-7f3a; its logs are in ~/.cache/agent-fox/specrun/widgets/runs/20261112T180047Z-7f3a
 specrun: 0001-implement-01_cache landed in 0.0 min
 specrun: 0002-implement-02_search landed in 0.0 min
 ```
@@ -446,13 +503,15 @@ case with `-` as `_`, prefixed `SPECRUN_`, sets its default; the flag wins.
 | `--strict-skills` | `SPECRUN_STRICT_SKILLS` | off | refuse to start when the installed af-impl skill is not the one `specrun` was built with |
 | `--dry-run` | | | say what the next step would be and change nothing |
 | `--ledger` | | | print the ledger as a table and start nothing |
+| `--run ID` | | | with `--ledger`, print only the steps of the run with this ID |
 | `--reset-state` | | | remove the state file and do nothing else |
 | `--version` | | | print the build identity |
 
 A variable whose value its flag would refuse is a usage error naming the
 variable (`SPECRUN_STALL=soon`, a `SPECRUN_LOG_DIR` inside the working tree). An unknown flag, a positional argument, a
-`--max` or `--stall` that is not greater than zero, and two of `--dry-run`,
-`--ledger` and `--reset-state` together are usage errors with exit code 2.
+`--max` or `--stall` that is not greater than zero, two of `--dry-run`,
+`--ledger` and `--reset-state` together, and a `--run` without `--ledger` or
+with no ID are usage errors with exit code 2.
 
 ### The dry run
 
@@ -525,7 +584,9 @@ The run above ends with:
       "built_skill_sha256": "d41f18c7…",
       "claude": "2.1.322 (Claude Code)",
       "issue": "issue 76b8216 (commit 76b8216, built 2026-10-23T09:42:50Z)"
-    }
+    },
+    "run_id": "20261112T180047Z-7f3a",
+    "run_dir": "~/.cache/agent-fox/specrun/widgets/runs/20261112T180047Z-7f3a"
   },
   "duration_ms": 405,
   "started_at": "2026-11-12T18:00:47Z"
@@ -543,6 +604,7 @@ tests; the home directory is written `~` and the hashes are cut short.)
 | `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, `stalled`, `interrupted`, or `the session could not start`) |
 | `dry_run`, `next_step` | under `--dry-run`: `true`, and the step it would take, `kind` and `spec_dir` |
 | `versions` | what the run runs: `specrun`, `skill_path`, `skill_sha256`, `built_skill_sha256`, `claude`, `issue` |
+| `run_id`, `run_dir` | the run's ID and its directory under the log directory; absent when the run stopped before the log directory was ready, and for a dry run |
 
 A stopped run's `summary` is `specrun: stopped at <step>: <reason>; landed <n>`,
 and its `error` names the stage: `land` for a landing check, `stall`,
@@ -554,7 +616,7 @@ and its `error` names the stage: `land` for a landing check, `stall`,
 |---|---|---|
 | `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
 | `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open or a repair of one failed (`defect`), the next package does not validate under `--strict-handoffs` (`validate`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
-| `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, or a log directory inside the working tree |
+| `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, a `--run` without `--ledger` or with no ID, or a log directory inside the working tree |
 
 ### Warning codes
 

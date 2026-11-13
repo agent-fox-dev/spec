@@ -56,6 +56,7 @@ type reconcile struct {
 }
 
 type run struct {
+	SessionID  string   `json:"session_id"`     // when set, an init event giving it comes first
 	Events     int      `json:"events"`         // assistant events to print
 	EventGapMS int      `json:"event_gap_ms"`   // the pause before each
 	Actions    []string `json:"actions"`        // what to do to the repository, in order
@@ -74,6 +75,7 @@ type record struct {
 	Cwd    string   `json:"cwd"`
 	WaitMS string   `json:"wait_ms"`
 	Head   string   `json:"head"`
+	RunID  string   `json:"run_id"`
 }
 
 func main() {
@@ -84,22 +86,25 @@ func main() {
 	cwd, _ := os.Getwd()
 	if len(os.Args) > 2 && strings.HasPrefix(os.Args[2], "/af-impl --repair ") {
 		appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
-			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
+			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD"), RunID: os.Getenv("SPECRUN_RUN_ID")})
 		repairSession(os.Args[2])
 		return
 	}
 	if len(os.Args) > 2 && strings.HasPrefix(os.Args[2], "/af-impl --reconcile ") {
 		appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
-			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
+			WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD"), RunID: os.Getenv("SPECRUN_RUN_ID")})
 		reconcileSession(os.Args[2])
 		return
 	}
 	starts := countLines(os.Getenv("SPECRUN_FAKE_RECORD")) - countPrompts(os.Getenv("SPECRUN_FAKE_RECORD"), "/af-impl --reconcile ") -
 		countPrompts(os.Getenv("SPECRUN_FAKE_RECORD"), "/af-impl --repair ")
 	appendJSON(os.Getenv("SPECRUN_FAKE_RECORD"), record{Argv: os.Args[1:], Cwd: cwd,
-		WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD")})
+		WaitMS: os.Getenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"), Head: gitOut("rev-parse", "HEAD"), RunID: os.Getenv("SPECRUN_RUN_ID")})
 
 	r := plan(starts)
+	if r.SessionID != "" {
+		fmt.Printf(`{"type":"system","subtype":"init","session_id":%q}`+"\n", r.SessionID)
+	}
 	for i := range r.Events {
 		time.Sleep(time.Duration(r.EventGapMS) * time.Millisecond)
 		fmt.Printf(`{"type":"assistant","n":%d}`+"\n", i+1)

@@ -348,7 +348,7 @@ func TestReconcile_WritesAnEmptyAdoptFileWhenThereIsNothingToAdopt(t *testing.T)
 	if _, code, stderr := runMain(t); code != 0 {
 		t.Fatalf("code %d\n%s", code, stderr)
 	}
-	files, _ := filepath.Glob(filepath.Join(f.logDir(), "*-adopt.json"))
+	files, _ := filepath.Glob(filepath.Join(f.logDir(), "runs", "*", "*-adopt.json"))
 	if len(files) != 1 {
 		t.Fatalf("adopt files %v", files)
 	}

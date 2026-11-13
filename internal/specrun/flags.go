@@ -35,6 +35,7 @@ type options struct {
 	repairSecurity bool
 	dryRun         bool
 	ledger         bool
+	run            string // under --ledger, the run whose steps it prints
 	resetState     bool
 	version        bool
 }
@@ -44,7 +45,8 @@ const usageText = `specrun — run /af-impl on every open spec package, one fres
 Usage:
   specrun [--max N] [--stall D] [--log-dir DIR] [--strict-skills] [--strict-handoffs]
   specrun --dry-run      say what the next step would be, and change nothing
-  specrun --ledger       print the ledger of every step as a table
+  specrun --ledger [--run ID]
+                         print the ledger of every step, or of one run's, as a table
   specrun --reset-state  discard the state file
   specrun --version
 
@@ -116,6 +118,9 @@ func parseOptions(argv []string, lookup func(string) (string, bool)) (*options, 
 	}
 	if set["stall"] && o.stall <= 0 {
 		errs = append(errs, fmt.Errorf("--stall %s: a session's stall time must be greater than zero", o.stall))
+	}
+	if set["run"] && (!o.ledger || o.run == "") {
+		errs = append(errs, fmt.Errorf("--run %q: names the run whose steps --ledger prints, and goes with --ledger only", o.run))
 	}
 	ops := []struct {
 		name  string
@@ -209,6 +214,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.strictSkills, "strict-skills", o.strictSkills, "refuse to start when the installed af-impl skill is not the one specrun was built with ($SPECRUN_STRICT_SKILLS)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "say what the next step would be and change nothing: no branch switched, nothing pulled, no session, no state or log")
 	fs.BoolVar(&o.ledger, "ledger", false, "print the ledger as a table and start nothing")
+	fs.StringVar(&o.run, "run", "", "with --ledger, print only the steps of this run ID")
 	fs.BoolVar(&o.resetState, "reset-state", false, "discard the state file and do nothing else")
 	fs.BoolVar(&o.version, "version", false, "print the build identity and exit")
 }
