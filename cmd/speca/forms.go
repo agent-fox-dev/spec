@@ -58,6 +58,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if o.gateReport {
 		return gateReport(c, dir)
 	}
+	if o.verifyEvidence {
+		return executeVerify(c, dir)
+	}
 	if o.render {
 		return renderOne(c, dir)
 	}

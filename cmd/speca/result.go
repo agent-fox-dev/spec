@@ -84,6 +84,8 @@ func (r *Result) Summary() string {
 		return r.gateSummary()
 	case r.GateReport != nil:
 		return r.gateReportSummary()
+	case r.EvidenceCheck != nil:
+		return r.evidenceCheckSummary()
 	case r.evidenceForm:
 		return r.evidenceSummary()
 	case r.taskForm:
@@ -198,6 +200,22 @@ func (r *Result) evidenceSummary() string {
 	return s
 }
 
+// evidenceCheckSummary gives the verify form's verdict, and how many tests of
+// how many tasks it ran, or why it ran none.
+func (r *Result) evidenceCheckSummary() string {
+	ch := r.EvidenceCheck
+	if ch.Verdict == envelope.GateVerdictNotRun {
+		return fmt.Sprintf("%s: %s evidence not checked: %s", tool, r.dirName(), ch.Reason)
+	}
+	tests := 0
+	for _, task := range ch.Tasks {
+		for _, e := range task.Evidence {
+			tests += len(e.Tests)
+		}
+	}
+	return fmt.Sprintf("%s: %s evidence %s, %d tests of %d done tasks", tool, r.dirName(), ch.Verdict, tests, len(ch.Tasks))
+}
+
 // renderSummary counts what the render form did to the packages' spec.md:
 // how many were written, how many were unchanged and how many failed, which add
 // up to the entries; and, under --dry-run, that nothing was written.
@@ -303,7 +321,7 @@ func (r *Result) Next() []cli.Next {
 	switch {
 	case r.nextSet:
 		return r.callNext
-	case r.renderForm, r.migrateForm, r.Gate != nil, r.GateReport != nil:
+	case r.renderForm, r.migrateForm, r.Gate != nil, r.GateReport != nil, r.EvidenceCheck != nil:
 		return nil
 	case r.nextForm:
 		return r.nextNext()

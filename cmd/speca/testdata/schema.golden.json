@@ -140,6 +140,11 @@
         "type": "boolean",
         "default": false,
         "description": "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call"
+      },
+      "verify-evidence": {
+        "type": "boolean",
+        "default": false,
+        "description": "the verify form: run every test recorded as evidence for every done task of the package once, on the tree as it is, and answer with one verdict, pass, fail or not_run, and each test's status; whatever the package's status, and writing nothing to it"
       }
     }
   },
@@ -1447,6 +1452,83 @@
               "clean_env",
               "commands",
               "seconds"
+            ]
+          },
+          "evidence_check": {
+            "type": "object",
+            "description": "the verify form's answer: its verdict (pass when every test recorded for a done task passes on the tree as it is, fail when one does not, not_run with reason when no done task has evidence or the tests could not be run), the log of the run, and each done task with each covers and its tests' statuses; --verify-evidence only",
+            "properties": {
+              "verdict": {
+                "type": "string",
+                "description": "pass when every test is pass, fail when one is not, not_run when no done task has evidence or the tests could not be run"
+              },
+              "reason": {
+                "type": "string",
+                "description": "not_run: why no test was checked; absent otherwise"
+              },
+              "tasks": {
+                "type": "array",
+                "description": "each done task that has evidence, in plan order, with its tests' statuses; [] when none was checked",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "description": "the task id"
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "description": "each entry of its evidence",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "covers": {
+                            "type": "string",
+                            "description": "the criterion (for the integration task, the path) the entry covers"
+                          },
+                          "tests": {
+                            "type": "array",
+                            "description": "its tests, each with its status",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "test": {
+                                  "type": "string",
+                                  "description": "the test identifier"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "description": "pass, fail, error, missing or skipped"
+                                }
+                              },
+                              "required": [
+                                "test",
+                                "status"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "covers",
+                          "tests"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "evidence"
+                  ]
+                }
+              },
+              "log": {
+                "type": "string",
+                "description": "the log of the run, under the gate's state directory; absent when no test ran or the log could not be written"
+              }
+            },
+            "required": [
+              "verdict",
+              "tasks"
             ]
           },
           "gate_report": {

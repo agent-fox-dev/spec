@@ -53,6 +53,8 @@ type AdminResult struct {
 
 	Gate *GateResult `json:"gate,omitempty" description:"the gate's verdict: its level, pass, fail or not_run, every command that ran with its exit code, seconds and log, a failing command's tail, a reused pass, and for a full gate the slowest units; --gate only"`
 
+	EvidenceCheck *EvidenceCheck `json:"evidence_check,omitempty" description:"the verify form's answer: its verdict (pass when every test recorded for a done task passes on the tree as it is, fail when one does not, not_run with reason when no done task has evidence or the tests could not be run), the log of the run, and each done task with each covers and its tests' statuses; --verify-evidence only"`
+
 	GateReport *GateReport `json:"gate_report,omitempty" description:"the package's gate runs since a commit: the full and task runs with their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; --gate-report only"`
 }
 

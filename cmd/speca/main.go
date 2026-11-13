@@ -352,8 +352,10 @@ type options struct {
 	since      givenFlag
 	// The evidence form.
 	evidence givenFlag
-	schema   bool
-	version  bool
+	// The verify form.
+	verifyEvidence bool
+	schema         bool
+	version        bool
 }
 
 // taskForm reports whether the call asks for the form that changes tasks. A
@@ -393,6 +395,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	o.timeout.value = gate.DefaultTimeout
 	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails")
 	fs.Var(&o.evidence, "evidence", "the evidence form, with --task and one task id: run every test of this evidence file once and record, for a task in progress of a package that requires evidence, the run in which each test failed before the task is implemented; the file is {\"evidence\": [{\"covers\": <criterion id, or path id for the integration task>, \"tests\": [<identifier>...], \"no_red\": <reason, for an exemption>}]}, at most 1 MiB")
+	fs.BoolVar(&o.verifyEvidence, "verify-evidence", false, "the verify form: run every test recorded as evidence for every done task of the package once, on the tree as it is, and answer with one verdict, pass, fail or not_run, and each test's status; whatever the package's status, and writing nothing to it")
 	fs.BoolVar(&o.gateReport, "gate-report", false, "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing")
 	fs.Var(&o.since, "since", "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
@@ -471,6 +474,10 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			given bool
 		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given && !o.runsTests()}} {
 			if f.given {
+				if f.name == "--timeout" {
+					errs = append(errs, errors.New("--timeout goes with --gate, --evidence, --verify-evidence or --state done: it limits how long a package's tests may run"))
+					continue
+				}
 				errs = append(errs, fmt.Errorf("%s goes with --gate: it applies to the gate form", f.name))
 			}
 		}
@@ -480,6 +487,9 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	}
 	if o.evidenceForm() {
 		errs = append(errs, o.evidenceErrors(ref)...)
+	}
+	if o.verifyEvidence {
+		errs = append(errs, o.verifyErrors(ref)...)
 	}
 	if o.gateReport {
 		errs = append(errs, o.gateReportErrors(ref)...)
@@ -510,7 +520,29 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 // form closing tasks, which in a package that requires evidence runs their
 // tests (the flags are checked before the package is read).
 func (o *options) runsTests() bool {
-	return o.evidenceForm() || (o.taskForm() && o.state == string(afspec.TaskStateDone))
+	return o.evidenceForm() || o.verifyEvidence || (o.taskForm() && o.state == string(afspec.TaskStateDone))
+}
+
+// verifyErrors are the faults of a call that asks for the verify form: it
+// needs a package and is the only operation of the call.
+func (o *options) verifyErrors(ref string) []error {
+	var errs []error
+	if ref == "" {
+		errs = append(errs, errors.New("--verify-evidence needs a package: name the package whose evidence to check"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+		{"--evidence", o.evidenceForm()}, {"--gate", o.gateForm()}, {"--gate-report", o.gateReport},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--verify-evidence and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
 }
 
 // evidenceErrors are the faults of a call that asks for the evidence form: it
@@ -740,7 +772,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() && !o.gateReport {
+	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() && !o.gateReport && !o.verifyEvidence && !o.evidenceForm() {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage

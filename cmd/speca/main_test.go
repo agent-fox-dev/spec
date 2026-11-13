@@ -215,6 +215,20 @@ func TestUsageErrors(t *testing.T) {
 		"--timeout -1m":              {[]string{in, "--gate", "full", "--timeout", "-1m"}, []string{"--timeout", "greater than zero"}, nil},
 		"--timeout soon":             {[]string{in, "--gate", "full", "--timeout", "soon"}, []string{"timeout"}, nil},
 		"--since without the report": {[]string{in, "--since", "HEAD"}, []string{"--since", "--gate-report"}, nil},
+		"--timeout with --validate":  {[]string{in, "--validate", "--timeout", "1m"}, []string{"--timeout"}, nil},
+		"--timeout, a claim":         {[]string{in, "--task", "1", "--state", "in_progress", "--timeout", "1m"}, []string{"--timeout"}, nil},
+
+		// The verify form.
+		"--verify-evidence, the task form":   {[]string{in, "--verify-evidence", "--task", "1", "--state", "done"}, []string{"--verify-evidence", "--task", "two operations"}, nil},
+		"--verify-evidence --state":          {[]string{in, "--verify-evidence", "--state", "done"}, []string{"--verify-evidence", "two operations"}, nil},
+		"--verify-evidence, the status form": {[]string{in, "--verify-evidence", "--status", "sealed"}, []string{"--verify-evidence", "--status", "two operations"}, nil},
+		"--verify-evidence --gate":           {[]string{in, "--verify-evidence", "--gate", "full"}, []string{"--verify-evidence", "--gate", "two operations"}, nil},
+		"--verify-evidence --validate":       {[]string{in, "--verify-evidence", "--validate"}, []string{"--verify-evidence", "--validate", "two operations"}, nil},
+		"--verify-evidence --render":         {[]string{in, "--verify-evidence", "--render"}, []string{"--verify-evidence", "--render", "two operations"}, nil},
+		"--verify-evidence --list":           {[]string{"--verify-evidence", "--list"}, []string{"--verify-evidence", "--list", "two operations"}, nil},
+		"--verify-evidence, the evidence form": {[]string{in, "--verify-evidence", "--task", "1", "--evidence", file},
+			[]string{"--verify-evidence", "--evidence", "two operations"}, nil},
+		"--verify-evidence without a package": {[]string{"--verify-evidence"}, []string{"--verify-evidence", "package"}, nil},
 
 		// The gate report.
 		"--gate-report --validate":         {[]string{in, "--gate-report", "--validate"}, []string{"--gate-report", "--validate", "two operations"}, nil},
@@ -287,6 +301,15 @@ func TestUsageErrors_AcceptEveryWellFormedTaskCall(t *testing.T) {
 		env, _, _ := run(t, append([]string{"--dir", root, "--dry-run"}, flags...)...)
 		if env.Error != nil && env.Error.Stage == "usage" {
 			t.Errorf("%s: refused as a usage error: %s", name, env.Error.Message)
+		}
+	}
+	// --timeout goes with every form that may run a package's tests.
+	for _, flags := range [][]string{
+		{"09", "--verify-evidence", "--timeout", "5m"},
+		{"09", "--task", "1", "--state", "done", "--timeout", "5m", "--dry-run"},
+	} {
+		if env, _, _ := run(t, append([]string{"--dir", root}, flags...)...); env.Error != nil && env.Error.Stage == "usage" {
+			t.Errorf("%v: refused as a usage error: %s", flags, env.Error.Message)
 		}
 	}
 	// The render form and the migrate form take --dry-run, and --all without

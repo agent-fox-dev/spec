@@ -133,6 +133,25 @@ func TestReport_ContractDrift(t *testing.T) {
 	}
 }
 
+// A package whose contract changed after activation still answers every form
+// that reads it or runs its commands: only the writes of its tasks and its
+// sealing are refused.
+func TestReport_EveryReadingFormAnswersOnAChangedContract(t *testing.T) {
+	root := newRepo(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := addPackage(t, root, "03_a", "03", "a")
+	setCommandsOf(t, dir, "true", "true")
+	activateWithContract(t, dir)
+	editCriterionAction(t, dir)
+	gitInit(t, root)
+	for _, flags := range [][]string{nil, {"--validate"}, {"--gate", "task"}, {"--gate-report"}, {"--render"}, {"--verify-evidence"}} {
+		env, code, _ := run(t, append([]string{"--dir", root, "03_a"}, flags...)...)
+		if code != cli.ExitOK || env.Error != nil {
+			t.Errorf("%v: code %d, error %+v; want an answer", flags, code, env.Error)
+		}
+	}
+}
+
 // Each task that holds evidence is reported with it, entry by entry and test
 // by test, a run absent until it was recorded; a task that holds none has no
 // evidence key.
