@@ -310,16 +310,93 @@ func setUpdatedAt(t *testing.T, dir, ts string) {
 }
 
 // activate moves the package to active through the library, which records the
-// hash of its Intent section.
+// hash of its Intent section, and leaves it as a package activated before the
+// contract hash was recorded: one whose contract files a test may still edit,
+// and whose tasks close without evidence.
 func activate(t *testing.T, dir string) {
+	t.Helper()
+	active := activateWithContract(t, dir)
+	active.ContractHash = nil
+	if err := active.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// activateWithContract moves the package to active through the library, which
+// records the hash of its Intent section and of its contract files: a package
+// that requires evidence.
+func activateWithContract(t *testing.T, dir string) *afspec.Spec {
 	t.Helper()
 	spec, err := afspec.LoadSpec(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spec.Transition("active", dir); err != nil {
+	active, err := spec.Transition("active", dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	return active
+}
+
+// contractPackage adds a package, gives it the plan, and activates it with its
+// contract hash recorded.
+func contractPackage(t *testing.T, root, dirName, id, name string, tasks ...map[string]any) string {
+	t.Helper()
+	dir := addPackage(t, root, dirName, id, name)
+	if len(tasks) > 0 {
+		setTasks(t, dir, tasks...)
+	}
+	activateWithContract(t, dir)
+	return dir
+}
+
+// editCriterionAction changes the action of the package's first criterion: a
+// change to its contract.
+func editCriterionAction(t *testing.T, dir string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.RequirementsFileName), func(m map[string]any) {
+		r := m["requirements"].([]any)[0].(map[string]any)
+		r["criteria"].([]any)[0].(map[string]any)["action"] = "do something the package was not activated with"
+	})
+}
+
+// editTaskStep changes the steps of the package's first task: a change to its
+// contract.
+func editTaskStep(t *testing.T, dir string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
+		m["tasks"].([]any)[0].(map[string]any)["steps"] = []any{"a step the package was not activated with"}
+	})
+}
+
+// setEvidenceCommand names command as the package's evidence_tests.
+func setEvidenceCommand(t *testing.T, dir, command string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
+		m["test_commands"].(map[string]any)["evidence_tests"] = command
+	})
+}
+
+// setTaskState sets the state of one task in the package's progress.json.
+func setTaskState(t *testing.T, dir string, id int, state string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) {
+		for _, e := range m["tasks"].([]any) {
+			if e := e.(map[string]any); int(e["id"].(float64)) == id {
+				e["state"] = state
+			}
+		}
+	})
+}
+
+// readFile is the content of the file at path.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 // driftIntent edits the ## Intent section, so that an active package no longer

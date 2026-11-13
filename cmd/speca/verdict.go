@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/authoring"
@@ -39,6 +42,12 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		c.warnUnreadable("the spec root", c.specsDir, err, "the cross-spec rules are skipped, and the verdict is the package's own")
 	}
 
+	if evidenceRunnerMissing(c.root, spec) {
+		c.run.Warn(cli.WarnEvidenceCommandMissing, "low", "%s names no evidence_tests in the test_commands of its tasks.json, and %s holds no go.mod: "+
+			"nothing can run its tests, so none of its tasks can close on evidence once it is active; name an evidence command in tasks.json",
+			r.SpecDir, c.root)
+	}
+
 	if c.opts.strictHandoffs {
 		combined = afspec.StrictHandoffs(combined)
 	}
@@ -53,4 +62,19 @@ func verdict(c *call, dir string) (*Result, *cli.ErrorInfo) {
 		r.Hints = append(r.Hints, specpkg.ItemOf(h))
 	}
 	return r, nil
+}
+
+// evidenceRunnerMissing reports whether nothing could run the tests of a
+// package that requires evidence, or will once it is activated: it is a draft
+// or requires evidence, it names no evidence_tests, and root holds no go.mod,
+// which the built-in Go runner needs (ADR 26).
+func evidenceRunnerMissing(root string, spec *afspec.Spec) bool {
+	if specpkg.Legacy(spec) || (spec.Status != string(afspec.PrdFrontmatterV3JsonStatusDraft) && !spec.RequiresEvidence()) {
+		return false
+	}
+	if spec.Tasks != nil && spec.Tasks.TestCommands.EvidenceTests != nil && *spec.Tasks.TestCommands.EvidenceTests != "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(root, "go.mod"))
+	return err != nil
 }

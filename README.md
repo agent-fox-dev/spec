@@ -36,14 +36,16 @@ changes what the tools can promise.
 - **Tests are the contract, not an option.** Because the check is part of the
   criterion, there is no test to skip and no "add tests later". The
   integration task that runs every path's smoke check is derived from the
-  package, so it cannot be forgotten or written differently each time, and the
-  implementation skill refuses to build a task whose checks it has not seen
-  fail first.
+  package, so it cannot be forgotten or written differently each time. A task
+  closes on evidence, not on a green suite: `speca` runs the tests mapped to
+  each criterion, records the run in which each failed before the task was
+  implemented, and closes the task only when every one of them passes.
 
 - **State is a state machine, not a checkbox.** A task is claimed through a
   compare-and-set, so two agents cannot both take it. Readiness follows the
-  dependencies. Activation hashes the spec's intent, and every later write is
-  refused while the intent differs. Progress lives in its own small file, so
+  dependencies. Activation hashes the spec's intent and its contract files,
+  and every later task move is refused while either differs, so the spec
+  cannot be edited to match the code. Progress lives in its own small file, so
   recording work never rewrites the contract.
 
 - **Context is engineered for the coder.** An agent implementing task 3 is
@@ -114,7 +116,9 @@ Three steps, and a command or skill for each.
 spec https://github.com/org/repo/issues/42    # idea → validated package under .specs/
 specr 16 --task 3                             # task 3 in full, the rest by id
 speca 16 --task 3 --state in_progress         # claim it; refused if another agent has it
-speca 16 --task 3 --state done                # record it; progress.json is the only file that changes
+speca 16 --task 3 --evidence map.json         # its tests, seen failing before the code exists
+speca 16 --task 3 --state done                # seen passing, then recorded; progress.json is the only file that changes
+speca 16 --verify-evidence                    # every recorded test again, on the merged tree
 speca 16 --validate                           # the format's full verdict, rule by rule
 speca --next                                  # the package to implement next, in dependency order
 specrun                                       # implement every open package, one /af-impl session each

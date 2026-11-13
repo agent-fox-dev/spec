@@ -233,6 +233,77 @@
               "ready": {
                 "type": "boolean",
                 "description": "true for a pending task whose dependencies are all done; absent otherwise"
+              },
+              "evidence": {
+                "type": "array",
+                "description": "speca's report only, never specr: in a package that requires evidence, the tests that cover each criterion the task owns, from progress.json; absent for a task that has none",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "covers": {
+                      "type": "string",
+                      "description": "the id of a criterion the task owns, or for the integration task of an execution path"
+                    },
+                    "no_red": {
+                      "type": "string",
+                      "description": "the exemption: why the entry's tests need not be seen failing first; absent when there is none"
+                    },
+                    "tests": {
+                      "type": "array",
+                      "description": "the tests that cover it, each with the runs recorded of it",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "test": {
+                            "type": "string",
+                            "description": "the test identifier, as the evidence command takes it"
+                          },
+                          "failed": {
+                            "type": "object",
+                            "description": "the run in which speca saw the test fail; absent until then, and for an exempt test or one of the integration task",
+                            "properties": {
+                              "at": {
+                                "type": "string",
+                                "description": "when the run was, RFC 3339"
+                              },
+                              "tree": {
+                                "type": "string",
+                                "description": "the git tree id of the working tree the run was on, as the gate computes it; absent outside a git work tree"
+                              }
+                            },
+                            "required": [
+                              "at"
+                            ]
+                          },
+                          "passed": {
+                            "type": "object",
+                            "description": "the run in which speca saw the test pass when the task closed; absent until then",
+                            "properties": {
+                              "at": {
+                                "type": "string",
+                                "description": "when the run was, RFC 3339"
+                              },
+                              "tree": {
+                                "type": "string",
+                                "description": "the git tree id of the working tree the run was on, as the gate computes it; absent outside a git work tree"
+                              }
+                            },
+                            "required": [
+                              "at"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "test"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "covers",
+                    "tests"
+                  ]
+                }
               }
             },
             "required": [
@@ -296,6 +367,77 @@
                 "ready": {
                   "type": "boolean",
                   "description": "true for a pending task whose dependencies are all done; absent otherwise"
+                },
+                "evidence": {
+                  "type": "array",
+                  "description": "speca's report only, never specr: in a package that requires evidence, the tests that cover each criterion the task owns, from progress.json; absent for a task that has none",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "covers": {
+                        "type": "string",
+                        "description": "the id of a criterion the task owns, or for the integration task of an execution path"
+                      },
+                      "no_red": {
+                        "type": "string",
+                        "description": "the exemption: why the entry's tests need not be seen failing first; absent when there is none"
+                      },
+                      "tests": {
+                        "type": "array",
+                        "description": "the tests that cover it, each with the runs recorded of it",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "test": {
+                              "type": "string",
+                              "description": "the test identifier, as the evidence command takes it"
+                            },
+                            "failed": {
+                              "type": "object",
+                              "description": "the run in which speca saw the test fail; absent until then, and for an exempt test or one of the integration task",
+                              "properties": {
+                                "at": {
+                                  "type": "string",
+                                  "description": "when the run was, RFC 3339"
+                                },
+                                "tree": {
+                                  "type": "string",
+                                  "description": "the git tree id of the working tree the run was on, as the gate computes it; absent outside a git work tree"
+                                }
+                              },
+                              "required": [
+                                "at"
+                              ]
+                            },
+                            "passed": {
+                              "type": "object",
+                              "description": "the run in which speca saw the test pass when the task closed; absent until then",
+                              "properties": {
+                                "at": {
+                                  "type": "string",
+                                  "description": "when the run was, RFC 3339"
+                                },
+                                "tree": {
+                                  "type": "string",
+                                  "description": "the git tree id of the working tree the run was on, as the gate computes it; absent outside a git work tree"
+                                }
+                              },
+                              "required": [
+                                "at"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "test"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "covers",
+                      "tests"
+                    ]
+                  }
                 }
               },
               "required": [

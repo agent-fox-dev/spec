@@ -113,6 +113,9 @@ title: "Human-readable title"
 status: "draft"                 # draft | active | sealed | superseded | archived
 created_at: "2026-05-18T12:00:00Z"
 intent_hash: null               # set at draft → active
+contract_hash:                  # set at draft → active; absent before
+  requirements.json: "<64 hex digits>"
+  tasks.json: "<64 hex digits>"
 schema_version: 3
 profile: "full"                 # optional: full | lite
 steering_version: "2.0.1"       # optional
@@ -129,6 +132,7 @@ supersedes: []                  # optional
 | `status` | enum | yes | Lifecycle state (§9). |
 | `created_at` | ISO 8601 | yes | Immutable after creation. |
 | `intent_hash` | string or null | yes | SHA-256 of the `## Intent` body. Null while `draft`. |
+| `contract_hash` | object | no | Recorded at `draft → active`: `requirements.json` and `tasks.json`, each the SHA-256 (64 lowercase hex digits) of that file's canonical encoding with every extension key (§10.1) left out. A package that is `active` and has one **requires evidence** (§8.3): while either file no longer hashes to it, the package's task moves and its sealing are refused. Absent for a draft and for a package activated before it was recorded, whose tasks close without evidence. |
 | `schema_version` | integer | yes | `3`. |
 | `profile` | enum | no | `full` (the default when absent) or `lite`. A `lite` package has at most three requirements, no execution path, no smoke check and no integration task (§6.5, rule C7). A package is promoted to `full` by adding a path and removing the field. |
 | `steering_version` | string | no | As in v2 §4.1. |
@@ -413,7 +417,8 @@ and no integration task is stored (§8.4).
   "test_commands": {
     "all_tests": "go test ./... -count=1",
     "linter": "go vet ./...",
-    "spec_tests": "go test ./cmd/spec/... -count=1"
+    "spec_tests": "go test ./cmd/spec/... -count=1",
+    "evidence_tests": "./scripts/run-tests {tests}"
   },
   "dependencies": [],
   "tasks": []
@@ -422,7 +427,7 @@ and no integration task is stored (§8.4).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `test_commands` | object | yes | `all_tests` and `linter` required; `spec_tests` optional; `affected_tests` optional, the command that runs the tests a change can affect, holding the placeholder `{base}` (the commit the change starts from) exactly once (rule `affected_tests_base`). Must use the project's real tooling. |
+| `test_commands` | object | yes | `all_tests` and `linter` required; `spec_tests` optional; `affected_tests` optional, the command that runs the tests a change can affect, holding the placeholder `{base}` (the commit the change starts from) exactly once (rule `affected_tests_base`); `evidence_tests` optional, the command that runs the tests it is given and prints, on stdout, one line per test, `{"test": <identifier>, "status": "pass" \| "fail" \| "error" \| "missing" \| "skipped"}`, holding the placeholder `{tests}` exactly once as an argument of its own once the command is split on white space and quotes (rule `evidence_tests_placeholder`), which the tools replace with one argument per test identifier. Without `evidence_tests`, a repository with a `go.mod` uses the tools' own Go runner, whose identifiers are `<package>:<Test>[/<subtest>]`. Must use the project's real tooling. |
 | `dependencies` | array | yes | Cross-spec dependencies, as v2 §8.2. May be empty. |
 | `tasks` | array | yes | Task objects (§7.2). At least one. |
 
@@ -520,7 +525,13 @@ task is the first `in_progress` task in id order, else the first ready one.
   "schema_version": 3,
   "updated_at": "2026-05-19T09:30:00Z",
   "tasks": [
-    { "id": 1, "state": "done" },
+    { "id": 1, "state": "done",
+      "evidence": [
+        { "covers": "REQ-1.1", "tests": [
+          { "test": "./cmd/x:TestA",
+            "failed": { "at": "2026-05-19T09:10:00Z", "tree": "4b825dc6…" },
+            "passed": { "at": "2026-05-19T09:25:00Z", "tree": "9c2f1e0a…" } } ] }
+      ] },
     { "id": 2, "state": "in_progress" },
     { "id": 3, "state": "pending" }
   ]
@@ -532,11 +543,22 @@ task is the first `in_progress` task in id order, else the first ready one.
 | `$schema`, `spec_id`, `spec_name`, `schema_version` | | yes | As the other artifacts. |
 | `updated_at` | string | yes | When a task last changed state, RFC 3339. The empty string when none has. |
 | `tasks` | array | yes | One `{id, state}` per task of the plan and one for the integration task, in id order. A task with no entry is `pending`. Every entry names a task of the plan or the integration task, each at most once (C8). |
+| `tasks[].evidence` | array | no | In a package that requires evidence (§4.1), the tests that cover each criterion the task owns (for the integration task, each execution path): entries of `covers` (the id), `tests` (1 to 50, each `{test, failed?, passed?}`, a run being `{at, tree?}`, `tree` the git tree id of the working tree the run was on) and an optional `no_red` (1 to 500 characters), the reason its tests need not be seen failing first. Written by the tools: the failing runs before the task is implemented, the passing runs when it closes. A move to `pending` removes it. |
 
 The file is written by every save of the package, and `Spec.SaveProgress`
 writes it alone. A package without it loads with every task `pending`. It is
 never rendered into `spec.md`, never hashed, and never a reason to refuse a
 package: a task move on an active package writes this one file.
+
+**Closing a task on evidence.** In a package that requires evidence, a task
+moves to `done` only when every criterion it owns (for the integration task,
+every path) has an evidence entry, every test of an implement task has a
+recorded failing run or is exempt (every entry that lists it carries
+`no_red`), and every test, run at the close, passes. The tools record the
+failing runs in a call of their own while the task is `in_progress`, before
+its implementation exists, and the close records the passing runs with the
+state. A tool may close a task without these checks only when asked to
+explicitly, and says so.
 
 ### 8.4 The integration task
 

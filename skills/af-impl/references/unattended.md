@@ -43,7 +43,8 @@ to, a deviation, a decision. The next subagent is pointed at those commits.
    verdict against the table of §5, run again here when in doubt; a report
    that answers for every check of the task's criteria and every
    `done_when` entry; and, with `git status` and `git diff`, that it
-   changed nothing in the package. On a landable verdict, record the task
+   changed nothing in the package but, in a package that requires evidence,
+   the task's evidence in `progress.json`. On a landable verdict, record the task
    done with `speca <package> --task <N> --state done`, check that the
    package's change is `progress.json` alone, and commit the work and the
    state as one commit, with the subject and body the subagent returned and
@@ -63,7 +64,10 @@ check narrowly, documentation, never the spec), then runs the gate,
 `speca <package> --gate task --base <commit>`. It reads the brief and the
 earlier tasks' commits, never the orchestrator's transcript.
 
-It does not claim, record or commit, and starts no other task. It returns:
+It does not claim, record or commit, and starts no other task. In a package
+that requires evidence it records the failing runs itself, with
+`speca <package> --task <N> --evidence <file>` before it implements
+(test-first.md): the one write of the package it makes. It returns:
 
 - what the task did, in a line, for the progress line this session writes
   once it has committed;
@@ -72,4 +76,5 @@ It does not claim, record or commit, and starts no other task. It returns:
   every deviation, with its trailer;
 - the gate verdict, with what each command returned, and how each check of
   the task's criteria and each `done_when` entry was answered;
-- the criterion-to-test map.
+- the criterion-to-test map: in a package that requires evidence, the path
+  of the evidence file it recorded.

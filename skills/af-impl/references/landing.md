@@ -88,11 +88,16 @@ is missing.
   and report the conflicting files. Without a conflict, run
   `speca <package> --gate full` on the merged tree (often `reused` from the
   branch tip's full gate), then the repository's thorough target, such as
-  `make check`, where it has one ([gate.md](gate.md)). Then
+  `make check`, where it has one ([gate.md](gate.md)). In a package that
+  requires evidence, then run `speca <package> --verify-evidence` on the
+  merged tree, which runs every recorded test of every done task again, and
+  write its `evidence_check.verdict` (and each test not `pass`) in the
+  verification section; a `fail` is a verdict that is not landable, and a
+  `not_run` is reported with its `reason`. Then
   `speca <package> --gate-report --since <baseline commit>`, and put its
   numbers in the message's verification section. Only a landable verdict
-  from the §5 table, for the gate and the thorough target, commits the
-  merge, with `git commit -F <message file>`; any other verdict is
+  from the §5 table, for the gate, the thorough target and the evidence
+  check, commits the merge, with `git commit -F <message file>`; any other verdict is
   `git merge --abort` and a report of what the checks returned, with the
   branch left as it is.
 - **Close what the branch resolved.** Before the merge, decide for each item

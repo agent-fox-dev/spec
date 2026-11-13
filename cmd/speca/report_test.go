@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
@@ -101,6 +103,103 @@ func TestReport_IntentDrift(t *testing.T) {
 		case !want && got != nil:
 			t.Errorf("package %s: intent_drift = %s; want it absent", ref, got)
 		}
+	}
+}
+
+// contract_drift is written for a package that has a contract hash, true
+// exactly when a contract file no longer hashes to it; evidence_required is
+// written, as true, for an active package that has one. An extension key is
+// not part of the contract.
+func TestReport_ContractDrift(t *testing.T) {
+	root := newRepo(t)
+	addPackage(t, root, "11_draft", "11", "draft")
+	activePackage(t, root, "12_nohash", "12", "nohash")
+	contractPackage(t, root, "13_matching", "13", "matching")
+	editCriterionAction(t, contractPackage(t, root, "14_requirements", "14", "requirements"))
+	editTaskStep(t, contractPackage(t, root, "15_tasks", "15", "tasks"))
+	extended := contractPackage(t, root, "16_extended", "16", "extended")
+	editJSON(t, filepath.Join(extended, afspec.RequirementsFileName), func(m map[string]any) { m["x-team"] = "search" })
+	unknown := contractPackage(t, root, "17_unknown", "17", "unknown")
+	editJSON(t, filepath.Join(unknown, afspec.TasksFileName), func(m map[string]any) { m["owner"] = "someone" })
+
+	for ref, want := range map[string]struct{ drift, required string }{
+		"11": {"", ""}, "12": {"", ""}, "13": {"false", "true"}, "14": {"true", "true"}, "15": {"true", "true"}, "16": {"false", "true"}, "17": {"true", "true"},
+	} {
+		_, raw := rawRun(t, "--dir", root, ref)
+		if got := string(raw["contract_drift"]); got != want.drift {
+			t.Errorf("package %s: contract_drift = %q; want %q", ref, got, want.drift)
+		}
+		if got := string(raw["evidence_required"]); got != want.required {
+			t.Errorf("package %s: evidence_required = %q; want %q", ref, got, want.required)
+		}
+	}
+}
+
+// A package whose contract changed after activation still answers every form
+// that reads it or runs its commands: only the writes of its tasks and its
+// sealing are refused.
+func TestReport_EveryReadingFormAnswersOnAChangedContract(t *testing.T) {
+	root := newRepo(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := addPackage(t, root, "03_a", "03", "a")
+	setCommandsOf(t, dir, "true", "true")
+	activateWithContract(t, dir)
+	editCriterionAction(t, dir)
+	gitInit(t, root)
+	for _, flags := range [][]string{nil, {"--validate"}, {"--gate", "task"}, {"--gate-report"}, {"--render"}, {"--verify-evidence"}} {
+		env, code, _ := run(t, append([]string{"--dir", root, "03_a"}, flags...)...)
+		if code != cli.ExitOK || env.Error != nil {
+			t.Errorf("%v: code %d, error %+v; want an answer", flags, code, env.Error)
+		}
+	}
+}
+
+// Each task that holds evidence is reported with it, entry by entry and test
+// by test, a run absent until it was recorded; a task that holds none has no
+// evidence key.
+func TestReport_ShowsEachTasksEvidence(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setTasks(t, dir, planTask(1, "in_progress", nil), planTask(2, "pending", nil))
+	evidence := []any{
+		map[string]any{"covers": "REQ-1.1", "tests": []any{
+			map[string]any{"test": "./p:TestFailedOnly", "failed": map[string]any{"at": "2026-11-13T10:00:00Z", "tree": "aaa"}},
+			map[string]any{"test": "./p:TestBoth", "failed": map[string]any{"at": "2026-11-13T10:00:00Z", "tree": "aaa"},
+				"passed": map[string]any{"at": "2026-11-13T11:00:00Z", "tree": "bbb"}},
+		}},
+		map[string]any{"covers": "REQ-1.2", "no_red": "the behaviour already existed", "tests": []any{
+			map[string]any{"test": "./p:TestExempt"},
+		}},
+	}
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) {
+		m["tasks"].([]any)[0].(map[string]any)["evidence"] = evidence
+	})
+
+	env, raw := rawRun(t, "--dir", root, "09")
+	want := []envelope.TaskEvidence{
+		{Covers: "REQ-1.1", Tests: []envelope.EvidenceTest{
+			{Test: "./p:TestFailedOnly", Failed: &envelope.EvidenceRun{At: "2026-11-13T10:00:00Z", Tree: "aaa"}},
+			{Test: "./p:TestBoth", Failed: &envelope.EvidenceRun{At: "2026-11-13T10:00:00Z", Tree: "aaa"},
+				Passed: &envelope.EvidenceRun{At: "2026-11-13T11:00:00Z", Tree: "bbb"}},
+		}},
+		{Covers: "REQ-1.2", NoRed: "the behaviour already existed", Tests: []envelope.EvidenceTest{{Test: "./p:TestExempt"}}},
+	}
+	if got := result(t, env).Tasks[0].Evidence; !reflect.DeepEqual(got, want) {
+		t.Errorf("task 1 evidence %+v; want %+v", got, want)
+	}
+	var tasks []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["tasks"], &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tasks[1]["evidence"]; ok {
+		t.Errorf("task 2 has an evidence key: %s", tasks[1]["evidence"])
+	}
+	var first []map[string]json.RawMessage
+	if err := json.Unmarshal(tasks[0]["evidence"], &first); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := first[0]["no_red"]; ok {
+		t.Errorf("an entry without an exemption has a no_red key: %s", tasks[0]["evidence"])
 	}
 }
 

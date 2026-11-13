@@ -27,10 +27,11 @@ Both commands use the same three:
 - `speca <package>` — the state: `spec_dir`, `spec_id`, `spec_name`, `title`,
   `status`, `profile`, `created_at`, `updated_at` (when a task last changed
   state, from `progress.json`), `valid` with `failing_rules`, `intent_drift`,
-  `depends_on`, the `tasks` list with each task's `kind` (`implement`, or
-  `integration` for the derived task N+1 of a `full` package), `state`,
-  `depends_on` and `ready`, `task_counts`, and `next_task`, the task to work
-  on now: the one in progress, else the first ready one.
+  `contract_drift` and `evidence_required` (see below), `depends_on`, the
+  `tasks` list with each task's `kind` (`implement`, or `integration` for the
+  derived task N+1 of a `full` package), `state`, `depends_on`, `ready` and
+  `evidence`, `task_counts`, and `next_task`, the task to work on now: the one
+  in progress, else the first ready one.
 - `speca <package> --validate` — the format's whole verdict:
   `result.validation.errors`, each naming its `check`, `artifact` and
   `entity`, `result.validation.warnings` in the same shape, and
@@ -70,6 +71,19 @@ Both commands use the same three:
   (`commit`, `at`, `seconds`), and runs nothing. Exit code 0 carries every
   verdict. It writes nothing in the repository; a `gate_not_recorded` warning
   says the result was not recorded for reuse.
+- `speca <package> --task N --evidence <file> [--dry-run]` — in a package
+  that requires evidence (`evidence_required: true`: active, with a
+  `contract_hash`), runs the tests the file maps to each criterion task N owns
+  (`{"evidence": [{"covers", "tests", "no_red"}]}`) through the package's
+  `evidence_tests` or, in a Go module, `go test`, and records in
+  `progress.json` the run in which each failed. A test that does not fail is
+  refused unless its entry carries `no_red`, the reason it need not.
+  `--state done` in such a package then runs the tests again and closes the
+  task only when every criterion has an entry and every test passes.
+- `speca <package> --verify-evidence` — runs every recorded test of every
+  done task once on the tree as it is and answers in `result.evidence_check`:
+  `verdict` (`pass`, `fail` or `not_run`, with `reason`) and each test's
+  status. It writes nothing to the package and exits 0 for every verdict.
 - `speca <package> --gate-report [--since <commit>]` — sums the package's
   gates since the commit in `result.gate_report`: `full` and `task` (`runs`,
   `seconds`, `reused`), `baseline_full_seconds`, `last_full_seconds` and
@@ -131,15 +145,23 @@ after a claim and a `done`, `git status -- <package>` and
 `git diff -- <package>` should show `progress.json`, new on a package's first
 move, and nothing else. Any other file changed is a blocker.
 
+The evidence form writes `progress.json` alone too: the task's evidence and
+`updated_at`.
+
 The status form writes through the library's `Spec.Save`, which rewrites
 **every** artifact of the package in its canonical encoding, `progress.json`
 with it, and writes `spec.md`, its render, beside them. The contract files
-change by a lifecycle move and by nothing else after activation.
+change by a lifecycle move and by nothing else after activation: activation
+records their `contract_hash`, and while `requirements.json` or `tasks.json`
+no longer matches it (`contract_drift: true`) every task move, every evidence
+call and sealing are refused.
 
 A refusal names its stage: `task` means the task's state is not what the report
 said, `status` that the package can no longer take a write (sealed, superseded,
-archived or drifted), `validate` that a write would drop keys the schema does
-not allow. Never get past one with `--force`.
+archived, or its intent or its contract drifted), `validate` that a write would
+drop keys the schema does not allow, `evidence` that a test broke its rule, a
+criterion has no evidence entry, or the tests could not be run. Never get past
+one with `--force`.
 
 ## What `--validate` checks
 

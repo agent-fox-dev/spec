@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,6 +37,49 @@ func TestRender_TheWholePackageIsTheCombinedRender(t *testing.T) {
 	}
 	if !strings.Contains(r.Markdown, "### 3. "+afspec.IntegrationTaskTitle+" (integration)") || strings.Contains(r.Markdown, "pending") {
 		t.Error("the render lacks the integration task, or shows a task state")
+	}
+}
+
+// The evidence in progress.json is speca's to report: the render and the
+// tasks of specr's result carry none of it.
+func TestRender_ShowsNoEvidence(t *testing.T) {
+	root := newRepo(t)
+	dir := filepath.Join(root, ".specs", "01_test_feature")
+	without, code, _ := run(t, "--dir", root, "01_test_feature")
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, without.Error)
+	}
+	path := filepath.Join(dir, afspec.ProgressFileName)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["tasks"].([]any)[0].(map[string]any)["evidence"] = []any{map[string]any{"covers": "REQ-1.1",
+		"tests": []any{map[string]any{"test": "./p:TestA", "failed": map[string]any{"at": "2026-11-13T10:00:00Z"}}}}}
+	if b, err = json.MarshalIndent(m, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	with, code, _ := run(t, "--dir", root, "01_test_feature")
+	if code != cli.ExitOK {
+		t.Fatalf("code %d: %+v", code, with.Error)
+	}
+	if with.Result.Markdown != without.Result.Markdown || strings.Contains(with.Result.Markdown, "TestA") {
+		t.Error("the render changed with the evidence")
+	}
+	out, err := json.Marshal(with.Result.Tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "evidence") {
+		t.Errorf("specr's tasks carry evidence: %s", out)
 	}
 }
 

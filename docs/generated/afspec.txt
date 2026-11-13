@@ -66,6 +66,11 @@ const AffectedTestsBase = "{base}"
 const DefaultSpecDirName = ".specs"
     DefaultSpecDirName is where spec packages live under the repository root.
 
+const EvidenceTestsPlaceholder = "{tests}"
+    EvidenceTestsPlaceholder is the placeholder the evidence command holds
+    exactly once, as an argument of its own, where speca puts one argument per
+    test identifier.
+
 const ExtensionPrefix = "x-"
     ExtensionPrefix begins every extension key.
 
@@ -92,6 +97,11 @@ const TestSpecFileName = "test_spec.json"
 
 
 VARIABLES
+
+var ContractFiles = []string{RequirementsFileName, TasksFileName}
+    ContractFiles are the files a package's contract hash covers, in the order a
+    caller names them: what an implementer builds against and may not edit once
+    the package is active (ADR 26).
 
 var GenerationSteps = []GenerationStep{StepRequirements, StepTasks}
     GenerationSteps is the mandatory generation order.
@@ -129,6 +139,12 @@ func DecodeArtifact(step GenerationStep, content map[string]any) (any, error)
 func EstimateTokens(text string) int
     EstimateTokens estimates the token count of text using the chars/4
     heuristic: len(text) / 4 (integer floor division).
+
+func EvidenceTestsArgument(command string) int
+    EvidenceTestsArgument is the index, in the command split as the gate splits
+    it, of the one argument that is the placeholder {tests}: -1 when the command
+    cannot be split, has no such argument, or holds the placeholder anywhere
+    else too.
 
 func FormatValidationEntries(entries []ValidationEntry) string
     FormatValidationEntries renders validation entries as the feedback a
@@ -529,6 +545,41 @@ func (g *DependencyGraph) TopologicalSort() ([]string, error)
 
     Nodes are inferred from edges. An empty graph returns an empty slice.
 
+type EvidenceEntry struct {
+	// The id of a criterion the task owns, or for the integration task of an
+	// execution path.
+	Covers string `json:"covers" yaml:"covers" mapstructure:"covers"`
+
+	// The exemption: why the tests of this entry need not be seen failing first, the
+	// behaviour having existed before the task.
+	NoRed *string `json:"no_red,omitempty,omitzero" yaml:"no_red,omitempty" mapstructure:"no_red,omitempty"`
+
+	// Tests corresponds to the JSON schema field "tests".
+	Tests []EvidenceTest `json:"tests" yaml:"tests" mapstructure:"tests"`
+}
+
+type EvidenceRun struct {
+	// When the run was, RFC 3339.
+	At string `json:"at" yaml:"at" mapstructure:"at"`
+
+	// The git tree id of the working tree the run was on, as the gate computes it;
+	// absent outside a git work tree.
+	Tree *string `json:"tree,omitempty,omitzero" yaml:"tree,omitempty" mapstructure:"tree,omitempty"`
+}
+
+type EvidenceTest struct {
+	// The run in which speca saw the test fail; absent until then, and for an exempt
+	// test.
+	Failed *EvidenceRun `json:"failed,omitempty,omitzero" yaml:"failed,omitempty" mapstructure:"failed,omitempty"`
+
+	// The run in which speca saw the test pass when the task closed; absent until
+	// then.
+	Passed *EvidenceRun `json:"passed,omitempty,omitzero" yaml:"passed,omitempty" mapstructure:"passed,omitempty"`
+
+	// The test identifier, as the evidence command takes it.
+	Test string `json:"test" yaml:"test" mapstructure:"test"`
+}
+
 type ExecutionPath struct {
 	// Id corresponds to the JSON schema field "id".
 	Id string `json:"id" yaml:"id" mapstructure:"id"`
@@ -762,6 +813,13 @@ type PlannedTask struct {
     progress.
 
 type PrdFrontmatterV3Json struct {
+	// The SHA-256 of each contract file's canonical encoding, its extension keys left
+	// out, recorded when the package was activated. While either file no longer
+	// hashes to it, the package's tasks and its sealing are refused. Absent for a
+	// draft and for a package activated without it, whose tasks close without
+	// evidence.
+	ContractHash *PrdFrontmatterV3JsonContractHash `json:"contract_hash,omitempty,omitzero" yaml:"contract_hash,omitempty" mapstructure:"contract_hash,omitempty"`
+
 	// CreatedAt corresponds to the JSON schema field "created_at".
 	CreatedAt string `json:"created_at" yaml:"created_at" mapstructure:"created_at"`
 
@@ -797,6 +855,19 @@ type PrdFrontmatterV3Json struct {
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
 }
     Schema for the YAML frontmatter block in prd.md (format version 3)
+
+type PrdFrontmatterV3JsonContractHash struct {
+	// RequirementsJson corresponds to the JSON schema field "requirements.json".
+	RequirementsJson string `json:"requirements.json" yaml:"requirements.json" mapstructure:"requirements.json"`
+
+	// TasksJson corresponds to the JSON schema field "tasks.json".
+	TasksJson string `json:"tasks.json" yaml:"tasks.json" mapstructure:"tasks.json"`
+}
+    The SHA-256 of each contract file's canonical encoding, its extension
+    keys left out, recorded when the package was activated. While either file
+    no longer hashes to it, the package's tasks and its sealing are refused.
+    Absent for a draft and for a package activated without it, whose tasks close
+    without evidence.
 
 type PrdFrontmatterV3JsonIntentHash *string
 
@@ -961,14 +1032,18 @@ func (sm Smoke) PseudocodeText() string
 
 type Spec struct {
 	// PRD frontmatter fields
-	SpecID        string
-	SpecName      string
-	Title         string
-	Status        string
-	CreatedAt     string
-	Source        string
-	Supersedes    []string
-	IntentHash    *string
+	SpecID     string
+	SpecName   string
+	Title      string
+	Status     string
+	CreatedAt  string
+	Source     string
+	Supersedes []string
+	IntentHash *string
+	// ContractHash is the hash of each contract file recorded at activation,
+	// keyed by its file name, or nil for a package activated without one
+	// (contract.go).
+	ContractHash  map[string]string
 	SchemaVersion int
 	// Profile is the package's profile, ProfileFull or ProfileLite, or ""
 	// when the frontmatter names none, which is full (format v3 §4.1).
@@ -1035,6 +1110,15 @@ func (s *Spec) CompleteTaskStates(taskIDs []int) *ProgressV3Json
     CompleteTaskStates sets the named tasks to done, bypassing the state
     machine, and returns the progress to write. Unknown ids are skipped.
 
+func (s *Spec) ComputeContractHash() (map[string]string, error)
+    ComputeContractHash returns, for each of the ContractFiles, the hex SHA-256
+    of the file's canonical encoding (the encoding Save writes) with every
+    extension key left out. It hashes what the package holds, not the bytes on
+    disk, so that another encoding of the same content and an x- key, which the
+    format gives no meaning, leave the hash as it was.
+
+    Returns a SaveError when an artifact cannot be encoded.
+
 func (s *Spec) ComputeTraceability() TraceabilityMatrix
     ComputeTraceability derives the traceability matrix from the artifacts.
     Nothing is read from disk and nothing is stored, so the matrix cannot drift
@@ -1043,6 +1127,14 @@ func (s *Spec) ComputeTraceability() TraceabilityMatrix
     Covered is ComputeCoverage's answer for the entity. Owned reports whether
     a task lists the criterion or its requirement; a path is owned by the
     integration task when the package has one.
+
+func (s *Spec) ContractDrift() []string
+    ContractDrift names, in the order of ContractFiles, each contract file
+    that no longer hashes to the package's ContractHash, a file the hash has
+    no entry for among them. A file that holds a key its schema does not allow
+    differs too: the decode drops such a key, so the hash cannot see it, and an
+    activated contract holds none. It is nil for a package without a contract
+    hash, and for one whose files match it.
 
 func (s *Spec) GetTask(id int) (*PlannedTask, bool)
     GetTask returns a copy of the planned task with the given id, the
@@ -1102,6 +1194,13 @@ func (s *Spec) OpenTasks() []PlannedTask
     OpenTasks are the tasks of the plan that are pending or in progress,
     the derived integration task included, in plan order.
 
+func (s *Spec) Owned(id int) []string
+    Owned lists what the task with the given id answers for with evidence,
+    in the order of requirements.json: for a task of the plan, every criterion
+    its criteria name, a requirement id standing for all of that requirement's
+    criteria; for the integration task, every execution path. It is nil for an
+    id the plan does not have.
+
 func (s *Spec) Plan() []PlannedTask
     Plan is every task of the package in id order: the tasks of tasks.json, each
     with kind implement, then the integration task when the package has one,
@@ -1148,6 +1247,11 @@ func (s *Spec) RenderedBytes() []byte
     a package's files itself writes to RenderedFileName. The same package always
     gives the same bytes, whatever its progress.
 
+func (s *Spec) RequiresEvidence() bool
+    RequiresEvidence reports whether the package's tasks close on evidence:
+    it is active and was activated with a contract hash. A draft, and a package
+    activated before the hash was recorded, do not (ADR 26).
+
 func (s *Spec) ResetTaskStates(taskIDs []int) *ProgressV3Json
     ResetTaskStates sets the named tasks to pending, bypassing the state
     machine, and returns the progress to write. Unknown ids are skipped.
@@ -1176,6 +1280,12 @@ func (s *Spec) Supersede(supersedingSpecID, dir string) (*Spec, error)
     and persists the updated spec to disk. Returns a new Spec copy.
 
     Returns a LifecycleError if the spec is not in the sealed state.
+
+func (s *Spec) TaskEvidence(id int) []EvidenceEntry
+    TaskEvidence is a copy of the evidence progress.json holds for the task with
+    the given id, sharing nothing with the package: for each criterion the task
+    owns (for the integration task, each execution path), the tests that cover
+    it and the runs speca recorded of them. It is nil for a task with none.
 
 func (s *Spec) TaskState(id int) TaskState
     TaskState is the state of the task with the given id: its entry in the
@@ -1221,6 +1331,12 @@ func (s *Spec) ValidateStructured() map[string]any
 
     Schema errors carry "artifact", "message" and optionally "path"; integrity
     errors carry "check" and "message".
+
+func (s *Spec) WithTaskEvidence(id int, entries []EvidenceEntry) *ProgressV3Json
+    WithTaskEvidence is the progress of the package with the evidence of the
+    task with the given id replaced by entries (none when entries is empty),
+    and every other task as it is: a new artifact, so the receiver's progress is
+    not touched. An id the plan does not have changes nothing.
 
 type SpecError struct {
 	Msg string
@@ -1307,6 +1423,13 @@ const (
 	TaskKindIntegration TaskKind = "integration"
 )
 type TaskProgress struct {
+	// In a package that requires evidence, the tests that cover each criterion the
+	// task owns (for the integration task, each execution path), with the run in
+	// which speca saw each fail and the run in which it saw each pass. Written by
+	// speca <package> --task N --evidence and by the close; absent when the task has
+	// none.
+	Evidence []EvidenceEntry `json:"evidence,omitempty,omitzero" yaml:"evidence,omitempty" mapstructure:"evidence,omitempty"`
+
 	// Id corresponds to the JSON schema field "id".
 	Id int `json:"id" yaml:"id" mapstructure:"id"`
 
@@ -1366,6 +1489,13 @@ type TestCommands struct {
 
 	// AllTests corresponds to the JSON schema field "all_tests".
 	AllTests string `json:"all_tests" yaml:"all_tests" mapstructure:"all_tests"`
+
+	// The command that runs the tests it is given, with the placeholder {tests}
+	// exactly once as an argument of its own, which speca replaces with one argument
+	// per test identifier; it prints one JSON line per test, {"test": <identifier>,
+	// "status": pass|fail|error|missing|skipped}. Without it, a repository whose
+	// --dir holds a go.mod uses the runner built into speca.
+	EvidenceTests *string `json:"evidence_tests,omitempty,omitzero" yaml:"evidence_tests,omitempty" mapstructure:"evidence_tests,omitempty"`
 
 	// Linter corresponds to the JSON schema field "linter".
 	Linter string `json:"linter" yaml:"linter" mapstructure:"linter"`

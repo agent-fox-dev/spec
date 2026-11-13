@@ -40,13 +40,16 @@ func init() {
 
 		// tasks.v3.json
 		reflect.TypeOf(TasksV3Json{}):  {"$schema", "spec_id", "spec_name", "schema_version", "test_commands", "dependencies", "tasks"},
-		reflect.TypeOf(TestCommands{}): {"all_tests", "linter", "spec_tests", "affected_tests"},
+		reflect.TypeOf(TestCommands{}): {"all_tests", "linter", "spec_tests", "affected_tests", "evidence_tests"},
 		reflect.TypeOf(Dependency{}):   {"spec", "reason"},
 		reflect.TypeOf(Task{}):         {"id", "title", "criteria", "steps", "touches", "depends_on", "done_when", "takes_handoffs"},
 
 		// progress.v3.json
 		reflect.TypeOf(ProgressV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "updated_at", "tasks"},
-		reflect.TypeOf(TaskProgress{}):   {"id", "state"},
+		reflect.TypeOf(TaskProgress{}):   {"id", "state", "evidence"},
+		reflect.TypeOf(EvidenceEntry{}):  {"covers", "no_red", "tests"},
+		reflect.TypeOf(EvidenceTest{}):   {"test", "failed", "passed"},
+		reflect.TypeOf(EvidenceRun{}):    {"at", "tree"},
 	}
 
 	// Fields omitted when nil. Everything else is always written, so a nil
@@ -82,7 +85,12 @@ func init() {
 		reflect.TypeOf(TestCommands{}): {
 			"spec_tests":     true,
 			"affected_tests": true,
+			"evidence_tests": true,
 		},
+		reflect.TypeOf(TaskProgress{}):  {"evidence": true},
+		reflect.TypeOf(EvidenceEntry{}): {"no_red": true},
+		reflect.TypeOf(EvidenceTest{}):  {"failed": true, "passed": true},
+		reflect.TypeOf(EvidenceRun{}):   {"tree": true},
 		reflect.TypeOf(Task{}): {
 			"touches":        true,
 			"depends_on":     true,

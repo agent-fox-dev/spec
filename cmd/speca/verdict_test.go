@@ -165,6 +165,7 @@ func TestVerdict_KeepsTheCrossSpecFindingsOfThePackage(t *testing.T) {
 // warning, and the verdict is the package's own.
 func TestVerdict_WithAnUnreadableSpecRoot(t *testing.T) {
 	root := newRepo(t) // 09 depends on 08, which the root lacks: a cross-spec error, were the root read
+	setEvidenceCommand(t, pkgDir(root, "09_agent_mode"), "run-tests {tests}")
 	missing := filepath.Join(t.TempDir(), "missing")
 
 	env, code, _ := run(t, "--specs-dir", missing, pkgDir(root, "09_agent_mode"), "--validate")
@@ -183,6 +184,7 @@ func TestVerdict_WithAnUnreadableSpecRoot(t *testing.T) {
 func TestVerdict_LeavesOutASiblingThatDoesNotLoad(t *testing.T) {
 	root := newRepo(t)
 	setDependencies(t, pkgDir(root, "09_agent_mode"))
+	setEvidenceCommand(t, pkgDir(root, "09_agent_mode"), "run-tests {tests}")
 	copyDir(t, fixture("malformed_yaml"), pkgDir(root, "05_broken"))
 	if err := os.Remove(filepath.Join(pkgDir(root, "05_broken"), "prd.md")); err != nil {
 		t.Fatal(err)
@@ -209,6 +211,59 @@ func TestVerdict_IntentDrift(t *testing.T) {
 		if _, raw := rawRun(t, "--dir", root, ref, "--validate"); raw["intent_drift"] != nil {
 			t.Errorf("%s: intent_drift = %s; want it absent", ref, raw["intent_drift"])
 		}
+	}
+}
+
+// The verdict warns, low, of a package that requires evidence or will once it
+// is activated, when nothing can run its tests: no evidence command and no
+// go.mod in --dir. The warning leaves valid as it is.
+func TestVerdict_WarnsOfAPackageWithNoEvidenceRunner(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, root string) string
+		gomod bool
+		warn  bool
+	}{
+		"a draft":                {func(t *testing.T, root string) string { return addPackage(t, root, "03_a", "03", "a") }, false, true},
+		"a draft in a Go module": {func(t *testing.T, root string) string { return addPackage(t, root, "03_a", "03", "a") }, true, false},
+		"a draft naming evidence_tests": {func(t *testing.T, root string) string {
+			dir := addPackage(t, root, "03_a", "03", "a")
+			setEvidenceCommand(t, dir, "run-tests {tests}")
+			return dir
+		}, false, false},
+		"active with a contract hash":    {func(t *testing.T, root string) string { return contractPackage(t, root, "03_a", "03", "a") }, false, true},
+		"active without a contract hash": {func(t *testing.T, root string) string { return activePackage(t, root, "03_a", "03", "a") }, false, false},
+		"sealed": {func(t *testing.T, root string) string {
+			return packageWith(t, root, "03_a", "03", "a", "sealed")
+		}, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepo(t)
+			tc.setup(t, root)
+			if tc.gomod {
+				writeFile(t, filepath.Join(root, "go.mod"), "module example.com/m\n")
+			}
+			env, _ := succeeds(t, root, "03", "--validate")
+			var found *envelope.Warning
+			for i := range env.Warnings {
+				if env.Warnings[i].Code == "evidence_command_missing" {
+					found = &env.Warnings[i]
+				}
+			}
+			if (found != nil) != tc.warn {
+				t.Fatalf("warnings %+v; want evidence_command_missing: %v", env.Warnings, tc.warn)
+			}
+			if found != nil {
+				saysAll(t, []string{"--validate"}, found.Message, "evidence_tests", "tasks.json")
+				if found.Severity != "low" {
+					t.Errorf("severity %q; want low", found.Severity)
+				}
+				writeFile(t, filepath.Join(root, "go.mod"), "module example.com/m\n")
+				_, without := succeeds(t, root, "03", "--validate")
+				if *env.Result.Valid != *without.Valid {
+					t.Errorf("valid %v with the warning, %v without it; want the same", *env.Result.Valid, *without.Valid)
+				}
+			}
+		})
 	}
 }
 

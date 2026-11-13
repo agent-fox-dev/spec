@@ -4,6 +4,13 @@ package afspec
 
 // Schema for the YAML frontmatter block in prd.md (format version 3)
 type PrdFrontmatterV3Json struct {
+	// The SHA-256 of each contract file's canonical encoding, its extension keys left
+	// out, recorded when the package was activated. While either file no longer
+	// hashes to it, the package's tasks and its sealing are refused. Absent for a
+	// draft and for a package activated without it, whose tasks close without
+	// evidence.
+	ContractHash *PrdFrontmatterV3JsonContractHash `json:"contract_hash,omitempty,omitzero" yaml:"contract_hash,omitempty" mapstructure:"contract_hash,omitempty"`
+
 	// CreatedAt corresponds to the JSON schema field "created_at".
 	CreatedAt string `json:"created_at" yaml:"created_at" mapstructure:"created_at"`
 
@@ -37,6 +44,18 @@ type PrdFrontmatterV3Json struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title" yaml:"title" mapstructure:"title"`
+}
+
+// The SHA-256 of each contract file's canonical encoding, its extension keys left
+// out, recorded when the package was activated. While either file no longer hashes
+// to it, the package's tasks and its sealing are refused. Absent for a draft and
+// for a package activated without it, whose tasks close without evidence.
+type PrdFrontmatterV3JsonContractHash struct {
+	// RequirementsJson corresponds to the JSON schema field "requirements.json".
+	RequirementsJson string `json:"requirements.json" yaml:"requirements.json" mapstructure:"requirements.json"`
+
+	// TasksJson corresponds to the JSON schema field "tasks.json".
+	TasksJson string `json:"tasks.json" yaml:"tasks.json" mapstructure:"tasks.json"`
 }
 
 type PrdFrontmatterV3JsonIntentHash *string

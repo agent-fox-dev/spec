@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -300,6 +303,27 @@ func TestStatus_ActivatesADraft(t *testing.T) {
 	}
 	if spec := loadSpec(t, dir); spec.Status != "active" || spec.IntentHash == nil || *spec.IntentHash != r.IntentHash {
 		t.Errorf("on disk: status %q, intent_hash %v", spec.Status, spec.IntentHash)
+	}
+	// The contract hash is the hash of each contract file as the activation
+	// wrote it, the package holding no extension key.
+	onDiskHash := loadSpec(t, dir).ContractHash
+	if len(onDiskHash) != 2 {
+		t.Fatalf("contract_hash on disk %v; want one entry for each contract file", onDiskHash)
+	}
+	for _, file := range []string{afspec.RequirementsFileName, afspec.TasksFileName} {
+		b, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf("%x", sha256.Sum256(b)); onDiskHash[file] != want {
+			t.Errorf("contract_hash[%s] = %q; want the SHA-256 of the file, %q", file, onDiskHash[file], want)
+		}
+	}
+	if !maps.Equal(r.ContractHash, onDiskHash) {
+		t.Errorf("result.contract_hash %v; want the hash on disk, %v", r.ContractHash, onDiskHash)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "prd.md")), "contract_hash:\n  requirements.json: \""+onDiskHash[afspec.RequirementsFileName]+"\"\n  tasks.json: \"") {
+		t.Errorf("prd.md does not hold contract_hash as a mapping beside intent_hash:\n%s", readFile(t, filepath.Join(dir, "prd.md")))
 	}
 }
 
@@ -708,6 +732,10 @@ func TestStatus_ADryRunActivationReportsTheHash(t *testing.T) {
 	}
 	if !maps.Equal(before, treeBytes(t, dir)) {
 		t.Error("prd.md, or another file, changed (bytes or modification time)")
+	}
+	_, activated := succeeds(t, root, "09", "--status", "active")
+	if len(r.ContractHash) != 2 || !maps.Equal(r.ContractHash, activated.ContractHash) {
+		t.Errorf("the dry run reported contract_hash %v; the activation recorded %v", r.ContractHash, activated.ContractHash)
 	}
 }
 

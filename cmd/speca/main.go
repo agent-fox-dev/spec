@@ -14,6 +14,8 @@
 //	speca --migrate [--all] [--dry-run]
 //	speca <spec> --gate task|full [--base <commit>] [--clean-env] [--timeout <duration>]
 //	speca <spec> --gate-report [--since <commit>]
+//	speca <spec> --task N --evidence <file> [--dry-run] [--timeout <duration>]
+//	speca <spec> --verify-evidence [--timeout <duration>]
 //
 // It takes one input, a reference to a spec package, and writes exactly one
 // JSON object to stdout: the package's state, its verdict under --validate,
@@ -31,7 +33,11 @@
 // removes its test_spec.json. The gate form runs the package's linter and
 // all_tests commands and the gate report sums the gates that ran; neither
 // writes under --dir, and what the gate keeps (the commands' logs, the passes
-// it reuses, the run log) goes to the user's state directory. No form makes a
+// it reuses, the run log) goes to the user's state directory. In a package
+// activated with a contract hash, the evidence form runs a task's tests and
+// writes their failing runs to progress.json, a close runs them again and
+// writes their passing runs, and the verify form runs every recorded test
+// again and writes nothing to the package (ADR 26). No form makes a
 // model or network call or reads a credential. Its siblings are spec, which writes a package from an idea, and
 // specr, which renders one as Markdown.
 package main
@@ -69,13 +75,18 @@ const description = "Reports the state of a specification package: its lifecycle
 	"file. With --migrate it converts a version 2 package to version 3 in place. With --gate task or " +
 	"full it runs the package's linter, then its all_tests command, with no shell, and answers with one " +
 	"verdict, pass, fail or not_run, reusing a pass recorded for the same tree; with --gate-report it sums " +
-	"the package's gate runs since a commit. Without these it changes nothing. " + cli.SiblingCommands
+	"the package's gate runs since a commit. In a package activated with a contract hash, the hash of its " +
+	"requirements.json and tasks.json, a task closes on evidence: with --task N --evidence <file> it runs the " +
+	"task's tests and records the run in which each failed, --state done runs them again and closes the task " +
+	"only when each passes, and --verify-evidence runs every recorded test of every done task again and " +
+	"answers with one verdict; while the contract files no longer match the hash, the package's tasks and its " +
+	"sealing are refused. Without these it changes nothing. " + cli.SiblingCommands
 
 // inputDescription is what --schema says the one positional input may be.
 const inputDescription = "Exactly one reference to a spec package: a path to its directory or to a file " +
 	"inside it, or a directory name, spec number or spec name under the spec root " +
 	"(16_indexed_code_search, 16, indexed_code_search). None with --list or --next, and none with --render or --migrate for every package; " +
-	"--gate and --gate-report need one."
+	"--gate, --gate-report, --evidence and --verify-evidence need one."
 
 const usage = `speca — report the state of a specification package
 
@@ -93,6 +104,8 @@ Usage:
   speca --migrate [--all] [--dry-run] [flags]
   speca <spec> --gate task|full [--base <commit>] [--clean-env] [--timeout <duration>] [flags]
   speca <spec> --gate-report [--since <commit>] [flags]
+  speca <spec> --task N --evidence <file> [--dry-run] [--timeout <duration>] [flags]
+  speca <spec> --verify-evidence [--timeout <duration>] [flags]
 
 The spec is one reference to a package, tried in this order:
   a path to the package directory, or to a file inside it
@@ -142,6 +155,36 @@ Forms:
                            Claiming a task that is in_progress is refused, which
                            is how a second agent learns it is taken (calls made
                            at the same moment are not locked against each other)
+                           In a package that requires evidence (active, with a
+                           contract_hash), done closes a task only when every
+                           criterion it owns (for the integration task, every
+                           path) has an evidence entry, every test of it has a
+                           failing run or is exempt (not for the integration
+                           task), and every test, run now, passes; the passing
+                           runs are written with the state. Otherwise the call
+                           is refused at stage evidence; --force closes without
+                           the checks (a high task_evidence_forced warning).
+                           Each exempt entry of a task that closes is a low
+                           evidence_no_red warning. A move to pending removes
+                           the task's evidence. While the package's contract
+                           files no longer match its contract_hash, every call
+                           of the task form is refused (stage status)
+  speca <spec> --task N --evidence <file>
+                           the evidence form: run every test of the evidence
+                           file once, through the package's evidence_tests or,
+                           in a Go module that names none, through go test, and
+                           record in progress.json, for task N in progress of a
+                           package that requires evidence, the run in which
+                           each test failed, before the task is implemented. A
+                           test every entry of which has no_red, and every test
+                           of the integration task, must pass or fail and gets
+                           no failing run; any other test must fail, or already
+                           have failed. The file is {"evidence": [{"covers",
+                           "tests", "no_red"}]}, at most 1 MiB, each covers a
+                           criterion (or path) task N owns. A refusal (stage
+                           evidence) names every offending test or covers; the
+                           run's log goes to the state directory (a low
+                           evidence_log_not_written warning when it cannot)
   speca <spec> --status S [--by <spec>]
                            the status form: move the package through its
                            lifecycle. S is active, sealed, archived or
@@ -218,7 +261,9 @@ Forms:
                            system git configuration, GIT_TERMINAL_PROMPT=0
     --timeout <duration>   with --gate: how long one command may run (default
                            20m); it is then ended with every process it
-                           started, and the gate fails
+                           started, and the gate fails. With --evidence,
+                           --verify-evidence and --state done, how long the
+                           tests may run
   speca <spec> --gate-report [--since <commit>]
                            the gate report: the package's gate runs that ended
                            in pass or fail, counted when the commit checked
@@ -231,9 +276,17 @@ Forms:
                            base of HEAD and the base branch (the one
                            refs/remotes/origin/HEAD names, else main). It
                            writes nothing
-    --dry-run              with the task, status, render or migrate form, run
-                           every check and report what would change; write
-                           nothing
+  speca <spec> --verify-evidence
+                           the verify form: run every test recorded as evidence
+                           for every done task once, on the tree as it is, and
+                           answer in evidence_check with one verdict, pass,
+                           fail or not_run (no done task has evidence, or the
+                           tests could not be run), and each test's status,
+                           whatever the package's status; it writes nothing to
+                           the package
+    --dry-run              with the task, evidence, status, render or migrate
+                           form, run every check (and the tests the call
+                           runs) and report what would change; write nothing
     --force                with the task form and done or pending, set a state
                            the machine refuses, through the library's own
                            bypasses (a high task_state_forced warning names
@@ -244,7 +297,10 @@ Forms:
                            tasks_open warning) and that no key the schema does
                            not know would be dropped (a high spec_invalid
                            warning). It skips nothing else, and cannot set
-                           in_progress or dropped
+                           in_progress or dropped. In a package that requires
+                           evidence, with done it also closes without the
+                           checks of the evidence (a high task_evidence_forced
+                           warning); it never gets past a changed contract
 
 Output is one JSON object on stdout; next names the call to make after this
 one. --schema prints the flags and the shape of the output as JSON Schema.
@@ -294,13 +350,21 @@ Exit codes:
      fails only when the package cannot be loaded; the gate report fails when
      the package or the run log cannot be read (stage load), or the commits
      since --since cannot be listed (stage git)
+     The evidence form, and a close in a package that requires evidence, are
+     refused at stage evidence when a test breaks its rule, a criterion has no
+     entry, the task does not take evidence, or the tests cannot be run, and
+     at stage status when the contract files no longer match the
+     contract_hash; nothing is written. The verify form exits 0 whatever its
+     verdict, and fails only when the package cannot be loaded
   2  usage error — the reference names no package, or two; two operations in
      one call; a flag that cannot hold; an id the plan does not have; --status
      draft, or a --by that names the package itself, no package or one with
      its spec_id; a --gate other than task or full, or a --timeout that is not
      a duration greater than zero; a --since that names no commit, no --since
-     and no base branch, or a --gate-report outside a git work tree. Nothing
-     was written
+     and no base branch, or a --gate-report outside a git work tree; an
+     --evidence without --task and one task id, with --state, or whose file is
+     missing, over 1 MiB or not an evidence file; a --timeout with a form that
+     runs no tests. Nothing was written
 
 Examples:
   speca 16
@@ -322,6 +386,8 @@ Examples:
   speca 16 --gate task --timeout 10m
   speca 16 --gate full --clean-env
   speca 16 --gate-report --since 6b61d8e
+  speca 16 --task 2 --evidence map.json
+  speca 16 --verify-evidence
 
 Flags:
 `
@@ -350,12 +416,21 @@ type options struct {
 	// The gate report.
 	gateReport bool
 	since      givenFlag
-	schema     bool
-	version    bool
+	// The evidence form.
+	evidence givenFlag
+	// The verify form.
+	verifyEvidence bool
+	schema         bool
+	version        bool
 }
 
-// taskForm reports whether the call asks for the form that changes tasks.
-func (o *options) taskForm() bool { return len(o.tasks) > 0 || o.state != "" }
+// taskForm reports whether the call asks for the form that changes tasks. A
+// call with --evidence asks for the evidence form instead, which takes --task.
+func (o *options) taskForm() bool { return !o.evidence.given && (len(o.tasks) > 0 || o.state != "") }
+
+// evidenceForm reports whether the call asks for the evidence form. An empty
+// --evidence asks for it, so that it is refused where it stands.
+func (o *options) evidenceForm() bool { return o.evidence.given }
 
 // statusForm reports whether the call asks for the form that changes the
 // package's lifecycle status. --by alone asks for it, so that it is refused
@@ -368,23 +443,25 @@ func (o *options) gateForm() bool { return o.gate.given }
 
 func (o *options) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.strictHandoffs, "strict-handoffs", false, "with --validate, report each handoff another package addresses to this one that no task takes as an error (handoff_not_taken) instead of a warning; it stores nothing")
-	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call")
+	fs.BoolVar(&o.validate, "validate", false, "give the format's full verdict on the package: the schemas, the cross-file rules C1 to C8 and the cross-spec rules that concern it, each finding naming its rule; a package that does not validate is still a successful call. A draft, or a package that requires evidence, whose tests nothing can run (no evidence_tests and no go.mod in --dir) is a low evidence_command_missing warning")
 	fs.BoolVar(&o.list, "list", false, "list every package under the spec root, in number order, each with its status, whether it validates, its task counts and its next task; takes no input")
 	fs.BoolVar(&o.next, "next", false, "name the package to implement now: the first package under the spec root, in dependency order with ties broken by number, that is open (draft or active, with a task pending or in progress) and whose every dependency is finished; all_done says when nothing is left, waiting what cannot start and why; a dependency cycle fails the call; takes no input")
 	fs.BoolVar(&o.all, "all", false, "with --list, also list the packages under archive/, marked archived; with --render or --migrate and no input, also render or migrate them")
 	fs.Var(&o.tasks, "task", "the task form: move these tasks to --state, every one or none; a task id, several ids comma-separated or repeated, next (the task to work on now) or all (every task not already in that state and not dropped)")
-	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped")
+	fs.StringVar(&o.state, "state", "", "the task form: the state to move the tasks to: pending, in_progress, done or dropped. In a package that requires evidence, done runs each task's tests and closes it only on its evidence (refused at stage evidence otherwise; each exempt entry is a low evidence_no_red warning), and pending removes the task's evidence")
 	fs.Var(&o.status, "status", "the status form: move the package to this lifecycle status: active (computes the intent hash), sealed, archived or superseded (which needs --by); archived and superseded packages are moved under archive/. A move the lifecycle does not allow is refused, with the moves that are allowed")
 	fs.Var(&o.by, "by", "with --status superseded, the package that replaces this one, named as the input is; it must be a draft, active or sealed package, and when it can be saved its supersedes list gets this package's id")
-	fs.BoolVar(&o.force, "force", false, "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; with the status form (--status), skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not know would be dropped; it skips nothing else, and a high task_state_forced, spec_invalid or tasks_open warning says what it skipped")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, the status form (--status), the render form (--render) or the migrate form (--migrate), run every check and report what would change, and write nothing")
+	fs.BoolVar(&o.force, "force", false, "with the task form and the state done or pending, set a state the task state machine refuses, through the library's own bypasses, and skip the guard on keys the schema does not know; with done in a package that requires evidence, close the task without the checks of its evidence (a high task_evidence_forced warning); with the status form (--status), skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not know would be dropped; it skips nothing else, and a high task_state_forced, spec_invalid or tasks_open warning says what it skipped")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "with the task form, the evidence form (--evidence), the status form (--status), the render form (--render) or the migrate form (--migrate), run every check, and the tests the call runs, and report what would change, and write nothing")
 	fs.BoolVar(&o.render, "render", false, "the render form: write the package's spec.md, the render every save writes beside its artifacts, whatever its status, and no other file; each package is reported written, unchanged or failed")
 	fs.BoolVar(&o.migrate, "migrate", false, "the migrate form: convert a version 2 package to version 3 in place, whatever its status, by the rules of format v3 §13; a version 3 package is left alone; each package is reported written, unchanged or failed")
 	fs.Var(&o.gate, "gate", "the gate form: run the package's linter command, then its all_tests command, from its test_commands, in --dir, each started directly with no shell, and answer with one verdict, pass, fail or not_run; task or full, the gate's level, which is part of the answer; whatever the package's status, and writing nothing under --dir")
 	fs.BoolVar(&o.cleanEnv, "clean-env", false, "with --gate, run every command with an empty temporary HOME, no global or system git configuration and GIT_TERMINAL_PROMPT=0, every other variable inherited; the directory is removed when the gate ends")
 	fs.Var(&o.base, "base", "with --gate task, the commit the task's change started from, which replaces {base} in the package's affected_tests command (default HEAD)")
 	o.timeout.value = gate.DefaultTimeout
-	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails")
+	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails; with --evidence, --verify-evidence and --state done, how long the package's tests may run")
+	fs.Var(&o.evidence, "evidence", "the evidence form, with --task and one task id: run every test of this evidence file once and record, for a task in progress of a package that requires evidence, the run in which each test failed before the task is implemented; the file is {\"evidence\": [{\"covers\": <criterion id, or path id for the integration task>, \"tests\": [<identifier>...], \"no_red\": <reason, for an exemption>}]}, at most 1 MiB; a refusal is at stage evidence, and a state directory that cannot be written is a low evidence_log_not_written warning")
+	fs.BoolVar(&o.verifyEvidence, "verify-evidence", false, "the verify form: run every test recorded as evidence for every done task of the package once, on the tree as it is, and answer with one verdict, pass, fail or not_run, and each test's status; whatever the package's status, and writing nothing to it")
 	fs.BoolVar(&o.gateReport, "gate-report", false, "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing")
 	fs.Var(&o.since, "since", "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
@@ -458,17 +535,13 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			hint = gateHint
 		}
 	} else {
-		for _, f := range []struct {
-			name  string
-			given bool
-		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given}} {
-			if f.given {
-				errs = append(errs, fmt.Errorf("%s goes with --gate: it applies to the gate form", f.name))
-			}
-		}
-		if o.base.given {
-			errs = append(errs, errors.New("--base goes with --gate task: it names the commit a task's affected tests start from"))
-		}
+		errs = append(errs, o.gateFlagErrors()...)
+	}
+	if o.evidenceForm() {
+		errs = append(errs, o.evidenceErrors(ref)...)
+	}
+	if o.verifyEvidence {
+		errs = append(errs, o.verifyErrors(ref)...)
 	}
 	if o.gateReport {
 		errs = append(errs, o.gateReportErrors(ref)...)
@@ -478,7 +551,7 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	if o.timeout.given && o.timeout.value <= 0 {
 		errs = append(errs, fmt.Errorf("--timeout %s: a command's time limit must be greater than zero", o.timeout.value))
 	}
-	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate {
+	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate && !o.evidenceForm() {
 		for _, f := range []struct {
 			name  string
 			given bool
@@ -492,6 +565,93 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		return nil
 	}
 	return usageInfo(errors.Join(errs...), hint)
+}
+
+// gateFlagErrors are the faults of a call that is not the gate form and gives
+// a flag of the gate's: --clean-env and --base go with --gate alone, and
+// --timeout with the forms that run a package's tests.
+func (o *options) gateFlagErrors() []error {
+	var errs []error
+	if o.cleanEnv {
+		errs = append(errs, errors.New("--clean-env goes with --gate: it applies to the gate form"))
+	}
+	if o.timeout.given && !o.runsTests() {
+		errs = append(errs, errors.New("--timeout goes with --gate, --evidence, --verify-evidence or --state done: it limits how long a package's tests may run"))
+	}
+	if o.base.given {
+		errs = append(errs, errors.New("--base goes with --gate task: it names the commit a task's affected tests start from"))
+	}
+	return errs
+}
+
+// runsTests reports whether the call may run a package's tests other than
+// through the gate, and so takes --timeout: the evidence form, and the task
+// form closing tasks, which in a package that requires evidence runs their
+// tests (the flags are checked before the package is read).
+func (o *options) runsTests() bool {
+	return o.evidenceForm() || o.verifyEvidence || (o.taskForm() && o.state == string(afspec.TaskStateDone))
+}
+
+// verifyErrors are the faults of a call that asks for the verify form: it
+// needs a package and is the only operation of the call.
+func (o *options) verifyErrors(ref string) []error {
+	var errs []error
+	if ref == "" {
+		errs = append(errs, errors.New("--verify-evidence needs a package: name the package whose evidence to check"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the task form (--task, --state)", o.taskForm()}, {"the status form (--status, --by)", o.statusForm()},
+		{"--evidence", o.evidenceForm()}, {"--gate", o.gateForm()}, {"--gate-report", o.gateReport},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--verify-evidence and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
+}
+
+// evidenceErrors are the faults of a call that asks for the evidence form: it
+// needs a package, a file, and --task with exactly one task id; it moves no
+// state, has nothing for --force to override, and is the only operation of
+// the call.
+func (o *options) evidenceErrors(ref string) []error {
+	var errs []error
+	if ref == "" {
+		errs = append(errs, errors.New("--evidence needs a package: name the package whose task the evidence is for"))
+	}
+	if strings.TrimSpace(o.evidence.value) == "" {
+		errs = append(errs, errors.New("--evidence is empty: name the evidence file"))
+	}
+	switch spec, err := parseTaskSpec(o.tasks); {
+	case len(o.tasks) == 0:
+		errs = append(errs, errors.New("--evidence needs --task with one task id: the task the evidence is for"))
+	case err != nil:
+		errs = append(errs, err)
+	case spec.keyword != "" || len(spec.ids) != 1:
+		errs = append(errs, fmt.Errorf("--evidence takes exactly one task id with --task, not %s: evidence is recorded for one task at a time", strings.Join(o.tasks, ",")))
+	}
+	if o.state != "" {
+		errs = append(errs, errors.New("--evidence and --state are two operations: record the evidence, then move the task"))
+	}
+	if o.force {
+		errs = append(errs, errors.New("--force has no effect with --evidence: no test's rule can be skipped when its runs are recorded"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the status form (--status, --by)", o.statusForm()}, {"--gate", o.gateForm()}, {"--gate-report", o.gateReport},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--evidence and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
 }
 
 // nextErrors are the faults of a call that asks for --next: it takes no input
@@ -681,7 +841,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 	ref = strings.TrimSpace(ref)
-	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() && !o.gateReport {
+	if ref == "" && !o.list && !o.next && !o.render && !o.migrate && !o.gateForm() && !o.gateReport && !o.verifyEvidence && !o.evidenceForm() {
 		fs.Usage()
 		if cli.IsTerminal(stdout) {
 			return cli.ExitUsage
@@ -753,9 +913,9 @@ func describe(fs *flag.FlagSet) selfDescription {
 		// classified input, so those envelope fields never appear.
 		Result: cli.EnvelopeDocument(Result{}, "side_effects", "input", "model", "usage"),
 		ExitCodes: map[int]string{
-			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, what --migrate did to the package, the gate's verdict whatever it is (pass, fail or not_run), or the gate report",
-			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read, or the commits since --since could not be listed (stage git)",
-			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --base that names no commit or comes without --gate task, a package with affected_tests outside a git work tree at the task level, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree; nothing was written",
+			cli.ExitOK:     "reported: the state of a package, its verdict (a package that does not validate is reported too), the list of packages, the package to implement next (or that every package is done, or that none can start), the tasks moved, the status changed, what --render did to spec.md, what --migrate did to the package, the gate's verdict whatever it is (pass, fail or not_run), the gate report, the evidence recorded by --evidence, or the verdict of --verify-evidence whatever it is",
+			cli.ExitFailed: "failed: the package could not be loaded, or the spec root --list reads could not be read; or the task form was refused after the package was read (the task state machine does not allow a move, the package can no longer take a write, a save would delete keys the schema does not know) or its write failed; the stage is named in error, and a refusal's result holds the package as it is on disk; or the status form was refused after the packages were read, with no result (the lifecycle does not allow the move, an activation has no intent or does not validate, a task is open, keys would be dropped, the replacing package is superseded or archived, the archive destination is taken) or its write failed; if only the move under archive/ failed, the status is written, the result says so and the call is resumable; or the render form's package could not be loaded or its spec.md could not be written, or the migrate form's package could not be read, converted or written, or the spec root a sweep reads could not be read, or the dependencies of the packages --next reads form a cycle, or the package the gate or the gate report reads could not be loaded, or the run log could not be read, or the commits since --since could not be listed (stage git); or the evidence form, or a close in a package that requires evidence, was refused (stage evidence: a test broke its rule, a criterion has no entry, the task takes no evidence, the tests could not be run; stage status: the contract files no longer match the contract_hash), writing nothing",
+			cli.ExitUsage:  "usage error: the call is refused before anything is written: the reference names no package or two, two operations in one call, a flag that cannot hold, an id the plan does not have, --status draft, or a --by that names the package itself, no package or one with its spec_id, a --gate other than task or full, a --timeout that is not a duration greater than zero, a --base that names no commit or comes without --gate task, a package with affected_tests outside a git work tree at the task level, a --since that names no commit, no --since and no base branch, or a --gate-report outside a git work tree, an --evidence without --task and exactly one task id or with --state, an evidence file that is missing, over 1 MiB or not one, --verify-evidence with another form, or a --timeout with a form that runs no tests; nothing was written",
 		},
 	}
 }

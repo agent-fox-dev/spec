@@ -525,6 +525,19 @@ func TestRenderTasks_ListsTheAffectedTestsCommand(t *testing.T) {
 	}
 }
 
+// The render lists the evidence command with the other test commands, after
+// the affected-tests command.
+func TestRenderTasks_ListsTheEvidenceCommand(t *testing.T) {
+	s := loadFixture(t, fixtureValidSpec)
+	affected, evidence := "make test-affected BASE={base}", "run-tests {tests}"
+	s.Tasks.TestCommands.AffectedTests, s.Tasks.TestCommands.EvidenceTests = &affected, &evidence
+	out := s.RenderTasks()
+	line := "- **evidence_tests:** `run-tests {tests}`\n"
+	if !strings.Contains(out, line) || strings.Index(out, line) < strings.Index(out, "- **affected_tests:**") {
+		t.Errorf("the render has no line for evidence_tests after affected_tests:\n%s", out)
+	}
+}
+
 // The whole render lists the package's own handoffs after its requirements
 // and each task's takes; a package with neither renders as it did.
 func TestRender_ListsThePackagesOwnHandoffs(t *testing.T) {

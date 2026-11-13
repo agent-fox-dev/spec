@@ -182,6 +182,8 @@ func (sc *statusCall) preview() *Result {
 		if sc.target == string(afspec.PrdFrontmatterV3JsonStatusActive) {
 			hash, _ := afspec.ComputeIntentHash(after.PRDBody) // the check found the intent
 			after.IntentHash = &hash
+			// The package is the one the checks read, so its contract encodes.
+			after.ContractHash, _ = after.ComputeContractHash()
 		}
 		changes = append(changes, envelope.Change{Kind: "status", From: sc.spec.Status, To: sc.target})
 	}

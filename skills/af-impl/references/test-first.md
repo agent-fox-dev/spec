@@ -32,7 +32,32 @@ integration task writes, so name the path.
 
 Run the new and extended tests and watch them fail **before** any
 implementation file changes; keep the command and the failure, because
-you report them. If the tests cannot compile until the task adds a
+you report them.
+
+**In a package that requires evidence** (`speca <package>` reports
+`evidence_required: true`), `speca` sees the failure, not you. Write an
+evidence file, outside the repository, that maps every criterion the task
+owns (for the integration task, every path) to the tests that cover it, and
+record it before any implementation file changes:
+
+```sh
+speca <package> --task <N> --evidence "${TMPDIR:-/tmp}/af-impl-<NN>-task-<N>-evidence.json"
+```
+
+The file is `{"evidence": [{"covers": "REQ-1.1", "tests": ["./pkg:TestName"]}]}`.
+A Go test is `<package>:<Test>` or `<package>:<Test>/<subtest>`, the package
+as `go test` takes it; another project names the identifiers its
+`evidence_tests` command takes. `speca` runs the tests, refuses a test that
+does not fail, and records each failing run in `progress.json`. A refusal
+names each test and why: one that passes needs its entry's `no_red` if the
+behaviour already existed, and one that does not build is not a failing
+test. Fix the tests and record again. The close (`--state done`) runs them
+again and closes the task only when every criterion has an entry, every
+test has a failing run or a `no_red`, and every test passes; a refused
+close is a failed attempt of the task, never answered with `--force`. A
+refusal at stage `status` naming `requirements.json` or `tasks.json` means
+the contract changed after activation: restore it, and record a divergence
+as a deviation in an ADR, never in the spec. If the tests cannot compile until the task adds a
 signature, add the minimal stub first (empty body, zero value, "not
 implemented"), then see them fail on behaviour, not on a compile error.
 An `unwanted` criterion's test asserts the outcome its `contract` names,
@@ -45,7 +70,9 @@ implementation proves nothing about it: when a red first run is
 impossible (a pure refactor, a docs-only change, a check whose behaviour
 the code and an existing test already deliver), say so as a test-first
 deviation, with the existing test that covers it, rather than burying it
-in notes.
+in notes. In a package that requires evidence the deviation is declared in
+the evidence file itself, as the entry's `no_red` with the reason, and the
+close raises a low `evidence_no_red` warning for it.
 
 ## The integration task
 
@@ -86,4 +113,7 @@ PATH-1 → cmd/search/main_test.go:TestSearch_IndexesAndFinds
 
 Name a table test's case after the colon where it helps. Write the intent
 of the check's `pseudocode` into the test's name and file, never the id
-itself.
+itself. In a package that requires evidence, the lines are the task's
+`evidence` in `speca <package>`'s report, each `covers` against its tests,
+copied rather than written from memory. The integration task records its
+paths' smoke tests with `--evidence` too; they need not fail first.

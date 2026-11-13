@@ -89,6 +89,7 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 		"task": "", "state": "string", "force": "boolean", "dry-run": "boolean", "status": "string", "by": "string",
 		"render": "boolean", "migrate": "boolean",
 		"gate": "string", "clean-env": "boolean", "timeout": "string", "gate-report": "boolean", "since": "string",
+		"evidence": "string", "verify-evidence": "boolean",
 	} {
 		if flags[name].Description == "" || typ != "" && flags[name].Type != typ {
 			t.Errorf("flag %s = %+v; want a described %s", name, flags[name], typ)
@@ -116,15 +117,17 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 
 	result := doc.Result.Properties["result"].Properties
 	for _, name := range []string{"spec_dir", "spec_id", "status", "valid", "failing_rules", "intent_drift", "tasks", "task_counts",
-		"next_task", "allowed_status", "depends_on", "dependents", "validation", "traceability", "packages", "changes", "dry_run"} {
+		"next_task", "allowed_status", "depends_on", "dependents", "validation", "traceability", "packages", "changes", "dry_run",
+		"contract_hash", "contract_drift", "evidence_required", "evidence_log", "evidence_check"} {
 		if d, _ := result[name]["description"].(string); d == "" {
 			t.Errorf("result.%s is not described", name)
 		}
 	}
 	// The gate's verdict and the gate report, every field of each described.
 	for name, fields := range map[string][]string{
-		"gate":        {"level", "verdict", "clean_env", "reason", "reused", "commands", "seconds", "slowest"},
-		"gate_report": {"since", "full", "task", "baseline_full_seconds", "last_full_seconds", "slowest"},
+		"gate":           {"level", "verdict", "clean_env", "reason", "reused", "commands", "seconds", "slowest"},
+		"gate_report":    {"since", "full", "task", "baseline_full_seconds", "last_full_seconds", "slowest"},
+		"evidence_check": {"verdict", "reason", "tasks", "log"},
 	} {
 		if d, _ := result[name]["description"].(string); d == "" {
 			t.Errorf("result.%s is not described", name)
@@ -136,6 +139,29 @@ func TestSchema_DescribesTheFormsFlagsAndResult(t *testing.T) {
 			}
 		}
 		describedEverywhere(t, "result."+name, props)
+	}
+	// A task's evidence, in the report's tasks, is described to the run.
+	items, _ := result["tasks"]["items"].(map[string]any)
+	taskProps, _ := items["properties"].(map[string]any)
+	evidenceProp, _ := taskProps["evidence"].(map[string]any)
+	if d, _ := evidenceProp["description"].(string); d == "" {
+		t.Errorf("result.tasks[].evidence is not described: %v", taskProps["evidence"])
+	}
+	evidenceItems, _ := evidenceProp["items"].(map[string]any)
+	describedEverywhere(t, "result.tasks[].evidence[]", evidenceItems["properties"].(map[string]any))
+	// The evidence form and the close name their stage and their warnings.
+	var all strings.Builder
+	all.WriteString(doc.Description)
+	for _, f := range flags {
+		all.WriteString(" " + f.Description)
+	}
+	for _, d := range doc.ExitCodes {
+		all.WriteString(" " + d)
+	}
+	for _, want := range []string{"stage evidence", "evidence_no_red", "task_evidence_forced", "evidence_command_missing", "evidence_log_not_written", "--verify-evidence", "--evidence"} {
+		if !strings.Contains(all.String(), want) {
+			t.Errorf("the self-description does not say %q", want)
+		}
 	}
 	if d := flags["render"].Description; !strings.Contains(d, "spec.md") {
 		t.Errorf("--render is described as %q, which does not say it writes spec.md", d)

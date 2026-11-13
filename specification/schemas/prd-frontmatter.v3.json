@@ -11,6 +11,16 @@
     "status": { "type": "string", "enum": ["draft", "active", "sealed", "superseded", "archived"] },
     "created_at": { "type": "string", "minLength": 1 },
     "intent_hash": { "type": ["string", "null"] },
+    "contract_hash": {
+      "type": "object",
+      "description": "The SHA-256 of each contract file's canonical encoding, its extension keys left out, recorded when the package was activated. While either file no longer hashes to it, the package's tasks and its sealing are refused. Absent for a draft and for a package activated without it, whose tasks close without evidence.",
+      "properties": {
+        "requirements.json": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "tasks.json": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "required": ["requirements.json", "tasks.json"],
+      "additionalProperties": false
+    },
     "schema_version": { "type": "integer", "const": 3 },
     "profile": { "type": "string", "enum": ["full", "lite"], "description": "The package's profile. A lite package has at most three requirements and no execution path, so no smoke check and no integration task. Absent means full." },
     "steering_version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },

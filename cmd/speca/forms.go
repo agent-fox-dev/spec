@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,6 +58,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if o.gateReport {
 		return gateReport(c, dir)
 	}
+	if o.verifyEvidence {
+		return executeVerify(c, dir)
+	}
 	if o.render {
 		return renderOne(c, dir)
 	}
@@ -65,6 +69,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	}
 	if o.statusForm() {
 		return executeStatus(c, dir)
+	}
+	if o.evidenceForm() {
+		return executeEvidence(c, dir)
 	}
 	if o.taskForm() {
 		return executeTask(c, dir)
@@ -114,6 +121,12 @@ func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
 	if spec.IntentHash != nil && *spec.IntentHash != "" {
 		r.IntentHash = *spec.IntentHash
 	}
+	if spec.ContractHash != nil {
+		r.ContractHash = maps.Clone(spec.ContractHash)
+		drift := len(spec.ContractDrift()) > 0
+		r.ContractDrift = &drift
+	}
+	r.EvidenceRequired = spec.RequiresEvidence()
 	if len(spec.Supersedes) > 0 {
 		r.Supersedes = slices.Clone(spec.Supersedes)
 	}

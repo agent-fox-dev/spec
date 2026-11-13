@@ -35,14 +35,18 @@ const (
 // are stored as pointers to the auto-generated types.
 type Spec struct {
 	// PRD frontmatter fields
-	SpecID        string
-	SpecName      string
-	Title         string
-	Status        string
-	CreatedAt     string
-	Source        string
-	Supersedes    []string
-	IntentHash    *string
+	SpecID     string
+	SpecName   string
+	Title      string
+	Status     string
+	CreatedAt  string
+	Source     string
+	Supersedes []string
+	IntentHash *string
+	// ContractHash is the hash of each contract file recorded at activation,
+	// keyed by its file name, or nil for a package activated without one
+	// (contract.go).
+	ContractHash  map[string]string
 	SchemaVersion int
 	// Profile is the package's profile, ProfileFull or ProfileLite, or ""
 	// when the frontmatter names none, which is full (format v3 §4.1).
@@ -192,6 +196,7 @@ func LoadSpec(dir string) (*Spec, error) {
 		Source:          fm.Source,
 		Supersedes:      fm.Supersedes,
 		IntentHash:      fm.IntentHash,
+		ContractHash:    fm.ContractHash,
 		SchemaVersion:   fm.SchemaVersion,
 		Profile:         fm.Profile,
 		SteeringVersion: fm.SteeringVersion,
@@ -461,7 +466,8 @@ func (s *Spec) saveToDisk(dir string) error {
 
 // progressArtifact is the progress file as a save writes it: the package's
 // identity, UpdatedAt, and one entry per task of the plan and for the
-// integration task, in id order, with the state the Spec carries for each. An
+// integration task, in id order, with the state and the evidence the Spec
+// carries for each. An
 // entry that names no task of the package is not written.
 func (s *Spec) progressArtifact() *ProgressV3Json {
 	p := &ProgressV3Json{
@@ -473,7 +479,7 @@ func (s *Spec) progressArtifact() *ProgressV3Json {
 		Tasks:         []TaskProgress{},
 	}
 	for _, t := range s.Plan() {
-		p.Tasks = append(p.Tasks, TaskProgress{Id: t.Id, State: t.State})
+		p.Tasks = append(p.Tasks, TaskProgress{Id: t.Id, State: t.State, Evidence: s.TaskEvidence(t.Id)})
 	}
 	return p
 }

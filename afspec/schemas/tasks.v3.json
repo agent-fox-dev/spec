@@ -31,7 +31,8 @@
         "all_tests": { "type": "string", "minLength": 1 },
         "linter": { "type": "string", "minLength": 1 },
         "spec_tests": { "type": "string", "minLength": 1 },
-        "affected_tests": { "type": "string", "minLength": 1, "description": "The command that runs the tests a change can affect, with the placeholder {base} exactly once for the commit the change starts from." }
+        "affected_tests": { "type": "string", "minLength": 1, "description": "The command that runs the tests a change can affect, with the placeholder {base} exactly once for the commit the change starts from." },
+        "evidence_tests": { "type": "string", "minLength": 1, "description": "The command that runs the tests it is given, with the placeholder {tests} exactly once as an argument of its own, which speca replaces with one argument per test identifier; it prints one JSON line per test, {\"test\": <identifier>, \"status\": pass|fail|error|missing|skipped}. Without it, a repository whose --dir holds a go.mod uses the runner built into speca." }
       },
       "required": ["all_tests", "linter"],
       "patternProperties": { "^x-": { "description": "An extension key: a team's own metadata, any value, kept by every save. The format gives it no meaning." } },

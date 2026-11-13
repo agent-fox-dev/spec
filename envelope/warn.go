@@ -41,6 +41,13 @@ const (
 	WarnSupersedesNotRecorded WarnCode = "supersedes_not_recorded"
 	// speca's gate form.
 	WarnGateNotRecorded WarnCode = "gate_not_recorded"
+	// speca's verdict, of a package whose tests nothing can run.
+	WarnEvidenceCommandMissing WarnCode = "evidence_command_missing"
+	// speca's evidence form and the close of a task on evidence.
+	WarnEvidenceLogNotWritten WarnCode = "evidence_log_not_written"
+	// speca's close of a task on evidence.
+	WarnEvidenceNoRed      WarnCode = "evidence_no_red"
+	WarnTaskEvidenceForced WarnCode = "task_evidence_forced"
 	// specr's codes.
 	WarnSpecInvalid   WarnCode = "spec_invalid"
 	WarnSectionAbsent WarnCode = "section_absent"

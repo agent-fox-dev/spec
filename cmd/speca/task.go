@@ -60,6 +60,10 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if refusal != nil {
 		return c.refused(dir, spec, refusal)
 	}
+	evidenceLog, refusal := c.closeOnEvidence(name, spec, &moves)
+	if refusal != nil {
+		return c.refused(dir, spec, refusal)
+	}
 
 	warnings := moves.warnings
 	validity := spec.Validate()
@@ -103,6 +107,7 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	r := c.reportWith(dir, spec, validity)
 	r.taskForm = true
 	r.DryRun = c.opts.dryRun
+	r.EvidenceLog = evidenceLog
 	for _, m := range moves.moves {
 		r.Changes = append(r.Changes, envelope.Change{Kind: "task", ID: m.id, From: string(m.from), To: string(m.to), Forced: m.forced})
 	}
@@ -179,6 +184,8 @@ func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
 		return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
 			Message: fmt.Sprintf("%s is active and its ## Intent section no longer matches its intent_hash (or is gone): "+
 				"the library refuses every write until the intent matches its hash again", name)}
+	case len(specpkg.ContractDrift(spec)) > 0:
+		return contractDriftRefusal(name, specpkg.ContractDrift(spec), "its tasks can change")
 	}
 	switch spec.Status {
 	case string(afspec.PrdFrontmatterV3JsonStatusSealed),
@@ -189,6 +196,22 @@ func unwritable(name string, spec *afspec.Spec) *cli.ErrorInfo {
 	}
 	return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
 		Message: fmt.Sprintf("%s has the status %q, which the format does not define: only a draft, or an active package whose intent has not drifted, takes a change", name, spec.Status)}
+}
+
+// contractDriftRefusal is the refusal of a call on an active package whose
+// contract files no longer match the contract_hash it was activated with,
+// naming the files that differ. There is no call that accepts a changed
+// contract, so it has no fix_hint, and --force does not override it (ADR 26).
+func contractDriftRefusal(name string, files []string, what string) *cli.ErrorInfo {
+	verb := "no longer matches"
+	if len(files) > 1 {
+		verb = "no longer match"
+	}
+	list := strings.Join(files, " and ")
+	return &cli.ErrorInfo{Stage: "status", Category: envelope.CategoryLifecycle,
+		Message: fmt.Sprintf("%s is active and its contract has changed since it was activated: %s %s its contract_hash; "+
+			"restore %s to the contract the package was activated with before %s, or write a package that supersedes this one",
+			name, list, verb, list, what)}
 }
 
 // checkNamedTasks refuses a --task that names what the plan cannot supply: an

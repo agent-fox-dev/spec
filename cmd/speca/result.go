@@ -34,6 +34,9 @@ type Result struct {
 	// taskForm marks the result of the task form, whose summary names the
 	// changes.
 	taskForm bool
+	// evidenceForm marks the result of the evidence form, whose summary says
+	// whose evidence it recorded.
+	evidenceForm bool
 	// renderForm marks the result of the render form, whose summary names what
 	// it did to spec.md and which suggests nothing.
 	renderForm bool
@@ -81,6 +84,10 @@ func (r *Result) Summary() string {
 		return r.gateSummary()
 	case r.GateReport != nil:
 		return r.gateReportSummary()
+	case r.EvidenceCheck != nil:
+		return r.evidenceCheckSummary()
+	case r.evidenceForm:
+		return r.evidenceSummary()
 	case r.taskForm:
 		return r.taskSummary()
 	case r.renderForm:
@@ -172,6 +179,41 @@ func (r *Result) taskSummary() string {
 		s += " (dry run, nothing written)"
 	}
 	return s
+}
+
+// evidenceSummary says whose evidence the evidence form recorded, and how many
+// tests it holds; and, under --dry-run, that nothing was written.
+func (r *Result) evidenceSummary() string {
+	id := r.Changes[0].ID
+	tests := 0
+	for _, t := range r.Tasks {
+		if t.ID == id {
+			for _, e := range t.Evidence {
+				tests += len(e.Tests)
+			}
+		}
+	}
+	s := fmt.Sprintf("%s: %s evidence of task %d recorded, %d tests", tool, r.dirName(), id, tests)
+	if r.DryRun {
+		s += " (dry run, nothing written)"
+	}
+	return s
+}
+
+// evidenceCheckSummary gives the verify form's verdict, and how many tests of
+// how many tasks it ran, or why it ran none.
+func (r *Result) evidenceCheckSummary() string {
+	ch := r.EvidenceCheck
+	if ch.Verdict == envelope.GateVerdictNotRun {
+		return fmt.Sprintf("%s: %s evidence not checked: %s", tool, r.dirName(), ch.Reason)
+	}
+	tests := 0
+	for _, task := range ch.Tasks {
+		for _, e := range task.Evidence {
+			tests += len(e.Tests)
+		}
+	}
+	return fmt.Sprintf("%s: %s evidence %s, %d tests of %d done tasks", tool, r.dirName(), ch.Verdict, tests, len(ch.Tasks))
 }
 
 // renderSummary counts what the render form did to the packages' spec.md:
@@ -279,7 +321,7 @@ func (r *Result) Next() []cli.Next {
 	switch {
 	case r.nextSet:
 		return r.callNext
-	case r.renderForm, r.migrateForm, r.Gate != nil, r.GateReport != nil:
+	case r.renderForm, r.migrateForm, r.Gate != nil, r.GateReport != nil, r.EvidenceCheck != nil:
 		return nil
 	case r.nextForm:
 		return r.nextNext()

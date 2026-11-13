@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,51 @@ func TestValidate_AcceptsEveryValidFixture(t *testing.T) {
 			result := loadFixture(t, fixture).Validate()
 			if !result.Valid {
 				t.Fatalf("Validate reported %d errors on a valid fixture: %v", len(result.Errors), result.Errors)
+			}
+		})
+	}
+}
+
+// The evidence of a task and the contract hash are optional: a package
+// validates with or without them, and one that breaks their shape does not.
+func TestValidate_TakesTheEvidenceAndTheContractHashAsOptional(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	withEvidence := func(s *Spec) {
+		s.Progress = s.CompleteTaskStates(nil)
+		s.Progress.Tasks[0].Evidence = []EvidenceEntry{{Covers: "REQ-1.1", Tests: []EvidenceTest{{Test: "./p:TestA", Failed: &EvidenceRun{At: "2026-11-13T10:00:00Z"}}}}}
+	}
+	for name, tc := range map[string]struct {
+		edit  func(s *Spec)
+		valid bool
+	}{
+		"neither":            {func(*Spec) {}, true},
+		"evidence on a task": {withEvidence, true},
+		"a contract hash of both files": {func(s *Spec) {
+			s.ContractHash = map[string]string{RequirementsFileName: hash, TasksFileName: hash}
+		}, true},
+		"a contract hash without tasks.json": {func(s *Spec) { s.ContractHash = map[string]string{RequirementsFileName: hash} }, false},
+		"a contract hash with a third file": {func(s *Spec) {
+			s.ContractHash = map[string]string{RequirementsFileName: hash, TasksFileName: hash, "prd.md": hash}
+		}, false},
+		"a contract hash of 63 digits": {func(s *Spec) {
+			s.ContractHash = map[string]string{RequirementsFileName: hash[1:], TasksFileName: hash}
+		}, false},
+		"an evidence entry without covers": {func(s *Spec) { withEvidence(s); s.Progress.Tasks[0].Evidence[0].Covers = "" }, false},
+		"an evidence entry without tests":  {func(s *Spec) { withEvidence(s); s.Progress.Tasks[0].Evidence[0].Tests = nil }, false},
+		"a test identifier with a line break": {func(s *Spec) {
+			withEvidence(s)
+			s.Progress.Tasks[0].Evidence[0].Tests[0].Test = "a\nb"
+		}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := loadFixture(t, fixtureValidSpec)
+			tc.edit(s)
+			v := s.Validate()
+			if v.Valid != tc.valid {
+				t.Fatalf("valid %v, errors %v; want valid %v", v.Valid, v.Errors, tc.valid)
+			}
+			if !tc.valid && !hasCheck(v, "json_schema") {
+				t.Errorf("errors %v; want a json_schema error", v.Errors)
 			}
 		})
 	}
@@ -737,6 +783,45 @@ func TestValidate_RefusesAnUnknownProfile(t *testing.T) {
 	}
 	if !found || v.Valid {
 		t.Errorf("valid %v, errors %+v; want a json_schema error on prd.md naming profile", v.Valid, v.Errors)
+	}
+}
+
+// An evidence command holds the placeholder {tests} exactly once, as an
+// argument of its own once the command is split as the gate splits it; an
+// empty one is a schema error.
+func TestValidate_ChecksThePlaceholderOfTheEvidenceCommand(t *testing.T) {
+	for name, tc := range map[string]struct {
+		command string
+		check   string
+	}{
+		"an argument of its own": {"run-tests {tests}", ""},
+		"quoted, still its own":  {`run-tests "{tests}"`, ""},
+		"none":                   {"run-tests", "evidence_tests_placeholder"},
+		"twice":                  {"run-tests {tests} {tests}", "evidence_tests_placeholder"},
+		"inside an argument":     {"run-tests --only={tests}", "evidence_tests_placeholder"},
+		"an open quote":          {`run-tests "{tests}`, "evidence_tests_placeholder"},
+		"empty":                  {"", "json_schema"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := loadFixture(t, fixtureValidSpec)
+			s.Tasks.TestCommands.EvidenceTests = &tc.command
+			v := s.Validate()
+			if tc.check == "" {
+				if !v.Valid {
+					t.Fatalf("errors %v; want valid", v.Errors)
+				}
+				return
+			}
+			if v.Valid || len(v.Errors) != 1 || v.Errors[0].Check != tc.check {
+				t.Fatalf("errors %v; want exactly one %s", v.Errors, tc.check)
+			}
+			e := v.Errors[0]
+			if tc.check == "evidence_tests_placeholder" &&
+				(e.Artifact != TasksFileName || e.EntityID != "test_commands.evidence_tests" ||
+					!strings.Contains(e.Message, strconv.Quote(tc.command)) || !strings.Contains(e.Message, "{tests}")) {
+				t.Errorf("error %+v; want it on tasks.json, test_commands.evidence_tests, naming the command and {tests}", e)
+			}
+		})
 	}
 }
 

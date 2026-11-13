@@ -2,6 +2,8 @@ package afspec
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,34 @@ func TestMarshalJSON_OrdersFieldsBySchema(t *testing.T) {
 	// Inside a criterion the check comes last, after the contract.
 	if strings.Index(out, `"contract": "a non-nil`) > strings.Index(out, `"check": {`) {
 		t.Error("the check is written before the contract")
+	}
+}
+
+// A save keeps the evidence command, written last among the test commands.
+func TestSave_KeepsTheEvidenceCommandLastAmongTheTestCommands(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	s := loadFixture(t, dir)
+	spec, affected, evidence := "go test ./a/...", "make test-affected BASE={base}", "run-tests {tests}"
+	tc := &s.Tasks.TestCommands
+	tc.SpecTests, tc.AffectedTests, tc.EvidenceTests = &spec, &affected, &evidence
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, TasksFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	last := -1
+	for _, key := range []string{`"all_tests"`, `"linter"`, `"spec_tests"`, `"affected_tests"`, `"evidence_tests": "run-tests {tests}"`} {
+		i := strings.Index(out, key)
+		if i < last {
+			t.Errorf("%s is missing or out of order in:\n%s", key, out)
+		}
+		last = i
+	}
+	if got := loadFixture(t, dir).Tasks.TestCommands.EvidenceTests; got == nil || *got != evidence {
+		t.Errorf("evidence_tests read back as %v; want %q", got, evidence)
 	}
 }
 

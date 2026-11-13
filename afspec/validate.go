@@ -14,6 +14,8 @@ import (
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/agent-fox-dev/spec/internal/gate"
 )
 
 // ValidationResult holds the results of spec validation. Valid is true if and
@@ -214,17 +216,18 @@ const (
 // spurious additionalProperties errors. The optional four are omitted when
 // empty, matching what renderPRD writes.
 type prdFrontmatterForSchema struct {
-	SpecID          string   `json:"spec_id"`
-	SpecName        string   `json:"spec_name"`
-	Title           string   `json:"title"`
-	Status          string   `json:"status"`
-	CreatedAt       string   `json:"created_at"`
-	IntentHash      *string  `json:"intent_hash"`
-	SchemaVersion   int      `json:"schema_version"`
-	Profile         string   `json:"profile,omitempty"`
-	SteeringVersion string   `json:"steering_version,omitempty"`
-	Source          string   `json:"source,omitempty"`
-	Supersedes      []string `json:"supersedes,omitempty"`
+	SpecID          string            `json:"spec_id"`
+	SpecName        string            `json:"spec_name"`
+	Title           string            `json:"title"`
+	Status          string            `json:"status"`
+	CreatedAt       string            `json:"created_at"`
+	IntentHash      *string           `json:"intent_hash"`
+	ContractHash    map[string]string `json:"contract_hash,omitempty"`
+	SchemaVersion   int               `json:"schema_version"`
+	Profile         string            `json:"profile,omitempty"`
+	SteeringVersion string            `json:"steering_version,omitempty"`
+	Source          string            `json:"source,omitempty"`
+	Supersedes      []string          `json:"supersedes,omitempty"`
 }
 
 // legacyVersionEntry describes a spec still written in an older format
@@ -279,6 +282,7 @@ func (s *Spec) ValidateSchema() ValidationResult {
 		Status:          s.Status,
 		CreatedAt:       s.CreatedAt,
 		IntentHash:      s.IntentHash,
+		ContractHash:    s.ContractHash,
 		SchemaVersion:   s.SchemaVersion,
 		Profile:         s.Profile,
 		SteeringVersion: s.SteeringVersion,
@@ -446,6 +450,7 @@ func (s *Spec) ValidateCrossFile() ValidationResult {
 	errors = append(errors, s.checkC7()...)
 	errors = append(errors, s.checkC8()...)
 	errors = append(errors, s.checkAffectedTestsBase()...)
+	errors = append(errors, s.checkEvidenceTestsPlaceholder()...)
 
 	return ValidationResult{
 		Valid:    len(errors) == 0,
@@ -472,6 +477,51 @@ func (s *Spec) checkAffectedTestsBase() []ValidationEntry {
 				*c, n, AffectedTestsBase)}}
 	}
 	return nil
+}
+
+// EvidenceTestsPlaceholder is the placeholder the evidence command holds
+// exactly once, as an argument of its own, where speca puts one argument per
+// test identifier.
+const EvidenceTestsPlaceholder = "{tests}"
+
+// checkEvidenceTestsPlaceholder: an evidence command, split as the gate
+// splits a command, has exactly one argument that is the placeholder, and the
+// placeholder appears nowhere else in it. A command that cannot be split has
+// no such argument.
+func (s *Spec) checkEvidenceTestsPlaceholder() []ValidationEntry {
+	c := s.Tasks.TestCommands.EvidenceTests
+	if c == nil || *c == "" {
+		return nil
+	}
+	if EvidenceTestsArgument(*c) >= 0 {
+		return nil
+	}
+	return []ValidationEntry{{Category: "integrity", Check: "evidence_tests_placeholder", Artifact: TasksFileName,
+		EntityID: "test_commands.evidence_tests",
+		Message: fmt.Sprintf("test_commands.evidence_tests is %q: %s must appear exactly once, as an argument of its own, "+
+			"where speca puts one argument per test identifier", *c, EvidenceTestsPlaceholder)}}
+}
+
+// EvidenceTestsArgument is the index, in the command split as the gate splits
+// it, of the one argument that is the placeholder {tests}: -1 when the command
+// cannot be split, has no such argument, or holds the placeholder anywhere
+// else too.
+func EvidenceTestsArgument(command string) int {
+	argv, err := gate.Split(command)
+	if err != nil {
+		return -1
+	}
+	at, seen := -1, 0
+	for i, a := range argv {
+		seen += strings.Count(a, EvidenceTestsPlaceholder)
+		if a == EvidenceTestsPlaceholder {
+			at = i
+		}
+	}
+	if seen != 1 {
+		return -1
+	}
+	return at
 }
 
 // The checks of the cross-spec handoff rules, and of the warning that a

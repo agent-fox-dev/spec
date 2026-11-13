@@ -270,6 +270,8 @@ must all be `done` first):
    say so as a test-first deviation, with the existing test that covers it,
    rather than burying it in notes.
 
+   With `evidence_required`, `speca` records that run (test-first.md).
+
    Write down, for the commit, which test covers each criterion the task owns.
 5. **Implement** the `steps`, in order, until the tests pass. Follow the
    conventions the survey recorded and the files you are editing already

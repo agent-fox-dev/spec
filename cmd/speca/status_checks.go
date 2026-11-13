@@ -92,14 +92,17 @@ func (sc *statusCall) checkActivation() *cli.ErrorInfo {
 	return nil
 }
 
-// checkSealing refuses a package whose intent has drifted, which --force does
-// not override: Save refuses every write of such a package, and sealing it
+// checkSealing refuses a package whose intent or contract has drifted, which
+// --force does not override: Save refuses every write of such a package, and sealing it
 // would make the drift permanent. A task still open (an optional one too)
 // refuses it unless --force is given.
 func (sc *statusCall) checkSealing() *cli.ErrorInfo {
 	if specpkg.IntentDrift(sc.spec) {
 		return lifecycleRefusal(fmt.Sprintf("%s cannot be sealed: its ## Intent has changed since it was activated (or is gone); "+
 			"restore the intent that was activated, or write a new package that supersedes this one", sc.name), nil)
+	}
+	if files := specpkg.ContractDrift(sc.spec); len(files) > 0 {
+		return contractDriftRefusal(sc.name, files, "it can be sealed")
 	}
 	open := openTasks(sc.spec)
 	if len(open) == 0 {

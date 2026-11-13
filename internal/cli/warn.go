@@ -44,6 +44,10 @@ const (
 	WarnTasksOpen                = envelope.WarnTasksOpen
 	WarnSupersedesNotRecorded    = envelope.WarnSupersedesNotRecorded
 	WarnGateNotRecorded          = envelope.WarnGateNotRecorded
+	WarnEvidenceCommandMissing   = envelope.WarnEvidenceCommandMissing
+	WarnEvidenceLogNotWritten    = envelope.WarnEvidenceLogNotWritten
+	WarnEvidenceNoRed            = envelope.WarnEvidenceNoRed
+	WarnTaskEvidenceForced       = envelope.WarnTaskEvidenceForced
 )
 
 // warnStages is the one place a code's stage is decided.
@@ -83,6 +87,10 @@ var warnStages = map[WarnCode]string{
 	WarnTasksOpen:                "status",
 	WarnSupersedesNotRecorded:    "status",
 	WarnGateNotRecorded:          "gate",
+	WarnEvidenceCommandMissing:   "validate",
+	WarnEvidenceLogNotWritten:    "evidence",
+	WarnEvidenceNoRed:            "task",
+	WarnTaskEvidenceForced:       "task",
 }
 
 // WarnStage returns the stage a code is recorded against, and whether the

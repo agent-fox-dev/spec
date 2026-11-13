@@ -2,6 +2,41 @@
 
 package afspec
 
+type EvidenceEntry struct {
+	// The id of a criterion the task owns, or for the integration task of an
+	// execution path.
+	Covers string `json:"covers" yaml:"covers" mapstructure:"covers"`
+
+	// The exemption: why the tests of this entry need not be seen failing first, the
+	// behaviour having existed before the task.
+	NoRed *string `json:"no_red,omitempty,omitzero" yaml:"no_red,omitempty" mapstructure:"no_red,omitempty"`
+
+	// Tests corresponds to the JSON schema field "tests".
+	Tests []EvidenceTest `json:"tests" yaml:"tests" mapstructure:"tests"`
+}
+
+type EvidenceRun struct {
+	// When the run was, RFC 3339.
+	At string `json:"at" yaml:"at" mapstructure:"at"`
+
+	// The git tree id of the working tree the run was on, as the gate computes it;
+	// absent outside a git work tree.
+	Tree *string `json:"tree,omitempty,omitzero" yaml:"tree,omitempty" mapstructure:"tree,omitempty"`
+}
+
+type EvidenceTest struct {
+	// The run in which speca saw the test fail; absent until then, and for an exempt
+	// test.
+	Failed *EvidenceRun `json:"failed,omitempty,omitzero" yaml:"failed,omitempty" mapstructure:"failed,omitempty"`
+
+	// The run in which speca saw the test pass when the task closed; absent until
+	// then.
+	Passed *EvidenceRun `json:"passed,omitempty,omitzero" yaml:"passed,omitempty" mapstructure:"passed,omitempty"`
+
+	// The test identifier, as the evidence command takes it.
+	Test string `json:"test" yaml:"test" mapstructure:"test"`
+}
+
 // Schema for progress.json, the state of a package's tasks (format version 3).
 // Written by the tools, never part of the contract.
 type ProgressV3Json struct {
@@ -26,6 +61,13 @@ type ProgressV3Json struct {
 }
 
 type TaskProgress struct {
+	// In a package that requires evidence, the tests that cover each criterion the
+	// task owns (for the integration task, each execution path), with the run in
+	// which speca saw each fail and the run in which it saw each pass. Written by
+	// speca <package> --task N --evidence and by the close; absent when the task has
+	// none.
+	Evidence []EvidenceEntry `json:"evidence,omitempty,omitzero" yaml:"evidence,omitempty" mapstructure:"evidence,omitempty"`
+
 	// Id corresponds to the JSON schema field "id".
 	Id int `json:"id" yaml:"id" mapstructure:"id"`
 

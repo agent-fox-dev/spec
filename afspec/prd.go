@@ -2,6 +2,8 @@ package afspec
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -10,15 +12,18 @@ import (
 // prdFrontmatter is the internal representation used for YAML parsing.
 // It uses go-yaml struct tags for parsing and maps to the Spec struct fields.
 type prdFrontmatter struct {
-	SpecID        string   `yaml:"spec_id"`
-	SpecName      string   `yaml:"spec_name"`
-	Title         string   `yaml:"title"`
-	Status        string   `yaml:"status"`
-	CreatedAt     string   `yaml:"created_at"`
-	Source        string   `yaml:"source"`
-	Supersedes    []string `yaml:"supersedes"`
-	IntentHash    *string  `yaml:"intent_hash"`
-	SchemaVersion int      `yaml:"schema_version"`
+	SpecID     string   `yaml:"spec_id"`
+	SpecName   string   `yaml:"spec_name"`
+	Title      string   `yaml:"title"`
+	Status     string   `yaml:"status"`
+	CreatedAt  string   `yaml:"created_at"`
+	Source     string   `yaml:"source"`
+	Supersedes []string `yaml:"supersedes"`
+	IntentHash *string  `yaml:"intent_hash"`
+	// ContractHash is read as a map, so that a key the schema does not allow
+	// reaches the validation rather than being dropped by the decode.
+	ContractHash  map[string]string `yaml:"contract_hash"`
+	SchemaVersion int               `yaml:"schema_version"`
 	// Profile is full or lite, or "" when the frontmatter names none, which
 	// is full.
 	Profile string `yaml:"profile"`
@@ -164,6 +169,12 @@ func renderPRD(s *Spec) []byte {
 	b.WriteString(renderYAMLNullableString(s.IntentHash))
 	b.WriteByte('\n')
 
+	if s.ContractHash != nil {
+		b.WriteString("contract_hash:")
+		b.WriteString(renderYAMLMap(s.ContractHash))
+		b.WriteByte('\n')
+	}
+
 	b.WriteString("schema_version: ")
 	b.WriteString(fmt.Sprintf("%d", s.SchemaVersion))
 	b.WriteByte('\n')
@@ -219,6 +230,36 @@ func renderYAMLList(items []string) string {
 		quoted[i] = fmt.Sprintf("%q", item)
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// plainYAMLKey matches a mapping key YAML reads as itself without quotes.
+var plainYAMLKey = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
+
+// renderYAMLMap renders a map of strings as a block mapping, one key per
+// indented line in key order, each value double-quoted and a key quoted
+// where YAML would not read it as itself; an empty map is rendered inline as {}. The result starts with the
+// newline that follows the mapping's own key.
+func renderYAMLMap(m map[string]string) string {
+	if len(m) == 0 {
+		return " {}"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString("\n  ")
+		if plainYAMLKey.MatchString(k) {
+			b.WriteString(k)
+		} else {
+			b.WriteString(renderYAMLString(k))
+		}
+		b.WriteString(": ")
+		b.WriteString(renderYAMLString(m[k]))
+	}
+	return b.String()
 }
 
 // renderYAMLNullableString renders a nullable string. nil is rendered as "null",
