@@ -1,0 +1,664 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "28",
+  "spec_name": "close_task_on_evidence",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Record the contract hash at activation",
+      "rationale": "A contract that is not recorded when the package is activated cannot be told apart from one edited afterwards.",
+      "system": "speca status form",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "event_driven",
+          "condition": "speca <package> --status active activates a draft package",
+          "action": "write contract_hash into the frontmatter of prd.md beside intent_hash: a mapping with the keys requirements.json and tasks.json, each the SHA-256 of that file's canonical encoding (the encoding Save writes) with every x- extension key left out, and report the same mapping as result.contract_hash",
+          "contract": "prd.md frontmatter: contract_hash: {requirements.json: <64 lowercase hex>, tasks.json: <64 lowercase hex>}; result.contract_hash is the same mapping; exit code 0",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a draft package that validates and whose JSON files carry no x- key"
+            ],
+            "pseudocode": "extends TestStatus_ActivatesADraft in cmd/speca/status_test.go: activate a draft that holds no x- key; read prd.md's frontmatter back; assert contract_hash has exactly the keys requirements.json and tasks.json; assert each value equals hex(sha256(bytes of that file as the activation left it on disk)); assert result.contract_hash equals the mapping on disk; assert intent_hash is set as before"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "ubiquitous",
+          "system": "afspec",
+          "action": "for any package, compute each file's contract hash so that it is unchanged when the file is rewritten in the canonical encoding or when an x- key is added, changed or removed anywhere in it, and changed when any other value of the file changes",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "a valid package loaded from the fixtures under afspec/testdata"
+            ],
+            "pseudocode": "in afspec/contract_test.go (new), a table over one loaded package: {unchanged, saved again through Save, an x- key added at the top level, an x- key added on a criterion, an x- key's value changed, an x- key removed} each gives the hash of the original for both files; {a criterion's action edited, a task's step edited, test_commands.all_tests edited, a task's criteria list reordered} each gives another hash for the file edited and the same hash for the other file"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "event_driven",
+          "condition": "speca <package> --status active --dry-run is run on a draft package",
+          "action": "report in result.contract_hash the mapping the activation would record, and write no file",
+          "contract": "exit code 0; result.dry_run true; result.contract_hash {requirements.json, tasks.json}; every file of the package byte-identical to before",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "extends TestStatus_ADryRunActivationReportsTheHash in cmd/speca/status_test.go: snapshot the package; run --status active --dry-run; assert result.contract_hash equals what the real activation then records; assert the snapshot before the real call equals the files after the dry run"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Refuse work on a changed contract",
+      "rationale": "An implementer who can edit a criterion to match the code has closed the task against a different spec.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "event_driven",
+          "condition": "speca <package> reports on a package",
+          "action": "report contract_drift as true when the package has a contract_hash and either file's current hash differs from it, false when both match, and absent when the package has no contract_hash; and report evidence_required as true for an active package with a contract_hash and absent otherwise",
+          "contract": "result.contract_drift: true | false | absent; result.evidence_required: true | absent; exit code 0",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/report_test.go beside TestReport_IntentDrift, a table over {a draft: both fields absent; an active package without contract_hash: both absent; an active package just activated: contract_drift false, evidence_required true; a criterion's action edited in requirements.json: contract_drift true; a task step edited in tasks.json: contract_drift true; an x- key added to requirements.json: contract_drift false}; assert the two fields of result in each case"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "the package has a contract_hash, a contract file no longer matches it, and a call of the task form, of the evidence form or of --status sealed is made",
+          "action": "refuse the call at stage status, category lifecycle, with a message that names each contract file that differs from its hash and says to restore it to the activated contract or to write a package that supersedes this one, with no fix_hint, writing nothing, whether or not --force or --dry-run is given",
+          "contract": "exit code 1; error.stage 'status'; error.category 'lifecycle'; no error.fix_hint; the message names each differing file; no file of the package changes",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "an active package activated through speca --status active, task 1 in_progress"
+            ],
+            "pseudocode": "in cmd/speca/task_test.go beside TestTask_RefusesAPackageThatCannotTakeAWrite, a table over the calls {--task 1 --state in_progress, --task 1 --state done, --task 1 --state pending, --task 1 --state done --force, --task 1 --state done --dry-run, --task 1 --evidence map.json, --status sealed, --status sealed --force} on a package whose requirements.json was edited after activation, and the call --task 1 --state done on one whose requirements.json and tasks.json were both edited: assert exit code 1, error.stage == 'status', error.category == 'lifecycle', error.fix_hint absent, the message names requirements.json (and tasks.json in the last case) and mentions restoring and superseding; assert every file of the package is byte-identical to before"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "state_driven",
+          "condition": "the package's contract_drift is true",
+          "action": "answer the report, --validate, --gate, --gate-report, --render and --verify-evidence as for a package whose contract matches, with no error",
+          "contract": "exit code 0 and no error object for each of the six forms",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/report_test.go beside the table above, on a package whose requirements.json was edited after activation and whose test_commands are commands that exit 0: run each of {no flag, --validate, --gate task, --gate-report, --render, --verify-evidence}; assert exit code 0 and no error object for each"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "Declare the evidence command",
+      "rationale": "A runner the format does not know cannot be asked which tests passed.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "unwanted",
+          "condition": "test_commands.evidence_tests in tasks.json holds the placeholder {tests} zero times, more than once, or inside a longer argument once the command is split as the gate splits it",
+          "action": "report a validation error with check evidence_tests_placeholder on artifact tasks.json, entity test_commands.evidence_tests, whose message gives the command and says that {tests} must appear exactly once as an argument of its own",
+          "contract": "speca --validate: result.valid false; one error {check: evidence_tests_placeholder, artifact: tasks.json, entity: test_commands.evidence_tests}",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/validate_test.go beside TestValidate_ChecksTheBaseOfTheAffectedTestsCommand, a table over evidence_tests = {'run-tests {tests}': valid; 'run-tests \"{tests}\"': valid; 'run-tests': one error; 'run-tests {tests} {tests}': one error; 'run-tests --only={tests}': one error; '': one error}; assert result.valid and, where invalid, exactly one error with that check, artifact and entity"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "event_driven",
+          "condition": "a package's tasks.json names test_commands.evidence_tests",
+          "action": "keep test_commands.evidence_tests through every save, written after affected_tests in the canonical encoding, and list it with the other test commands in the package's render",
+          "contract": "tasks.json after Save holds the same evidence_tests value; spec.md lists it",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/marshal_test.go, a round trip: load a package whose test_commands has all_tests, linter, spec_tests, affected_tests and evidence_tests; Save; assert the bytes of tasks.json keep evidence_tests last among test_commands and the value unchanged; in afspec/render_test.go assert the rendered Markdown lists the evidence_tests command beside affected_tests"
+          }
+        },
+        {
+          "id": "REQ-3.3",
+          "pattern": "optional",
+          "condition": "the package is a draft or is active with a contract_hash, its test_commands names no evidence_tests, and the directory given by --dir holds no go.mod",
+          "action": "raise a low warning evidence_command_missing from speca --validate that names evidence_tests and tasks.json, leaving result.valid as it would be without the warning",
+          "contract": "warnings holds {code: evidence_command_missing, severity: low}; result.valid unchanged; exit code 0",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/verdict_test.go, a table over {a draft with neither evidence_tests nor go.mod in --dir: warned; a draft with go.mod in --dir: not warned; a draft naming evidence_tests: not warned; an active package with a contract_hash and neither: warned; an active package without contract_hash and neither: not warned; a sealed package and neither: not warned}; assert the presence of the warning with severity low and that result.valid is the same as for the same package with go.mod present"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-4",
+      "title": "Run tests through the evidence command",
+      "rationale": "The tool, not the implementer, must be the one that sees a test fail and pass.",
+      "system": "evidence runner",
+      "criteria": [
+        {
+          "id": "REQ-4.1",
+          "pattern": "event_driven",
+          "condition": "speca runs a set of tests and the package names evidence_tests",
+          "action": "split evidence_tests as the gate splits a command (no shell), replace the {tests} argument with one argument per test identifier in the order asked, and start the program in the directory given by --dir",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/evidence/run_test.go (new): a stub program written by the test, as cmd/speca/gate_test.go's TestGate_StartsTheProgramWithItsArgumentsAndNoShell does, records its argv and working directory; run with evidence_tests 'stub --flag \"two words\" {tests}' and the identifiers ['a:T1', 'b:T2/sub']; assert argv == ['--flag', 'two words', 'a:T1', 'b:T2/sub'] and the working directory is --dir"
+          }
+        },
+        {
+          "id": "REQ-4.2",
+          "pattern": "ubiquitous",
+          "action": "for any stdout of the command, give each test asked for the status of its result line, a line being a JSON object whose test is the identifier as given and whose status is one of pass, fail, error, missing or skipped; ignore every other line and every result line for a test not asked for; give missing to a test with no result line and error to a test with two result lines of different status; and ignore the command's exit code",
+          "contract": "one status per asked test, from {pass, fail, error, missing, skipped}",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/evidence/run_test.go, a table over stdout fed to the parser with the tests [A, B]: {A pass and B fail lines: A pass, B fail; a non-JSON line and a JSON line without status among them: ignored; a line for C: ignored; no line for B: B missing; A pass then A fail: A error; A pass twice: A pass; a status outside the five: ignored, so missing}; and one run of a stub that prints A pass and exits 3: assert A pass"
+          }
+        },
+        {
+          "id": "REQ-4.3",
+          "pattern": "event_driven",
+          "condition": "the evidence command runs and the state directory can be written",
+          "action": "write the command's stdout and stderr to a log file under the gate's log directory in the state directory, and name that file in the result",
+          "contract": "the result names the log path; the file holds the command's stdout and stderr",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in internal/evidence/run_test.go with XDG_STATE_HOME set to a temporary directory: a stub that prints a result line on stdout and a line on stderr; assert the result's log path is under the gate store's LogDir and the file holds both lines"
+          }
+        },
+        {
+          "id": "REQ-4.4",
+          "pattern": "unwanted",
+          "condition": "the state directory cannot be written",
+          "system": "speca",
+          "action": "run the command without a log, name no log in the result, and raise a low warning evidence_log_not_written that says why",
+          "contract": "the call's outcome is unchanged; no log named; warnings holds {code: evidence_log_not_written, severity: low}",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go (new), with XDG_STATE_HOME pointing at a file rather than a directory: record evidence with a stub command; assert exit code 0, the evidence recorded, no log in the result, and a warning {code: evidence_log_not_written, severity: low}"
+          }
+        },
+        {
+          "id": "REQ-4.5",
+          "pattern": "unwanted",
+          "condition": "the evidence command cannot be started for a call of the evidence form or of --state done",
+          "system": "speca",
+          "action": "end the call at stage evidence, category evidence, with nothing written: naming evidence_tests and tasks.json when the package names no evidence command and --dir holds no go.mod; naming the command and the reason when its program is not found or its string cannot be split",
+          "contract": "exit code 1; error.stage 'evidence'; error.category 'evidence'; no file of the package changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, a table over {no evidence_tests and no go.mod: message names evidence_tests and tasks.json; evidence_tests 'no-such-program-xyz {tests}': message names the command and that the program is not found; evidence_tests 'stub \"open {tests}': message names the command and the open quote}, each for the calls --task 1 --evidence map.json and --task 1 --state done; assert exit code 1, error.stage == 'evidence', error.category == 'evidence', progress.json byte-identical"
+          }
+        },
+        {
+          "id": "REQ-4.6",
+          "pattern": "unwanted",
+          "condition": "the evidence command is still running when --timeout (a Go duration, default 20m) has passed",
+          "system": "speca",
+          "action": "end the command and every process it started, and end the call at stage evidence, category evidence, with a message that says it timed out, writing nothing",
+          "contract": "exit code 1; error.stage 'evidence'; error.category 'evidence'; no process of the command remains; no file of the package changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, as TestGate_EndsACommandAndItsProcessesAtTheTimeout does for the gate: a stub that starts a child writing its pid to a file and both sleep; call --task 1 --evidence map.json --timeout 1s; assert exit code 1, error.stage == 'evidence', the message says it timed out, the child process no longer exists, progress.json byte-identical"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-5",
+      "title": "Run Go tests with the built-in runner",
+      "rationale": "Every Go repository would otherwise write the same wrapper around go test -json.",
+      "system": "evidence runner",
+      "criteria": [
+        {
+          "id": "REQ-5.1",
+          "pattern": "event_driven",
+          "condition": "speca runs a set of tests, the package names no evidence_tests and --dir holds a go.mod",
+          "action": "run each identifier of the form <package>:<Test> or <package>:<Test>/<subtest> with go test -json and the test cache off, in the package as go test takes it, and give each the status of its pass, fail or skip event, matched by the package's import path and the test name",
+          "contract": "one status per identifier: pass, fail or skipped from the events of that test",
+          "check": {
+            "kind": "integration",
+            "setup": [
+              "the go toolchain on PATH, GOCACHE in a temporary directory"
+            ],
+            "pseudocode": "in internal/evidence/gorunner_test.go (new), against a temporary module with go.mod and a package ./p holding TestPass, TestFail, TestSkip (t.Skip) and TestParent with subtests ok and bad: run ['./p:TestPass', './p:TestFail', './p:TestSkip', './p:TestParent/bad', './p:TestParent/ok']; assert pass, fail, skipped, fail, pass; run the same twice and assert the second run reports the same statuses (no cached result)"
+          }
+        },
+        {
+          "id": "REQ-5.2",
+          "pattern": "ubiquitous",
+          "action": "for any set of identifiers, run no test of a package other than the tests named and the parents of the subtests named",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in internal/evidence/gorunner_test.go, a package ./q whose TestNamed passes and whose TestOther and TestNamedTwin (a name TestNamed is a prefix of) each write a marker file of their own; run ['./q:TestNamed']; assert pass and that neither marker file exists"
+          }
+        },
+        {
+          "id": "REQ-5.3",
+          "pattern": "unwanted",
+          "condition": "a package named by an identifier fails to build, or an identifier names no test",
+          "action": "give the status error to every test asked of a package that fails to build, and missing to an identifier that names no test or has no ':' separating a package from a test",
+          "contract": "error for every test asked of a package that fails to build; missing for an unknown or malformed identifier; the other identifiers keep their own statuses",
+          "check": {
+            "kind": "integration",
+            "pseudocode": "in internal/evidence/gorunner_test.go, a table over a module holding ./ok (TestOK passes) and ./broken (a test file that does not compile): ['./broken:TestX', './broken:TestY', './ok:TestOK', './ok:TestNoSuch', 'no-separator'] gives [error, error, pass, missing, missing]"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-6",
+      "title": "Record the evidence of a task",
+      "rationale": "The failing run has to be seen by the tool while the implementation does not exist yet.",
+      "system": "speca evidence form",
+      "criteria": [
+        {
+          "id": "REQ-6.1",
+          "pattern": "event_driven",
+          "condition": "speca <package> --task N --evidence <file> is called for a task that is in_progress in a package that requires evidence, and every test meets its rule",
+          "action": "replace the task's evidence in progress.json with the file's entries, recording for each test that had to fail its failing run with the time and the tree id of the working tree (absent outside a git work tree), keeping a failing run already recorded for a test the file still lists, dropping the recorded runs of tests the file no longer lists, and setting updated_at; and answer with the report of the package with evidence on the task and one change of kind evidence naming the task",
+          "contract": "exit code 0; progress.json holds the task's evidence; result.tasks[N].evidence as written; result.changes [{kind: evidence, id: N}]; no other file changes",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "an active package with a contract_hash; task 1 in_progress and owning REQ-1.1 and REQ-1.2"
+            ],
+            "pseudocode": "in cmd/speca/evidence_test.go: in a git work tree, a stub evidence command that prints fail for T1 and T2; file {REQ-1.1: [T1], REQ-1.2: [T2]}; call --task 1 --evidence; assert progress.json task 1 evidence lists both entries, T1 and T2 each with failed.at set and failed.tree == the gate's tree id of the working tree; assert updated_at changed and every other file of the package is byte-identical; assert result.changes == [{kind: evidence, id: 1}]; then make the stub print pass for T1 and fail for T3 and call with {REQ-1.1: [T1, T3]}: assert T1 keeps its first failed run, T3 gains one, T2 is gone; repeat the first call outside a git work tree and assert failed.tree is absent"
+          }
+        },
+        {
+          "id": "REQ-6.2",
+          "pattern": "event_driven",
+          "condition": "a test of the file is exempt, every entry that lists it carrying no_red, or the task is the integration task",
+          "action": "require the test to be pass or fail and record no failing run for it",
+          "contract": "the test's entry is recorded with no failed run when it is pass or fail; otherwise the call is refused as in REQ-6.3",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, a table over {a test under an entry with no_red, printed pass: recorded, no failed run; the same printed fail: recorded, no failed run; a test listed under two entries of which only one has no_red, printed pass: refused as a test that had to fail; a smoke test of the integration task mapped from PATH-1, printed pass: recorded, no failed run}; assert the outcome and progress.json in each case"
+          }
+        },
+        {
+          "id": "REQ-6.3",
+          "pattern": "unwanted",
+          "condition": "a test that has no recorded failing run and is not exempt is not fail, or an exempt test is neither pass nor fail",
+          "action": "refuse the call at stage evidence, exit code 1, writing nothing, with a message that names every offending test with its status, saying for a pass that it passes without the implementation and needs no_red with a reason if the behaviour already existed, and for an error that a build or collection failure is not a failing test",
+          "contract": "exit code 1; error.stage 'evidence'; the message names each offending test and its status; no file changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, a table over the status printed for a test that had to fail = {pass, error, missing, skipped} and for an exempt test = {error, missing, skipped}, and a case where two tests offend at once; assert exit code 1, error.stage == 'evidence', the message names every offending test with its status and carries the pass and error explanations, progress.json byte-identical"
+          }
+        },
+        {
+          "id": "REQ-6.4",
+          "pattern": "unwanted",
+          "condition": "a covers of the file names a criterion or path the task does not own, or appears in two entries",
+          "action": "refuse the call at stage evidence, exit code 1, writing nothing, with a message naming every such covers",
+          "contract": "exit code 1; error.stage 'evidence'; each offending covers named; no file changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, a table over covers = {a criterion owned by task 2 only, REQ-9.9 which does not exist, PATH-1 on an implement task, REQ-1.1 twice, two of these at once}; assert exit code 1, error.stage == 'evidence', every offending covers named, progress.json byte-identical"
+          }
+        },
+        {
+          "id": "REQ-6.5",
+          "pattern": "unwanted",
+          "condition": "--evidence is given without --task, with --state, with more than one task id, next or all, or names a file that does not exist, is larger than 1 MiB, is not JSON of the evidence shape or breaks one of its limits",
+          "action": "refuse the call as a usage error before the package is read",
+          "contract": "exit code 2; error.category 'usage'; nothing read beyond the file and nothing run or written",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, a table over {--evidence f without --task; --task 1 --state in_progress --evidence f; --task 1,2 --evidence f; --task next --evidence f; --task all --evidence f; a file that does not exist; a file of 1 MiB + 1 byte; a file that is not JSON; a file with an unknown key; an entry without covers; tests empty; 51 tests in one entry; an identifier of 0 or 501 characters or holding a line break; no_red of 0 or 501 characters; 501 distinct tests across entries}; assert exit code 2, error.category == 'usage', and that no evidence command ran (the stub's marker file is absent)"
+          }
+        },
+        {
+          "id": "REQ-6.6",
+          "pattern": "unwanted",
+          "condition": "the package does not require evidence or the task is not in_progress",
+          "action": "refuse the call at stage evidence, exit code 1, writing nothing, with a message that says why: the package is a draft, it has no contract_hash, or the task is not in_progress",
+          "contract": "exit code 1; error.stage 'evidence'; the reason named; nothing run or written",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go, a table over {a draft package; an active package without contract_hash; task 1 pending; task 1 done}; assert exit code 1, error.stage == 'evidence', the message names the reason, no evidence command ran, progress.json byte-identical"
+          }
+        },
+        {
+          "id": "REQ-6.7",
+          "pattern": "event_driven",
+          "condition": "--evidence is given with --dry-run",
+          "action": "run the tests and every check, write nothing, and return the result and the refusals the call without --dry-run would have",
+          "contract": "the result or refusal of the real call; result.dry_run true on success; no file changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/evidence_test.go: snapshot the package; call --task 1 --evidence f --dry-run with a stub that prints fail; assert result.dry_run, the task's evidence in the result as the real call would record it, and the package byte-identical to the snapshot; with a stub that prints pass, assert the same refusal as REQ-6.3's"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-7",
+      "title": "Close a task on evidence",
+      "rationale": "A task is done when each criterion it owns has a test that was seen failing and is seen passing, not when the suite is green.",
+      "system": "speca task form",
+      "criteria": [
+        {
+          "id": "REQ-7.1",
+          "pattern": "event_driven",
+          "condition": "speca <package> --task N --state done would close an implement task of a package that requires evidence",
+          "action": "check after the state machine's own checks that every criterion the task owns has an evidence entry, that every test of those entries has a recorded failing run or is exempt, and that every test, run now, is pass; and when all hold, record each test's passing run with its time and tree id and write the state and the evidence to progress.json in one write",
+          "contract": "exit code 0; progress.json: state done and passed {at, tree} on every test, written once; result.changes the task move",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "an active package with a contract_hash, a stub evidence command whose output the test controls"
+            ],
+            "pseudocode": "in cmd/speca/task_test.go beside TestTask_AMoveRewritesProgressAloneAtMode0600: task 1 in_progress with evidence for REQ-1.1 and REQ-1.2 recorded through --evidence; switch the stub to print pass; call --task 1 --state done; assert exit code 0, task 1 done, each test with passed.at and passed.tree set and failed kept, a single change {kind: task, id: 1, from: in_progress, to: done}, and only progress.json rewritten"
+          }
+        },
+        {
+          "id": "REQ-7.2",
+          "pattern": "unwanted",
+          "condition": "a task the call would close fails one of the three checks",
+          "action": "refuse the call at stage evidence, exit code 1, with fix_hint.flag --force, writing nothing for any task named, with a message that names each criterion without an entry, each test without a failing run, and each test with its status when it is not pass",
+          "contract": "exit code 1; error.stage 'evidence'; error.fix_hint.flag '--force'; each missing criterion, test without a failing run and non-pass test named; no file changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/task_test.go, a table over {REQ-1.2 with no entry; T2 without a failing run and not exempt (written into progress.json by the test); T1 fail now; T1 missing now; --task 1,2 --state done where task 2 qualifies and task 1 does not}; assert exit code 1, error.stage == 'evidence', error.fix_hint.flag == '--force', the message names each defect, and progress.json byte-identical (task 2 not closed either)"
+          }
+        },
+        {
+          "id": "REQ-7.3",
+          "pattern": "event_driven",
+          "condition": "the call would close the integration task of a package that requires evidence",
+          "action": "check that every execution path of the package has an evidence entry and that every test of those entries, run now, is pass, without requiring a failing run, and record the passing runs as for an implement task",
+          "contract": "exit code 0 and passed {at, tree} recorded when every path is mapped and passes; otherwise the refusal of REQ-7.2 naming the unmapped paths and non-pass tests",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/task_test.go beside TestTask_MovesTheIntegrationTask: the integration task in_progress with evidence {PATH-1: [S1]} recorded without a failed run; stub prints pass; --state done succeeds and records passed; a second case with PATH-2 unmapped is refused naming PATH-2"
+          }
+        },
+        {
+          "id": "REQ-7.4",
+          "pattern": "event_driven",
+          "condition": "a task closes and one of its evidence entries carries no_red",
+          "action": "raise one low warning evidence_no_red per exempt entry naming the task, the criterion and the reason",
+          "contract": "warnings holds {code: evidence_no_red, severity: low} per exempt entry",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/task_test.go: close task 1 whose REQ-1.2 entry carries no_red 'already reported'; assert warnings holds exactly one {code: evidence_no_red, severity: low} whose message names task 1, REQ-1.2 and 'already reported'"
+          }
+        },
+        {
+          "id": "REQ-7.5",
+          "pattern": "event_driven",
+          "condition": "--state done is given with --force in a package that requires evidence",
+          "action": "close the task without the three checks and without running a test, keep the evidence recorded so far as it is, mark the change forced: true, and raise a high warning task_evidence_forced naming the task",
+          "contract": "exit code 0; the change carries forced true; warnings holds {code: task_evidence_forced, severity: high}",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/task_test.go: task 1 in_progress with no evidence; --task 1 --state done --force; assert exit code 0, task 1 done, the stub's marker file absent (no test ran), result.changes[0].forced == true, warnings holds {code: task_evidence_forced, severity: high} naming task 1; with partial evidence, assert it is byte-identical in progress.json after the close"
+          }
+        },
+        {
+          "id": "REQ-7.6",
+          "pattern": "event_driven",
+          "condition": "a task of a package that requires evidence moves to pending",
+          "action": "remove the task's evidence from progress.json",
+          "contract": "the task's progress entry holds no evidence after the move",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/task_test.go, a table over {in_progress -> pending, done -> pending, done -> pending with --force}: the task holds evidence before; assert it holds none after; and a pending -> dropped move in a package requiring evidence succeeds with no evidence and no test run"
+          }
+        },
+        {
+          "id": "REQ-7.7",
+          "pattern": "state_driven",
+          "condition": "the package does not require evidence (a draft, or an active package without contract_hash)",
+          "action": "move tasks as the task form does without this change: no test runs, no evidence is checked or required, and no evidence warning is raised",
+          "contract": "exit code 0 for every move the state machine allows; no evidence in progress.json",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "extends TestTask_TakesAChangeOnADraftOrAnActivePackage in cmd/speca/task_test.go: for a draft and for an active package without contract_hash, in a directory with neither evidence_tests nor go.mod, claim and close task 1; assert exit code 0, task 1 done, no warning with a code beginning evidence_ or task_evidence_"
+          }
+        },
+        {
+          "id": "REQ-7.8",
+          "pattern": "event_driven",
+          "condition": "--state done is given with --dry-run in a package that requires evidence",
+          "action": "run the tests and the three checks, write nothing, and return the result or refusal the call without --dry-run would have",
+          "contract": "the result or refusal of the real call; no file changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/task_test.go beside TestTask_ADryRunWritesNothingAndReportsTheChange: in a package requiring evidence, snapshot; --task 1 --state done --dry-run with a stub printing pass: assert result.dry_run, task 1 reported done with passed runs, package byte-identical; with the stub printing fail: assert the refusal of REQ-7.2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-8",
+      "title": "Check the evidence again",
+      "rationale": "Evidence recorded on one tree says nothing about the merged tree until it is run there.",
+      "system": "speca verify form",
+      "criteria": [
+        {
+          "id": "REQ-8.1",
+          "pattern": "event_driven",
+          "condition": "speca <package> --verify-evidence is called",
+          "action": "run every test recorded for every done task once, on the tree as it is, and answer in result.evidence_check with verdict pass when every test is pass and fail when one is not, and one entry per done task with each covers, its tests and their statuses, writing nothing to the package and exiting 0",
+          "contract": "exit code 0; result.evidence_check {verdict: pass | fail, tasks: [{id, evidence: [{covers, tests: [{test, status}]}]}]}; no file of the package changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/verify_test.go (new): tasks 1 and 2 done with evidence, task 3 in_progress with evidence; stub prints pass for all: assert verdict pass, entries for tasks 1 and 2 only, each covers with its tests and status pass, the stub asked each test once and no test of task 3; stub prints fail for one test of task 2: verdict fail and that test's status fail; assert exit code 0 and the package byte-identical in both runs"
+          }
+        },
+        {
+          "id": "REQ-8.2",
+          "pattern": "unwanted",
+          "condition": "no done task has evidence, or the evidence command could not run to its end",
+          "action": "answer with verdict not_run and a reason that says why, exiting 0 and writing nothing",
+          "contract": "exit code 0; result.evidence_check.verdict 'not_run' with reason; no file changes",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/verify_test.go, a table over {no done task has evidence; no evidence_tests and no go.mod; a program not found; an evidence command that cannot be split; a command past --timeout 1s}; assert exit code 0, verdict not_run, a reason naming the cause, no error object"
+          }
+        },
+        {
+          "id": "REQ-8.3",
+          "pattern": "unwanted",
+          "condition": "--verify-evidence is combined with another form or given no package, or --timeout is given with a form that runs no tests",
+          "action": "refuse the call as a usage error",
+          "contract": "exit code 2; error.category 'usage'",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/main_test.go, in the table of flag combinations: --verify-evidence with --task, --state, --status, --gate, --validate, --render, --list or no package; and --timeout with a form other than --gate, --evidence, --verify-evidence or --state done; assert exit code 2 and error.category 'usage'; and that --verify-evidence --timeout 5m and --task 1 --state done --timeout 5m are accepted"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-9",
+      "title": "Show the evidence in the report and the format",
+      "rationale": "Evidence that only the tool can see cannot be copied into a commit or checked by a reviewer.",
+      "system": "speca",
+      "criteria": [
+        {
+          "id": "REQ-9.1",
+          "pattern": "event_driven",
+          "condition": "speca <package> reports on a package whose progress.json holds evidence",
+          "action": "give each task that holds evidence an evidence list of its entries, each with covers, no_red when set, and per test the identifier, failed {at, tree} and passed {at, tree}, each absent until recorded; and give no evidence field to a task that holds none",
+          "contract": "result.tasks[i].evidence: [{covers, no_red?, tests: [{test, failed?: {at, tree?}, passed?: {at, tree?}}]}]",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/speca/report_test.go beside TestReport_ListsAndCountsTheTasks: a progress.json with evidence on task 1 (one test failed only, one failed and passed, one exempt entry) and none on task 2; assert result.tasks[0].evidence matches progress.json field for field and result.tasks[1] has no evidence key in the JSON"
+          }
+        },
+        {
+          "id": "REQ-9.2",
+          "pattern": "ubiquitous",
+          "action": "accept evidence on a progress.json task entry and contract_hash in the frontmatter as optional fields, validate a package without them as before, and report a contract_hash that lacks a key, has another key or holds a value that is not 64 lowercase hex digits as a json_schema error",
+          "contract": "speca --validate: result.valid true for a package with or without the new fields; result.valid false with one json_schema error naming the field for a malformed contract_hash or evidence entry",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in afspec/validate_test.go beside TestValidate_AcceptsEveryValidFixture, a table over {every existing valid fixture: valid; a fixture with evidence on a task entry: valid; with contract_hash of both keys: valid; contract_hash without tasks.json: json_schema error; with a third key: json_schema error; with a 63-digit value: json_schema error; an evidence entry without covers: json_schema error}"
+          }
+        },
+        {
+          "id": "REQ-9.3",
+          "pattern": "ubiquitous",
+          "system": "specr",
+          "action": "render no evidence: neither specr's Markdown nor its result.tasks carries the evidence of a package whose progress.json holds it",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "in cmd/specr/render_test.go: render a package whose progress.json holds evidence on task 1; assert the Markdown equals the render of the same package without the evidence, and no entry of result.tasks has an evidence key"
+          }
+        },
+        {
+          "id": "REQ-9.4",
+          "pattern": "event_driven",
+          "condition": "speca --schema is called",
+          "action": "describe the evidence form, the verify form, the --evidence and --verify-evidence flags, the stage evidence, the warnings evidence_no_red, task_evidence_forced, evidence_command_missing and evidence_log_not_written, and the result fields contract_hash, contract_drift, evidence_required, evidence and evidence_check",
+          "contract": "exit code 0; the schema output lists each named item with a description",
+          "check": {
+            "kind": "unit",
+            "pseudocode": "extends TestSchema_DescribesTheFormsFlagsAndResult in cmd/speca/schema_test.go: assert each named form, flag, stage, warning code and result field appears in the --schema output with a description; TestSchema_MatchesTheGoldenFile is updated with cmd/speca/testdata/schema.golden.json regenerated"
+          }
+        }
+      ]
+    }
+  ],
+  "execution_paths": [
+    {
+      "id": "PATH-1",
+      "title": "A task closes on evidence and the evidence is checked again",
+      "steps": [
+        {
+          "actor": "implementer",
+          "action": "claims task 1 of an active package with speca <package> --task 1 --state in_progress"
+        },
+        {
+          "actor": "implementer",
+          "action": "writes the task's tests and calls speca <package> --task 1 --evidence map.json"
+        },
+        {
+          "actor": "speca",
+          "action": "runs the mapped tests through the built-in Go runner"
+        },
+        {
+          "actor": "go test",
+          "action": "reports each mapped test as fail"
+        },
+        {
+          "actor": "speca",
+          "action": "writes the task's evidence with each test's failing run to progress.json"
+        },
+        {
+          "actor": "implementer",
+          "action": "writes the implementation and calls speca <package> --task 1 --state done"
+        },
+        {
+          "actor": "speca",
+          "action": "runs the tests again, sees each pass, and writes the state done and the passing runs to progress.json in one write"
+        },
+        {
+          "actor": "implementer",
+          "action": "calls speca <package> --verify-evidence"
+        },
+        {
+          "actor": "speca",
+          "action": "runs every recorded test again and answers with the verdict pass, writing nothing"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "speca's Main",
+          "the built-in Go runner",
+          "the go toolchain",
+          "a git work tree",
+          "the package's files on disk"
+        ],
+        "setup": [
+          "a temporary git repository with a go.mod, a package ./calc whose Add returns 0 and whose test TestAdd expects the sum",
+          "a package in .specs whose task 1 owns one criterion, activated with speca --status active so it carries a contract_hash"
+        ],
+        "end_state": [
+          "progress.json holds task 1 done with one evidence entry whose test ./calc:TestAdd carries failed {at, tree} and passed {at, tree} with different trees",
+          "speca <package> reports the same evidence on task 1",
+          "--verify-evidence answers verdict pass",
+          "requirements.json and tasks.json are byte-identical to the activated ones"
+        ],
+        "pseudocode": "new end-to-end test in cmd/speca/e2e_test.go beside TestAnAgentFollowsNextFromTheReportToTheFinishedTask: activate; claim; write map.json {covers: REQ-1.1, tests: ['./calc:TestAdd']}; run --evidence and assert a failed run; fix Add; run --state done and assert passed; run the report and --verify-evidence; assert the end state"
+      }
+    },
+    {
+      "id": "PATH-2",
+      "title": "A changed contract stops the work",
+      "steps": [
+        {
+          "actor": "implementer",
+          "action": "with task 1 in progress and its evidence recorded, edits a criterion's action in requirements.json"
+        },
+        {
+          "actor": "implementer",
+          "action": "calls speca <package> --task 1 --state done"
+        },
+        {
+          "actor": "speca",
+          "action": "refuses at stage status, naming requirements.json, and writes nothing"
+        },
+        {
+          "actor": "implementer",
+          "action": "reads speca <package> and finds contract_drift true"
+        },
+        {
+          "actor": "implementer",
+          "action": "restores requirements.json and calls speca <package> --task 1 --state done again"
+        },
+        {
+          "actor": "speca",
+          "action": "runs the tests, sees each pass and closes task 1"
+        }
+      ],
+      "smoke": {
+        "real_components": [
+          "speca's Main",
+          "the built-in Go runner",
+          "the go toolchain",
+          "the package's files on disk"
+        ],
+        "setup": [
+          "the repository and activated package of PATH-1's setup, task 1 in_progress with its evidence recorded and the implementation written"
+        ],
+        "end_state": [
+          "the first close exits 1 at stage status, its message naming requirements.json, and progress.json is byte-identical to before it",
+          "the report shows contract_drift true while the edit stands and false after the restore",
+          "the second close exits 0 and progress.json holds task 1 done"
+        ],
+        "pseudocode": "new end-to-end test in cmd/speca/e2e_test.go beside the one of PATH-1, sharing its setup helper: edit the action with editJSON; assert the refusal and the unchanged progress.json; assert contract_drift true; restore the saved bytes; assert contract_drift false and that the close succeeds"
+      }
+    }
+  ],
+  "external_apis": [
+    {
+      "package": "go toolchain: go test -json (cmd/test2json)",
+      "version": "go 1.27.3",
+      "verified": true,
+      "symbols": [
+        {
+          "name": "go test -json event",
+          "import_path": "cmd/test2json",
+          "signature": "one JSON object per line: {Time, Action, Package, Test, Elapsed, Output, OutputType, FailedBuild}; Action in start, run, pause, cont, pass, bench, fail, output, skip; Package is the import path; a build failure is a fail event for the package with no Test and FailedBuild set, preceded by an {ImportPath, Action: build-fail} record"
+        },
+        {
+          "name": "go test -run",
+          "import_path": "cmd/go",
+          "signature": "go test -json -count=1 -run '<regexp>[/<regexp>]' <package>: a pattern that matches no test produces no event carrying a Test"
+        }
+      ]
+    }
+  ]
+}

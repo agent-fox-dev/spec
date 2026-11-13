@@ -1,0 +1,271 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "28",
+  "spec_name": "close_task_on_evidence",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./afspec/... ./cmd/speca/... ./cmd/specr/... ./internal/... ./envelope/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "19",
+      "reason": "the evidence command runs with the gate's command splitting, timeout, process handling, tree id and state directory"
+    },
+    {
+      "spec": "25",
+      "reason": "evidence_tests follows the placeholder convention and the schema position of its affected_tests"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Record the contract hash at activation and report contract drift",
+      "criteria": [
+        "REQ-1",
+        "REQ-2.1"
+      ],
+      "steps": [
+        "Add the activation, dry-run and report cases and the hash table as tests and confirm they fail",
+        "Add the optional contract_hash to specification/schemas/prd-frontmatter.v3.json and its copy afspec/schemas/prd-frontmatter.v3.json: an object with exactly the keys requirements.json and tasks.json, each a string of 64 lowercase hex digits; regenerate the Go types with `make json-gen`",
+        "Add ContractHash to afspec.Spec, read it from the frontmatter and write it after intent_hash in renderPRD as a two-key YAML mapping, omitted when nil",
+        "Add an exported function in a new afspec/contract.go that computes each contract file's hash: SHA-256 over the file's canonical encoding as marshalArtifact writes it with no extension keys, so that x- keys never count; and one that names the files whose current hash differs from the recorded one",
+        "Make Transition from draft to active record the contract hash beside the intent hash, and make the status form's dry-run preview report the hash it would record",
+        "Add contract_hash, contract_drift (a pointer, so false is reported) and evidence_required to envelope.AdminResult with descriptions, and fill them in identityOf in cmd/speca/forms.go: contract_drift only when the package has a contract_hash, evidence_required only when it is active with one",
+        "Add a ContractDrift helper to internal/specpkg/writable.go beside IntentDrift; make Writable false for a package whose contract drifted, and make unwritable in cmd/speca/task.go and checkSealing in cmd/speca/status_checks.go refuse it at stage status, category lifecycle, naming each differing file and saying to restore it or supersede the package, with no fix_hint and --force not overriding it; add those rows to the refusal table of REQ-2.2 now (its evidence-form row comes with task 5)",
+        "Leave a package without contract_hash, and every package activated before this change, behaving as it did: no drift reported, nothing refused"
+      ],
+      "touches": [
+        "specification/schemas/prd-frontmatter.v3.json",
+        "afspec/schemas/prd-frontmatter.v3.json",
+        "afspec/prd-frontmatter.v3.go",
+        "afspec/afspec.go",
+        "afspec/prd.go",
+        "afspec/contract.go",
+        "afspec/contract_test.go",
+        "afspec/lifecycle.go",
+        "afspec/lifecycle_test.go",
+        "internal/specpkg/writable.go",
+        "internal/specpkg/writable_test.go",
+        "envelope/admin_result.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/status.go",
+        "cmd/speca/status_checks.go",
+        "cmd/speca/status_test.go",
+        "cmd/speca/task.go",
+        "cmd/speca/task_test.go",
+        "cmd/speca/report_test.go",
+        "cmd/speca/helpers_test.go"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Declare the evidence command in test_commands",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the placeholder table, the round trip, the render case and the warning table as tests and confirm they fail",
+        "Add the optional string evidence_tests, of at least one character, to test_commands in specification/schemas/tasks.v3.json and its copy afspec/schemas/tasks.v3.json, after affected_tests; regenerate the Go types with `make json-gen`, and keep it in the key order and in the copy afspec/task.go makes of test_commands",
+        "Add the constant EvidenceTestsPlaceholder = \"{tests}\" and checkEvidenceTestsPlaceholder in afspec/validate.go beside checkAffectedTestsBase: split the command as gate.Split does and require exactly one argument equal to the placeholder, else one error evidence_tests_placeholder on tasks.json, entity test_commands.evidence_tests",
+        "List evidence_tests in the render of the test commands in afspec/render.go, beside affected_tests",
+        "In the verdict form (cmd/speca/verdict.go), raise the low envelope warning evidence_command_missing for a draft, or an active package with a contract_hash, whose test_commands names no evidence_tests while --dir holds no go.mod; add the code to envelope/warn.go and internal/cli/warn.go"
+      ],
+      "touches": [
+        "specification/schemas/tasks.v3.json",
+        "afspec/schemas/tasks.v3.json",
+        "afspec/tasks.v3.go",
+        "afspec/task.go",
+        "afspec/validate.go",
+        "afspec/validate_test.go",
+        "afspec/render.go",
+        "afspec/render_test.go",
+        "afspec/marshal_test.go",
+        "envelope/warn.go",
+        "internal/cli/warn.go",
+        "cmd/speca/verdict.go",
+        "cmd/speca/verdict_test.go"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Run tests through the evidence command and the built-in Go runner",
+      "criteria": [
+        "REQ-4.1",
+        "REQ-4.2",
+        "REQ-4.3",
+        "REQ-5"
+      ],
+      "steps": [
+        "Add internal/evidence's tests (argv and directory, the result-line table, the log, the Go runner over a temporary module) and confirm they fail",
+        "Create the package internal/evidence: a Run that takes the command string, the test identifiers, the directory, the timeout and the log directory, and returns one status per identifier, the log path, and an error that says whether the program was not found, the string could not be split or the run timed out",
+        "Split the command with gate.Split and replace the one {tests} argument with the identifiers, one argument each, in the order given; start it with no shell, in the given directory, in its own process group, and end the group at the timeout, reusing internal/gate's process handling (isolate and endGroup, exported or moved where both packages reach them) rather than copying it",
+        "Read stdout line by line for result lines as REQ-4.2 says, the exit code deciding nothing; write stdout and stderr to a log file under the directory given, and run without one when it is empty",
+        "Add the built-in Go runner: group the identifiers by package, resolve each package's import path with go list in the directory, run go test -json -count=1 with an anchored -run pattern of exactly the tests named for that package (regexp-quoted, one level per / of a subtest), and map pass, fail and skip events of the named tests to their identifiers",
+        "Give error to every test asked of a package whose run carries a fail event with FailedBuild or a build-fail record, missing to a test with no event and to an identifier without a ':'",
+        "Expose one entry point that picks the package's evidence_tests when it names one, the Go runner when the directory holds a go.mod, and otherwise returns an error naming evidence_tests and tasks.json"
+      ],
+      "touches": [
+        "internal/evidence/",
+        "internal/evidence/run_test.go",
+        "internal/evidence/gorunner_test.go",
+        "internal/gate/proc_unix.go",
+        "internal/gate/proc_other.go",
+        "internal/gate/command.go"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Carry the evidence in progress.json and the report",
+      "criteria": [
+        "REQ-9.1",
+        "REQ-9.2",
+        "REQ-9.3"
+      ],
+      "steps": [
+        "Add the report case, the schema table and the specr case as tests and confirm they fail",
+        "Add the optional evidence array to task_progress in specification/schemas/progress.v3.json and its copy afspec/schemas/progress.v3.json: entries {covers, no_red?, tests: [{test, failed?: {at, tree?}, passed?: {at, tree?}}]} with the limits of the evidence file (covers non-empty, 1 to 50 tests, identifiers of 1 to 500 characters with no line break, no_red of 1 to 500 characters); regenerate the Go types with `make json-gen`",
+        "Keep each task's evidence through progressArtifact, TransitionTask, CompleteTaskStates and every other path that rebuilds the progress, so that a move writes it back unchanged",
+        "Add evidence to the speca report's task entries in envelope with a description, filled from progress.json; keep specpkg.TaskInfo as specr uses it free of evidence, so that specr's result.tasks and Markdown carry none"
+      ],
+      "touches": [
+        "specification/schemas/progress.v3.json",
+        "afspec/schemas/progress.v3.json",
+        "afspec/progress.v3.go",
+        "afspec/afspec.go",
+        "afspec/task.go",
+        "afspec/task_test.go",
+        "afspec/validate_test.go",
+        "afspec/testdata/",
+        "envelope/render_result.go",
+        "envelope/admin_result.go",
+        "internal/specpkg/specpkg.go",
+        "cmd/speca/report.go",
+        "cmd/speca/report_test.go",
+        "cmd/specr/render_test.go"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Record the evidence of a task with --evidence",
+      "criteria": [
+        "REQ-6",
+        "REQ-4.4",
+        "REQ-4.6",
+        "REQ-2.2"
+      ],
+      "steps": [
+        "Add cmd/speca/evidence_test.go with the recording, exemption, refusal, usage, dry-run, log and timeout cases, and the evidence-form row of the contract-drift table, and confirm they fail",
+        "Add the --evidence <file> flag in cmd/speca/main.go: it needs --task with exactly one numeric id and refuses --state, next and all as usage errors; let --timeout be given with it; route it in execute (cmd/speca/forms.go) to a new executeEvidence in cmd/speca/evidence.go",
+        "Read the file before the package: at most 1 MiB, JSON of the shape {evidence: [{covers, tests, no_red?}]} with no other key, 1 to 50 tests per entry, identifiers of 1 to 500 characters with no line break, no_red of 1 to 500 characters, at most 500 distinct tests; any breach is a usage error naming it",
+        "Refuse, at stage status, a package unwritable() refuses (contract drift included); then, at stage evidence, a package that does not require evidence and a task that is not in_progress, saying why; then each covers the task does not own (criteria through its requirement ids; for the integration task, the package's path ids) and each covers given twice, naming all of them",
+        "Run every test of the file once through internal/evidence, with --timeout and the gate store's log directory (opened with gate.OpenStore on the work tree's top level); without a store, run without a log and raise the low warning evidence_log_not_written; a runner error ends the call at stage evidence, category evidence, naming its cause",
+        "Judge each test: one with a recorded failing run keeps it whatever its status; one exempt (every entry listing it has no_red), or any test of the integration task, must be pass or fail and gets no failing run; any other must be fail and gets a failing run with the time and gate.ReadTree's tree id, absent outside a git work tree. Refuse naming every offending test with its status, with the pass and error explanations",
+        "On success replace the task's evidence with the file's entries and their runs, drop the runs of tests no longer listed, set updated_at, write progress.json alone through the existing writeProgress, and return the report with one change {kind: evidence, id}; under --dry-run write nothing and return the same",
+        "Add the stage evidence and the category evidence to envelope/error.go, the warning code evidence_log_not_written to envelope/warn.go and internal/cli/warn.go, and the change kind evidence to the description of envelope.Change"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/evidence.go",
+        "cmd/speca/evidence_test.go",
+        "cmd/speca/task.go",
+        "cmd/speca/task_test.go",
+        "cmd/speca/helpers_test.go",
+        "envelope/error.go",
+        "envelope/admin_result.go",
+        "envelope/warn.go",
+        "internal/cli/warn.go",
+        "internal/evidence/"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Close a task on its evidence",
+      "criteria": [
+        "REQ-7",
+        "REQ-4.5"
+      ],
+      "steps": [
+        "Add the close, refusal, integration-task, no_red, --force, reopen, unchanged-package and dry-run cases to cmd/speca/task_test.go and the runner-failure table to cmd/speca/evidence_test.go, and confirm they fail",
+        "In planMoves (cmd/speca/plan.go), for a package that requires evidence and a move to done that is not forced, check each task it would close after the state machine's checks: every criterion it owns (for the integration task, every path) has an entry; every test has a failing run or is exempt (not for the integration task); and every test, run now through internal/evidence in one run over all of them, is pass",
+        "Refuse the whole call at stage evidence, exit code 1, with fix_hint.flag --force, naming each criterion or path without an entry, each test without a failing run and each test whose status is not pass; a runner error ends it at stage evidence, category evidence, as for the evidence form",
+        "When every check holds, record each test's passing run with the time and the tree id, and write the state and the evidence in the one progress write the task form already makes; raise one low evidence_no_red warning per exempt entry naming the task, the criterion and the reason",
+        "Under --force, close without the checks and without running a test, keep the evidence as it is, set forced on the change and raise the high warning task_evidence_forced naming the task",
+        "Remove a task's evidence on every move to pending, forced or not; ask nothing of a move to dropped",
+        "Let --timeout be given with --task and --state done in the flag checks of cmd/speca/main.go; under --dry-run run the tests and the checks and write nothing",
+        "Add the warning codes evidence_no_red and task_evidence_forced to envelope/warn.go and internal/cli/warn.go"
+      ],
+      "touches": [
+        "cmd/speca/plan.go",
+        "cmd/speca/task.go",
+        "cmd/speca/task_test.go",
+        "cmd/speca/evidence.go",
+        "cmd/speca/evidence_test.go",
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "envelope/warn.go",
+        "internal/cli/warn.go"
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Check the evidence again with --verify-evidence",
+      "criteria": [
+        "REQ-8",
+        "REQ-2.3"
+      ],
+      "steps": [
+        "Add cmd/speca/verify_test.go with the pass, fail and not_run cases, the usage rows to cmd/speca/main_test.go, and the six-form row table of REQ-2.3 to cmd/speca/report_test.go, and confirm they fail",
+        "Add the --verify-evidence flag in cmd/speca/main.go, refused with any other form and without a package, taking --timeout and --dir; route it in execute to a new executeVerify in cmd/speca/verify.go",
+        "Collect every test recorded for every done task, run them once on the tree as it is through internal/evidence, and answer in result.evidence_check: verdict pass when every test is pass, fail when one is not, and per done task each covers with its tests and statuses",
+        "Answer not_run with a reason when no done task has evidence or the runner returns an error (no runner, program not found, unsplittable command, timeout); exit 0 for every verdict and write nothing to the package; fail only when the package cannot be loaded",
+        "Add envelope.EvidenceCheck with descriptions and the evidence_check field to envelope.AdminResult",
+        "Confirm that the report, --validate, --gate, --gate-report and --render answer on a package whose contract drifted, as task 1 left them"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/main_test.go",
+        "cmd/speca/forms.go",
+        "cmd/speca/verify.go",
+        "cmd/speca/verify_test.go",
+        "cmd/speca/report_test.go",
+        "envelope/admin_result.go",
+        "envelope/evidence_check.go"
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Describe the new forms and move af-impl and the docs onto them",
+      "criteria": [
+        "REQ-9.4"
+      ],
+      "steps": [
+        "Extend TestSchema_DescribesTheFormsFlagsAndResult with the new forms, flags, stage, warnings and result fields and confirm it fails",
+        "Describe the evidence form and the verify form in the usage text and --schema output of cmd/speca/main.go and cmd/speca/result.go, and regenerate cmd/speca/testdata/schema.golden.json",
+        "Write ADR 26 (docs/adr/26-close-a-task-on-evidence.md): the contract hash, the evidence command and the built-in Go runner, the two calls, and why a changed contract is refused rather than re-accepted",
+        "Document the contract hash, contract_drift, evidence_required, the evidence form, the close on evidence, --verify-evidence, the stage, the warnings and the evidence fields in docs/speca.md; the contract_hash frontmatter field, test_commands.evidence_tests and the evidence in progress.json in specification/spec-format-v3.md; the evidence runner and the frozen contract in docs/architecture.md",
+        "Change skills/af-impl/SKILL.md and skills/af-impl/references/test-first.md so that the test-first step records the failing run with --evidence, a test-first deviation is a no_red entry, a refused close is a failed attempt never answered with --force, and the commit body's criterion-to-test list is copied from the report; change skills/af-impl/references/landing.md so that the landing runs --verify-evidence on the merged tree and reports its verdict; describe the new forms in skills/_shared/references/speca-specr.md; run `make skills-check`",
+        "Run `make doc` and commit docs/generated with the new exported identifiers"
+      ],
+      "touches": [
+        "cmd/speca/main.go",
+        "cmd/speca/result.go",
+        "cmd/speca/result_test.go",
+        "cmd/speca/schema_test.go",
+        "cmd/speca/testdata/schema.golden.json",
+        "docs/adr/26-close-a-task-on-evidence.md",
+        "docs/speca.md",
+        "docs/architecture.md",
+        "specification/spec-format-v3.md",
+        "skills/af-impl/SKILL.md",
+        "skills/af-impl/references/test-first.md",
+        "skills/af-impl/references/landing.md",
+        "skills/_shared/references/speca-specr.md",
+        "docs/generated/"
+      ]
+    }
+  ]
+}
