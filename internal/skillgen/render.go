@@ -45,10 +45,11 @@ var (
 // A skill that carries it works in Claude Code and nowhere else.
 const argumentPlaceholder = "$ARGUMENTS"
 
-// ownSyntax matches a skill named in an agent's own invocation syntax, but only
-// where the name stands alone: the delimiters on both sides keep a path such as
-// skills/af-impl, written in prose, from being reported (see ADR 12).
-var ownSyntax = regexp.MustCompile("(?m)(^|[\\s`(\\[\"])([/$])([a-z0-9-]+)($|[\\s[:punct:]])")
+// ownSyntax matches a skill named in an agent's own invocation syntax — /name,
+// $name, @name or /skill:name — but only where the name stands alone: the
+// delimiters on both sides keep a path such as skills/af-impl, written in
+// prose, from being reported (see ADR 12).
+var ownSyntax = regexp.MustCompile("(?m)(^|[\\s`(\\[\"])(/skill:|[/$@])([a-z0-9-]+)($|[\\s[:punct:]])")
 
 // meta is the part of a frontmatter the render reads. Every other key is
 // carried through or dropped by the agent's key list, never interpreted.
@@ -191,9 +192,9 @@ func dedupe(problems []problem) []problem {
 const bodyLimit = 24576
 
 // checkAgents reports a rendered body over the ceiling, one line per agent it
-// is over for. Every agent's invocation prefix is one byte today, so the four
-// sizes coincide; the measure stays per agent because the criterion is, and an
-// agent with a longer prefix would need it.
+// is over for. The invocation prefixes differ in length — pi's /skill: is seven
+// bytes where the others are one — so a body with invocations in it can be
+// under the ceiling for one agent and over it for another.
 func (s *source) checkAgents() []problem {
 	var problems []problem
 	for _, sk := range s.skills {

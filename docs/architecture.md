@@ -24,7 +24,7 @@ cmd/speca/                  # The speca command: a package's state, its verdict,
 cmd/specrun/                # The specrun command: the implementation loop
 specgen/                    # The generation pipeline: phases, prompts, review, split
   templates/                #   The prompts, as Markdown, embedded
-skills/                     # The af-* skills, one source for four agents
+skills/                     # The af-* skills, one source for six agents
   af-prd/SKILL.md           #   A skill: the frontmatter and the body
   af-prd/references/        #   The files only that skill links
   _shared/references/       #   The files more than one skill links
@@ -434,9 +434,9 @@ first on `PATH`.
 
 ## The skill render
 
-`skills/` is one source tree that renders to the three skills for each of four
-coding agents — Claude Code, Codex, Cursor and GitHub Copilot — all of which
-load a skill from a directory holding a `SKILL.md`. The decision and the agent
+`skills/` is one source tree that renders to the three skills for each of six
+coding agents — Claude Code, Codex, Cursor, GitHub Copilot, pi and opencode —
+all of which load a skill from a directory holding a `SKILL.md`. The decision and the agent
 tables are [ADR 12](adr/12-render-the-skills-for-every-agent-from-one-source.md).
 
 ### The source
@@ -463,7 +463,7 @@ reaches the network or reads a credential.
 
 ```
 main.go      # the flags, the order of the run, the exit codes
-agents.go    # the four agents: their keys, their invocation prefix, their directories
+agents.go    # the six agents: their keys, their invocation prefix, their directories
 source.go    # reading a skills tree from an fs.FS, and resolving the links
 render.go    # the frontmatter filter, the token, the name and description rules, the ceiling
 check.go     # the warnings about a reference file nothing links

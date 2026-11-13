@@ -52,8 +52,8 @@ func (a agent) skillsDir(o options) (string, error) {
 }
 
 // userSkillsDir is the agent's directory under the user's home. codex reads
-// CODEX_HOME, and its directory is that value plus skills/, not a dotted
-// directory inside it.
+// CODEX_HOME and pi PI_CODING_AGENT_DIR, and the directory is that value plus
+// skills/, not a dotted directory inside it.
 func (a agent) userSkillsDir() (string, error) {
 	if a.homeEnv != "" {
 		if base := os.Getenv(a.homeEnv); base != "" {
@@ -69,7 +69,7 @@ func (a agent) userSkillsDir() (string, error) {
 
 // defaultAgent is the agent an install serves when none is named, so that
 // "make install-skills" with no AGENT does what it did before the render
-// served four agents.
+// served other agents.
 const defaultAgent = "claude"
 
 // install renders every skill for one agent and replaces each one's directory

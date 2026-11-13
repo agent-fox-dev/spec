@@ -15,7 +15,8 @@ type agent struct {
 	userDir    string
 	projectDir string
 	// homeEnv names an environment variable that, when set, replaces the home
-	// directory with its value plus "skills". Only codex has one.
+	// directory with its value plus "skills": CODEX_HOME for codex and
+	// PI_CODING_AGENT_DIR for pi.
 	homeEnv string
 	// alsoUser and alsoProject are the other directories this agent also loads,
 	// so an install can warn that it will see a skill twice. They come from the
@@ -52,6 +53,25 @@ var agents = []agent{{
 	invoke:      "/",
 	userDir:     ".copilot/skills",
 	projectDir:  ".github/skills",
+	alsoUser:    []string{".claude/skills", ".agents/skills"},
+	alsoProject: []string{".claude/skills", ".agents/skills"},
+}, {
+	name:        "pi",
+	keys:        []string{"name", "description", "disable-model-invocation"},
+	invoke:      "/skill:",
+	userDir:     ".pi/agent/skills",
+	projectDir:  ".pi/skills",
+	homeEnv:     "PI_CODING_AGENT_DIR",
+	alsoUser:    []string{".agents/skills"},
+	alsoProject: []string{".agents/skills"},
+}, {
+	// opencode has no slash command for a skill: a person names one in the
+	// prompt as @<name>, and the model loads it with its skill tool.
+	name:        "opencode",
+	keys:        []string{"name", "description", "disable-model-invocation"},
+	invoke:      "@",
+	userDir:     ".config/opencode/skills",
+	projectDir:  ".opencode/skills",
 	alsoUser:    []string{".claude/skills", ".agents/skills"},
 	alsoProject: []string{".claude/skills", ".agents/skills"},
 }}

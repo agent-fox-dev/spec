@@ -76,6 +76,8 @@ One source tree under `skills/`, rendered per agent by a program `make` runs.
 | `codex` | `name`, `description` | `$af-impl` | **not confirmed at the vendor** — <https://developers.openai.com/codex/skills> was not reachable; taken from third-party copies of the page |
 | `cursor` | `name`, `description`, `disable-model-invocation` | `/af-impl` | **not confirmed at the vendor** — <https://cursor.com/docs/skills> was not reachable; taken from search results quoting it |
 | `copilot` | `name`, `description` | `/af-impl` | **not confirmed at the vendor** — the Microsoft Learn and GitHub Docs pages were not reachable; taken from search results quoting them |
+| `pi` | `name`, `description`, `disable-model-invocation` | `/skill:af-impl` | 2026-11-13, <https://pi.dev/docs/latest/skills> |
+| `opencode` | `name`, `description`, `disable-model-invocation` | `@af-impl` — a skill is named in the prompt, not run as a slash command | 2026-11-13, <https://opencode.ai/docs/skills/> |
 
 Claude Code ignores a frontmatter key it does not recognise without reporting
 an error, so a key kept for one agent would do no harm in another; the keys are
@@ -89,6 +91,8 @@ filtered anyway, so an installed skill carries nothing its agent would ignore.
 | `codex` | `$CODEX_HOME/skills`, else `~/.codex/skills` | `<PROJECT>/.agents/skills` | — | **not confirmed**; whether a repository's `.agents/skills/` is read was **NOT FOUND** in any source read |
 | `cursor` | `~/.cursor/skills` | `<PROJECT>/.cursor/skills` | `.agents/skills`, `.claude/skills`, `.codex/skills` in a repository | **not confirmed** |
 | `copilot` | `~/.copilot/skills` | `<PROJECT>/.github/skills` | `~/.claude/skills`, `~/.agents/skills` for a user; `.claude/skills`, `.agents/skills` in a repository | **not confirmed** |
+| `pi` | `$PI_CODING_AGENT_DIR/skills`, else `~/.pi/agent/skills` | `<PROJECT>/.pi/skills` | `~/.agents/skills` for a user; `.agents/skills` in a repository | 2026-11-13, vendor documentation; `PI_CODING_AGENT_DIR` from <https://pi.dev/docs/latest/configuration> |
+| `opencode` | `~/.config/opencode/skills` | `<PROJECT>/.opencode/skills` | `~/.claude/skills`, `~/.agents/skills` for a user; `.claude/skills`, `.agents/skills` in a repository | 2026-11-13, vendor documentation; whether `XDG_CONFIG_HOME` moves the user directory was **NOT FOUND** |
 
 `SKILLS_DIR` overrides every row, which is the way out when one of them turns
 out to be wrong.
@@ -110,4 +114,9 @@ out to be wrong.
 - Four of the rows above were not confirmed at their vendor, because the pages
   were not reachable from where this was written. Each is marked, and
   `SKILLS_DIR` and the frontmatter filter make a wrong row cheap to correct.
-- Adding a fifth agent is a row in both tables and nothing else.
+- Adding an agent is a row in both tables and nothing else. pi and opencode
+  were added on 2026-11-13 that way. pi's prefix, `/skill:`, is the first
+  longer than one byte, so a body with invocations in it can now be under the
+  ceiling for one agent and over it for another, which the per-agent measure
+  of decision 4 already reports. The check for a skill named in one agent's
+  own syntax gained `@<name>` and `/skill:<name>`.

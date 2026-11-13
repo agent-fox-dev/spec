@@ -202,7 +202,7 @@ a credential.
 
 | Make variable | Default | Effect |
 |---|---|---|
-| `AGENT` | `claude` | the agent to render and install for: `claude`, `codex`, `cursor` or `copilot`. Any other value is refused, and nothing is written |
+| `AGENT` | `claude` | the agent to render and install for: `claude`, `codex`, `cursor`, `copilot`, `pi` or `opencode`. Any other value is refused, and nothing is written |
 | `PROJECT` | *(unset)* | install into this repository's own skill directory instead of the user's. A path that is not an existing directory is refused, and nothing is written |
 | `SKILLS_DIR` | *(unset)* | install into this directory, whatever the agent. It overrides `AGENT`'s directory and `PROJECT` |
 | `SKILLS_SRC` | `skills` | the source tree to read |
@@ -217,10 +217,13 @@ together:
 | `codex` | `$CODEX_HOME/skills`, else `~/.codex/skills` | `<PROJECT>/.agents/skills` |
 | `cursor` | `~/.cursor/skills` | `<PROJECT>/.cursor/skills` |
 | `copilot` | `~/.copilot/skills` | `<PROJECT>/.github/skills` |
+| `pi` | `$PI_CODING_AGENT_DIR/skills`, else `~/.pi/agent/skills` | `<PROJECT>/.pi/skills` |
+| `opencode` | `~/.config/opencode/skills` | `<PROJECT>/.opencode/skills` |
 
 | Environment variable | Effect |
 |---|---|
 | `CODEX_HOME` | with `AGENT=codex` and no `PROJECT`, the user install goes to `$CODEX_HOME/skills` instead of `~/.codex/skills`. It does not reach a project install, which is the repository's directory and not the user's |
+| `PI_CODING_AGENT_DIR` | with `AGENT=pi` and no `PROJECT`, the user install goes to `$PI_CODING_AGENT_DIR/skills` instead of `~/.pi/agent/skills`. Like `CODEX_HOME`, it does not reach a project install |
 
 Each row of both tables is recorded, with the date it was confirmed against
 that vendor's documentation, in

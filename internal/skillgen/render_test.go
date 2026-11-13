@@ -144,6 +144,8 @@ func TestRenderSkill_KeepsOnlyTheKeysTheAgentReadsInTheSourcesOrder(t *testing.T
 		{"codex", []string{"name", "description"}},
 		{"cursor", []string{"name", "description", "disable-model-invocation"}},
 		{"copilot", []string{"name", "description"}},
+		{"pi", []string{"name", "description", "disable-model-invocation"}},
+		{"opencode", []string{"name", "description", "disable-model-invocation"}},
 	} {
 		t.Run(tc.agent, func(t *testing.T) {
 			got := renderSkill(sk, agentNamed(t, tc.agent))
@@ -191,6 +193,8 @@ func TestRenderSkill_ReplacesTheInvokeTokenAndNothingElse(t *testing.T) {
 		{"codex", "$af-impl", "$af-prd"},
 		{"cursor", "/af-impl", "/af-prd"},
 		{"copilot", "/af-impl", "/af-prd"},
+		{"pi", "/skill:af-impl", "/skill:af-prd"},
+		{"opencode", "@af-impl", "@af-prd"},
 	} {
 		t.Run(tc.agent, func(t *testing.T) {
 			got := renderSkill(spec, agentNamed(t, tc.agent))
@@ -254,6 +258,8 @@ func TestReadSource_RefusesAnArgumentPlaceholderOrAnAgentsOwnInvocationSyntax(t 
 		"a slash invocation in a code block": {"```sh\n/af-impl <NN>   # implement it\n```\n", true},
 		"a slash invocation after a space":   {"Then run /af-impl to finish.\n", true},
 		"a dollar invocation after a space":  {"Then run $af-impl to finish.\n", true},
+		"an at invocation after a space":     {"Then mention @af-impl to finish.\n", true},
+		"a skill command after a space":      {"Then run /skill:af-impl to finish.\n", true},
 		"a slash invocation in backticks":    {"Run `/af-impl` next.\n", true},
 		"a slash invocation in parentheses":  {"Finish it (/af-impl) afterwards.\n", true},
 		"a slash invocation in brackets":     {"See [/af-impl] for the next step.\n", true},
@@ -262,6 +268,7 @@ func TestReadSource_RefusesAnArgumentPlaceholderOrAnAgentsOwnInvocationSyntax(t 
 		"a path in backticks":                {"Write it to `skills/af-impl/references/landing.md`.\n", false},
 		"another repository's path":          {"It lives in spec/af-impl for now.\n", false},
 		"the bare name":                      {"The af-impl skill implements the package.\n", false},
+		"an address":                         {"Write to team@af-impl.example about it.\n", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := map[string]string{
@@ -352,9 +359,10 @@ func TestReadSource_MeasuresTheBodyAgainstTheCeilingInBytesAfterSubstitution(t *
 			body: strings.Repeat("x", bodyLimit-1) + "é", wantOver: true, wantBytes: "24,577",
 		},
 		"over before substitution and at the ceiling after it": {
-			// {{invoke af-impl}} is 18 bytes and /af-impl or $af-impl is 8, so
-			// the rendered body is 10 bytes shorter than the source's.
-			body: bodyOfBytes("{{invoke af-impl}}\n", bodyLimit+10),
+			// {{invoke af-impl}} is 18 bytes and pi's /skill:af-impl, the
+			// longest rendering, is 14, so every rendered body is at least 4
+			// bytes shorter than the source's.
+			body: bodyOfBytes("{{invoke af-impl}}\n", bodyLimit+4),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -369,8 +377,8 @@ func TestReadSource_MeasuresTheBodyAgainstTheCeilingInBytesAfterSubstitution(t *
 				}
 				return
 			}
-			// One line per agent the body is over for; every agent's prefix is
-			// one byte, so it is over for all four at the same size.
+			// One line per agent the body is over for; with no invocation in
+			// the body, it is over for every agent at the same size.
 			if len(problems) != len(agents) {
 				t.Fatalf("want %d problems, one per agent, got %d: %s",
 					len(agents), len(problems), strings.Join(lines(problems), " | "))
@@ -381,6 +389,21 @@ func TestReadSource_MeasuresTheBodyAgainstTheCeilingInBytesAfterSubstitution(t *
 				t.Errorf("no problem reads\n  %s\ngot\n  %s", want, strings.Join(got, "\n  "))
 			}
 		})
+	}
+}
+
+func TestReadSource_ReportsABodyOverTheCeilingOnlyForTheAgentsItIsOverFor(t *testing.T) {
+	// /af-impl renders 10 bytes shorter than the token and /skill:af-impl only
+	// 4, so a body 5 bytes over in the source is under for every agent but pi.
+	body := bodyOfBytes("{{invoke af-impl}}\n", bodyLimit+5)
+	files := map[string]string{
+		"af-x/SKILL.md":    docOf(paddedFrontmatter, body),
+		"af-impl/SKILL.md": skillFile("af-impl", "# af-impl\n"),
+	}
+	_, problems := readSource(tree(files), "skills")
+	got := onlyProblem(t, problems)
+	if want := "body is 24,577 bytes for pi, 1 over the 24,576-byte limit"; !strings.Contains(got, want) {
+		t.Errorf("problem %q does not read %q", got, want)
 	}
 }
 
