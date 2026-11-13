@@ -67,6 +67,9 @@ func execute(ref string, o *options, run *cli.Run) (*Result, *cli.ErrorInfo) {
 	if o.statusForm() {
 		return executeStatus(c, dir)
 	}
+	if o.evidenceForm() {
+		return executeEvidence(c, dir)
+	}
 	if o.taskForm() {
 		return executeTask(c, dir)
 	}

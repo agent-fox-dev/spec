@@ -34,6 +34,9 @@ type Result struct {
 	// taskForm marks the result of the task form, whose summary names the
 	// changes.
 	taskForm bool
+	// evidenceForm marks the result of the evidence form, whose summary says
+	// whose evidence it recorded.
+	evidenceForm bool
 	// renderForm marks the result of the render form, whose summary names what
 	// it did to spec.md and which suggests nothing.
 	renderForm bool
@@ -81,6 +84,8 @@ func (r *Result) Summary() string {
 		return r.gateSummary()
 	case r.GateReport != nil:
 		return r.gateReportSummary()
+	case r.evidenceForm:
+		return r.evidenceSummary()
 	case r.taskForm:
 		return r.taskSummary()
 	case r.renderForm:
@@ -168,6 +173,25 @@ func (r *Result) taskSummary() string {
 		}
 		s += fmt.Sprintf(" tasks %s → %s", strings.Join(ids, ", "), r.Changes[0].To)
 	}
+	if r.DryRun {
+		s += " (dry run, nothing written)"
+	}
+	return s
+}
+
+// evidenceSummary says whose evidence the evidence form recorded, and how many
+// tests it holds; and, under --dry-run, that nothing was written.
+func (r *Result) evidenceSummary() string {
+	id := r.Changes[0].ID
+	tests := 0
+	for _, t := range r.Tasks {
+		if t.ID == id {
+			for _, e := range t.Evidence {
+				tests += len(e.Tests)
+			}
+		}
+	}
+	s := fmt.Sprintf("%s: %s evidence of task %d recorded, %d tests", tool, r.dirName(), id, tests)
 	if r.DryRun {
 		s += " (dry run, nothing written)"
 	}

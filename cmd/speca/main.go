@@ -350,12 +350,19 @@ type options struct {
 	// The gate report.
 	gateReport bool
 	since      givenFlag
-	schema     bool
-	version    bool
+	// The evidence form.
+	evidence givenFlag
+	schema   bool
+	version  bool
 }
 
-// taskForm reports whether the call asks for the form that changes tasks.
-func (o *options) taskForm() bool { return len(o.tasks) > 0 || o.state != "" }
+// taskForm reports whether the call asks for the form that changes tasks. A
+// call with --evidence asks for the evidence form instead, which takes --task.
+func (o *options) taskForm() bool { return !o.evidence.given && (len(o.tasks) > 0 || o.state != "") }
+
+// evidenceForm reports whether the call asks for the evidence form. An empty
+// --evidence asks for it, so that it is refused where it stands.
+func (o *options) evidenceForm() bool { return o.evidence.given }
 
 // statusForm reports whether the call asks for the form that changes the
 // package's lifecycle status. --by alone asks for it, so that it is refused
@@ -385,6 +392,7 @@ func (o *options) register(fs *flag.FlagSet) {
 	fs.Var(&o.base, "base", "with --gate task, the commit the task's change started from, which replaces {base} in the package's affected_tests command (default HEAD)")
 	o.timeout.value = gate.DefaultTimeout
 	fs.Var(&o.timeout, "timeout", "with --gate, how long one command may run, a Go duration greater than zero; a command still running then is ended with every process it started, and the gate fails")
+	fs.Var(&o.evidence, "evidence", "the evidence form, with --task and one task id: run every test of this evidence file once and record, for a task in progress of a package that requires evidence, the run in which each test failed before the task is implemented; the file is {\"evidence\": [{\"covers\": <criterion id, or path id for the integration task>, \"tests\": [<identifier>...], \"no_red\": <reason, for an exemption>}]}, at most 1 MiB")
 	fs.BoolVar(&o.gateReport, "gate-report", false, "the gate report: sum the package's gate runs recorded since a commit (--since, or the merge base of HEAD and the base branch): the full and task runs, their seconds and how many were reused, the full gate's seconds at the baseline and on the last tree, and the last full gate's slowest units; whatever the package's status, and writing nothing")
 	fs.Var(&o.since, "since", "with --gate-report, the commit the runs are counted from: a run at it or at a descendant of it that HEAD reaches, or MERGE_HEAD while a merge is uncommitted, counts; default the merge base of HEAD and the branch refs/remotes/origin/HEAD names, else main")
 	fs.StringVar(&o.specsDir, "specs-dir", "", "where NN_name packages live; default <dir>/"+afspec.DefaultSpecDirName+" or $"+afspec.SpecDirEnv)
@@ -461,7 +469,7 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		for _, f := range []struct {
 			name  string
 			given bool
-		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given}} {
+		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given && !o.runsTests()}} {
 			if f.given {
 				errs = append(errs, fmt.Errorf("%s goes with --gate: it applies to the gate form", f.name))
 			}
@@ -469,6 +477,9 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		if o.base.given {
 			errs = append(errs, errors.New("--base goes with --gate task: it names the commit a task's affected tests start from"))
 		}
+	}
+	if o.evidenceForm() {
+		errs = append(errs, o.evidenceErrors(ref)...)
 	}
 	if o.gateReport {
 		errs = append(errs, o.gateReportErrors(ref)...)
@@ -478,7 +489,7 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	if o.timeout.given && o.timeout.value <= 0 {
 		errs = append(errs, fmt.Errorf("--timeout %s: a command's time limit must be greater than zero", o.timeout.value))
 	}
-	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate {
+	if !o.taskForm() && !o.statusForm() && !o.render && !o.migrate && !o.evidenceForm() {
 		for _, f := range []struct {
 			name  string
 			given bool
@@ -492,6 +503,50 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		return nil
 	}
 	return usageInfo(errors.Join(errs...), hint)
+}
+
+// runsTests reports whether the call runs a package's tests other than through
+// the gate, and so takes --timeout: the evidence form.
+func (o *options) runsTests() bool { return o.evidenceForm() }
+
+// evidenceErrors are the faults of a call that asks for the evidence form: it
+// needs a package, a file, and --task with exactly one task id; it moves no
+// state, has nothing for --force to override, and is the only operation of
+// the call.
+func (o *options) evidenceErrors(ref string) []error {
+	var errs []error
+	if ref == "" {
+		errs = append(errs, errors.New("--evidence needs a package: name the package whose task the evidence is for"))
+	}
+	if strings.TrimSpace(o.evidence.value) == "" {
+		errs = append(errs, errors.New("--evidence is empty: name the evidence file"))
+	}
+	switch spec, err := parseTaskSpec(o.tasks); {
+	case len(o.tasks) == 0:
+		errs = append(errs, errors.New("--evidence needs --task with one task id: the task the evidence is for"))
+	case err != nil:
+		errs = append(errs, err)
+	case spec.keyword != "" || len(spec.ids) != 1:
+		errs = append(errs, fmt.Errorf("--evidence takes exactly one task id with --task, not %s: evidence is recorded for one task at a time", strings.Join(o.tasks, ",")))
+	}
+	if o.state != "" {
+		errs = append(errs, errors.New("--evidence and --state are two operations: record the evidence, then move the task"))
+	}
+	if o.force {
+		errs = append(errs, errors.New("--force has no effect with --evidence: no test's rule can be skipped when its runs are recorded"))
+	}
+	for _, f := range []struct {
+		name  string
+		given bool
+	}{
+		{"--validate", o.validate}, {"--list", o.list}, {"--next", o.next}, {"--render", o.render}, {"--migrate", o.migrate},
+		{"the status form (--status, --by)", o.statusForm()}, {"--gate", o.gateForm()}, {"--gate-report", o.gateReport},
+	} {
+		if f.given {
+			errs = append(errs, fmt.Errorf("--evidence and %s are two operations: give one", f.name))
+		}
+	}
+	return errs
 }
 
 // nextErrors are the faults of a call that asks for --next: it takes no input

@@ -377,6 +377,18 @@ func setEvidenceCommand(t *testing.T, dir, command string) {
 	})
 }
 
+// setTaskState sets the state of one task in the package's progress.json.
+func setTaskState(t *testing.T, dir string, id int, state string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) {
+		for _, e := range m["tasks"].([]any) {
+			if e := e.(map[string]any); int(e["id"].(float64)) == id {
+				e["state"] = state
+			}
+		}
+	})
+}
+
 // readFile is the content of the file at path.
 func readFile(t *testing.T, path string) string {
 	t.Helper()

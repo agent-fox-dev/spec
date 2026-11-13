@@ -45,6 +45,7 @@ const (
 	WarnSupersedesNotRecorded    = envelope.WarnSupersedesNotRecorded
 	WarnGateNotRecorded          = envelope.WarnGateNotRecorded
 	WarnEvidenceCommandMissing   = envelope.WarnEvidenceCommandMissing
+	WarnEvidenceLogNotWritten    = envelope.WarnEvidenceLogNotWritten
 )
 
 // warnStages is the one place a code's stage is decided.
@@ -85,6 +86,7 @@ var warnStages = map[WarnCode]string{
 	WarnSupersedesNotRecorded:    "status",
 	WarnGateNotRecorded:          "gate",
 	WarnEvidenceCommandMissing:   "validate",
+	WarnEvidenceLogNotWritten:    "evidence",
 }
 
 // WarnStage returns the stage a code is recorded against, and whether the

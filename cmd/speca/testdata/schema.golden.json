@@ -44,6 +44,11 @@
         "default": false,
         "description": "with the task form, the status form (--status), the render form (--render) or the migrate form (--migrate), run every check and report what would change, and write nothing"
       },
+      "evidence": {
+        "type": "string",
+        "default": "",
+        "description": "the evidence form, with --task and one task id: run every test of this evidence file once and record, for a task in progress of a package that requires evidence, the run in which each test failed before the task is implemented; the file is {\"evidence\": [{\"covers\": <criterion id, or path id for the integration task>, \"tests\": [<identifier>...], \"no_red\": <reason, for an exemption>}]}, at most 1 MiB"
+      },
       "force": {
         "type": "boolean",
         "default": false,
@@ -755,11 +760,11 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "description": "what changed: task (the state of a task), status (the package's lifecycle status), supersedes (an id added to the supersedes list of the replacing package) or moved (the package's directory); the set is open"
+                  "description": "what changed: task (the state of a task), evidence (the evidence recorded for a task), status (the package's lifecycle status), supersedes (an id added to the supersedes list of the replacing package) or moved (the package's directory); the set is open"
                 },
                 "id": {
                   "type": "integer",
-                  "description": "task: the id of the task that changed"
+                  "description": "task and evidence: the id of the task that changed"
                 },
                 "from": {
                   "type": "string",
@@ -784,6 +789,10 @@
               },
               "required": []
             }
+          },
+          "evidence_log": {
+            "type": "string",
+            "description": "the log of the evidence command's run, its stdout and stderr, under the gate's state directory; absent when no test ran or the log could not be written; the evidence form and a close on evidence"
           },
           "dry_run": {
             "type": "boolean",

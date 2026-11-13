@@ -37,8 +37,9 @@ type AdminResult struct {
 	Traceability *TraceReport      `json:"traceability,omitempty" description:"the derived coverage: criteria_covered, criteria_uncovered, paths_covered, paths_uncovered and criteria_unowned; --validate only"`
 	Hints        []ValidationItem  `json:"hints,omitzero" description:"the authoring hints, which are not the format's rules and never change valid: a vague word in a criterion (vague_language), a step or touches entry naming a line of a file (line_reference), and a test command from an ecosystem the repository does not have (foreign_test_command), each with its check, artifact, entity and message; [] when there are none; --validate only"`
 
-	Changes []Change `json:"changes,omitempty" description:"what the call changed, each with its kind, what it left and what it entered: the tasks in plan order for the task form; status, then supersedes, then moved for the status form, in the order they were written; with --dry-run, what it would have changed; absent when nothing changed; the task and status forms only"`
-	DryRun  bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task and status forms only"`
+	Changes     []Change `json:"changes,omitempty" description:"what the call changed, each with its kind, what it left and what it entered: the tasks in plan order for the task form; status, then supersedes, then moved for the status form, in the order they were written; with --dry-run, what it would have changed; absent when nothing changed; the task and status forms only"`
+	EvidenceLog string   `json:"evidence_log,omitempty" description:"the log of the evidence command's run, its stdout and stderr, under the gate's state directory; absent when no test ran or the log could not be written; the evidence form and a close on evidence"`
+	DryRun      bool     `json:"dry_run,omitempty" description:"true under --dry-run: every check ran and nothing was written, and the result is what the call would have produced; the task and status forms only"`
 
 	Packages []PackageInfo `json:"packages,omitzero" description:"one entry for every package under the spec root in number order, then with --all those under archive/; [] when there are none; --list only"`
 
@@ -121,8 +122,8 @@ type PackageInfo struct {
 // list) and moved (the package's directory, from and to), in the order it made
 // them.
 type Change struct {
-	Kind   string `json:"kind,omitempty" description:"what changed: task (the state of a task), status (the package's lifecycle status), supersedes (an id added to the supersedes list of the replacing package) or moved (the package's directory); the set is open"`
-	ID     int    `json:"id,omitempty" description:"task: the id of the task that changed"`
+	Kind   string `json:"kind,omitempty" description:"what changed: task (the state of a task), evidence (the evidence recorded for a task), status (the package's lifecycle status), supersedes (an id added to the supersedes list of the replacing package) or moved (the package's directory); the set is open"`
+	ID     int    `json:"id,omitempty" description:"task and evidence: the id of the task that changed"`
 	From   string `json:"from,omitempty" description:"task: the state it was in (pending, in_progress, done or dropped); status: the status it was in; moved: the directory it was in"`
 	To     string `json:"to,omitempty" description:"task: the state it was set to; status: the status it was set to; moved: the directory it was moved to"`
 	Forced bool   `json:"forced,omitempty" description:"task: true when --force set a state the task state machine would have refused; absent otherwise"`

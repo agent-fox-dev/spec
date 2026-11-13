@@ -45,6 +45,13 @@ const (
 // error's fix hint, where there is one, lists what would be allowed.
 const CategoryLifecycle = "lifecycle"
 
+// CategoryEvidence is a call of speca's evidence form, or a close of a task
+// in a package that requires evidence, refused on what its tests showed or
+// because they could not be run: a test that did not fail first, one that
+// does not pass at the close, a criterion with no test, or an evidence
+// command that could not run. Nothing was written.
+const CategoryEvidence = "evidence"
+
 // RetryableFor reports whether an error of the given category can succeed if
 // re-run unchanged. Only "api" and "aborted" are retryable.
 func RetryableFor(category string) bool {

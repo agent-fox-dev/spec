@@ -145,6 +145,7 @@ func TestTask_RefusesAPackageWhoseContractChanged(t *testing.T) {
 		{"--task", "1", "--state", "pending"},
 		{"--task", "1", "--state", "done", "--force"},
 		{"--task", "1", "--state", "done", "--dry-run"},
+		{"--task", "1", "--evidence", "MAP"},
 		{"--status", "sealed"},
 		{"--status", "sealed", "--force"},
 	}
@@ -165,7 +166,14 @@ func TestTask_RefusesAPackageWhoseContractChanged(t *testing.T) {
 				dir := contractPackage(t, root, "03_a", "03", "a", planTask(1, "in_progress", nil))
 				tc.edit(t, dir)
 				before := treeBytes(t, dir)
-				argv := append([]string{"--dir", root, "03_a"}, call...)
+				argv := []string{"--dir", root, "03_a"}
+				for _, a := range call {
+					if a == "MAP" {
+						a = filepath.Join(t.TempDir(), "map.json")
+						writeFile(t, a, `{"evidence":[{"covers":"REQ-1.1","tests":["T1"]}]}`)
+					}
+					argv = append(argv, a)
+				}
 				env, code, _ := run(t, argv...)
 				e := env.Error
 				if code != cli.ExitFailed || e == nil || e.Stage != "status" || e.Category != "lifecycle" {
