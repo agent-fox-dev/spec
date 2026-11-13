@@ -39,8 +39,10 @@ func (s *Spec) ComputeContractHash() (map[string]string, error) {
 
 // ContractDrift names, in the order of ContractFiles, each contract file that
 // no longer hashes to the package's ContractHash, a file the hash has no
-// entry for among them. It is nil for a package without a contract hash, and
-// for one whose files match it.
+// entry for among them. A file that holds a key its schema does not allow
+// differs too: the decode drops such a key, so the hash cannot see it, and an
+// activated contract holds none. It is nil for a package without a contract
+// hash, and for one whose files match it.
 func (s *Spec) ContractDrift() []string {
 	if s == nil || s.ContractHash == nil {
 		return nil
@@ -52,7 +54,7 @@ func (s *Spec) ContractDrift() []string {
 	}
 	var out []string
 	for _, file := range ContractFiles {
-		if recorded, ok := s.ContractHash[file]; !ok || recorded != current[file] {
+		if recorded, ok := s.ContractHash[file]; !ok || recorded != current[file] || len(s.unknown[file]) > 0 {
 			out = append(out, file)
 		}
 	}

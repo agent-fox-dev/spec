@@ -50,6 +50,7 @@ func statusesOf(t *testing.T, dir string, tests ...string) []Status {
 // <package>:<Test>/<subtest> takes the status go test reports for it, run
 // afresh every time.
 func TestRun_RunsTheNamedGoTestsAndReadsTheirResults(t *testing.T) {
+	t.Parallel()
 	dir := goModule(t, map[string]string{"p/p_test.go": `package p
 
 import "testing"
@@ -64,16 +65,39 @@ func TestParent(t *testing.T) {
 `})
 	tests := []string{"./p:TestPass", "./p:TestFail", "./p:TestSkip", "./p:TestParent/bad", "./p:TestParent/ok"}
 	want := []Status{Pass, Fail, Skipped, Fail, Pass}
+	if got := statusesOf(t, dir, tests...); !slices.Equal(got, want) {
+		t.Errorf("statuses %v; want %v", got, want)
+	}
+}
+
+// Every run runs the test afresh: a test that leaves a file of its own each
+// time it runs, and which go test would replay from its cache, leaves two
+// after two runs. A pattern that names several packages names no one test.
+func TestRun_RunsTheTestsAfreshAndOnePackageAtATime(t *testing.T) {
+	t.Parallel()
+	runs := t.TempDir()
+	dir := goModule(t, map[string]string{
+		"c/c_test.go": "package c\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n\t\"strconv\"\n\t\"testing\"\n\t\"time\"\n)\n\n" +
+			"func TestCounts(t *testing.T) {\n\tos.WriteFile(filepath.Join(`" + runs + "`, strconv.FormatInt(time.Now().UnixNano(), 10)), nil, 0o644)\n}\n",
+		"d/d_test.go": "package d\n\nimport \"testing\"\n\nfunc TestCounts(t *testing.T) {}\n",
+	})
 	for range 2 {
-		if got := statusesOf(t, dir, tests...); !slices.Equal(got, want) {
-			t.Errorf("statuses %v; want %v", got, want)
+		if got := statusesOf(t, dir, "./c:TestCounts"); !slices.Equal(got, []Status{Pass}) {
+			t.Fatalf("statuses %v; want pass", got)
 		}
+	}
+	if entries, _ := os.ReadDir(runs); len(entries) != 2 {
+		t.Errorf("the test ran %d times in two runs; want 2, none from the cache", len(entries))
+	}
+	if got := statusesOf(t, dir, "./...:TestCounts"); !slices.Equal(got, []Status{Missing}) {
+		t.Errorf("a pattern of two packages: %v; want missing", got)
 	}
 }
 
 // No test of a package runs but the ones named, and the parents of the
 // subtests named.
 func TestRun_RunsNoGoTestThatWasNotNamed(t *testing.T) {
+	t.Parallel()
 	marker := func(name string) string { return filepath.Join(t.TempDir(), name) }
 	other, twin := marker("other"), marker("twin")
 	dir := goModule(t, map[string]string{"q/q_test.go": `package q
@@ -101,6 +125,7 @@ func TestOther(t *testing.T) { os.WriteFile(` + "`" + other + "`" + `, nil, 0o64
 // does not exist, and an identifier with no package, are missing; the others
 // keep their own statuses.
 func TestRun_GivesErrorToEveryTestOfAPackageThatDoesNotBuild(t *testing.T) {
+	t.Parallel()
 	dir := goModule(t, map[string]string{
 		"ok/ok_test.go":         "package ok\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {}\n",
 		"broken/broken_test.go": "package broken\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) { undefined() }\n",

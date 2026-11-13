@@ -25,6 +25,7 @@ func script(t *testing.T, name, body string) string {
 // The command is split as the gate splits one and started with no shell, in
 // the directory given, with one argument per test in place of {tests}.
 func TestRun_StartsTheProgramWithTheTestsInPlaceOfThePlaceholder(t *testing.T) {
+	t.Parallel()
 	out := filepath.Join(t.TempDir(), "argv")
 	stub := script(t, "stub", `pwd > '`+out+`'; for a in "$@"; do echo "$a"; done >> '`+out+`'`)
 	dir := t.TempDir()
@@ -50,6 +51,7 @@ func TestRun_StartsTheProgramWithTheTestsInPlaceOfThePlaceholder(t *testing.T) {
 // line, and a line for a test not asked for, is ignored; no line is missing,
 // and two lines of different status are an error.
 func TestParseResults_GivesEachTestTheStatusOfItsLine(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		stdout string
 		want   map[string]Status

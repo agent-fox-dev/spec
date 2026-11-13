@@ -507,7 +507,9 @@ contract_hash:
 ```
 
 Another encoding of the same content, and adding, changing or removing an `x-`
-key, leave the hash as it was; any other change to a file changes its hash.
+key, leave the hash as it was; any other change to what a file says changes
+its hash, and a key its schema does not allow, which the hash cannot see,
+counts as a change of the file too.
 `--status active --dry-run` reports the hash the activation would record.
 
 A package **requires evidence** when it is active and has a `contract_hash`.

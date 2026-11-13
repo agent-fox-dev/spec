@@ -418,7 +418,7 @@ and no integration task is stored (§8.4).
     "all_tests": "go test ./... -count=1",
     "linter": "go vet ./...",
     "spec_tests": "go test ./cmd/spec/... -count=1",
-    "evidence_tests": "make test-evidence TESTS={tests}"
+    "evidence_tests": "./scripts/run-tests {tests}"
   },
   "dependencies": [],
   "tasks": []

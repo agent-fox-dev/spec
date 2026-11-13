@@ -1131,8 +1131,10 @@ func (s *Spec) ComputeTraceability() TraceabilityMatrix
 func (s *Spec) ContractDrift() []string
     ContractDrift names, in the order of ContractFiles, each contract file
     that no longer hashes to the package's ContractHash, a file the hash has
-    no entry for among them. It is nil for a package without a contract hash,
-    and for one whose files match it.
+    no entry for among them. A file that holds a key its schema does not allow
+    differs too: the decode drops such a key, so the hash cannot see it, and an
+    activated contract holds none. It is nil for a package without a contract
+    hash, and for one whose files match it.
 
 func (s *Spec) GetTask(id int) (*PlannedTask, bool)
     GetTask returns a copy of the planned task with the given id, the

@@ -63,6 +63,9 @@ type Runner struct {
 type Result struct {
 	Status map[string]Status
 	Log    string
+	// NoLog is why the run kept no log in the LogDir it was given, which
+	// exists and could not take one; empty otherwise.
+	NoLog string
 }
 
 // FailureKind says why a run did not reach its end.
@@ -104,14 +107,16 @@ func (r Runner) Run(tests []string) (Result, error) {
 	defer cancel()
 
 	var log *os.File
+	res := Result{}
 	if r.LogDir != "" {
 		pattern := time.Now().UTC().Format("20060102T150405Z") + "-evidence-*.log"
 		if f, err := os.CreateTemp(r.LogDir, pattern); err == nil {
 			defer f.Close()
 			log = f
+		} else {
+			res.NoLog = err.Error()
 		}
 	}
-	res := Result{}
 	if log != nil {
 		res.Log = log.Name()
 	}
@@ -131,7 +136,7 @@ func (r Runner) Run(tests []string) (Result, error) {
 			"for the runner built into speca: nothing can run its tests", "evidence_tests", afspec.TasksFileName, r.Dir)}
 	}
 	if err != nil {
-		return Result{Log: res.Log}, err
+		return Result{Log: res.Log, NoLog: res.NoLog}, err
 	}
 	return res, nil
 }

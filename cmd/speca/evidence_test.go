@@ -31,7 +31,8 @@ type evidenceRepo struct {
 
 // newEvidenceRepo lays the repository out, in a git work tree when inGit, with
 // the tasks in the given states, and activates the package with its contract
-// hash.
+// hash. It points XDG_STATE_HOME at a directory of its own, for the
+// run's log, so its tests run serially.
 func newEvidenceRepo(t *testing.T, inGit bool, states ...string) *evidenceRepo {
 	t.Helper()
 	r := &evidenceRepo{root: t.TempDir(), bin: t.TempDir()}
@@ -465,10 +466,34 @@ func TestEvidence_ADryRunWritesNothing(t *testing.T) {
 // Where the state directory cannot be written, the command runs without a
 // log, the result names none, and a low warning says so.
 func TestEvidence_RunsWithoutALogWhereTheStateDirectoryCannotBeWritten(t *testing.T) {
+	for name, block := range map[string]func(t *testing.T, r *evidenceRepo){
+		"a state directory that is a file": func(t *testing.T, r *evidenceRepo) {
+			blocked := filepath.Join(t.TempDir(), "a-file")
+			writeFile(t, blocked, "")
+			t.Setenv(gate.StateEnv, blocked)
+		},
+		"a log directory that cannot be written": func(t *testing.T, r *evidenceRepo) {
+			tree, err := gate.ReadTree(r.root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := gate.OpenStore(tree.Top)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(store.LogDir(), 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(store.LogDir(), 0o700) })
+		},
+	} {
+		t.Run(name, func(t *testing.T) { runsWithoutALog(t, block) })
+	}
+}
+
+func runsWithoutALog(t *testing.T, block func(t *testing.T, r *evidenceRepo)) {
 	r := newEvidenceRepo(t, true)
-	blocked := filepath.Join(t.TempDir(), "a-file")
-	writeFile(t, blocked, "")
-	t.Setenv(gate.StateEnv, blocked)
+	block(t, r)
 	r.answer(t, map[string]string{"T1": "fail"})
 
 	env, code := r.record(t, 1, r.file(t, entry{Covers: "REQ-1.1", Tests: []string{"T1"}}))

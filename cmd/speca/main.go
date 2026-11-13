@@ -535,21 +535,7 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 			hint = gateHint
 		}
 	} else {
-		for _, f := range []struct {
-			name  string
-			given bool
-		}{{"--clean-env", o.cleanEnv}, {"--timeout", o.timeout.given && !o.runsTests()}} {
-			if f.given {
-				if f.name == "--timeout" {
-					errs = append(errs, errors.New("--timeout goes with --gate, --evidence, --verify-evidence or --state done: it limits how long a package's tests may run"))
-					continue
-				}
-				errs = append(errs, fmt.Errorf("%s goes with --gate: it applies to the gate form", f.name))
-			}
-		}
-		if o.base.given {
-			errs = append(errs, errors.New("--base goes with --gate task: it names the commit a task's affected tests start from"))
-		}
+		errs = append(errs, o.gateFlagErrors()...)
 	}
 	if o.evidenceForm() {
 		errs = append(errs, o.evidenceErrors(ref)...)
@@ -579,6 +565,23 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 		return nil
 	}
 	return usageInfo(errors.Join(errs...), hint)
+}
+
+// gateFlagErrors are the faults of a call that is not the gate form and gives
+// a flag of the gate's: --clean-env and --base go with --gate alone, and
+// --timeout with the forms that run a package's tests.
+func (o *options) gateFlagErrors() []error {
+	var errs []error
+	if o.cleanEnv {
+		errs = append(errs, errors.New("--clean-env goes with --gate: it applies to the gate form"))
+	}
+	if o.timeout.given && !o.runsTests() {
+		errs = append(errs, errors.New("--timeout goes with --gate, --evidence, --verify-evidence or --state done: it limits how long a package's tests may run"))
+	}
+	if o.base.given {
+		errs = append(errs, errors.New("--base goes with --gate task: it names the commit a task's affected tests start from"))
+	}
+	return errs
 }
 
 // runsTests reports whether the call may run a package's tests other than

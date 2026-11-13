@@ -259,6 +259,10 @@ func (c *call) runEvidenceTests(name string, spec *afspec.Spec, tests []string) 
 			Message: fmt.Sprintf("%s: the tests could not be run, and nothing was written: %v", name, err)}
 	}
 	run.status, run.log = res.Status, res.Log
+	if res.NoLog != "" {
+		run.warnings = append(run.warnings, plannedWarning{cli.WarnEvidenceLogNotWritten, "low", fmt.Sprintf(
+			"the log could not be written under %s (%s): the tests ran, and no log of them was kept", runner.LogDir, res.NoLog)})
+	}
 	return run, nil
 }
 
