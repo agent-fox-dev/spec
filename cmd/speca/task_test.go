@@ -196,6 +196,11 @@ func TestTask_RefusesAPackageWhoseContractChanged(t *testing.T) {
 
 // A draft takes a task change, and so does an active package whose intent
 // matches its hash.
+//
+// Neither requires evidence, a draft or a package activated without a
+// contract hash: a task closes as it always has, with no test run, no
+// evidence asked for and no evidence warning, in a directory where nothing
+// could run a test.
 func TestTask_TakesAChangeOnADraftOrAnActivePackage(t *testing.T) {
 	for name, active := range map[string]bool{"a draft": false, "an active package": true} {
 		root := newRepo(t)
@@ -209,6 +214,15 @@ func TestTask_TakesAChangeOnADraftOrAnActivePackage(t *testing.T) {
 		}
 		if active && result(t, env).Status != "active" {
 			t.Errorf("%s: status %q", name, result(t, env).Status)
+		}
+		done, code, _ := run(t, "--dir", root, "09", "--task", "1", "--state", "done")
+		if code != cli.ExitOK || onDisk(t, dir)[1] != "done" || loadSpec(t, dir).TaskEvidence(1) != nil {
+			t.Errorf("%s: closing: code %d: %+v; on disk %v", name, code, done.Error, onDisk(t, dir))
+		}
+		for _, w := range done.Warnings {
+			if strings.HasPrefix(string(w.Code), "evidence_") || strings.HasPrefix(string(w.Code), "task_evidence_") {
+				t.Errorf("%s: warning %+v; want no evidence warning", name, w)
+			}
 		}
 	}
 }
@@ -892,5 +906,269 @@ func TestUnknownKeys_NamesTheKeysThatWouldBeLost(t *testing.T) {
 	}
 	if got, want := progressUnknownKeys(entries), want[2:]; !slices.Equal(got, want) {
 		t.Errorf("progressUnknownKeys = %q; want %q", got, want)
+	}
+}
+
+// recordAll records, for task 1 of the repository, one failing test for each
+// of its criteria: T1 for REQ-1.1, T2 for REQ-1.2, T3 for REQ-1.3.
+func (r *evidenceRepo) recordAll(t *testing.T, entries ...entry) {
+	t.Helper()
+	if len(entries) == 0 {
+		entries = []entry{{Covers: "REQ-1.1", Tests: []string{"T1"}}, {Covers: "REQ-1.2", Tests: []string{"T2"}}, {Covers: "REQ-1.3", Tests: []string{"T3"}}}
+	}
+	fail := map[string]string{}
+	for _, e := range entries {
+		for _, test := range e.Tests {
+			fail[test] = "fail"
+		}
+	}
+	r.answer(t, fail)
+	if env, code := r.record(t, 1, r.file(t, entries...)); code != cli.ExitOK {
+		t.Fatalf("recording the evidence: code %d, error %+v", code, env.Error)
+	}
+	r.forget(t)
+}
+
+// close runs speca 05 --task <ids> --state <state> [extra].
+func (r *evidenceRepo) move(t *testing.T, ids, state string, extra ...string) (envelope.AdminEnvelope, int) {
+	t.Helper()
+	env, code, _ := run(t, append([]string{"--dir", r.root, "05", "--task", ids, "--state", state}, extra...)...)
+	return env, code
+}
+
+// A task closes on its evidence: every test runs again, passes, and has its
+// passing run recorded beside its failing one, with the state, in the one
+// write of progress.json.
+func TestTask_ClosesATaskOnItsEvidence(t *testing.T) {
+	r := newEvidenceRepo(t, true)
+	r.recordAll(t)
+	r.answer(t, map[string]string{"T1": "pass", "T2": "pass", "T3": "pass"})
+	failed := r.evidenceOnDisk(t, 1)
+	before := treeBytes(t, r.dir)
+
+	env, code := r.move(t, "1", "done")
+	if code != cli.ExitOK || onDisk(t, r.dir)[1] != "done" {
+		t.Fatalf("code %d, error %+v; on disk %v", code, env.Error, onDisk(t, r.dir))
+	}
+	ev := r.evidenceOnDisk(t, 1)
+	for i, e := range ev {
+		got := e.Tests[0]
+		if got.Passed == nil || got.Passed.At == "" || got.Passed.Tree == nil || !reflect.DeepEqual(got.Failed, failed[i].Tests[0].Failed) {
+			t.Errorf("%s %s recorded as %+v; want its failed run kept and a passed run on a tree", e.Covers, got.Test, got)
+		}
+	}
+	if asked := r.askedTests(t); !slices.Equal(asked, []string{"T1", "T2", "T3"}) {
+		t.Errorf("the close ran %v; want each test once", asked)
+	}
+	if want := []envelope.Change{{Kind: "task", ID: 1, From: "in_progress", To: "done"}}; !slices.Equal(result(t, env).Changes, want) {
+		t.Errorf("changes %+v; want %+v", result(t, env).Changes, want)
+	}
+	after := treeBytes(t, r.dir)
+	for name := range before {
+		if name != afspec.ProgressFileName && before[name] != after[name] {
+			t.Errorf("%s changed; want progress.json alone written", name)
+		}
+	}
+}
+
+// A task that fails a check of the close is not closed, and neither is any
+// other task of the call: the refusal names each criterion without an entry,
+// each test without a failing run and each test that does not pass, and
+// offers --force.
+func TestTask_RefusesToCloseATaskWithoutItsEvidence(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, r *evidenceRepo)
+		ids   string
+		says  []string
+	}{
+		"a criterion with no entry": {func(t *testing.T, r *evidenceRepo) {
+			r.recordAll(t, entry{Covers: "REQ-1.1", Tests: []string{"T1"}}, entry{Covers: "REQ-1.2", Tests: []string{"T2"}})
+			r.answer(t, map[string]string{"T1": "pass", "T2": "pass"})
+		}, "1", []string{"REQ-1.3"}},
+		"a test with no failing run": {func(t *testing.T, r *evidenceRepo) {
+			r.recordAll(t)
+			editJSON(t, filepath.Join(r.dir, afspec.ProgressFileName), func(m map[string]any) {
+				task := m["tasks"].([]any)[0].(map[string]any)
+				test := task["evidence"].([]any)[1].(map[string]any)["tests"].([]any)[0].(map[string]any)
+				delete(test, "failed")
+			})
+			r.answer(t, map[string]string{"T1": "pass", "T2": "pass", "T3": "pass"})
+		}, "1", []string{"T2", "no failing run"}},
+		"a test that fails now": {func(t *testing.T, r *evidenceRepo) {
+			r.recordAll(t)
+			r.answer(t, map[string]string{"T1": "fail", "T2": "pass", "T3": "pass"})
+		}, "1", []string{"T1", "fail"}},
+		"a test that is missing now": {func(t *testing.T, r *evidenceRepo) {
+			r.recordAll(t)
+			r.answer(t, map[string]string{"T2": "pass", "T3": "pass"})
+		}, "1", []string{"T1", "missing"}},
+		"two tasks, one of them not ready to close": {func(t *testing.T, r *evidenceRepo) {
+			setTaskState(t, r.dir, 2, "in_progress")
+			r.recordAll(t, entry{Covers: "REQ-1.1", Tests: []string{"T1"}})
+			r.answer(t, map[string]string{"T4": "fail", "T5": "fail"})
+			if env, code := r.record(t, 2, r.file(t, entry{Covers: "REQ-2.1", Tests: []string{"T4"}}, entry{Covers: "REQ-2.2", Tests: []string{"T5"}})); code != cli.ExitOK {
+				t.Fatalf("recording task 2: %+v", env.Error)
+			}
+			r.answer(t, map[string]string{"T1": "pass", "T4": "pass", "T5": "pass"})
+		}, "1,2", []string{"task 1", "REQ-1.2", "REQ-1.3"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newEvidenceRepo(t, true)
+			tc.setup(t, r)
+			before := treeBytes(t, r.dir)
+			env, code := r.move(t, tc.ids, "done")
+			e := refusedAtEvidence(t, env, code, before, treeBytes(t, r.dir))
+			saysAll(t, []string{name}, e.Message, tc.says...)
+			if e.FixHint == nil || e.FixHint.Flag != "--force" {
+				t.Errorf("fix_hint %+v; want --force", e.FixHint)
+			}
+		})
+	}
+}
+
+// The integration task closes on a smoke test for every execution path, which
+// must pass and need not have failed first.
+func TestTask_ClosesTheIntegrationTaskOnItsSmokeTests(t *testing.T) {
+	r := newEvidenceRepo(t, true, "done", "done", "in_progress")
+	r.answer(t, map[string]string{"S1": "pass"})
+	if env, code := r.record(t, 3, r.file(t, entry{Covers: "PATH-1", Tests: []string{"S1"}})); code != cli.ExitOK {
+		t.Fatalf("recording: %+v", env.Error)
+	}
+	if env, code := r.move(t, "3", "done"); code != cli.ExitOK {
+		t.Fatalf("closing: code %d, error %+v", code, env.Error)
+	}
+	if got := testOf(r.evidenceOnDisk(t, 3), "PATH-1", "S1"); got == nil || got.Failed != nil || got.Passed == nil {
+		t.Errorf("S1 recorded as %+v; want a passed run and no failed one", got)
+	}
+
+	unmapped := newEvidenceRepo(t, true, "done", "done", "in_progress")
+	before := treeBytes(t, unmapped.dir)
+	env, code := unmapped.move(t, "3", "done")
+	e := refusedAtEvidence(t, env, code, before, treeBytes(t, unmapped.dir))
+	saysAll(t, []string{"unmapped"}, e.Message, "PATH-1")
+}
+
+// Each exempt entry of a task that closes is a low warning naming the task,
+// the criterion and the reason.
+func TestTask_WarnsOfEachExemptEntryAtTheClose(t *testing.T) {
+	r := newEvidenceRepo(t, true)
+	r.recordAll(t, entry{Covers: "REQ-1.1", Tests: []string{"T1"}}, entry{Covers: "REQ-1.2", Tests: []string{"T2"}, NoRed: "already reported"},
+		entry{Covers: "REQ-1.3", Tests: []string{"T3"}})
+	r.answer(t, map[string]string{"T1": "pass", "T2": "pass", "T3": "pass"})
+	env, code := r.move(t, "1", "done")
+	if code != cli.ExitOK {
+		t.Fatalf("code %d, error %+v", code, env.Error)
+	}
+	var found []envelope.Warning
+	for _, w := range env.Warnings {
+		if w.Code == "evidence_no_red" {
+			found = append(found, w)
+		}
+	}
+	if len(found) != 1 || found[0].Severity != "low" {
+		t.Fatalf("warnings %+v; want one low evidence_no_red", env.Warnings)
+	}
+	saysAll(t, []string{"no_red"}, found[0].Message, "task 1", "REQ-1.2", "already reported")
+}
+
+// --force closes a task without the checks and without running a test,
+// keeps its evidence as it is, and says so, high.
+func TestTask_ForceClosesWithoutTheChecks(t *testing.T) {
+	for name, partial := range map[string]bool{"no evidence": false, "partial evidence": true} {
+		t.Run(name, func(t *testing.T) {
+			r := newEvidenceRepo(t, true)
+			if partial {
+				r.recordAll(t, entry{Covers: "REQ-1.1", Tests: []string{"T1"}})
+			}
+			kept := r.evidenceOnDisk(t, 1)
+			env, code := r.move(t, "1", "done", "--force")
+			if code != cli.ExitOK || onDisk(t, r.dir)[1] != "done" {
+				t.Fatalf("code %d, error %+v", code, env.Error)
+			}
+			if asked := r.askedTests(t); len(asked) != 0 {
+				t.Errorf("the forced close ran %v; want no test", asked)
+			}
+			if c := result(t, env).Changes; len(c) != 1 || !c[0].Forced {
+				t.Errorf("changes %+v; want the close marked forced", c)
+			}
+			var found bool
+			for _, w := range env.Warnings {
+				found = found || (w.Code == "task_evidence_forced" && w.Severity == "high" && strings.Contains(w.Message, "task 1"))
+			}
+			if !found {
+				t.Errorf("warnings %+v; want a high task_evidence_forced naming task 1", env.Warnings)
+			}
+			if got := r.evidenceOnDisk(t, 1); !reflect.DeepEqual(got, kept) {
+				t.Errorf("evidence %+v after the forced close; want it as it was, %+v", got, kept)
+			}
+		})
+	}
+}
+
+// A task that moves back to pending loses its evidence, its work being done
+// again; a task dropped needs none.
+func TestTask_ReopeningATaskRemovesItsEvidence(t *testing.T) {
+	for name, tc := range map[string]struct {
+		close bool
+		argv  []string
+	}{
+		"in progress to pending":        {false, nil},
+		"done to pending":               {true, nil},
+		"done to pending, with --force": {true, []string{"--force"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newEvidenceRepo(t, true)
+			r.recordAll(t)
+			if tc.close {
+				r.answer(t, map[string]string{"T1": "pass", "T2": "pass", "T3": "pass"})
+				if env, code := r.move(t, "1", "done"); code != cli.ExitOK {
+					t.Fatalf("closing: %+v", env.Error)
+				}
+			}
+			if env, code := r.move(t, "1", "pending", tc.argv...); code != cli.ExitOK {
+				t.Fatalf("code %d, error %+v", code, env.Error)
+			}
+			if got := r.evidenceOnDisk(t, 1); got != nil {
+				t.Errorf("evidence %+v; want none", got)
+			}
+		})
+	}
+
+	r := newEvidenceRepo(t, true, "done", "pending", "pending")
+	r.forget(t)
+	if env, code := r.move(t, "2", "dropped"); code != cli.ExitOK || onDisk(t, r.dir)[2] != "dropped" {
+		t.Fatalf("dropping: code %d, error %+v", code, env.Error)
+	}
+	if asked := r.askedTests(t); len(asked) != 0 {
+		t.Errorf("dropping ran %v; want no test", asked)
+	}
+}
+
+// A dry-run close runs the tests and the checks and writes nothing: its
+// result is the real close's, and so is its refusal.
+func TestTask_ADryRunCloseWritesNothing(t *testing.T) {
+	r := newEvidenceRepo(t, true)
+	r.recordAll(t)
+	r.answer(t, map[string]string{"T1": "pass", "T2": "pass", "T3": "pass"})
+	before := treeBytes(t, r.dir)
+	env, code := r.move(t, "1", "done", "--dry-run")
+	if code != cli.ExitOK || !result(t, env).DryRun || result(t, env).Tasks[0].State != "done" {
+		t.Fatalf("code %d, error %+v; want a dry run that closes task 1", code, env.Error)
+	}
+	if ev := result(t, env).Tasks[0].Evidence; len(ev) != 3 || ev[0].Tests[0].Passed == nil {
+		t.Errorf("the dry run reported %+v; want the passed runs the close would record", ev)
+	}
+	if !maps.Equal(before, treeBytes(t, r.dir)) {
+		t.Error("the dry run wrote to the package")
+	}
+	if asked := r.askedTests(t); len(asked) != 3 {
+		t.Errorf("the dry run ran %v; want the three tests", asked)
+	}
+
+	r.answer(t, map[string]string{"T1": "fail", "T2": "pass", "T3": "pass"})
+	dry, dryCode := r.move(t, "1", "done", "--dry-run")
+	real, realCode := r.move(t, "1", "done")
+	if dryCode != cli.ExitFailed || realCode != cli.ExitFailed || dry.Error.Message != real.Error.Message {
+		t.Errorf("the dry run's refusal %+v; want the real call's, %+v", dry.Error, real.Error)
 	}
 }

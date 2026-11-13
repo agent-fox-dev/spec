@@ -539,3 +539,51 @@ func TestEvidence_EndsACommandAndItsProcessesAtTheTimeout(t *testing.T) {
 		}
 	}
 }
+
+// setCommand sets the package's evidence command, nil for none, and activates
+// it again with that contract.
+func (r *evidenceRepo) setCommand(t *testing.T, command *string) {
+	t.Helper()
+	spec := loadSpec(t, r.dir)
+	spec.Tasks.TestCommands.EvidenceTests = command
+	spec.ContractHash, _ = spec.ComputeContractHash()
+	if err := spec.Save(r.dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// When the evidence command cannot be started, neither the evidence form nor
+// a close goes ahead: the refusal names why, and nothing is written.
+func TestEvidence_RefusesWhenTheTestsCannotRun(t *testing.T) {
+	missing, open := "no-such-program-xyz {tests}", `run-tests "open {tests}`
+	for name, tc := range map[string]struct {
+		command *string
+		says    []string
+	}{
+		"no evidence_tests and no go.mod": {nil, []string{"evidence_tests", "tasks.json"}},
+		"a program not found":             {&missing, []string{"no-such-program-xyz", "could not start"}},
+		"a command that cannot be split":  {&open, []string{`run-tests \"open {tests}`, "quote"}},
+	} {
+		for _, call := range []string{"--evidence", "--state done"} {
+			t.Run(name+", "+call, func(t *testing.T) {
+				r := newEvidenceRepo(t, true)
+				r.recordAll(t)
+				r.answer(t, map[string]string{"T1": "pass", "T2": "pass", "T3": "pass"})
+				r.setCommand(t, tc.command)
+				before := treeBytes(t, r.dir)
+				var env envelope.AdminEnvelope
+				var code int
+				if call == "--evidence" {
+					env, code = r.record(t, 1, r.file(t, entry{Covers: "REQ-1.1", Tests: []string{"T1"}}))
+				} else {
+					env, code = r.move(t, "1", "done")
+				}
+				e := refusedAtEvidence(t, env, code, before, treeBytes(t, r.dir))
+				if e.Category != "evidence" {
+					t.Errorf("category %q; want evidence", e.Category)
+				}
+				saysAll(t, []string{name}, e.Message, tc.says...)
+			})
+		}
+	}
+}

@@ -60,6 +60,10 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	if refusal != nil {
 		return c.refused(dir, spec, refusal)
 	}
+	evidenceLog, refusal := c.closeOnEvidence(name, spec, &moves)
+	if refusal != nil {
+		return c.refused(dir, spec, refusal)
+	}
 
 	warnings := moves.warnings
 	validity := spec.Validate()
@@ -103,6 +107,7 @@ func executeTask(c *call, dir string) (*Result, *cli.ErrorInfo) {
 	r := c.reportWith(dir, spec, validity)
 	r.taskForm = true
 	r.DryRun = c.opts.dryRun
+	r.EvidenceLog = evidenceLog
 	for _, m := range moves.moves {
 		r.Changes = append(r.Changes, envelope.Change{Kind: "task", ID: m.id, From: string(m.from), To: string(m.to), Forced: m.forced})
 	}

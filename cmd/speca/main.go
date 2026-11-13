@@ -505,9 +505,13 @@ func (o *options) check(ref string) *cli.ErrorInfo {
 	return usageInfo(errors.Join(errs...), hint)
 }
 
-// runsTests reports whether the call runs a package's tests other than through
-// the gate, and so takes --timeout: the evidence form.
-func (o *options) runsTests() bool { return o.evidenceForm() }
+// runsTests reports whether the call may run a package's tests other than
+// through the gate, and so takes --timeout: the evidence form, and the task
+// form closing tasks, which in a package that requires evidence runs their
+// tests (the flags are checked before the package is read).
+func (o *options) runsTests() bool {
+	return o.evidenceForm() || (o.taskForm() && o.state == string(afspec.TaskStateDone))
+}
 
 // evidenceErrors are the faults of a call that asks for the evidence form: it
 // needs a package, a file, and --task with exactly one task id; it moves no
