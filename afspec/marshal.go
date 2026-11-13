@@ -46,7 +46,10 @@ func init() {
 
 		// progress.v3.json
 		reflect.TypeOf(ProgressV3Json{}): {"$schema", "spec_id", "spec_name", "schema_version", "updated_at", "tasks"},
-		reflect.TypeOf(TaskProgress{}):   {"id", "state"},
+		reflect.TypeOf(TaskProgress{}):   {"id", "state", "evidence"},
+		reflect.TypeOf(EvidenceEntry{}):  {"covers", "no_red", "tests"},
+		reflect.TypeOf(EvidenceTest{}):   {"test", "failed", "passed"},
+		reflect.TypeOf(EvidenceRun{}):    {"at", "tree"},
 	}
 
 	// Fields omitted when nil. Everything else is always written, so a nil
@@ -84,6 +87,10 @@ func init() {
 			"affected_tests": true,
 			"evidence_tests": true,
 		},
+		reflect.TypeOf(TaskProgress{}):  {"evidence": true},
+		reflect.TypeOf(EvidenceEntry{}): {"no_red": true},
+		reflect.TypeOf(EvidenceTest{}):  {"failed": true, "passed": true},
+		reflect.TypeOf(EvidenceRun{}):   {"tree": true},
 		reflect.TypeOf(Task{}): {
 			"touches":        true,
 			"depends_on":     true,

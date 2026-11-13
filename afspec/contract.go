@@ -73,3 +73,52 @@ func cloneContractHash(h map[string]string) map[string]string {
 	}
 	return maps.Clone(h)
 }
+
+// TaskEvidence is a copy of the evidence progress.json holds for the task
+// with the given id, sharing nothing with the package: for each criterion the
+// task owns (for the integration task, each execution path), the tests that
+// cover it and the runs speca recorded of them. It is nil for a task with
+// none.
+func (s *Spec) TaskEvidence(id int) []EvidenceEntry {
+	if s == nil || s.Progress == nil {
+		return nil
+	}
+	for _, e := range s.Progress.Tasks {
+		if e.Id == id {
+			return cloneEvidence(e.Evidence)
+		}
+	}
+	return nil
+}
+
+// cloneEvidence is a copy of entries that shares nothing with them, nil for
+// none.
+func cloneEvidence(entries []EvidenceEntry) []EvidenceEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]EvidenceEntry, len(entries))
+	for i, e := range entries {
+		out[i] = EvidenceEntry{Covers: e.Covers, Tests: make([]EvidenceTest, len(e.Tests))}
+		if e.NoRed != nil {
+			reason := *e.NoRed
+			out[i].NoRed = &reason
+		}
+		for j, t := range e.Tests {
+			out[i].Tests[j] = EvidenceTest{Test: t.Test, Failed: cloneRun(t.Failed), Passed: cloneRun(t.Passed)}
+		}
+	}
+	return out
+}
+
+func cloneRun(r *EvidenceRun) *EvidenceRun {
+	if r == nil {
+		return nil
+	}
+	c := EvidenceRun{At: r.At}
+	if r.Tree != nil {
+		tree := *r.Tree
+		c.Tree = &tree
+	}
+	return &c
+}

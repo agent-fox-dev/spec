@@ -3,6 +3,7 @@ package afspec
 import (
 	"errors"
 	"math/rand/v2"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -112,6 +113,41 @@ func TestTransitionTask_ReturnsANewProgress(t *testing.T) {
 	}
 	if done.Tasks[2].State != TaskStateInProgress {
 		t.Errorf("integration task state = %s", done.Tasks[2].State)
+	}
+}
+
+// A move keeps the evidence of every task, the moved one's included, and
+// shares none of it with the package it was made on; a save writes it back.
+func TestTransitionTask_KeepsEveryTasksEvidence(t *testing.T) {
+	dir := copyFixture(t, fixtureValidSpec)
+	spec := loadFixture(t, dir)
+	tree := "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+	entry := func(covers string) []EvidenceEntry {
+		return []EvidenceEntry{{Covers: covers, Tests: []EvidenceTest{{Test: "./p:TestA", Failed: &EvidenceRun{At: "2026-11-13T10:00:00Z", Tree: &tree}}}}}
+	}
+	spec.Progress = spec.CompleteTaskStates(nil)
+	spec.Progress.Tasks[0].Evidence = entry("REQ-1.1")
+	spec.Progress.Tasks[1].Evidence = entry("REQ-2.1")
+	spec.Progress = spec.ResetTaskStates(nil)
+
+	moved, err := spec.TransitionTask(1, string(TaskStateInProgress))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(moved.Tasks[0].Evidence, entry("REQ-1.1")) || !reflect.DeepEqual(moved.Tasks[1].Evidence, entry("REQ-2.1")) {
+		t.Fatalf("evidence after the move %+v, %+v; want both kept", moved.Tasks[0].Evidence, moved.Tasks[1].Evidence)
+	}
+	moved.Tasks[0].Evidence[0].Tests[0].Test = "changed"
+	if spec.Progress.Tasks[0].Evidence[0].Tests[0].Test != "./p:TestA" {
+		t.Error("the move's progress shares its evidence with the package's")
+	}
+	moved.Tasks[0].Evidence[0].Tests[0].Test = "./p:TestA"
+	spec.Progress = moved
+	if err := spec.SaveProgress(dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadFixture(t, dir).Progress.Tasks[1].Evidence; !reflect.DeepEqual(got, entry("REQ-2.1")) {
+		t.Errorf("read back %+v; want the evidence written", got)
 	}
 }
 

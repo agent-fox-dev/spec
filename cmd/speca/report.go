@@ -70,6 +70,9 @@ func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResu
 	}
 
 	r.Tasks = specpkg.TaskInfos(spec)
+	for i := range r.Tasks {
+		r.Tasks[i].Evidence = evidenceOf(spec.TaskEvidence(r.Tasks[i].ID))
+	}
 	r.TaskCounts = countTasks(spec)
 	if next, ok := spec.NextTask(); ok {
 		info := specpkg.TaskInfo(spec, *next)
@@ -81,6 +84,34 @@ func (c *call) reportWith(dir string, spec *afspec.Spec, v afspec.ValidationResu
 		r.Dependents = dependentsOf(metas, c.specsDir, spec.SpecID)
 	}
 	return r
+}
+
+// evidenceOf is a task's evidence as the report writes it, nil for none.
+func evidenceOf(entries []afspec.EvidenceEntry) []envelope.TaskEvidence {
+	var out []envelope.TaskEvidence
+	for _, e := range entries {
+		te := envelope.TaskEvidence{Covers: e.Covers, Tests: []envelope.EvidenceTest{}}
+		if e.NoRed != nil {
+			te.NoRed = *e.NoRed
+		}
+		for _, t := range e.Tests {
+			te.Tests = append(te.Tests, envelope.EvidenceTest{Test: t.Test, Failed: runOf(t.Failed), Passed: runOf(t.Passed)})
+		}
+		out = append(out, te)
+	}
+	return out
+}
+
+// runOf is a recorded run as the report writes it, nil for none.
+func runOf(r *afspec.EvidenceRun) *envelope.EvidenceRun {
+	if r == nil {
+		return nil
+	}
+	out := &envelope.EvidenceRun{At: r.At}
+	if r.Tree != nil {
+		out.Tree = *r.Tree
+	}
+	return out
 }
 
 // countTasks counts the plan's tasks by state, the derived integration task

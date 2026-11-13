@@ -466,7 +466,8 @@ func (s *Spec) saveToDisk(dir string) error {
 
 // progressArtifact is the progress file as a save writes it: the package's
 // identity, UpdatedAt, and one entry per task of the plan and for the
-// integration task, in id order, with the state the Spec carries for each. An
+// integration task, in id order, with the state and the evidence the Spec
+// carries for each. An
 // entry that names no task of the package is not written.
 func (s *Spec) progressArtifact() *ProgressV3Json {
 	p := &ProgressV3Json{
@@ -478,7 +479,7 @@ func (s *Spec) progressArtifact() *ProgressV3Json {
 		Tasks:         []TaskProgress{},
 	}
 	for _, t := range s.Plan() {
-		p.Tasks = append(p.Tasks, TaskProgress{Id: t.Id, State: t.State})
+		p.Tasks = append(p.Tasks, TaskProgress{Id: t.Id, State: t.State, Evidence: s.TaskEvidence(t.Id)})
 	}
 	return p
 }

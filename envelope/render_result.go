@@ -51,10 +51,11 @@ type RenderResult struct {
 // TaskInfo is one task of the plan, by id, without its body: a task of
 // tasks.json, or the derived integration task.
 type TaskInfo struct {
-	ID        int    `json:"id" description:"the task id, as --task takes it"`
-	Title     string `json:"title" description:"the task title"`
-	Kind      string `json:"kind" description:"implement for a task of tasks.json, or integration for the derived last task of a full package"`
-	State     string `json:"state" description:"pending, in_progress, done or dropped, from progress.json"`
-	DependsOn []int  `json:"depends_on,omitempty" description:"the tasks that must be done first"`
-	Ready     bool   `json:"ready,omitempty" description:"true for a pending task whose dependencies are all done; absent otherwise"`
+	ID        int            `json:"id" description:"the task id, as --task takes it"`
+	Title     string         `json:"title" description:"the task title"`
+	Kind      string         `json:"kind" description:"implement for a task of tasks.json, or integration for the derived last task of a full package"`
+	State     string         `json:"state" description:"pending, in_progress, done or dropped, from progress.json"`
+	DependsOn []int          `json:"depends_on,omitempty" description:"the tasks that must be done first"`
+	Ready     bool           `json:"ready,omitempty" description:"true for a pending task whose dependencies are all done; absent otherwise"`
+	Evidence  []TaskEvidence `json:"evidence,omitempty" description:"speca's report only, never specr: in a package that requires evidence, the tests that cover each criterion the task owns, from progress.json; absent for a task that has none"`
 }

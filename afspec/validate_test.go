@@ -25,6 +25,51 @@ func TestValidate_AcceptsEveryValidFixture(t *testing.T) {
 	}
 }
 
+// The evidence of a task and the contract hash are optional: a package
+// validates with or without them, and one that breaks their shape does not.
+func TestValidate_TakesTheEvidenceAndTheContractHashAsOptional(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	withEvidence := func(s *Spec) {
+		s.Progress = s.CompleteTaskStates(nil)
+		s.Progress.Tasks[0].Evidence = []EvidenceEntry{{Covers: "REQ-1.1", Tests: []EvidenceTest{{Test: "./p:TestA", Failed: &EvidenceRun{At: "2026-11-13T10:00:00Z"}}}}}
+	}
+	for name, tc := range map[string]struct {
+		edit  func(s *Spec)
+		valid bool
+	}{
+		"neither":            {func(*Spec) {}, true},
+		"evidence on a task": {withEvidence, true},
+		"a contract hash of both files": {func(s *Spec) {
+			s.ContractHash = map[string]string{RequirementsFileName: hash, TasksFileName: hash}
+		}, true},
+		"a contract hash without tasks.json": {func(s *Spec) { s.ContractHash = map[string]string{RequirementsFileName: hash} }, false},
+		"a contract hash with a third file": {func(s *Spec) {
+			s.ContractHash = map[string]string{RequirementsFileName: hash, TasksFileName: hash, "prd.md": hash}
+		}, false},
+		"a contract hash of 63 digits": {func(s *Spec) {
+			s.ContractHash = map[string]string{RequirementsFileName: hash[1:], TasksFileName: hash}
+		}, false},
+		"an evidence entry without covers": {func(s *Spec) { withEvidence(s); s.Progress.Tasks[0].Evidence[0].Covers = "" }, false},
+		"an evidence entry without tests":  {func(s *Spec) { withEvidence(s); s.Progress.Tasks[0].Evidence[0].Tests = nil }, false},
+		"a test identifier with a line break": {func(s *Spec) {
+			withEvidence(s)
+			s.Progress.Tasks[0].Evidence[0].Tests[0].Test = "a\nb"
+		}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := loadFixture(t, fixtureValidSpec)
+			tc.edit(s)
+			v := s.Validate()
+			if v.Valid != tc.valid {
+				t.Fatalf("valid %v, errors %v; want valid %v", v.Valid, v.Errors, tc.valid)
+			}
+			if !tc.valid && !hasCheck(v, "json_schema") {
+				t.Errorf("errors %v; want a json_schema error", v.Errors)
+			}
+		})
+	}
+}
+
 // The proofs of format v2 that moved into the schema: a criterion without a
 // check, a path without a smoke check, and a check that mixes its two forms
 // cannot be written at all.

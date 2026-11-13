@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -129,6 +130,55 @@ func TestReport_ContractDrift(t *testing.T) {
 		if got := string(raw["evidence_required"]); got != want.required {
 			t.Errorf("package %s: evidence_required = %q; want %q", ref, got, want.required)
 		}
+	}
+}
+
+// Each task that holds evidence is reported with it, entry by entry and test
+// by test, a run absent until it was recorded; a task that holds none has no
+// evidence key.
+func TestReport_ShowsEachTasksEvidence(t *testing.T) {
+	root := newRepo(t)
+	dir := pkgDir(root, "09_agent_mode")
+	setTasks(t, dir, planTask(1, "in_progress", nil), planTask(2, "pending", nil))
+	evidence := []any{
+		map[string]any{"covers": "REQ-1.1", "tests": []any{
+			map[string]any{"test": "./p:TestFailedOnly", "failed": map[string]any{"at": "2026-11-13T10:00:00Z", "tree": "aaa"}},
+			map[string]any{"test": "./p:TestBoth", "failed": map[string]any{"at": "2026-11-13T10:00:00Z", "tree": "aaa"},
+				"passed": map[string]any{"at": "2026-11-13T11:00:00Z", "tree": "bbb"}},
+		}},
+		map[string]any{"covers": "REQ-1.2", "no_red": "the behaviour already existed", "tests": []any{
+			map[string]any{"test": "./p:TestExempt"},
+		}},
+	}
+	editJSON(t, filepath.Join(dir, afspec.ProgressFileName), func(m map[string]any) {
+		m["tasks"].([]any)[0].(map[string]any)["evidence"] = evidence
+	})
+
+	env, raw := rawRun(t, "--dir", root, "09")
+	want := []envelope.TaskEvidence{
+		{Covers: "REQ-1.1", Tests: []envelope.EvidenceTest{
+			{Test: "./p:TestFailedOnly", Failed: &envelope.EvidenceRun{At: "2026-11-13T10:00:00Z", Tree: "aaa"}},
+			{Test: "./p:TestBoth", Failed: &envelope.EvidenceRun{At: "2026-11-13T10:00:00Z", Tree: "aaa"},
+				Passed: &envelope.EvidenceRun{At: "2026-11-13T11:00:00Z", Tree: "bbb"}},
+		}},
+		{Covers: "REQ-1.2", NoRed: "the behaviour already existed", Tests: []envelope.EvidenceTest{{Test: "./p:TestExempt"}}},
+	}
+	if got := result(t, env).Tasks[0].Evidence; !reflect.DeepEqual(got, want) {
+		t.Errorf("task 1 evidence %+v; want %+v", got, want)
+	}
+	var tasks []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["tasks"], &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tasks[1]["evidence"]; ok {
+		t.Errorf("task 2 has an evidence key: %s", tasks[1]["evidence"])
+	}
+	var first []map[string]json.RawMessage
+	if err := json.Unmarshal(tasks[0]["evidence"], &first); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := first[0]["no_red"]; ok {
+		t.Errorf("an entry without an exemption has a no_red key: %s", tasks[0]["evidence"])
 	}
 }
 
