@@ -418,3 +418,52 @@ func TestLoop_StrictHandoffsStopBeforeAPackageThatDoesNotTakeOne(t *testing.T) {
 		t.Errorf("code %d, would_stop %+v; want 02 named, nothing started", code, env.Result.WouldStop)
 	}
 }
+
+// A session that ended in an error and left its package unfinished stops the
+// loop with the error it ended with, not with the landing check the error
+// happened to leave failing; an API error is reported as retryable. A session
+// that ended in an error after its package landed has landed.
+func TestLoop_StopsWithTheErrorASessionEndedWith(t *testing.T) {
+	const cloudflare = "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"
+	for name, tc := range map[string]struct {
+		session   map[string]any
+		reason    string
+		category  string
+		retryable bool
+	}{
+		"an API error on the feature branch": {
+			map[string]any{"events": 1, "actions": []string{"branch", "done"}, "result": cloudflare, "is_error": true, "api_status": 403},
+			"the session ended with an API error (403): " + cloudflare, "api", true},
+		"an API error that changed nothing": {
+			map[string]any{"events": 1, "result": "", "is_error": true, "api_status": 529},
+			"the session ended with an API error (529)", "api", true},
+		"another error, its first line": {
+			map[string]any{"events": 1, "actions": []string{"branch", "done"}, "result": "Reached max turns\nmore", "is_error": true},
+			"the session ended with an error: Reached max turns", "input", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.addPackage(t, "01_a", "01", "pending")
+			f.plan(t, tc.session)
+			env, code, stderr := runMain(t)
+			r := env.Result
+			if code != 1 || r == nil || r.Stopped == nil || r.Stopped.Reason != tc.reason {
+				t.Fatalf("code %d, result %+v, error %+v; want a stop: %s\n%s", code, r, env.Error, tc.reason, stderr)
+			}
+			if e := env.Error; e.Stage != "session" || e.Category != tc.category || e.Retryable != tc.retryable {
+				t.Errorf("error %+v; want stage session, category %s, retryable %t", e, tc.category, tc.retryable)
+			}
+		})
+	}
+	t.Run("an API error after the package landed", func(t *testing.T) {
+		f := newFixture(t)
+		f.addPackage(t, "01_a", "01", "pending")
+		session := land(1)
+		session["result"], session["is_error"], session["api_status"] = cloudflare, true, 403
+		f.plan(t, session)
+		env, code, stderr := runMain(t)
+		if code != 0 || env.Result == nil || strings.Join(env.Result.Landed, ",") != "01_a" {
+			t.Fatalf("code %d, result %+v, error %+v; want the package landed\n%s", code, env.Result, env.Error, stderr)
+		}
+	})
+}

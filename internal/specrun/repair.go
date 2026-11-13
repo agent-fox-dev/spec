@@ -221,6 +221,9 @@ func (r *run) repair(issue int) *Stopped {
 		reason = reasonStalled
 	default:
 		outcome, failedIssue, reason = r.repairLeft(issue)
+		if reason != reasonRepairFailed {
+			reason = o.explain(reason)
+		}
 	}
 	_ = os.WriteFile(filepath.Join(r.runDir, step+".log"), []byte(o.final), 0o644)
 	ended := r.host.now().UTC().Truncate(time.Second)

@@ -61,6 +61,8 @@ type run struct {
 	EventGapMS int      `json:"event_gap_ms"`   // the pause before each
 	Actions    []string `json:"actions"`        // what to do to the repository, in order
 	Result     *string  `json:"result"`         // the final message; none when absent
+	IsError    bool     `json:"is_error"`       // the result event says the session ended in an error
+	APIStatus  int      `json:"api_status"`     // the result event's api_error_status; none when 0
 	Silence    int      `json:"silence_s"`      // then print nothing for this long
 	Child      bool     `json:"child"`          // start a child that sleeps, recording both pids
 	Detached   bool     `json:"detached_child"` // the same, the child in a process group of its own
@@ -131,7 +133,11 @@ func main() {
 		time.Sleep(time.Duration(r.Silence) * time.Second)
 	}
 	if r.Result != nil {
-		b, _ := json.Marshal(map[string]string{"type": "result", "result": *r.Result})
+		ev := map[string]any{"type": "result", "result": *r.Result, "is_error": r.IsError}
+		if r.APIStatus != 0 {
+			ev["api_error_status"] = r.APIStatus
+		}
+		b, _ := json.Marshal(ev)
 		fmt.Println(string(b))
 	}
 	os.Exit(r.Exit)
