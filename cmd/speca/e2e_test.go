@@ -3,6 +3,7 @@ package main
 import (
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -421,5 +422,142 @@ func TestASpecAuthorDeclaresAHandoffAndTheReceiversCoderSeesWhatToWire(t *testin
 		if !strings.Contains(md, want) {
 			t.Errorf("the render of 02's task 1 lacks %q", want)
 		}
+	}
+}
+
+// calcRepo is a git repository holding a Go module, whose package ./calc has
+// an Add that returns 0 and a TestAdd that expects the sum, and a package,
+// 05_calc, whose task 1 owns REQ-1.1 alone, activated through speca with its
+// contract hash and with task 1 claimed. Nothing is stubbed: speca's Main runs
+// the module's tests with the go toolchain.
+type calcRepo struct {
+	root, dir string
+	contract  map[string][]byte
+}
+
+func newCalcRepo(t *testing.T) *calcRepo {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("-short: the evidence runs go test")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("the go tool is not on the path")
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	r := &calcRepo{root: t.TempDir()}
+	writeFile(t, filepath.Join(r.root, "go.mod"), "module example.com/calc\n\ngo 1.27\n")
+	mustMkdir(t, filepath.Join(r.root, "calc"))
+	r.setAdd(t, "0")
+	writeFile(t, filepath.Join(r.root, "calc", "calc_test.go"), `package calc
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if got := Add(2, 3); got != 5 {
+		t.Fatalf("Add(2, 3) = %d; want 5", got)
+	}
+}
+`)
+	r.dir = addPackage(t, r.root, "05_calc", "05", "calc")
+	task := func(id int, criteria ...any) map[string]any {
+		m := planTask(id, "pending", nil)
+		m["criteria"] = criteria
+		return m
+	}
+	setTasks(t, r.dir, task(1, "REQ-1.1"), task(2, "REQ-1.2", "REQ-1.3", "REQ-2"))
+	gitInit(t, r.root)
+	for _, argv := range [][]string{{"05", "--render"}, {"05", "--status", "active"}, {"05", "--task", "1", "--state", "in_progress"}} {
+		succeeds(t, r.root, argv...)
+	}
+	if loadSpec(t, r.dir).ContractHash == nil {
+		t.Fatal("the activation recorded no contract hash")
+	}
+	r.contract = map[string][]byte{}
+	for _, f := range []string{afspec.RequirementsFileName, afspec.TasksFileName} {
+		r.contract[f] = []byte(readFile(t, filepath.Join(r.dir, f)))
+	}
+	return r
+}
+
+// setAdd makes Add return the expression.
+func (r *calcRepo) setAdd(t *testing.T, expr string) {
+	t.Helper()
+	writeFile(t, filepath.Join(r.root, "calc", "calc.go"), "package calc\n\n// Add adds.\nfunc Add(a, b int) int { return "+expr+" }\n")
+}
+
+// recordEvidence maps REQ-1.1 to TestAdd and records it, while Add is wrong.
+func (r *calcRepo) recordEvidence(t *testing.T) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "map.json")
+	writeFile(t, file, `{"evidence": [{"covers": "REQ-1.1", "tests": ["./calc:TestAdd"]}]}`)
+	succeeds(t, r.root, "05", "--task", "1", "--evidence", file)
+}
+
+// An implementer claims a task of a package that requires evidence, records
+// its test failing before the code exists, writes the code, closes the task
+// as speca sees the test pass, and checks the evidence again: the failing
+// and the passing runs are on two trees, and the contract is untouched.
+func TestAnImplementerClosesATaskOnItsEvidenceAndChecksItAgain(t *testing.T) {
+	r := newCalcRepo(t)
+	r.recordEvidence(t)
+	recorded := loadSpec(t, r.dir).TaskEvidence(1)
+	if len(recorded) != 1 || recorded[0].Tests[0].Failed == nil {
+		t.Fatalf("evidence %+v; want TestAdd's failing run", recorded)
+	}
+
+	r.setAdd(t, "a + b")
+	succeeds(t, r.root, "05", "--task", "1", "--state", "done")
+	ev := loadSpec(t, r.dir).TaskEvidence(1)
+	if onDisk(t, r.dir)[1] != "done" || len(ev) != 1 || ev[0].Covers != "REQ-1.1" || ev[0].Tests[0].Test != "./calc:TestAdd" {
+		t.Fatalf("task 1 is %s with evidence %+v; want done, REQ-1.1 covered by ./calc:TestAdd", onDisk(t, r.dir)[1], ev)
+	}
+	test := ev[0].Tests[0]
+	if test.Failed == nil || test.Passed == nil || test.Failed.Tree == nil || test.Passed.Tree == nil || *test.Failed.Tree == *test.Passed.Tree {
+		t.Errorf("TestAdd recorded as %+v; want a failed and a passed run on two trees", test)
+	}
+
+	_, report := succeeds(t, r.root, "05")
+	if got := report.Tasks[0].Evidence; len(got) != 1 || got[0].Tests[0].Passed == nil || got[0].Tests[0].Passed.Tree != *test.Passed.Tree {
+		t.Errorf("the report holds %+v; want the evidence on disk", got)
+	}
+	_, verified := succeeds(t, r.root, "05", "--verify-evidence")
+	if c := verified.EvidenceCheck; c == nil || c.Verdict != "pass" || len(c.Tasks) != 1 || c.Tasks[0].Evidence[0].Tests[0].Status != "pass" {
+		t.Errorf("evidence_check %+v; want pass, TestAdd pass", c)
+	}
+	for f, want := range r.contract {
+		if got := readFile(t, filepath.Join(r.dir, f)); got != string(want) {
+			t.Errorf("%s changed after activation", f)
+		}
+	}
+}
+
+// An implementer edits a criterion while a task is in progress: the close is
+// refused, naming the file, with nothing written, and the report says the
+// contract drifted; once the file is restored, the same close succeeds.
+func TestAChangedContractStopsTheWorkUntilItIsRestored(t *testing.T) {
+	r := newCalcRepo(t)
+	r.recordEvidence(t)
+	r.setAdd(t, "a + b")
+	editCriterionAction(t, r.dir)
+	progress := readFile(t, filepath.Join(r.dir, afspec.ProgressFileName))
+
+	env, code, _ := run(t, "--dir", r.root, "05", "--task", "1", "--state", "done")
+	if code != cli.ExitFailed || env.Error == nil || env.Error.Stage != "status" || !strings.Contains(env.Error.Message, "requirements.json") {
+		t.Fatalf("code %d, error %+v; want a refusal at stage status naming requirements.json", code, env.Error)
+	}
+	if readFile(t, filepath.Join(r.dir, afspec.ProgressFileName)) != progress {
+		t.Error("the refused close wrote progress.json")
+	}
+	if _, raw := rawRun(t, "--dir", r.root, "05"); string(raw["contract_drift"]) != "true" {
+		t.Errorf("contract_drift = %s with the edit; want true", raw["contract_drift"])
+	}
+
+	writeFile(t, filepath.Join(r.dir, afspec.RequirementsFileName), string(r.contract[afspec.RequirementsFileName]))
+	if _, raw := rawRun(t, "--dir", r.root, "05"); string(raw["contract_drift"]) != "false" {
+		t.Errorf("contract_drift = %s after the restore; want false", raw["contract_drift"])
+	}
+	succeeds(t, r.root, "05", "--task", "1", "--state", "done")
+	if onDisk(t, r.dir)[1] != "done" {
+		t.Errorf("task 1 is %s; want done", onDisk(t, r.dir)[1])
 	}
 }
