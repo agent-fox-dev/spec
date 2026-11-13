@@ -31,6 +31,7 @@ skills/                     # The af-* skills, one source for six agents
 internal/
   agentrun/                 #   One model phase on the AgentKit driver
   cli/                      #   The shell: input, envelope, flags, progress
+  evidence/                 #   speca's evidence runner: a package's tests through evidence_tests or go test
   gate/                     #   speca's gate: run linter and all_tests, record and reuse a pass
   issuex/                   #   GitHub and GitLab: read an issue, post a comment
   project/                  #   Language detection, the test-command audit, steering
@@ -307,7 +308,8 @@ cmd/speca ──> afspec
     ├───────> internal/project (the steering, for steering_malformed; the profile, for the hints)
     ├───────> internal/authoring (the hints of --validate)
     ├───────> internal/specpkg
-    ├───────> internal/gate   (the gate form and the gate report)
+    ├───────> internal/gate   (the gate form and the gate report; the tree id and the state directory of the evidence)
+    ├───────> internal/evidence (the evidence form, the close on evidence and the verify form)
     └───────> internal/cli    (the Run, SplitArgs, the --schema generator)
 
 cmd/specr ──> internal/specpkg
@@ -315,6 +317,8 @@ specgen   ──> internal/specpkg, internal/authoring
 internal/authoring ──> afspec, internal/project
 internal/specpkg ──> afspec, envelope, internal/cli   (for the usage error)
 internal/gate    ──> envelope                         (and git, as a process)
+internal/evidence ──> afspec, internal/gate            (and the evidence command or go test, as a process)
+afspec           ──> internal/gate                    (Split, for the evidence_tests_placeholder rule)
 ```
 
 Like `specr`, it does not use `cli.App`, and it links `internal/cli` and so the
@@ -330,7 +334,7 @@ afspec's verdict and derived coverage into the envelope's `ValidationReport` and
 breaks (`Rules`). It is a package of its own because `envelope` must stay
 standard-library only and `internal/cli` does not import `afspec`.
 
-`cmd/speca` has ten forms, each in a file of its own (the status form in three),
+`cmd/speca` has twelve forms, each in a file of its own (the status form in three),
 chosen by the flags in `forms.go`:
 
 | Form | File | Reads | Writes |
@@ -339,7 +343,9 @@ chosen by the flags in `forms.go`:
 | the verdict, `speca <spec> --validate` | `verdict.go`, through `specpkg.Verdict`, and `authoring.Hints` for the hints | the package and every package of the spec root, for the cross-spec rules | nothing |
 | the list, `speca --list` | `list.go` | every package directory of the spec root, and `archive/` with `--all` | nothing |
 | the next package, `speca --next` | `next.go`; it goes through the spec root with `list.go`'s `packageDirs` and `archiveDirs` | every package of the spec root, ordered by the dependencies of their `tasks.json`, and the spec ids of `archive/` | nothing |
-| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go` | the package | `progress.json` alone, through `Spec.SaveProgress`; the content that changes is the task states and its `updated_at` |
+| the task form, `speca <spec> --task T --state S` | `task.go`, `plan.go`, `taskflags.go`, and `close.go` for a close on evidence | the package; in a package that requires evidence, the results of its tests for a close, through `internal/evidence` | `progress.json` alone, through `Spec.SaveProgress`; the content that changes is the task states, their evidence and its `updated_at` |
+| the evidence form, `speca <spec> --task N --evidence <file>` | `evidence.go`, through `internal/evidence` | the evidence file, then the package, the results of the tests and the tree id | `progress.json` alone, through `task.go`'s `writeProgress`; in the state directory, the run's log ([ADR 26](adr/26-close-a-task-on-evidence.md)) |
+| the verify form, `speca <spec> --verify-evidence` | `verify.go`, through `internal/evidence` | the package and the results of its recorded tests | nothing in the package; in the state directory, the run's log |
 | the status form, `speca <spec> --status S` | `status.go`, `status_checks.go`, `status_supersede.go` | the package, and the replacing package with `--by` | every artifact of the package (`progress.json` and `spec.md` included), through `Transition` or `Supersede`, and of the replacing package, through `Save`; then the directory, renamed under `archive/` by `MoveUnderArchive`, which rewrites no file |
 | the render form, `speca <spec> --render`, and the sweep, `speca --render [--all]` | `render.go`; the sweep goes through the spec root with `list.go`'s `packageDirs` | the package, or every package of the spec root (and `archive/` with `--all`) | `spec.md` alone, through `cli.WriteAtomic`, when it is not the render already; never an artifact ([ADR 14](adr/14-commit-the-rendered-package-beside-its-json.md)) |
 | the migrate form, `speca <spec> --migrate`, and the sweep, `speca --migrate [--all]` | `migrate.go`; the sweep goes through the spec root as the render sweep does | the package, or every package of the spec root (and `archive/` with `--all`) | every artifact of a version 2 package, written as version 3 through the library's `MigrateV2`, and its `test_spec.json`, removed; a version 3 package is left alone ([ADR 19](adr/19-migrate-the-format-to-version-3.md)) |
@@ -360,6 +366,31 @@ passes by `Key` and the run log (`AppendRun`, `ReadRuns`); `Top`, `Commit`,
 asks. The gate form reads the tree before anything runs, looks the key up,
 runs the commands when it finds no pass, and records a pass and logs every
 pass and fail after; the report selects the logged runs by ancestry.
+
+`internal/evidence` runs the tests a package maps its criteria to (ADR 26). With
+the package's `evidence_tests`, it splits the command with `gate.Split`, puts
+one argument per test in place of `{tests}`, starts it with no shell in a
+process group of its own (`gate.Isolate`, `gate.EndGroup`) under one timeout,
+and reads a JSON result line per test from its stdout (`parseResults`). In a Go
+module that names none, `gorunner.go` runs `go test -json -count=1` once per
+package, with a `-run` pattern that alternates the tests named, each anchored at
+every level, and reads the `pass`, `fail` and `skip` events of those tests,
+`FailedBuild` and `build-fail` making every test of the package an `error`. Both
+write the output to one log under the gate's log directory, and a run that
+cannot reach its end is a `*Failure` of its kind (no runner, not started,
+unsplittable, timed out). `cmd/speca` judges the statuses: the evidence form the
+failing runs (`judgeFirstRun`), the close the passing ones (`closeOnEvidence`,
+inside the task form's move plan, so that a refused close writes nothing for
+any task), and the verify form the verdict.
+
+The contract of an active package is frozen with its intent. Activation
+records `contract_hash` (`afspec.ComputeContractHash`: the SHA-256 of each
+contract file's canonical encoding without its extension keys);
+`specpkg.ContractDrift` names the files that no longer match it, and
+`specpkg.Writable` is false while there are any, so the task form, the evidence
+form and the report's suggestions agree; `checkSealing` refuses sealing the
+same way. The refusal is `speca`'s, not the library's `Save`: the library's
+mutations of an active package are as they were.
 
 The forms that write do so only through the library. The task form:
 `plan.go` chooses the moves and applies them with `TransitionTask` (and, under

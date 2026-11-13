@@ -132,6 +132,9 @@ Every one of these messages begins with `speca`.
 | `--migrate --all` with no input | the same, then the packages under `archive/` |
 | `--gate task` or `--gate full` | `gate`: the verdict of the package's `linter`, then `all_tests`, or the recorded pass of the same tree reused |
 | `--gate-report` | `gate_report`: the package's gate runs since a commit, summed |
+| `--task N --evidence F` | the report on the package after the evidence of task N was recorded, with `changes` (one entry of kind `evidence`) and `evidence_log` |
+| `--task N --evidence F --dry-run` | the same, for evidence that was not written: `dry_run` is true |
+| `--verify-evidence` | `evidence_check`: every test recorded for every done task, run again on the tree as it is, with one verdict |
 
 A call names one operation. `--validate` with `--list`, the task form or the
 status form with either of them or with each other, `--next` with any other
@@ -145,7 +148,12 @@ nothing for one package. `--gate` and `--gate-report` take a package and go with
 no other operation, nor with each other; `--clean-env` and `--timeout` go with
 `--gate`, `--base` with `--gate task`, and `--since` with `--gate-report`, and a `--gate` other than `task` or
 `full` (case-sensitive, with `fix_hint.valid` `["task", "full"]`) or a
-`--timeout` that is not a duration greater than zero is refused.
+`--timeout` that is not a duration greater than zero is refused. `--evidence`
+takes a package and `--task` with exactly one task id (not `next` or `all`),
+and goes with no `--state`, no `--force` and no other operation;
+`--verify-evidence` takes a package and goes with no other operation.
+`--timeout` goes with `--gate`, `--evidence`, `--verify-evidence` and
+`--state done`, the forms that may run a package's tests, and with no other.
 
 ## The report: `speca <spec>`
 
@@ -161,7 +169,10 @@ empty, except where the table says the empty list is written.
 | `valid` | the package's own verdict from `(*Spec).Validate`: the schemas and the cross-file rules C1 to C8. It is always written, so a `false` is not mistaken for an absent field |
 | `failing_rules` | the rules the package's errors break (`C3`, `C7`, `json_schema`, …), each once, in the order they first appear; present only when `valid` is `false` |
 | `intent_drift` | `true` when the package is `active`, has an `intent_hash`, and its PRD's `## Intent` section no longer hashes to it, or is gone. The library refuses every save of such a package, so a caller learns here why; absent otherwise |
-| `tasks` | every task of the plan, in order, the derived integration task last: `id`, `title`, `kind` (`implement` for a task of `tasks.json`, `integration` for the derived one), `state` (from `progress.json`; `pending` for a task with no entry), `depends_on`, and `ready`. `[]` when the plan has none |
+| `contract_hash` | from the frontmatter: `{"requirements.json": …, "tasks.json": …}`, the SHA-256 of each contract file recorded at activation; absent for a draft and for a package activated before it was recorded |
+| `contract_drift` | for a package with a `contract_hash`: `true` when `requirements.json` or `tasks.json` no longer hashes to it, `false` when both match; absent for a package without one. See [the contract hash](#the-contract-hash) |
+| `evidence_required` | `true` when the package is active and has a `contract_hash`, so that its tasks close on evidence; absent otherwise |
+| `tasks` | every task of the plan, in order, the derived integration task last: `id`, `title`, `kind` (`implement` for a task of `tasks.json`, `integration` for the derived one), `state` (from `progress.json`; `pending` for a task with no entry), `depends_on`, `ready`, and `evidence` when the task has some (see [the evidence form](#the-evidence-form-speca-spec---task-n---evidence-file)). `[]` when the plan has none |
 | `task_counts` | `pending`, `in_progress`, `done`, `dropped` and `total`, the number of tasks, the integration task among them. A task whose state is none of the four (the package then does not validate) is in the total and in no count |
 | `next_task` | the task to work on now, as the entries of `tasks`: the first task in progress, otherwise the first ready task; absent when there is none |
 | `allowed_status` | the lifecycle states the package may move to from its status, in the order `draft`, `active`, `sealed`, `superseded`, `archived`. `[]` for a terminal status |
@@ -422,15 +433,20 @@ The checks run in this order, and each stops the call:
    usage error, with or without `--force`, because none of its task states can
    be read; the message names `speca <package> --migrate`;
 4. the package can take a write (stage `status`): it is a draft, or active with
-   its intent matching its `intent_hash`. A sealed, superseded or archived package,
-   and an active one whose `## Intent` section drifted or is gone, are refused,
-   as the library's `Save` would refuse them. `--force` and `--dry-run` change
-   nothing here;
+   its intent matching its `intent_hash` and its contract files matching its
+   `contract_hash`. A sealed, superseded or archived package, an active one
+   whose `## Intent` section drifted or is gone, and an active one whose
+   `requirements.json` or `tasks.json` changed since activation (the message
+   names each file that differs, and says to restore it or to write a package
+   that supersedes this one; there is no `fix_hint`) are refused. `--force` and
+   `--dry-run` change nothing here;
 5. the ids: an id the plan does not have, `next` with no next task (a plan with
    no tasks says so, rather than that every task is done), and `all` on a plan
    with no tasks are usage errors;
 6. the moves (stage `task`);
-7. the keys (stage `validate`), when a write would happen: `SaveProgress`
+7. in a package that requires evidence, the evidence of each task the call
+   closes (stage `evidence`; see [closing a task on its evidence](#closing-a-task-on-its-evidence));
+8. the keys (stage `validate`), when a write would happen: `SaveProgress`
    re-encodes `progress.json` and drops the keys the schema does not allow, so a
    package whose progress file holds any would lose them. That is refused,
    listing each key (`progress.json /my_key`), unless `--force` is given. The
@@ -444,7 +460,7 @@ task already in the state is no move. Each task set through a bypass has a high
 `task_state_forced` warning and `forced: true` on its change. The library has no
 setter for `in_progress` or `dropped`, and `speca` writes no state by hand, so
 `--force` covers nothing there. `--force` also lets the write go over the keys of
-step 7. It skips no usage error, no status refusal and no legacy refusal.
+step 8, and closes a task without the checks of its evidence (step 7). It skips no usage error, no status refusal and no legacy refusal.
 
 **`--dry-run`** runs every check, expansion, warning and refusal and does not
 write. The result is the one the call would have produced, with `dry_run: true`,
@@ -476,6 +492,141 @@ the report of the package as it is on disk, with no `changes`, so the caller see
 the states without another call. Its `summary` is the refusal's message and it has
 no `next`: a suggestion after a refused claim could send one agent to the task
 another holds. A usage error or a package that does not load has no result.
+
+## The contract hash
+
+`speca <spec> --status active` records `contract_hash` in the frontmatter of
+`prd.md`, beside `intent_hash`: the SHA-256 of `requirements.json` and of
+`tasks.json`, each over its canonical encoding (the encoding `Save` writes)
+with every `x-` extension key left out, keyed by the file's name:
+
+```yaml
+contract_hash:
+  requirements.json: "<64 hex digits>"
+  tasks.json: "<64 hex digits>"
+```
+
+Another encoding of the same content, and adding, changing or removing an `x-`
+key, leave the hash as it was; any other change to a file changes its hash.
+`--status active --dry-run` reports the hash the activation would record.
+
+A package **requires evidence** when it is active and has a `contract_hash`.
+A draft, and a package activated before the hash was recorded, do not: the
+presence of the hash is the switch, and there is no setting. While an active
+package's contract files no longer match its hash (`contract_drift: true`),
+every call of the task form, the evidence form and `--status sealed` is
+refused at stage `status`, with nothing written, `--force` or not; the report,
+`--validate`, `--gate`, `--gate-report`, `--render` and `--verify-evidence`
+still answer. There is no call that accepts a changed contract: the files are
+restored, or a package that supersedes this one is written (ADR 26).
+
+## The evidence form: `speca <spec> --task N --evidence <file>`
+
+The evidence form records, for task N of a package that requires evidence, the
+run in which each of its tests failed: the run that has to happen once its
+tests are written and before it is implemented. The file is at most 1 MiB:
+
+```json
+{
+  "evidence": [
+    { "covers": "REQ-1.1", "tests": ["./cmd/speca:TestGate/full"] },
+    { "covers": "REQ-1.2", "tests": ["./cmd/speca:TestGate/task"],
+      "no_red": "the level is reported by code REQ-1.1 already added" }
+  ]
+}
+```
+
+`covers` is a criterion the task owns (a requirement id in the task's
+`criteria` stands for its every criterion); for the integration task it is an
+execution path. `tests` holds 1 to 50 test identifiers of 1 to 500
+characters, with no line break; a file names at most 500 distinct tests, one
+test may appear under several entries, and one `covers` under one. `no_red` is
+an exemption, a reason of 1 to 500 characters for a criterion whose behaviour
+existed before the task. A test is **exempt** when every entry that lists it
+carries `no_red`.
+
+**The tests run** through the package's `evidence_tests` command (format v3
+§7.1): split as the gate splits a command, with no shell, `{tests}` replaced by
+one argument per identifier, started in `--dir`, its exit code deciding
+nothing. Each test takes the status of its result line on stdout,
+`{"test": <identifier>, "status": "pass" | "fail" | "error" | "missing" |
+"skipped"}`; every other line is ignored, a test with no line is `missing`, and
+one with two lines of different status is `error`. A package that names no
+`evidence_tests` in a `--dir` that holds a `go.mod` uses the runner built into
+`speca`: identifiers are `<package>:<Test>` or `<package>:<Test>/<subtest>`,
+the package as `go test` takes it (`./cmd/speca`); it runs `go test -json
+-count=1` once per package with a `-run` pattern that matches exactly the
+tests named, and reads their `pass`, `fail` and `skip` events. Every test of a
+package that does not build is `error`; a name that matches no test, and an
+identifier with no `:`, are `missing`. The run's stdout and stderr go to a log
+in the gate's log directory, named in `evidence_log`; where the state
+directory cannot be written there is no log, and a low
+`evidence_log_not_written` warning says so. A run still going at `--timeout`
+(default `20m`) is ended with every process it started.
+
+**Each test is judged**: one that already has a recorded failing run keeps it,
+whatever its status now; an exempt test, and every test of the integration
+task, must be `pass` or `fail` and gets no failing run; every other test must
+be `fail`, and the run is recorded as its failing run, `{"at", "tree"}`, the
+time and the gate's tree id of the working tree (no `tree` outside a git work
+tree). When every test meets its rule, the task's evidence in `progress.json`
+is replaced by the file's entries with their runs (the runs of a test no
+longer listed are dropped), `updated_at` is set, and no other file is
+written. The result is the report, with the task's `evidence`, one change
+`{"kind": "evidence", "id": N}` and `evidence_log`. `--dry-run` runs the tests
+and every check and writes nothing.
+
+**Refusals**, each with nothing written and exit code 1:
+
+| Stage | When |
+|---|---|
+| `status` | the package cannot take a write (as the task form's step 4), its changed contract included |
+| `evidence` | the package is a draft, or has no `contract_hash`; the task is not `in_progress`; a `covers` the task does not own, or given twice (every one named, before any test runs); a test that had to fail is `pass` (it passes without the implementation, and needs `no_red` if the behaviour already existed), `error` (a build or collection failure is not a failing test), `missing` or `skipped`, and an exempt test that is neither `pass` nor `fail` (every one named); the tests could not be run: no `evidence_tests` and no `go.mod`, a program not found, a command that cannot be split, a timeout |
+| `validate` | `progress.json` holds keys its schema does not allow, which the write would delete |
+
+`--evidence` without `--task`, with `--state` or `--force`, with more than one
+task id, `next` or `all`, and a file that does not exist, is over 1 MiB, is not
+an evidence file or breaks one of its limits, are usage errors, refused before
+the package is read.
+
+### Closing a task on its evidence
+
+In a package that requires evidence, `--state done` checks each task it would
+close, after the state machine's own checks:
+
+1. every criterion the task owns has an evidence entry (for the integration
+   task, every execution path);
+2. every test of those entries has a recorded failing run or is exempt (not
+   for the integration task, whose paths the tasks before it made live);
+3. every test, run now through the evidence command, is `pass`.
+
+When every task of the call passes, each test's passing run is recorded with
+its time and tree id, and the states and the evidence are written to
+`progress.json` in one write; each exempt entry is a low `evidence_no_red`
+warning naming the task, the criterion and the reason, and `evidence_log` names
+the run's log. Otherwise the whole call is refused at stage `evidence`, exit
+code 1, nothing written for any task, naming each criterion without an entry,
+each test without a failing run and each test whose status is not `pass`, with
+`fix_hint.flag` `--force`. `--state done --force` closes without the checks and
+without running a test, keeps the evidence as it is, sets `forced: true` on the
+change and raises a high `task_evidence_forced` warning. A move to `pending`
+removes the task's evidence; a move to `dropped` needs none. `--dry-run` runs
+the tests and the checks and writes nothing.
+
+## The verify form: `speca <spec> --verify-evidence`
+
+The verify form runs every test recorded for every `done` task once, on the
+tree as it is, and answers in `evidence_check`, writing nothing to the package,
+whatever its status (a package whose contract drifted included). It takes
+`--timeout` and `--dir`, and exits 0 for every verdict, as the gate does; 1 only
+when the package cannot be loaded.
+
+| Field | Meaning |
+|---|---|
+| `verdict` | `pass` when every test is `pass`; `fail` when one is not; `not_run` when no done task has evidence or the tests could not be run |
+| `reason` | with `not_run`, why |
+| `tasks` | each done task with evidence, in plan order: `id`, and `evidence`, each `covers` with its `tests`, each `{test, status}`. `[]` when none was checked |
+| `log` | the run's log, as for the evidence form |
 
 ## The status form: `speca <spec> --status S`
 
@@ -551,12 +702,14 @@ the call: nothing is written, and the envelope has no `result`.
   refused at stage `validate`, category `invalid_spec`, naming the failing rules,
   with `fix_hint.flag` `--force`; a key the schema does not allow counts as a
   failing rule `unknown_field`. The write is `Transition("active")`, which records
-  the hash of the intent. The package stays where it is.
+  the hash of the intent and the [contract hash](#the-contract-hash). The
+  package stays where it is.
 - `sealed`. A package whose intent has drifted cannot be sealed, and `--force`
   does not change that: a drifted package cannot be saved, and sealing would make
   the drift permanent. The message says to restore the intent that was activated,
   or to write a new package that supersedes this one; there is no `fix_hint`. A
-  task still `pending` or `in_progress`, the integration task included, refuses
+  package whose contract files no longer match its `contract_hash` is refused
+  the same way, naming the files. A task still `pending` or `in_progress`, the integration task included, refuses
   it too, naming each with its state, with `fix_hint.flag` `--force`. The write is
   `Transition("sealed")`.
 - `archived`, from `draft`, `sealed` or `superseded`. A package not under
@@ -1292,12 +1445,13 @@ if env.Result.NextTask != nil {
 |---|---|---|
 | `usage` | `usage` | more than one input; an input with `--list` or `--next`; `--validate` with `--list`; `--next` with any other operation; `--all` without `--list`; `-`, a URL or a multi-line input; a `--dir` that is not a directory; a reference that names no package or two; an undefined flag. For the task form: `--task` without `--state` or the reverse; a `--state` outside the four (`fix_hint` is `{flag: "--state", valid: [the four]}`); a `--task` value that is not an id, `next` or `all`, or `next`/`all` beside anything else; the task form with `--validate` or `--list`; `--force` or `--dry-run` without `--task` or `--status`; and, once the package is loaded, an id it does not have (`fix_hint` is `{flag: "--task", valid: [every id]}`, none when the plan has no tasks), `next` with no next task (`fix_hint` lists the pending ids when they are only blocked), `all` on a plan with no tasks, and a package in a format version other than 3 (the message names `speca <package> --migrate`). For the status form: `--status draft` (`fix_hint` is `{flag: "--status", valid: ["active", "sealed", "superseded", "archived"]}`, as for any value that is not one of the four, an empty one included); `--status superseded` without `--by`; `--by` without `--status superseded`, or with another status, or empty; the status form with `--task`/`--state`, `--validate` or `--list`; a `--by` that the resolver refuses (the message begins `--by:`), that names the package itself, or whose package has the input's `spec_id`. Nothing was written, and the message is also written to stderr |
 | `load` | `input` | `afspec.LoadSpec` refused the package (a missing artifact, malformed JSON or YAML), naming the directory and the library's reason; or `--list`, `--next`, `--render` or `--migrate` with no input on a spec root that cannot be read, with `fix_hint.flag` `--specs-dir`. The status form: also the `--by` package (the message names `--by`), a package in a format version other than 3 (the message names `speca <package> --migrate`), and a package that was written but cannot be read back (its `result` carries the changes) |
-| `status` | `lifecycle` | the task form on a package that cannot take a write: sealed, superseded or archived, or active with a drifted `## Intent`; or `Save` refused it as such. No `fix_hint`; `--force` and `--dry-run` change nothing. The status form: a move the lifecycle does not allow (`fix_hint` is `{flag: "--status", valid: [the moves allowed]}`, none when there are none); an activation with no `## Intent`; sealing a package whose intent drifted (no `fix_hint`) or that has a task open (`fix_hint.flag` `--force`); a replacing package that is superseded or archived (`fix_hint.flag` `--by`); keys the schema does not allow (`fix_hint.flag` `--force`); or a lifecycle or intent error that reached the write. `--force` reaches only the ones with a `fix_hint.flag` of `--force` |
+| `status` | `lifecycle` | the task form or the evidence form on a package that cannot take a write: sealed, superseded or archived, or active with a drifted `## Intent` or with contract files that no longer match its `contract_hash` (the message names each file); or `Save` refused it as such. No `fix_hint`; `--force` and `--dry-run` change nothing. The status form: a move the lifecycle does not allow (`fix_hint` is `{flag: "--status", valid: [the moves allowed]}`, none when there are none); an activation with no `## Intent`; sealing a package whose intent drifted (no `fix_hint`) or that has a task open (`fix_hint.flag` `--force`); a replacing package that is superseded or archived (`fix_hint.flag` `--by`); keys the schema does not allow (`fix_hint.flag` `--force`); or a lifecycle or intent error that reached the write. `--force` reaches only the ones with a `fix_hint.flag` of `--force` |
 | `task` | `lifecycle` | the task state machine does not allow a named move. The message names every refused task with its state and the target, cites format v3 §8.1 and says where each may go; `fix_hint` is `{flag: "--state", valid: [the first refused task's targets]}`, none when that task is `dropped`, and the message then says `--force` with `done` or `pending` is the only way out. Nothing was changed |
 | `validate` | `invalid_spec` | the task form: the write would delete keys of `progress.json` the schema does not allow, and `--force` was not given. The message lists each key; no `fix_hint`. The status form: an activation of a package that does not validate (the message names the failing rules; `fix_hint.flag` `--force`) |
 | `write` | `disk` | `SaveProgress` could not write `progress.json`. Not retryable; see "The write" above. The status form: `Transition` or `Supersede` could not, with the library's message and no `result`. The render form: `spec.md` could not be written |
 | `archive` | `disk` | the status form: the archive destination is taken, before anything was written (no `result`, not resumable); or the move under `archive/` failed after the status was written (**resumable**, with a `result` and a `next`) |
 | `migrate` | `input` | the migrate form on one package: it could not be read as version 2 or 3, it has a gap the conversion refuses (a criterion no test verifies, a path no smoke test verifies), or it could not be written; the message is the library's reason, and nothing was written. The sweep never fails this way: such a package is an entry |
+| `evidence` | `evidence` | the evidence form, or a close in a package that requires evidence: the package does not require evidence or the task is not in progress; a `covers` the task does not own or given twice; a test that broke its rule; a criterion or path with no entry, a test with no failing run, a test that does not pass at the close (`fix_hint.flag` `--force`); or the tests could not be run (no runner, a program not found, a command that cannot be split, a timeout). Every fault is named; nothing was written |
 | `graph` | `input` | `--next`: the dependencies of the packages under the spec root form a cycle, which the message names; no `result` |
 | `schema` | `internal` | the `--schema` document could not be encoded |
 
@@ -1315,9 +1469,9 @@ else.
 
 | Code | `status` | Meaning |
 |---|---|---|
-| `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already; or the gate ran or was reused, whatever its verdict (`pass`, `fail` or `not_run`); or the gate report summed the runs |
-| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`); or the package the gate form or the gate report reads could not be loaded (stage `load`), or the gate report's run log could not be read (stage `load`), or the commits since `--since` could not be listed (stage `git`) |
-| `2` | `usage` | usage error — nothing was written. Among them: a `--gate` other than `task` or `full`, a `--timeout` that is not a duration greater than zero, a `--base` that names no commit or comes without `--gate task`, a package with `affected_tests` gated at the task level outside a git work tree, a `--since` that names no commit, no `--since` and no base branch, and a `--gate-report` outside a git work tree |
+| `0` | `done` | reported — including a package that does not validate, and `--next` with no package to name, whether all are done or none can start; or the tasks were moved, or none needed to be; or the status was changed, or the package only moved; or `spec.md` was rendered, or was current already; or the package was migrated, or was version 3 already; or the gate ran or was reused, whatever its verdict (`pass`, `fail` or `not_run`); or the gate report summed the runs; or the evidence of a task was recorded; or `--verify-evidence` answered, whatever its verdict |
+| `1` | `failed` | the package could not be loaded, or the spec root `--list` reads could not be read; or the task form was refused after the package was read (stages `status`, `task`, `validate`), or its write failed; or the status form was refused (stages `status`, `validate`, `archive`) or failed (stages `write`, `archive`, `load`); or the render form's package could not be loaded (stage `load`) or its `spec.md` written (stage `write`); or the migrate form's package could not be read, converted or written (stage `migrate`); or the spec root a sweep or `--next` reads could not be read (stage `load`); or the packages `--next` reads depend on one another in a cycle (stage `graph`); or the package the gate form or the gate report reads could not be loaded (stage `load`), or the gate report's run log could not be read (stage `load`), or the commits since `--since` could not be listed (stage `git`); or the evidence form, or a close in a package that requires evidence, was refused (stage `evidence`, or `status` for a changed contract) |
+| `2` | `usage` | usage error — nothing was written. Among them: a `--gate` other than `task` or `full`, a `--timeout` that is not a duration greater than zero, a `--base` that names no commit or comes without `--gate task`, a package with `affected_tests` gated at the task level outside a git work tree, a `--since` that names no commit, no `--since` and no base branch, a `--gate-report` outside a git work tree, an `--evidence` without one task id or whose file is not an evidence file, `--verify-evidence` with another form, and a `--timeout` with a form that runs no tests |
 
 ### Warning codes
 
@@ -1332,6 +1486,10 @@ else.
 | `supersedes_not_recorded` | low | status | superseding went through, but the old `spec_id` was not added to the replacing package's `supersedes`: it is sealed, its intent drifted, it holds keys the schema does not allow, or its save failed. The warning names the replacing package's directory, the id and the reason |
 | `task_not_ready` | low | task | a task moved to `in_progress` has a dependency that is not `done`, judged on the plan before the call. The warning names the task and the dependencies |
 | `task_state_forced` | high | task | `--force` set a state the machine would have refused. One for each such task, naming it and its two states |
+| `evidence_command_missing` | low | validate | `--validate` only: a draft, or a package that requires evidence, names no `evidence_tests` and `--dir` holds no `go.mod`, so nothing could run its tests. `valid` is as it would be without it |
+| `evidence_log_not_written` | low | evidence | the evidence form, a close on evidence or the verify form ran the tests, but the state directory could not be written, so no log was kept |
+| `evidence_no_red` | low | task | a task closed on its evidence with an exempt entry: one per entry, naming the task, the criterion and the reason |
+| `task_evidence_forced` | high | task | `--state done --force` closed a task of a package that requires evidence without the checks of its evidence. One for each such task |
 | `gate_not_recorded` | low | gate | the gate ran and answered, but its result is not recorded for reuse: there is no tree id (`--dir` is not in a git work tree, or git is not installed), or the state directory cannot be written (the message names the path, or says that neither `$XDG_STATE_HOME` nor the home directory is set; the commands ran without a `log`), or the pass or the run could not be written |
 
 The warnings of the task and status forms are raised when the call goes ahead: a
@@ -1352,13 +1510,15 @@ that were not made. The shell adds `; <n> high-severity warning(s)` to the
 | `--state` | | the task form: the state to move them to: `pending`, `in_progress`, `done` or `dropped` |
 | `--status` | | the status form: the lifecycle status to move the package to: `active`, `sealed`, `superseded` or `archived`. An archived or superseded package is moved under `archive/` |
 | `--by` | | with `--status superseded`: the package that replaces this one, named as the input is |
-| `--force` | off | with the task form: set `done` or `pending` where the machine refuses it, and write over keys the schema does not allow. With the status form: skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not allow would be dropped |
-| `--dry-run` | off | with the task form, the status form, the render form or the migrate form: run every check and report the result, write nothing |
+| `--force` | off | with the task form: set `done` or `pending` where the machine refuses it, write over keys the schema does not allow, and, in a package that requires evidence, close a task without the checks of its evidence. With the status form: skip the checks that an activation validates, that no task is open when sealing, and that no key the schema does not allow would be dropped |
+| `--dry-run` | off | with the task form, the evidence form, the status form, the render form or the migrate form: run every check (and the tests the call runs) and report the result, write nothing |
 | `--render` | off | the render form: write the package's `spec.md`, its render, and no other file |
 | `--migrate` | off | the migrate form: convert a version 2 package to version 3 in place, whatever its status, by format v3 §13; a version 3 package is left alone |
 | `--gate` | | the gate form: `task` or `full`, the level of the gate to run |
 | `--clean-env` | off | with `--gate`: run the commands with an empty temporary `HOME`, no global or system git configuration and `GIT_TERMINAL_PROMPT=0` |
-| `--timeout` | `20m` | with `--gate`: how long one command may run, a Go duration greater than zero |
+| `--timeout` | `20m` | with `--gate`: how long one command may run, a Go duration greater than zero; with `--evidence`, `--verify-evidence` and `--state done`: how long the tests may run |
+| `--evidence` | | the evidence form, with `--task` and one task id: the evidence file to record |
+| `--verify-evidence` | off | the verify form: run every recorded test of every done task again |
 | `--base` | `HEAD` | with `--gate task`: the commit a package's `affected_tests` runs from, in place of `{base}` |
 | `--gate-report` | off | the gate report: sum the package's gate runs since a commit |
 | `--since` | the merge base of `HEAD` and the base branch | with `--gate-report`: the commit the runs are counted from |
