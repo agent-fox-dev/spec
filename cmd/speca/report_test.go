@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agent-fox-dev/spec/afspec"
 	"github.com/agent-fox-dev/spec/envelope"
 	"github.com/agent-fox-dev/spec/internal/cli"
 )
@@ -100,6 +101,33 @@ func TestReport_IntentDrift(t *testing.T) {
 			t.Errorf("package %s: intent_drift = %s; want true", ref, got)
 		case !want && got != nil:
 			t.Errorf("package %s: intent_drift = %s; want it absent", ref, got)
+		}
+	}
+}
+
+// contract_drift is written for a package that has a contract hash, true
+// exactly when a contract file no longer hashes to it; evidence_required is
+// written, as true, for an active package that has one. An extension key is
+// not part of the contract.
+func TestReport_ContractDrift(t *testing.T) {
+	root := newRepo(t)
+	addPackage(t, root, "11_draft", "11", "draft")
+	activePackage(t, root, "12_nohash", "12", "nohash")
+	contractPackage(t, root, "13_matching", "13", "matching")
+	editCriterionAction(t, contractPackage(t, root, "14_requirements", "14", "requirements"))
+	editTaskStep(t, contractPackage(t, root, "15_tasks", "15", "tasks"))
+	extended := contractPackage(t, root, "16_extended", "16", "extended")
+	editJSON(t, filepath.Join(extended, afspec.RequirementsFileName), func(m map[string]any) { m["x-team"] = "search" })
+
+	for ref, want := range map[string]struct{ drift, required string }{
+		"11": {"", ""}, "12": {"", ""}, "13": {"false", "true"}, "14": {"true", "true"}, "15": {"true", "true"}, "16": {"false", "true"},
+	} {
+		_, raw := rawRun(t, "--dir", root, ref)
+		if got := string(raw["contract_drift"]); got != want.drift {
+			t.Errorf("package %s: contract_drift = %q; want %q", ref, got, want.drift)
+		}
+		if got := string(raw["evidence_required"]); got != want.required {
+			t.Errorf("package %s: evidence_required = %q; want %q", ref, got, want.required)
 		}
 	}
 }

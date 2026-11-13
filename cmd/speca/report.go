@@ -40,7 +40,7 @@ func statusSuggestion(r *Result, spec *afspec.Spec) []cli.Next {
 				Why: "the package validates and has an intent; activating it records the hash of its ## Intent"}}
 		}
 	case string(afspec.PrdFrontmatterV3JsonStatusActive):
-		if len(openTasks(spec)) == 0 && !r.IntentDrift && !holdsKeys {
+		if len(openTasks(spec)) == 0 && !r.IntentDrift && len(specpkg.ContractDrift(spec)) == 0 && !holdsKeys {
 			return []cli.Next{{Tool: tool, Input: r.SpecDir, Flags: []string{"--status", "sealed"},
 				Why: "no task is open and the intent is as it was activated; sealing the package ends its work"}}
 		}

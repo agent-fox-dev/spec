@@ -15,8 +15,20 @@ func IntentDrift(spec *afspec.Spec) bool {
 	return err != nil || hash != *spec.IntentHash
 }
 
+// ContractDrift names the contract files of an active package that no longer
+// hash to the contract_hash it was activated with, in the order of
+// afspec.ContractFiles; nil for a package that is not active, has no
+// contract_hash, or matches it. speca refuses the package's task changes and
+// its sealing while the list is not empty (ADR 26).
+func ContractDrift(spec *afspec.Spec) []string {
+	if spec == nil || spec.Status != string(afspec.PrdFrontmatterV3JsonStatusActive) {
+		return nil
+	}
+	return spec.ContractDrift()
+}
+
 // Writable reports whether a package can take a write: it is a draft, or it is
-// active and its intent has not drifted. A sealed, superseded or archived package
+// active and neither its intent nor its contract has drifted. A sealed, superseded or archived package
 // cannot, and neither can an active one whose intent drifted. speca's task form
 // accepts only a writable package, and its report and specr's next suggest a
 // claim only for one, so the two ask this one question. (The status form moves a
@@ -30,7 +42,7 @@ func Writable(spec *afspec.Spec) bool {
 	case string(afspec.PrdFrontmatterV3JsonStatusDraft):
 		return true
 	case string(afspec.PrdFrontmatterV3JsonStatusActive):
-		return !IntentDrift(spec)
+		return !IntentDrift(spec) && len(ContractDrift(spec)) == 0
 	}
 	return false
 }

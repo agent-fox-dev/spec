@@ -8,16 +8,19 @@ package envelope
 // the rest are absent: Valid is a pointer so that false is written, and the slices that
 // must show as [] in their own form are omitted when nil rather than empty.
 type AdminResult struct {
-	SpecDir    string   `json:"spec_dir,omitempty" description:"the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca; the report and the verdict"`
-	SpecID     string   `json:"spec_id,omitempty" description:"the spec id, from the PRD frontmatter; the report and the verdict"`
-	SpecName   string   `json:"spec_name,omitempty" description:"the spec name, from the PRD frontmatter; the report and the verdict"`
-	Title      string   `json:"title,omitempty" description:"the spec title, from the PRD frontmatter; the report and the verdict"`
-	Status     string   `json:"status,omitempty" description:"the package's lifecycle status: draft, active, sealed, superseded or archived; the report and the verdict"`
-	CreatedAt  string   `json:"created_at,omitempty" description:"when the package was created, RFC 3339, from the PRD frontmatter; the report and the verdict"`
-	UpdatedAt  string   `json:"updated_at,omitempty" description:"when a task of the package last changed state, RFC 3339, from progress.json; absent when none has; the report and the verdict"`
-	Profile    string   `json:"profile,omitempty" description:"the package's profile, full or lite, from the PRD frontmatter; absent when the frontmatter names none, which is full"`
-	IntentHash string   `json:"intent_hash,omitempty" description:"the SHA-256 of the PRD's ## Intent section, recorded when the package was activated; absent while unset"`
-	Supersedes []string `json:"supersedes,omitempty" description:"the spec ids this package supersedes; absent when it supersedes none"`
+	SpecDir          string            `json:"spec_dir,omitempty" description:"the package directory, relative to --dir when inside it, absolute otherwise; runnable as the input of specr and speca; the report and the verdict"`
+	SpecID           string            `json:"spec_id,omitempty" description:"the spec id, from the PRD frontmatter; the report and the verdict"`
+	SpecName         string            `json:"spec_name,omitempty" description:"the spec name, from the PRD frontmatter; the report and the verdict"`
+	Title            string            `json:"title,omitempty" description:"the spec title, from the PRD frontmatter; the report and the verdict"`
+	Status           string            `json:"status,omitempty" description:"the package's lifecycle status: draft, active, sealed, superseded or archived; the report and the verdict"`
+	CreatedAt        string            `json:"created_at,omitempty" description:"when the package was created, RFC 3339, from the PRD frontmatter; the report and the verdict"`
+	UpdatedAt        string            `json:"updated_at,omitempty" description:"when a task of the package last changed state, RFC 3339, from progress.json; absent when none has; the report and the verdict"`
+	Profile          string            `json:"profile,omitempty" description:"the package's profile, full or lite, from the PRD frontmatter; absent when the frontmatter names none, which is full"`
+	IntentHash       string            `json:"intent_hash,omitempty" description:"the SHA-256 of the PRD's ## Intent section, recorded when the package was activated; absent while unset"`
+	ContractHash     map[string]string `json:"contract_hash,omitempty" description:"the SHA-256 of each contract file, keyed requirements.json and tasks.json, over its canonical encoding without extension keys, recorded when the package was activated; absent for a draft and for a package activated without it; the report and the verdict"`
+	ContractDrift    *bool             `json:"contract_drift,omitempty" description:"for a package with a contract_hash, true when requirements.json or tasks.json no longer hashes to it, so that every task change, every evidence call and sealing are refused, and false when both match; absent for a package without a contract_hash; the report and the verdict"`
+	EvidenceRequired bool              `json:"evidence_required,omitempty" description:"true when the package is active and has a contract_hash, so that each task closes on evidence: a test per criterion seen failing, then passing; absent otherwise; the report and the verdict"`
+	Supersedes       []string          `json:"supersedes,omitempty" description:"the spec ids this package supersedes; absent when it supersedes none"`
 
 	Valid        *bool    `json:"valid,omitempty" description:"whether the package validates. In the report, its own verdict, from the schemas and the cross-file rules C1 to C8; with --validate, the combined verdict: true exactly when no error was kept from the package's own rules or the cross-spec rules. Absent under --list, where each entry holds its own"`
 	FailingRules []string `json:"failing_rules,omitempty" description:"the rules the package's errors break, in order of first appearance; the report only, and present only when valid is false"`

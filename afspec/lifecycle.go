@@ -86,6 +86,7 @@ func (s *Spec) Transition(target, dir string) (*Spec, error) {
 	// to the returned spec cannot alias back to the original.
 	newSpec := *s
 	newSpec.Supersedes = append([]string{}, s.Supersedes...)
+	newSpec.ContractHash = cloneContractHash(s.ContractHash)
 	newSpec.Requirements = deepCopyJSON(s.Requirements)
 	newSpec.Tasks = deepCopyJSON(s.Tasks)
 	newSpec.Progress = deepCopyJSON(s.Progress)
@@ -101,6 +102,13 @@ func (s *Spec) Transition(target, dir string) (*Spec, error) {
 			return nil, err
 		}
 		newSpec.IntentHash = &hash
+		// The contract the package is activated with: while its files no
+		// longer hash to it, speca refuses the package's tasks (ADR 26).
+		contract, err := newSpec.ComputeContractHash()
+		if err != nil {
+			return nil, err
+		}
+		newSpec.ContractHash = contract
 		newSpec.loaded = &immutableSnapshot{
 			SpecID:    newSpec.SpecID,
 			SpecName:  newSpec.SpecName,

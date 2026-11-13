@@ -134,6 +134,58 @@ func TestTask_RefusesAPackageThatCannotTakeAWrite(t *testing.T) {
 	}
 }
 
+// A package whose contract files no longer match the contract hash recorded
+// at activation takes no task change and cannot be sealed, with or without
+// --force or --dry-run: the refusal names each file that differs and the two
+// ways out, and nothing is written.
+func TestTask_RefusesAPackageWhoseContractChanged(t *testing.T) {
+	calls := [][]string{
+		{"--task", "1", "--state", "in_progress"},
+		{"--task", "1", "--state", "done"},
+		{"--task", "1", "--state", "pending"},
+		{"--task", "1", "--state", "done", "--force"},
+		{"--task", "1", "--state", "done", "--dry-run"},
+		{"--status", "sealed"},
+		{"--status", "sealed", "--force"},
+	}
+	for name, tc := range map[string]struct {
+		edit  func(t *testing.T, dir string)
+		calls [][]string
+		names []string
+	}{
+		"requirements.json edited": {editCriterionAction, calls, []string{"requirements.json"}},
+		"requirements.json and tasks.json edited": {func(t *testing.T, dir string) {
+			editCriterionAction(t, dir)
+			editTaskStep(t, dir)
+		}, calls[1:2], []string{"requirements.json", "tasks.json"}},
+	} {
+		for _, call := range tc.calls {
+			t.Run(name+" "+strings.Join(call, " "), func(t *testing.T) {
+				root := newRepo(t)
+				dir := contractPackage(t, root, "03_a", "03", "a", planTask(1, "in_progress", nil))
+				tc.edit(t, dir)
+				before := treeBytes(t, dir)
+				argv := append([]string{"--dir", root, "03_a"}, call...)
+				env, code, _ := run(t, argv...)
+				e := env.Error
+				if code != cli.ExitFailed || e == nil || e.Stage != "status" || e.Category != "lifecycle" {
+					t.Fatalf("%v: code %d, error %+v; want exit 1 at stage status, category lifecycle", call, code, e)
+				}
+				saysAll(t, call, e.Message, append(slices.Clone(tc.names), "restore", "supersedes")...)
+				if strings.Contains(e.Message, "tasks.json") != slices.Contains(tc.names, "tasks.json") {
+					t.Errorf("%v: message %q; want it to name exactly %v", call, e.Message, tc.names)
+				}
+				if e.FixHint != nil {
+					t.Errorf("%v: fix_hint %+v; want none", call, e.FixHint)
+				}
+				if !maps.Equal(before, treeBytes(t, dir)) {
+					t.Errorf("%v: the package changed", call)
+				}
+			})
+		}
+	}
+}
+
 // A draft takes a task change, and so does an active package whose intent
 // matches its hash.
 func TestTask_TakesAChangeOnADraftOrAnActivePackage(t *testing.T) {

@@ -214,17 +214,18 @@ const (
 // spurious additionalProperties errors. The optional four are omitted when
 // empty, matching what renderPRD writes.
 type prdFrontmatterForSchema struct {
-	SpecID          string   `json:"spec_id"`
-	SpecName        string   `json:"spec_name"`
-	Title           string   `json:"title"`
-	Status          string   `json:"status"`
-	CreatedAt       string   `json:"created_at"`
-	IntentHash      *string  `json:"intent_hash"`
-	SchemaVersion   int      `json:"schema_version"`
-	Profile         string   `json:"profile,omitempty"`
-	SteeringVersion string   `json:"steering_version,omitempty"`
-	Source          string   `json:"source,omitempty"`
-	Supersedes      []string `json:"supersedes,omitempty"`
+	SpecID          string            `json:"spec_id"`
+	SpecName        string            `json:"spec_name"`
+	Title           string            `json:"title"`
+	Status          string            `json:"status"`
+	CreatedAt       string            `json:"created_at"`
+	IntentHash      *string           `json:"intent_hash"`
+	ContractHash    map[string]string `json:"contract_hash,omitempty"`
+	SchemaVersion   int               `json:"schema_version"`
+	Profile         string            `json:"profile,omitempty"`
+	SteeringVersion string            `json:"steering_version,omitempty"`
+	Source          string            `json:"source,omitempty"`
+	Supersedes      []string          `json:"supersedes,omitempty"`
 }
 
 // legacyVersionEntry describes a spec still written in an older format
@@ -279,6 +280,7 @@ func (s *Spec) ValidateSchema() ValidationResult {
 		Status:          s.Status,
 		CreatedAt:       s.CreatedAt,
 		IntentHash:      s.IntentHash,
+		ContractHash:    s.ContractHash,
 		SchemaVersion:   s.SchemaVersion,
 		Profile:         s.Profile,
 		SteeringVersion: s.SteeringVersion,

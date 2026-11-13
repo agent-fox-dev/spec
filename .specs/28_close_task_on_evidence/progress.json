@@ -3,11 +3,11 @@
   "spec_id": "28",
   "spec_name": "close_task_on_evidence",
   "schema_version": 3,
-  "updated_at": "",
+  "updated_at": "2026-11-13T17:23:19Z",
   "tasks": [
     {
       "id": 1,
-      "state": "pending"
+      "state": "done"
     },
     {
       "id": 2,

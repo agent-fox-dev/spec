@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -114,6 +115,12 @@ func (c *call) identityOf(dir string, spec *afspec.Spec) envelope.AdminResult {
 	if spec.IntentHash != nil && *spec.IntentHash != "" {
 		r.IntentHash = *spec.IntentHash
 	}
+	if spec.ContractHash != nil {
+		r.ContractHash = maps.Clone(spec.ContractHash)
+		drift := len(spec.ContractDrift()) > 0
+		r.ContractDrift = &drift
+	}
+	r.EvidenceRequired = spec.RequiresEvidence()
 	if len(spec.Supersedes) > 0 {
 		r.Supersedes = slices.Clone(spec.Supersedes)
 	}

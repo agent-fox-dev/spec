@@ -35,14 +35,18 @@ const (
 // are stored as pointers to the auto-generated types.
 type Spec struct {
 	// PRD frontmatter fields
-	SpecID        string
-	SpecName      string
-	Title         string
-	Status        string
-	CreatedAt     string
-	Source        string
-	Supersedes    []string
-	IntentHash    *string
+	SpecID     string
+	SpecName   string
+	Title      string
+	Status     string
+	CreatedAt  string
+	Source     string
+	Supersedes []string
+	IntentHash *string
+	// ContractHash is the hash of each contract file recorded at activation,
+	// keyed by its file name, or nil for a package activated without one
+	// (contract.go).
+	ContractHash  map[string]string
 	SchemaVersion int
 	// Profile is the package's profile, ProfileFull or ProfileLite, or ""
 	// when the frontmatter names none, which is full (format v3 §4.1).
@@ -192,6 +196,7 @@ func LoadSpec(dir string) (*Spec, error) {
 		Source:          fm.Source,
 		Supersedes:      fm.Supersedes,
 		IntentHash:      fm.IntentHash,
+		ContractHash:    fm.ContractHash,
 		SchemaVersion:   fm.SchemaVersion,
 		Profile:         fm.Profile,
 		SteeringVersion: fm.SteeringVersion,

@@ -303,6 +303,21 @@
             "type": "string",
             "description": "the SHA-256 of the PRD's ## Intent section, recorded when the package was activated; absent while unset"
           },
+          "contract_hash": {
+            "type": "object",
+            "description": "the SHA-256 of each contract file, keyed requirements.json and tasks.json, over its canonical encoding without extension keys, recorded when the package was activated; absent for a draft and for a package activated without it; the report and the verdict",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "contract_drift": {
+            "type": "boolean",
+            "description": "for a package with a contract_hash, true when requirements.json or tasks.json no longer hashes to it, so that every task change, every evidence call and sealing are refused, and false when both match; absent for a package without a contract_hash; the report and the verdict"
+          },
+          "evidence_required": {
+            "type": "boolean",
+            "description": "true when the package is active and has a contract_hash, so that each task closes on evidence: a test per criterion seen failing, then passing; absent otherwise; the report and the verdict"
+          },
           "supersedes": {
             "type": "array",
             "description": "the spec ids this package supersedes; absent when it supersedes none",
