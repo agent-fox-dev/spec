@@ -24,12 +24,21 @@ const ledgerName = "ledger.jsonl"
 
 // ledgerLine is one line of ledger.jsonl: one step.
 type ledgerLine struct {
+	// RunID is the run that wrote the line; its directory under runs/
+	// holds the step's files. Lines written before runs had IDs have none.
+	RunID       string  `json:"run_id,omitempty"`
 	Kind        string  `json:"kind"`
 	Subject     string  `json:"subject"`
 	StartedAt   string  `json:"started_at"`
 	EndedAt     string  `json:"ended_at"`
 	WallMinutes float64 `json:"wall_minutes"`
 	Outcome     string  `json:"outcome"`
+	// ResumedFrom is, on a line that records what a session of an earlier
+	// run did, as a landing found on restart, the run that started the step.
+	ResumedFrom string `json:"resumed_from,omitempty"`
+	// ClaudeSessionID is the session_id of the step's claude stream, which
+	// claude --resume takes; absent when the stream gave none.
+	ClaudeSessionID string `json:"claude_session_id,omitempty"`
 	// Gate and OpenItems are the AF-Run trailer's objects of a landed
 	// package's merge commit, as the trailer gave them; absent without one.
 	Gate      json.RawMessage `json:"gate,omitempty"`
@@ -84,6 +93,14 @@ func appendLedger(dir string, l ledgerLine) error {
 	return f.Close()
 }
 
+// record adds the step's line to the ledger, marked with this run's ID.
+func (r *run) record(l ledgerLine) {
+	l.RunID = r.runID
+	if err := appendLedger(r.logDir, l); err != nil {
+		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
+	}
+}
+
 // slowerThanUsual reports whether a package that landed in minutes took more
 // than twice the median of the packages that landed before it, and the
 // median; with none before, it never did. Stopped and stalled steps are not
@@ -106,20 +123,36 @@ func slowerThanUsual(earlier []ledgerLine, minutes float64) (float64, bool) {
 	return median, minutes > 2*median
 }
 
-// printLedger writes the ledger in dir as a table.
-func printLedger(w io.Writer, dir string) error {
+// printLedger writes the ledger in dir as a table, only the steps of the run
+// runID when it is not empty. A step keeps its number in the whole ledger,
+// which its files are named by.
+func printLedger(w io.Writer, dir, runID string) error {
 	lines, err := readLedger(dir)
 	if err != nil {
 		return err
 	}
-	if len(lines) == 0 {
+	var rows []int
+	for i, l := range lines {
+		if runID == "" || l.RunID == runID {
+			rows = append(rows, i)
+		}
+	}
+	switch {
+	case len(rows) == 0 && runID != "":
+		fmt.Fprintf(w, "no step of run %s is recorded in %s\n", runID, filepath.Join(dir, ledgerName))
+		return nil
+	case len(rows) == 0:
 		fmt.Fprintf(w, "no step is recorded in %s\n", filepath.Join(dir, ledgerName))
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "STEP\tKIND\tSUBJECT\tSTARTED\tMINUTES\tOUTCOME")
-	for i, l := range lines {
-		fmt.Fprintf(tw, "%04d\t%s\t%s\t%s\t%.1f\t%s\n", i+1, l.Kind, l.Subject, l.StartedAt, l.WallMinutes, l.Outcome)
+	fmt.Fprintln(tw, "STEP\tRUN\tKIND\tSUBJECT\tSTARTED\tMINUTES\tOUTCOME")
+	for _, i := range rows {
+		l, run := lines[i], lines[i].RunID
+		if run == "" {
+			run = "-"
+		}
+		fmt.Fprintf(tw, "%04d\t%s\t%s\t%s\t%s\t%.1f\t%s\n", i+1, run, l.Kind, l.Subject, l.StartedAt, l.WallMinutes, l.Outcome)
 	}
 	return tw.Flush()
 }

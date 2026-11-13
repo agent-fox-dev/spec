@@ -125,7 +125,7 @@ func (r *run) reconcile() *Stopped {
 	if err != nil {
 		return stop(fmt.Sprintf("reconcile: listing the issues to adopt: %v", err))
 	}
-	adoptPath, reportPath := filepath.Join(r.logDir, step+"-adopt.json"), filepath.Join(r.logDir, step+"-report.md")
+	adoptPath, reportPath := filepath.Join(r.runDir, step+"-adopt.json"), filepath.Join(r.runDir, step+"-report.md")
 	b, _ := json.MarshalIndent(adopt, "", "  ")
 	if err := os.WriteFile(adoptPath, append(b, '\n'), 0o644); err != nil {
 		return stop(fmt.Sprintf("reconcile: the adopt file could not be written: %v", err))
@@ -140,7 +140,7 @@ func (r *run) reconcile() *Stopped {
 	}
 	started := r.host.now().UTC().Truncate(time.Second)
 	r.state.Running = &runningStep{Kind: kindReconcile, Subject: kindReconcile, StartedAt: started.Format(time.RFC3339),
-		Head: before, PID: os.Getpid()}
+		Head: before, PID: os.Getpid(), RunID: r.runID}
 	r.saveState()
 
 	reason := ""
@@ -155,8 +155,9 @@ func (r *run) reconcile() *Stopped {
 	default:
 		reason = r.unmoved(before)
 	}
-	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
-	line := ledgerLine{Kind: kindReconcile, Subject: kindReconcile, StartedAt: started.Format(time.RFC3339), Outcome: outcomeReconciled}
+	_ = os.WriteFile(filepath.Join(r.runDir, step+".log"), []byte(o.final), 0o644)
+	line := ledgerLine{Kind: kindReconcile, Subject: kindReconcile, StartedAt: started.Format(time.RFC3339), Outcome: outcomeReconciled,
+		ClaudeSessionID: o.sessionID}
 	if reason == "" {
 		if _, err := os.Stat(reportPath); err != nil {
 			msg := fmt.Sprintf("the reconcile session wrote no report at %s", reportPath)
@@ -182,9 +183,7 @@ func (r *run) reconcile() *Stopped {
 	}
 	ended := r.host.now().UTC().Truncate(time.Second)
 	line.EndedAt, line.WallMinutes = ended.Format(time.RFC3339), ended.Sub(started).Minutes()
-	if err := appendLedger(r.logDir, line); err != nil {
-		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
-	}
+	r.record(line)
 	if reason != "" {
 		r.releaseStep()
 		fmt.Fprintf(r.stderr, "%s: %s %s: %s\n", tool, step, line.Outcome, reason)

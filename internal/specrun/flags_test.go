@@ -48,20 +48,22 @@ func TestMain_RefusesACallThatCannotHold(t *testing.T) {
 		env  map[string]string
 		says string
 	}{
-		"an unknown flag":             {[]string{"--frobnicate"}, nil, "frobnicate"},
-		"a positional argument":       {[]string{"19"}, nil, "19"},
-		"--dry-run and --ledger":      {[]string{"--dry-run", "--ledger"}, nil, "--ledger"},
-		"--ledger and --reset-state":  {[]string{"--ledger", "--reset-state"}, nil, "--reset-state"},
-		"--dry-run and --reset-state": {[]string{"--dry-run", "--reset-state"}, nil, "--dry-run"},
-		"--max 0":                     {[]string{"--max", "0"}, nil, "--max"},
-		"--max -1":                    {[]string{"--max", "-1"}, nil, "--max"},
-		"--stall 0s":                  {[]string{"--stall", "0s"}, nil, "--stall"},
-		"--stall -1m":                 {[]string{"--stall", "-1m"}, nil, "--stall"},
-		"--stall soon":                {[]string{"--stall", "soon"}, nil, "--stall"},
-		"SPECRUN_STALL=soon":          {nil, map[string]string{"SPECRUN_STALL": "soon"}, "SPECRUN_STALL"},
-		"SPECRUN_MAX=x":               {nil, map[string]string{"SPECRUN_MAX": "x"}, "SPECRUN_MAX"},
-		"SPECRUN_MAX=0":               {nil, map[string]string{"SPECRUN_MAX": "0"}, "SPECRUN_MAX"},
-		"SPECRUN_STRICT_SKILLS=maybe": {nil, map[string]string{"SPECRUN_STRICT_SKILLS": "maybe"}, "SPECRUN_STRICT_SKILLS"},
+		"an unknown flag":              {[]string{"--frobnicate"}, nil, "frobnicate"},
+		"a positional argument":        {[]string{"19"}, nil, "19"},
+		"--dry-run and --ledger":       {[]string{"--dry-run", "--ledger"}, nil, "--ledger"},
+		"--ledger and --reset-state":   {[]string{"--ledger", "--reset-state"}, nil, "--reset-state"},
+		"--run without --ledger":       {[]string{"--run", "20261112T080000Z-aaaa"}, nil, "--run"},
+		"--ledger with an empty --run": {[]string{"--ledger", "--run", ""}, nil, "--run"},
+		"--dry-run and --reset-state":  {[]string{"--dry-run", "--reset-state"}, nil, "--dry-run"},
+		"--max 0":                      {[]string{"--max", "0"}, nil, "--max"},
+		"--max -1":                     {[]string{"--max", "-1"}, nil, "--max"},
+		"--stall 0s":                   {[]string{"--stall", "0s"}, nil, "--stall"},
+		"--stall -1m":                  {[]string{"--stall", "-1m"}, nil, "--stall"},
+		"--stall soon":                 {[]string{"--stall", "soon"}, nil, "--stall"},
+		"SPECRUN_STALL=soon":           {nil, map[string]string{"SPECRUN_STALL": "soon"}, "SPECRUN_STALL"},
+		"SPECRUN_MAX=x":                {nil, map[string]string{"SPECRUN_MAX": "x"}, "SPECRUN_MAX"},
+		"SPECRUN_MAX=0":                {nil, map[string]string{"SPECRUN_MAX": "0"}, "SPECRUN_MAX"},
+		"SPECRUN_STRICT_SKILLS=maybe":  {nil, map[string]string{"SPECRUN_STRICT_SKILLS": "maybe"}, "SPECRUN_STRICT_SKILLS"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)

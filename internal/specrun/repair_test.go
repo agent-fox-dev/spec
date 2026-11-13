@@ -91,7 +91,7 @@ func TestRepair_RunsTheQueueAfterAReconcile(t *testing.T) {
 	if got := prompts(f.starts(t)); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("sessions %v; want %v", got, want)
 	}
-	logs, _ := os.ReadDir(f.logDir())
+	logs, _ := os.ReadDir(f.runDirs(t)[0])
 	found := false
 	for _, e := range logs {
 		found = found || e.Name() == fmt.Sprintf("0003-repair-%d.jsonl", correctness)
@@ -401,7 +401,7 @@ func TestRepair_StartsOneSessionForTheIssue(t *testing.T) {
 	if rep == nil || pkg == nil || strings.Join(rep, " ") != strings.Join(pkg, " ") {
 		t.Errorf("the repair's flags %v; want a session with the prompt and the package session's flags %v", rep, pkg)
 	}
-	if !exists(fmt.Sprintf("%s/0003-repair-%d.jsonl", f.logDir(), issue)) {
+	if f.stepFile(t, fmt.Sprintf("0003-repair-%d.jsonl", issue)) == "" {
 		t.Errorf("no stream file 0003-repair-%d.jsonl", issue)
 	}
 }

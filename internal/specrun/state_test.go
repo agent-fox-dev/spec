@@ -107,8 +107,9 @@ func TestState_ResumesTheRunningStepFromTheRepository(t *testing.T) {
 			if len(lines) != tc.landed+1 {
 				t.Fatalf("%d ledger lines; want %d", len(lines), tc.landed+1)
 			}
-			if tc.landed == 1 && (lines[0]["subject"] != "01_a" || lines[0]["outcome"] != "landed") {
-				t.Errorf("the resumed step's line %v; want 01_a landed", lines[0])
+			if tc.landed == 1 && (lines[0]["subject"] != "01_a" || lines[0]["outcome"] != "landed" ||
+				lines[0]["resumed_from"] != earlierRun || lines[0]["run_id"] != env.Result.RunID) {
+				t.Errorf("the resumed step's line %v; want 01_a landed, written by this run, resumed from %s", lines[0], earlierRun)
 			}
 		})
 	}

@@ -423,10 +423,12 @@ It links nothing of `agentkit-go`: not `internal/cli`, `internal/specpkg` or
 their `SPECRUN_` variables; `specrun.go` is `Main`, the dry run and the loop,
 which checks out and pulls the base branch before every step and chooses the
 next package; `session.go` starts `claude -p` in a process group of its own
-(`proc_unix.go`), reads its stream line by line into `<step>.jsonl` and ends it
-when it stalls; `land.go` makes the four landing checks; `ledger.go`,
-`logdir.go`, `state.go` and `versions.go` keep the ledger, the log directory,
-the state file with the resume, and what the run runs. The fake `claude` of the
+(`proc_unix.go`), reads its stream line by line into `<step>.jsonl`, keeps the
+stream's `session_id`, and ends the session when it stalls; `land.go` makes the
+four landing checks; `ledger.go`, `logdir.go`, `state.go` and `versions.go`
+keep the ledger, the log directory with one directory per run (its run ID,
+step files and `run.json`, [ADR 25](adr/25-group-specrun-logs-by-run.md)), the
+state file with the resume, and what the run runs. The fake `claude` of the
 tests is `internal/specrun/testdata/fakeclaude`, built once per test run and put
 first on `PATH`.
 

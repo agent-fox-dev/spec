@@ -20,8 +20,10 @@ type state struct {
 	Done    []doneStep   `json:"done"`
 	Running *runningStep `json:"running,omitempty"`
 	// Owner is the process id of the specrun whose loop works on the
-	// repository, from its first step to its end; absent otherwise.
-	Owner int `json:"owner,omitempty"`
+	// repository, from its first step to its end, and OwnerRun its run ID;
+	// absent otherwise.
+	Owner    int    `json:"owner,omitempty"`
+	OwnerRun string `json:"owner_run,omitempty"`
 	// LabelCheck is the landed package whose label rules a forge call cut
 	// short: the next start applies them again before it chooses a step.
 	LabelCheck string `json:"label_check,omitempty"`
@@ -53,8 +55,9 @@ type doneStep struct {
 }
 
 // runningStep is the step under way, or one that stopped and is to be run
-// again: its kind and package, when it started, the commit HEAD was at, and
-// the process id of the specrun running it, 0 once that specrun has ended.
+// again: its kind and package, when it started, the commit HEAD was at, the
+// process id of the specrun running it, 0 once that specrun has ended, and
+// the run that started it.
 type runningStep struct {
 	Kind      string `json:"kind"`
 	Subject   string `json:"subject"`
@@ -62,6 +65,7 @@ type runningStep struct {
 	StartedAt string `json:"started_at"`
 	Head      string `json:"head"`
 	PID       int    `json:"pid"`
+	RunID     string `json:"run_id,omitempty"`
 }
 
 // statePath is the state file of the repository at root: <its name>.json
@@ -99,13 +103,23 @@ func (r *run) loadState() *envelope.ErrorInfo {
 		return failure("state", "input", "the state file %s cannot be parsed (%v): specrun --reset-state discards it", path, err)
 	}
 	if run := r.state.Running; run != nil && run.PID > 0 && isSpecrun(run.PID) {
-		return failure("state", "input", "the state file %s records %s %s as running in process %d, a specrun that is alive: "+
-			"another specrun works on this repository", path, run.Kind, run.Subject, run.PID)
+		return failure("state", "input", "the state file %s records %s %s as running in process %d%s, a specrun that is alive: "+
+			"another specrun works on this repository", path, run.Kind, run.Subject, run.PID, ofRun(run.RunID))
 	}
 	if o := r.state.Owner; o > 0 && isSpecrun(o) {
-		return failure("state", "input", "the state file %s records process %d, a specrun that is alive, as working on this repository", path, o)
+		return failure("state", "input", "the state file %s records process %d, a specrun that is alive, as working on this repository%s",
+			path, o, ofRun(r.state.OwnerRun))
 	}
 	return nil
+}
+
+// ofRun names the run in a refusal, as " (run <id>)"; nothing for a state
+// written before runs had IDs.
+func ofRun(id string) string {
+	if id == "" {
+		return ""
+	}
+	return " (run " + id + ")"
 }
 
 // saveState writes the state through a temporary file that is renamed, so
@@ -184,13 +198,11 @@ func (r *run) resume() *afspec.NextPackage {
 			minutes = ended.Sub(started).Minutes()
 		}
 		line := ledgerLine{Kind: run.Kind, Subject: run.Subject, StartedAt: run.StartedAt,
-			EndedAt: ended.Format(time.RFC3339), WallMinutes: minutes, Outcome: outcomeLanded}
+			EndedAt: ended.Format(time.RFC3339), WallMinutes: minutes, Outcome: outcomeLanded, ResumedFrom: run.RunID}
 		if t, ok := r.readTrailer(); ok {
 			line.Gate, line.OpenItems = t.Gate, t.OpenItems
 		}
-		if err := appendLedger(r.logDir, line); err != nil {
-			fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
-		}
+		r.record(line)
 		// It landed in the run that was interrupted, not in this one: it is in
 		// the ledger, and neither in landed nor counted against --max.
 		fmt.Fprintf(r.stderr, "%s: %s %s landed before this run, as the repository shows\n", tool, run.Kind, run.Subject)
@@ -216,7 +228,7 @@ func (r *run) movedPast(commit string) bool {
 // startStep records the step as running.
 func (r *run) startStep(kind string, next *afspec.NextPackage, head string, started time.Time) {
 	r.state.Running = &runningStep{Kind: kind, Subject: filepath.Base(next.Dir), SpecDir: next.Dir,
-		StartedAt: started.Format(time.RFC3339), Head: head, PID: os.Getpid()}
+		StartedAt: started.Format(time.RFC3339), Head: head, PID: os.Getpid(), RunID: r.runID}
 	r.saveState()
 }
 
@@ -247,7 +259,7 @@ func (r *run) releaseStep() {
 // second one is refused between steps too.
 func (r *run) hold() {
 	if r.statePath != "" && !r.holding {
-		r.state.Owner, r.holding = os.Getpid(), true
+		r.state.Owner, r.state.OwnerRun, r.holding = os.Getpid(), r.runID, true
 		r.saveState()
 	}
 }
@@ -256,7 +268,7 @@ func (r *run) hold() {
 // this run held it.
 func (r *run) release() {
 	if r.holding {
-		r.state.Owner, r.holding = 0, false
+		r.state.Owner, r.state.OwnerRun, r.holding = 0, "", false
 		r.saveState()
 	}
 }

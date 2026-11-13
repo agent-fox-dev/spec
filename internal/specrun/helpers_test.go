@@ -317,6 +317,7 @@ type fakeStart struct {
 	Cwd    string   `json:"cwd"`
 	WaitMS string   `json:"wait_ms"`
 	Head   string   `json:"head"`
+	RunID  string   `json:"run_id"`
 }
 
 // specDirs is the spec_dir each session was started for.
@@ -445,6 +446,29 @@ func (f *fixture) logDir() string {
 	return filepath.Join(f.cache, "agent-fox", "specrun", filepath.Base(f.root))
 }
 
+// runDirs are the runs' directories in the default log directory, oldest
+// first.
+func (f *fixture) runDirs(t *testing.T) []string {
+	t.Helper()
+	dirs, err := filepath.Glob(filepath.Join(f.logDir(), "runs", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dirs
+}
+
+// stepFile is the path of a step's file, name, in the directory of the run
+// that wrote it; "" when no run holds one.
+func (f *fixture) stepFile(t *testing.T, name string) string {
+	t.Helper()
+	for _, d := range f.runDirs(t) {
+		if p := filepath.Join(d, name); exists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
 // ledgerLines is the ledger in the default log directory, one map per line.
 func (f *fixture) ledgerLines(t *testing.T) []map[string]any {
 	t.Helper()
@@ -514,13 +538,16 @@ func (f *fixture) statePath() string {
 	return filepath.Join(f.state, "agent-fox", "specrun", filepath.Base(f.root)+".json")
 }
 
+// earlierRun is the run a state file of writeState says started its step.
+const earlierRun = "20261112T080000Z-0a0a"
+
 // writeState writes the state file as specrun would have left it with the
 // package in specDir running since the commit head, by the process pid.
 func (f *fixture) writeState(t *testing.T, specDir, head string, pid int) {
 	t.Helper()
 	b, err := json.Marshal(map[string]any{"done": []any{}, "running": map[string]any{
 		"kind": "implement", "subject": filepath.Base(specDir), "spec_dir": specDir,
-		"started_at": "2026-11-12T08:00:00Z", "head": head, "pid": pid}})
+		"started_at": "2026-11-12T08:00:00Z", "head": head, "pid": pid, "run_id": earlierRun}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,6 +23,7 @@ func sessionArgs(prompt string) []string {
 // session is one claude -p process.
 type session struct {
 	host   host          // whose PATH finds claude, and whose environment it inherits
+	runID  string        // the run it is a step of, given to it as SPECRUN_RUN_ID
 	dir    string        // the repository
 	stall  time.Duration // how long it may write nothing
 	stream io.Writer     // where every line of its stdout goes
@@ -34,6 +35,7 @@ type outcome struct {
 	stalled     bool
 	interrupted bool
 	final       string // the result text of its last result event
+	sessionID   string // the first session_id its stream gave
 }
 
 // run starts the session for the package in specDir and waits for it to end.
@@ -49,6 +51,10 @@ func (s *session) run(ctx context.Context, prompt string) (outcome, error) {
 	cmd := exec.CommandContext(ctx, claude, sessionArgs(prompt)...)
 	cmd.Dir = s.dir
 	cmd.Env = append(slices.Clone(s.host.env), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="+strconv.FormatInt(s.stall.Milliseconds(), 10))
+	if s.runID != "" {
+		// What the session commits or writes can name the run it was part of.
+		cmd.Env = append(cmd.Env, "SPECRUN_RUN_ID="+s.runID)
+	}
 	cmd.Stderr = io.Discard
 	if s.errs != nil {
 		cmd.Stderr = s.errs
@@ -85,11 +91,17 @@ read:
 				_, _ = io.WriteString(s.stream, line+"\n")
 			}
 			var ev struct {
-				Type   string `json:"type"`
-				Result string `json:"result"`
+				Type      string `json:"type"`
+				Result    string `json:"result"`
+				SessionID string `json:"session_id"`
 			}
-			if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == "result" {
-				o.final = ev.Result
+			if json.Unmarshal([]byte(line), &ev) == nil {
+				if ev.Type == "result" {
+					o.final = ev.Result
+				}
+				if o.sessionID == "" {
+					o.sessionID = ev.SessionID
+				}
 			}
 		case <-timer.C:
 			o.stalled = true

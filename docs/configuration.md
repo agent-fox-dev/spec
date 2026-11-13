@@ -178,7 +178,8 @@ It also reads:
 | `GITHUB_API_URL`, `GITLAB_API_URL` | the API of a self-hosted forge, as `aflib/issuex` reads them |
 
 It sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` for each session to the stall
-time in milliseconds.
+time in milliseconds, and `SPECRUN_RUN_ID` to the ID of the run the session is
+a step of. `SPECRUN_RUN_ID` is not a setting: `specrun` does not read it.
 
 ## The build
 

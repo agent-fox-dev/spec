@@ -205,7 +205,8 @@ func (r *run) repair(issue int) *Stopped {
 	}
 	head, _ := gitOutput(r.root, "rev-parse", "HEAD")
 	started := r.host.now().UTC().Truncate(time.Second)
-	r.state.Running = &runningStep{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), Head: head, PID: os.Getpid()}
+	r.state.Running = &runningStep{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), Head: head, PID: os.Getpid(),
+		RunID: r.runID}
 	r.saveState()
 
 	reason, outcome := "", outcomeFixed
@@ -221,10 +222,10 @@ func (r *run) repair(issue int) *Stopped {
 	default:
 		outcome, failedIssue, reason = r.repairLeft(issue)
 	}
-	_ = os.WriteFile(filepath.Join(r.logDir, step+".log"), []byte(o.final), 0o644)
+	_ = os.WriteFile(filepath.Join(r.runDir, step+".log"), []byte(o.final), 0o644)
 	ended := r.host.now().UTC().Truncate(time.Second)
 	line := ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: started.Format(time.RFC3339), EndedAt: ended.Format(time.RFC3339),
-		WallMinutes: ended.Sub(started).Minutes(), Outcome: outcome}
+		WallMinutes: ended.Sub(started).Minutes(), Outcome: outcome, ClaudeSessionID: o.sessionID}
 	switch reason {
 	case "", reasonRepairFailed:
 	case reasonStalled:
@@ -232,9 +233,7 @@ func (r *run) repair(issue int) *Stopped {
 	default:
 		line.Outcome = outcomeStopped
 	}
-	if err := appendLedger(r.logDir, line); err != nil {
-		fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
-	}
+	r.record(line)
 	fmt.Fprintf(r.stderr, "%s: %s %s in %.1f min\n", tool, step, line.Outcome, line.WallMinutes)
 	if reason != "" && reason != reasonRepairFailed {
 		r.releaseStep()
@@ -347,10 +346,9 @@ func (r *run) rerunRepair(issue int) *Stopped {
 	step := stepName(len(earlier)+1, kindRepair, subject)
 	record := func(outcome string) {
 		ended := r.host.now().UTC().Truncate(time.Second)
-		if err := appendLedger(r.logDir, ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: r.state.Running.StartedAt,
-			EndedAt: ended.Format(time.RFC3339), Outcome: outcome}); err != nil {
-			fmt.Fprintf(r.stderr, "%s: the ledger could not be written: %v\n", tool, err)
-		}
+		// The repair happened in the run that started it, not in this one.
+		r.record(ledgerLine{Kind: kindRepair, Subject: subject, StartedAt: r.state.Running.StartedAt,
+			EndedAt: ended.Format(time.RFC3339), Outcome: outcome, ResumedFrom: r.state.Running.RunID})
 		fmt.Fprintf(r.stderr, "%s: %s %s before this run, as the forge shows\n", tool, step, outcome)
 		r.finishStep(kindRepair, subject)
 	}

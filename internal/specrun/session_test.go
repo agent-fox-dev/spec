@@ -54,7 +54,7 @@ func TestSession_SavesItsStreamAndItsFinalMessage(t *testing.T) {
 		t.Fatalf("code %d\n%s", code, stderr)
 	}
 	read := func(name string) string {
-		b, err := os.ReadFile(filepath.Join(f.logDir(), name))
+		b, err := os.ReadFile(f.stepFile(t, name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestSession_SavesItsStreamAndItsFinalMessage(t *testing.T) {
 	if got := read("0002-implement-02_b.log"); got != "" {
 		t.Errorf("the second final message is %q; want it empty", got)
 	}
-	if !exists(filepath.Join(f.logDir(), "0001-implement-01_a.stderr")) {
+	if f.stepFile(t, "0001-implement-01_a.stderr") == "" {
 		t.Error("the session's stderr was not kept")
 	}
 }
