@@ -360,7 +360,17 @@ func (r *run) loop() int {
 func (r *run) stop(s *Stopped) int {
 	r.result.Stopped = s
 	return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, s.Step, s.Reason,
-		len(r.result.Landed)), failure(stopStage(s.Reason), "input", "%s %s: %s", s.Kind, s.Subject, s.Reason))
+		len(r.result.Landed)), failure(stopStage(s.Reason), stopCategory(s.Reason), "%s %s: %s", s.Kind, s.Subject, s.Reason))
+}
+
+// stopCategory is the category of the failure a stopped step is reported
+// with: an API error a session ended with may pass when the step runs again;
+// every other stop needs somebody to look first.
+func stopCategory(reason string) string {
+	if strings.HasPrefix(reason, reasonAPIError) {
+		return envelope.CategoryAPI
+	}
+	return envelope.CategoryInput
 }
 
 // recheckLabels applies the label rules a forge call cut short in an earlier
@@ -449,6 +459,9 @@ func stopStage(reason string) string {
 	}
 	if reason == reasonSeriousDefect || reason == reasonRepairFailed {
 		return "defect"
+	}
+	if strings.HasPrefix(reason, reasonSessionError) || strings.HasPrefix(reason, reasonAPIError) {
+		return "session"
 	}
 	if strings.HasPrefix(reason, "serious defects:") {
 		return "forge"
@@ -544,7 +557,7 @@ func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	case o.stalled:
 		reason = reasonStalled
 	default:
-		reason = r.landed(filepath.Join(r.root, filepath.FromSlash(next.Dir)), before)
+		reason = o.explain(r.landed(filepath.Join(r.root, filepath.FromSlash(next.Dir)), before))
 	}
 	_ = os.WriteFile(filepath.Join(r.runDir, step+".log"), []byte(o.final), 0o644)
 

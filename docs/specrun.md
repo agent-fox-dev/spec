@@ -100,7 +100,14 @@ Each step is **implement the next package**:
    | the package has no task `pending` or `in_progress`, read through `afspec` | `tasks still open` |
 
    The first check that fails stops the loop with exit code 1, and
-   `result.stopped.reason` names it.
+   `result.stopped.reason` names it. When the session's last `result` event
+   says it ended in an error (`is_error`), the reason is that error instead,
+   because the check only says where the error left the work:
+   `the session ended with an API error (<status>): <first line>` when the
+   event gives an `api_error_status` (stage `session`, category `api`,
+   retryable), and `the session ended with an error: <first line>` otherwise
+   (stage `session`). A package that passed every check has landed, whatever
+   the session ended with.
 
 The loop ends with exit code 0 when no package is open (`all_done`), or once
 `--max` packages have landed in this run. When packages are open and none can
@@ -366,7 +373,9 @@ code 1 at stage `stall`. An interrupt or a termination of `specrun` (Ctrl-C,
 `SIGTERM`) ends the session's process group the same way, records the step as
 `stopped` with the reason `interrupted`, and stops at stage `interrupt`; the
 step is taken up by the next run. The session's exit code decides nothing: the
-landing checks do. What a session leaves running when it exits is ended with
+landing checks do, and an error the session ended with only explains a check
+that failed (see step 4 above; the reconcile and repair sessions are read the
+same way). What a session leaves running when it exits is ended with
 its group.
 
 ## Logs and the ledger
@@ -601,14 +610,16 @@ tests; the home directory is written `~` and the hashes are cut short.)
 | `landed` | the packages that landed in this run, by directory name, in order |
 | `all_done` | true when no package is open |
 | `waiting` | the open packages that cannot start, each with `spec_dir`, `spec_id`, `waits_on` and `reason` |
-| `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, `stalled`, `interrupted`, or `the session could not start`) |
+| `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, the error the session ended with, `stalled`, `interrupted`, or `the session could not start`) |
 | `dry_run`, `next_step` | under `--dry-run`: `true`, and the step it would take, `kind` and `spec_dir` |
 | `versions` | what the run runs: `specrun`, `skill_path`, `skill_sha256`, `built_skill_sha256`, `claude`, `issue` |
 | `run_id`, `run_dir` | the run's ID and its directory under the log directory; absent when the run stopped before the log directory was ready, and for a dry run |
 
 A stopped run's `summary` is `specrun: stopped at <step>: <reason>; landed <n>`,
 and its `error` names the stage: `land` for a landing check, `stall`,
-`interrupt`, or `session`.
+`interrupt`, or `session` (the session could not start, or ended with an
+error). Its category is `api`, and `retryable` true, for an API error the
+session ended with, and `input` for every other stop.
 
 ### Exit codes
 

@@ -153,7 +153,7 @@ func (r *run) reconcile() *Stopped {
 	case o.stalled:
 		reason = reasonStalled
 	default:
-		reason = r.unmoved(before)
+		reason = o.explain(r.unmoved(before))
 	}
 	_ = os.WriteFile(filepath.Join(r.runDir, step+".log"), []byte(o.final), 0o644)
 	line := ledgerLine{Kind: kindReconcile, Subject: kindReconcile, StartedAt: started.Format(time.RFC3339), Outcome: outcomeReconciled,

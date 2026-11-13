@@ -14,6 +14,10 @@ const (
 	reasonStalled     = "stalled"
 	reasonNoSession   = "the session could not start"
 	reasonInterrupted = "interrupted"
+	// A session that ended in an error and left the step unfinished stops
+	// with one of these, then a colon and the first line of what it said.
+	reasonSessionError = "the session ended with an error"
+	reasonAPIError     = "the session ended with an API error"
 )
 
 // landed checks from the repository that the package in dir landed: the base

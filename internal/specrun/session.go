@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -36,12 +37,40 @@ type outcome struct {
 	interrupted bool
 	final       string // the result text of its last result event
 	sessionID   string // the first session_id its stream gave
+	failed      bool   // its last result event says it ended in an error
+	apiStatus   int    // the HTTP status of the API error it ended with; 0 when none
+}
+
+// explain is the reason a step stops, given the reason the repository checks
+// found: when the session ended in an error, that error, because the check
+// that failed only says where the error left the work. A step whose checks
+// all passed keeps "" whatever the session ended with.
+func (o outcome) explain(reason string) string {
+	if reason == "" || !o.failed {
+		return reason
+	}
+	said := o.final
+	if i := strings.IndexByte(said, '\n'); i >= 0 {
+		said = said[:i]
+	}
+	if said = strings.TrimSpace(said); len([]rune(said)) > 200 {
+		said = string([]rune(said)[:200]) + "…"
+	}
+	why := reasonSessionError
+	if o.apiStatus != 0 {
+		why = fmt.Sprintf("%s (%d)", reasonAPIError, o.apiStatus)
+	}
+	if said == "" {
+		return why
+	}
+	return why + ": " + said
 }
 
 // run starts the session for the package in specDir and waits for it to end.
 // Every line it writes goes to the stream as it arrives; one that writes
 // nothing for the stall time is ended with every process it started. Its exit
-// code decides nothing: the landing checks do.
+// code decides nothing: the landing checks do, and the error its last result
+// event reports, if any, explains a check that failed.
 func (s *session) run(ctx context.Context, prompt string) (outcome, error) {
 	var o outcome
 	claude, err := s.host.lookPath("claude")
@@ -94,10 +123,12 @@ read:
 				Type      string `json:"type"`
 				Result    string `json:"result"`
 				SessionID string `json:"session_id"`
+				IsError   bool   `json:"is_error"`
+				APIStatus int    `json:"api_error_status"`
 			}
 			if json.Unmarshal([]byte(line), &ev) == nil {
 				if ev.Type == "result" {
-					o.final = ev.Result
+					o.final, o.failed, o.apiStatus = ev.Result, ev.IsError, ev.APIStatus
 				}
 				if o.sessionID == "" {
 					o.sessionID = ev.SessionID
