@@ -40,7 +40,7 @@ func init() {
 
 		// tasks.v3.json
 		reflect.TypeOf(TasksV3Json{}):  {"$schema", "spec_id", "spec_name", "schema_version", "test_commands", "dependencies", "tasks"},
-		reflect.TypeOf(TestCommands{}): {"all_tests", "linter", "spec_tests", "affected_tests"},
+		reflect.TypeOf(TestCommands{}): {"all_tests", "linter", "spec_tests", "affected_tests", "evidence_tests"},
 		reflect.TypeOf(Dependency{}):   {"spec", "reason"},
 		reflect.TypeOf(Task{}):         {"id", "title", "criteria", "steps", "touches", "depends_on", "done_when", "takes_handoffs"},
 
@@ -82,6 +82,7 @@ func init() {
 		reflect.TypeOf(TestCommands{}): {
 			"spec_tests":     true,
 			"affected_tests": true,
+			"evidence_tests": true,
 		},
 		reflect.TypeOf(Task{}): {
 			"touches":        true,

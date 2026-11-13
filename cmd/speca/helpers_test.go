@@ -369,6 +369,14 @@ func editTaskStep(t *testing.T, dir string) {
 	})
 }
 
+// setEvidenceCommand names command as the package's evidence_tests.
+func setEvidenceCommand(t *testing.T, dir, command string) {
+	t.Helper()
+	editJSON(t, filepath.Join(dir, afspec.TasksFileName), func(m map[string]any) {
+		m["test_commands"].(map[string]any)["evidence_tests"] = command
+	})
+}
+
 // readFile is the content of the file at path.
 func readFile(t *testing.T, path string) string {
 	t.Helper()

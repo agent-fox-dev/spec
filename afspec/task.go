@@ -338,6 +338,10 @@ func (t *TasksV3Json) deepCopy() *TasksV3Json {
 		at := *t.TestCommands.AffectedTests
 		newTasks.TestCommands.AffectedTests = &at
 	}
+	if t.TestCommands.EvidenceTests != nil {
+		et := *t.TestCommands.EvidenceTests
+		newTasks.TestCommands.EvidenceTests = &et
+	}
 
 	return &newTasks
 }

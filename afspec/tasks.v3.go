@@ -71,6 +71,13 @@ type TestCommands struct {
 	// AllTests corresponds to the JSON schema field "all_tests".
 	AllTests string `json:"all_tests" yaml:"all_tests" mapstructure:"all_tests"`
 
+	// The command that runs the tests it is given, with the placeholder {tests}
+	// exactly once as an argument of its own, which speca replaces with one argument
+	// per test identifier; it prints one JSON line per test, {"test": <identifier>,
+	// "status": pass|fail|error|missing|skipped}. Without it, a repository whose
+	// --dir holds a go.mod uses the runner built into speca.
+	EvidenceTests *string `json:"evidence_tests,omitempty,omitzero" yaml:"evidence_tests,omitempty" mapstructure:"evidence_tests,omitempty"`
+
 	// Linter corresponds to the JSON schema field "linter".
 	Linter string `json:"linter" yaml:"linter" mapstructure:"linter"`
 

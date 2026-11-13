@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -737,6 +738,45 @@ func TestValidate_RefusesAnUnknownProfile(t *testing.T) {
 	}
 	if !found || v.Valid {
 		t.Errorf("valid %v, errors %+v; want a json_schema error on prd.md naming profile", v.Valid, v.Errors)
+	}
+}
+
+// An evidence command holds the placeholder {tests} exactly once, as an
+// argument of its own once the command is split as the gate splits it; an
+// empty one is a schema error.
+func TestValidate_ChecksThePlaceholderOfTheEvidenceCommand(t *testing.T) {
+	for name, tc := range map[string]struct {
+		command string
+		check   string
+	}{
+		"an argument of its own": {"run-tests {tests}", ""},
+		"quoted, still its own":  {`run-tests "{tests}"`, ""},
+		"none":                   {"run-tests", "evidence_tests_placeholder"},
+		"twice":                  {"run-tests {tests} {tests}", "evidence_tests_placeholder"},
+		"inside an argument":     {"run-tests --only={tests}", "evidence_tests_placeholder"},
+		"an open quote":          {`run-tests "{tests}`, "evidence_tests_placeholder"},
+		"empty":                  {"", "json_schema"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := loadFixture(t, fixtureValidSpec)
+			s.Tasks.TestCommands.EvidenceTests = &tc.command
+			v := s.Validate()
+			if tc.check == "" {
+				if !v.Valid {
+					t.Fatalf("errors %v; want valid", v.Errors)
+				}
+				return
+			}
+			if v.Valid || len(v.Errors) != 1 || v.Errors[0].Check != tc.check {
+				t.Fatalf("errors %v; want exactly one %s", v.Errors, tc.check)
+			}
+			e := v.Errors[0]
+			if tc.check == "evidence_tests_placeholder" &&
+				(e.Artifact != TasksFileName || e.EntityID != "test_commands.evidence_tests" ||
+					!strings.Contains(e.Message, strconv.Quote(tc.command)) || !strings.Contains(e.Message, "{tests}")) {
+				t.Errorf("error %+v; want it on tasks.json, test_commands.evidence_tests, naming the command and {tests}", e)
+			}
+		})
 	}
 }
 
