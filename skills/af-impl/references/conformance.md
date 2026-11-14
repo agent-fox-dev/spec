@@ -48,7 +48,9 @@ the whole diff from the base branch:
   every path of the integration task and every survey decision, each criterion through the test its commit maps it to: `implemented`, `partial`, `missing` or `different`;
   `asserts_contract`, `weaker`, `tautological`, `no_assertions` or
   `missing`; `followed` or `not_followed`; cite `file:line` for each, and
-  name every documentation statement the code contradicts.
+  name every documentation statement the code contradicts, found by
+  searching the reference documentation for the names the diff adds, alters
+  or removes, not by reading it through.
 
 `missing`, `different`, `tautological`, `no_assertions`, `not_followed`, a
 contradicted document and a clean-environment failure are blocking. Fix

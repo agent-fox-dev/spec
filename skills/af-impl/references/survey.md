@@ -15,6 +15,19 @@ written once and read at every step that needs it.
 - **Conventions.** The test framework and where tests live, how errors are
   handled, how packages are wired, what the linter enforces, what the
   Makefile does. Read a neighbouring test file rather than guessing a style.
+- **Decisions and divergences.** Read every ADR, where the repository keeps
+  them (`docs/adr/`), and the errata of the packages this one builds on
+  (`docs/errata/<NN>_*.md`, where it keeps them): each package in the
+  spec's `dependencies`, each package whose code the tasks `touch`, and the
+  errata that carry no package number. Not the other errata, not the
+  project's PRDs, and not the reference documentation, which the code
+  supersedes: this holds whatever the project's instructions say a session
+  reads first, since the package holds what it needs of the PRDs and the
+  code says what the code does. Record each rule a task must follow and each divergence it
+  would otherwise trip over, in a line with the file it comes from, in the
+  entry of the task it concerns, or in the general part when it concerns
+  them all. A task reads the brief and not these files, so a rule the brief
+  leaves out is a rule no task follows.
 - **Where the checks go.** For each check the spec carries — a criterion's
   own check, a path's smoke check — the production area it exercises and that
   area's existing test file, or where one would be created; the existing tests

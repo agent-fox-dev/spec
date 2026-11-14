@@ -21,7 +21,8 @@ of the brief, not the general part. §3's "show the brief" is this file: say
 where it is and what it decides, instead of putting it all in this session's
 context. A subagent reads the brief, never this session's transcript, so the
 brief says everything a task needs that the scoped render and the code do
-not.
+not: the decisions and divergences the survey read among them, each with its
+file, so that no subagent reads the ADRs, the errata or the PRDs again.
 
 What a later task needs to know from an earlier one goes into the earlier
 task's commit body, where §5 already puts it: the test each criterion maps
@@ -38,7 +39,11 @@ to, a deviation, a decision. The next subagent is pointed at those commits.
    and the paths of this skill's `SKILL.md` (§5 and *Never*),
    `references/test-first.md` and `references/gate.md`, which it reads in
    full, since it has none of this session's context. Tell it what it does
-   and returns (below).
+   and returns (below), and that the brief stands in for the repository's
+   ADRs, errata and PRDs: it reads none of them to orient itself, whatever
+   the project's instructions say a session reads first. It opens an ADR
+   only when the brief points it at one for a rule it has to apply or
+   amend.
 4. When it returns, check what §5 checks before a task lands: the gate
    verdict against the table of §5, run again here when in doubt; a report
    that answers for every check of the task's criteria and every
@@ -62,7 +67,10 @@ is not a stop.
 It does steps 3 to 8 of §5 for its one task (orient, test first, implement,
 check narrowly, documentation, never the spec), then runs the gate,
 `speca <package> --gate task --base <commit>`. It reads the brief and the
-earlier tasks' commits, never the orchestrator's transcript.
+earlier tasks' commits, never the orchestrator's transcript, and not the
+repository's ADRs, errata, PRDs or reference documentation to orient
+itself: the brief holds what it needs of the first two, and step 7 says how
+it opens the last.
 
 It does not claim, record or commit, and starts no other task. In a package
 that requires evidence it records the failing runs itself, with
