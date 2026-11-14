@@ -8,8 +8,21 @@ Read `.specs/steering.md`, the project's steering directives:
 
 @.specs/steering.md
 
-1. **Read ADRs and errata** in `docs/` for architectural context.
-2. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
+1. **Read the ADRs** in `docs/adr/`: the decisions the code follows, which
+   the code alone does not show.
+2. **Read the errata of what you build on**, not all of them:
+   `docs/errata/NN_*.md` for the specs your change depends on or whose code
+   it changes (NN is the spec number), and the project-wide ones, which have
+   no number.
+3. **Check git state:** `git log --oneline -20`, `git status --short --branch`.
+
+Do not read the rest of `docs/` to orient yourself. A spec package holds what
+a change needs from the PRDs in `docs/prd/`. The reference docs describe the
+code, and the code is authoritative: open one only to update it, at the
+section the change makes wrong, found by searching it.
+
+A subagent that is handed a brief by a session which did these steps works
+from the brief, and does not repeat steps 1 and 2.
 
 Only read files tracked by git (`git ls-files`): what `.gitignore` excludes
 is private notes and local secrets, not project material.

@@ -38,6 +38,8 @@ If `.specs/steering.md` exists, read it first. Follow the repository's own
 agent instructions (`CLAUDE.md`, `AGENTS.md`) for branching, commits and
 landing; where they say nothing, the defaults below apply.
 
+What they say to read first, §3 settles.
+
 ## Run to the end
 
 This is one run, not a conversation: read the package, survey, every task,
@@ -189,10 +191,8 @@ commit of its own before any task — `fix: <subject>` with a
 One read-only pass over the spec and the repository, before any branch exists.
 Read only files `git ls-files` lists. Read
 [references/survey.md](references/survey.md) in full before starting: it gives
-the five things the brief records — where things live, the project's
-conventions, where each of the spec's checks goes, the drift between the spec
-and the code with a numbered decision for each, and what each task's `steps`
-and `touches` leave out.
+what the brief records, and which of the repository's documents the survey
+reads and which nothing reads.
 
 The survey also reads back the open items this package must take up or not
 build on, as [references/survey.md](references/survey.md) says.
@@ -288,7 +288,8 @@ must all be `done` first):
    from the code or a test, not from the PRD, and you can say which line it
    came from. When the code does not do what the spec asks, the docs say
    what the code does. The steering file's documentation table, if there is
-   one, names the files.
+   one, names the files. Search them for the names the change alters; do
+   not read them through.
 8. **Never edit the spec package.** The task's state, written by `speca`,
    is the one change it takes. If the implementation has to diverge
    from a criterion, its contract or a survey decision, do what is
