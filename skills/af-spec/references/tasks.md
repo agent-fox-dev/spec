@@ -87,7 +87,7 @@ and write each criterion id against the task whose `criteria` holds it, by
 itself or through its requirement. An id with no owner is the commonest way a
 plan ships with a hole.
 
-Keep a task to at most 12 steps, and the plan to at most 12 tasks. **Group by
+Keep a task to at most 12 steps, and the plan to at most 6 tasks. **Group by
 requirement, not by layer**: a task delivers one or two requirements end to
 end — data, logic, interface and tests — so each one leaves the system
 working.

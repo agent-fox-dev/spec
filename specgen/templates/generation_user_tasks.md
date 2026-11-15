@@ -29,7 +29,7 @@ A task's tests extend the test files of the code in its `touches`: the test file
 - **Before you submit, check ownership explicitly.** Go through the requirements and write each criterion id next to the task whose `criteria` lists it or its requirement. An id with no owner is rejected, and each rejection costs a full regeneration of this file.
 - Every ID in `criteria` and `depends_on` resolves, and `depends_on` names lower ids.
 
-Keep a task to at most 12 steps, and the spec to at most 12 tasks. Group by requirement, not by layer: a task should deliver one or two requirements end to end — model, logic, interface and tests — so that each task leaves the system in a working state.
+Keep a task to at most 12 steps, and the spec to at most 6 tasks. Group by requirement, not by layer: a task should deliver one or two requirements end to end — model, logic, interface and tests — so that each task leaves the system in a working state.
 
 ## The integration task
 

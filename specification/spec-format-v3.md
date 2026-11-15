@@ -150,7 +150,8 @@ operator-discretion sections. A package's glossary, when it has one, is a
 `## Glossary` section of the PRD: documentation, read by people, validated
 by nothing. Architectural content belongs in `architecture.md`.
 
-The scope rule of v2 §4.2 stands: at most 10 requirements, or a split.
+The scope rule of v2 §4.2 stands with a lower limit: at most 6 requirements,
+or a split.
 
 ---
 
@@ -371,7 +372,7 @@ handoff no task takes, an error under `speca --validate --strict-handoffs`.
 2. **[validator, error]** Every `unwanted` criterion has a `contract` (C6).
 3. **[validator, error]** A `full` package has at least one path; a `lite`
    package has none and at most three requirements (C7).
-4. **[validator, warning]** A spec has at most 10 requirements; a requirement
+4. **[validator, warning]** A spec has at most 6 requirements; a requirement
    has at most 8 criteria. Beyond that, split the spec.
 5. **[generation hint, review rubric]** Criterion fields avoid vague words
    (`appropriate`, `properly`, `correctly`, `reasonable`, `relevant`,
@@ -479,7 +480,7 @@ and see it fail, then implement `steps` until it passes.
 2. **[validator, error]** Every id in `criteria` and `depends_on` resolves;
    `depends_on` forms a DAG over lower ids (C4).
 3. **[validator, warning]** A task has at most 12 steps; a spec has at most
-   12 tasks.
+   6 tasks.
 4. **[generation instruction]** Group by requirement, not by layer: a task
    delivers one or two requirements end to end, so that each task leaves the
    system in a working state.
@@ -727,7 +728,7 @@ Rendering is deterministic: same JSON in, same Markdown out.
    failed generation.
 3. **Examples match the schema.**
 4. **Scope first.** Before writing requirements the coordinator decides
-   whether the PRD fits in 10 requirements; if not, it reports that the PRD
+   whether the PRD fits in 6 requirements; if not, it reports that the PRD
    must be split. A PRD of at most three requirements with no flow that
    crosses components may be a `lite` package; the PRD phase decides and the
    requirements phase is held to it.

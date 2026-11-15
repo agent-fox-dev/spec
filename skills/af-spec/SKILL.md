@@ -175,14 +175,17 @@ file, no notes, no scratch copies, and no `progress.json` written by hand.
 
 ## 4. Size the work, and split before you write
 
-A package is **one cohesive feature**: at most 10 requirements, at most 8
-criteria each, at most 12 tasks. The validator warns past those; the warnings
-are a sign the work was not split, not a formatting nit.
+A package is **one cohesive feature**: at most 6 requirements, at most 8
+criteria each, at most 6 tasks. The limits are set by the time a package
+takes to land: `{{invoke af-impl}}` works through it task by task, about 12
+minutes a task, and only then merges, so a 12-task package takes three hours
+and a stop late in it puts all of them at risk. The validator warns past the
+limits; the warnings are a sign the work was not split, not a formatting nit.
 
-Count the areas of the PRD's `## Requirements`. If the work is plainly
-larger — three or more areas that could be built and tested on their own, or
-unrelated stories serving different actors — do not write an oversized
-package. Propose the split: every scope in order, each with the `snake_case`
+Count the areas of the PRD's `## Requirements`. If the work is larger — more
+than 6 requirements, two or more areas that could be built and tested on
+their own, or unrelated stories serving different actors — do not write an
+oversized package. Propose the split: every scope in order, each with the `snake_case`
 name its package will carry and a sentence of what it covers, the
 **foundational one first**, and ask which to write now. Then write that scope
 alone, name the later scopes in the PRD's `## Non-goals`, and say in the

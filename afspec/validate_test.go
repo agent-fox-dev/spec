@@ -292,6 +292,13 @@ func TestValidateCrossFile_WarnsWithoutFailing(t *testing.T) {
 				s.Tasks.Tasks[0].Steps[i] = "do a thing"
 			}
 		}},
+		{"a spec over the task limit", fmt.Sprintf("spec has %d tasks (limit %d)", maxTasksPerSpec+1, maxTasksPerSpec), func(s *Spec) {
+			for id := len(s.Tasks.Tasks) + 1; len(s.Tasks.Tasks) <= maxTasksPerSpec; id++ {
+				task := s.Tasks.Tasks[0]
+				task.Id, task.DependsOn = id, nil
+				s.Tasks.Tasks = append(s.Tasks.Tasks, task)
+			}
+		}},
 		{"an error outcome without a contract", "describes an error outcome but has no contract", func(s *Spec) {
 			c := &s.Requirements.Requirements[0].Criteria[2] // the ubiquitous one
 			c.Action = "for any malformed input, reject the request as invalid"

@@ -109,9 +109,9 @@ for.
 
 ## The size of one package
 
-One package holds at most 10 requirements and 12 tasks, and
-`spec` splits a larger PRD into several packages, one per scope, the first
-one foundational. Count the areas of `## Requirements`: past what one
+One package holds at most 6 requirements and 6 tasks, since a package
+lands task by task, about 12 minutes a task, and `spec` splits a larger PRD
+into several packages, one per scope, the first one foundational. Count the areas of `## Requirements`: past what one
 package holds, tell the person a split is coming, and make each area one
 that can be built and tested on its own, the foundational one first. A
 PRD of several scopes is written whole; `spec` does the split.
