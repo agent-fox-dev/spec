@@ -185,7 +185,9 @@ for a sealed one. `speca <package> --render` fixes it.
 
 The rules across packages are: a dependency on a package that does not exist,
 a dependency cycle, and a dependency whose execution paths share no actor with
-this package's.
+this package's. A dependency on a package with a higher number is the warning
+`cross_spec_dependency_order`: the numbers are the order the packages are
+implemented in, so a dependency names an earlier package.
 
 A rule that fails is a defect in the spec, and the spec is not the
 implementer's to edit.

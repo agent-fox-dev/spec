@@ -48,9 +48,12 @@ missing one is a warning, one that differs is an error naming the first line
 that differs. `speca <NN> --render` fixes either.
 
 Fix, ask again, and do not go on until `valid` is true. Then read the
-warnings: they never block, and both are worth acting on anyway.
+warnings: they never block, and these are worth acting on anyway.
 `missing_contract` names a criterion that describes an error outcome and has
 no contract; give it one. `scope_limit` means the work wanted a split (§4).
+`cross_spec_dependency_order` names a dependency on a package with a higher
+number, one that is implemented after this one; depend on earlier packages
+only (§7).
 Say in the report which warnings you left, and why.
 
 The verdict matches no words, so `speca` reports the checks `spec` makes as it

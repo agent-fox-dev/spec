@@ -75,7 +75,12 @@ for the repository it will be run in.
 `{spec, reason}`, where `spec` is the other package's **number alone**
 (`"06"`, never `06_router` or its name). A number that names no package in
 the spec root makes the package invalid, and so does a dependency whose paths
-share no actor with this one (§6).
+share no actor with this one (§6). **A dependency points back**: the packages
+are implemented in the order of their numbers, so every entry names a package
+with a lower number than this one. One with a higher number is the warning
+`cross_spec_dependency_order`. Do not leave it: move the shared work into an
+earlier package, or turn the edge round, so that this package offers the
+extension point and the later one depends on it and fills it (`handoffs`).
 
 **Rules that make the plan invalid.** Every criterion is owned by the
 `criteria` of at least one task, directly or through its requirement id (C5).

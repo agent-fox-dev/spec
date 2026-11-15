@@ -492,7 +492,9 @@ func landscapeBlock(metas []afspec.SpecMeta, specRoot string) string {
 	b.WriteString("\nDo not restate what an existing spec already covers. If this work depends on " +
 		"one, name it in the PRD's `## Dependencies` section with a reason, and the tasks " +
 		"artifact's `dependencies` array will carry it. In that array a spec is named by its number " +
-		"alone (`06`), never by its directory name or its name.\n")
+		"alone (`06`), never by its directory name or its name. The numbers are the order the specs " +
+		"are implemented in, and this spec is numbered after every spec in the table: a dependency " +
+		"names one of them, never a spec still to be written.\n")
 	return b.String()
 }
 

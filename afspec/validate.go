@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -1085,7 +1086,8 @@ func firstDifferingLine(want, got []byte) (int, bool) {
 // ValidateCrossSpec checks the rules that span specs: every declared
 // dependency exists, the dependency graph is acyclic, and each dependency edge
 // between two packages that have execution paths is reflected by a shared
-// actor in their paths (error).
+// actor in their paths (error). A dependency on a package with a higher
+// number is a warning (ADR 29).
 //
 // The v2 glossary comparison is gone with the glossary; the v1 external-API
 // signature and return-contract comparisons were gone before it.
@@ -1112,6 +1114,8 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 			}
 		}
 	}
+
+	warnings = append(warnings, dependencyOrderRule(specs, specByID)...)
 
 	moreErrs, moreWarns := handoffRules(specs, specByID, graph)
 	errors, warnings = append(errors, moreErrs...), append(warnings, moreWarns...)
@@ -1185,6 +1189,40 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult {
 	}
 
 	return ValidationResult{Valid: len(errors) == 0, Errors: errors, Warnings: warnings}
+}
+
+// CheckDependencyOrder is the check of the warning that a package depends on
+// one with a higher number.
+const CheckDependencyOrder = "cross_spec_dependency_order"
+
+// dependencyOrderRule warns about each dependency on a package with a higher
+// number. The numbers are the order the packages were written in and should
+// be the order they are implemented in, so a dependency points back (ADR 29).
+// It is a warning of the package that declares it: the graph may still be
+// sound, and a package that is already active cannot be renumbered.
+func dependencyOrderRule(specs []*Spec, byID map[string]*Spec) []ValidationEntry {
+	var warns []ValidationEntry
+	for _, s := range specs {
+		if s.Tasks == nil {
+			continue
+		}
+		own, err := strconv.Atoi(s.SpecID)
+		if err != nil {
+			continue
+		}
+		for _, dep := range s.Tasks.Dependencies {
+			other, err := strconv.Atoi(dep.Spec)
+			if err != nil || byID[dep.Spec] == nil || other <= own {
+				continue
+			}
+			warns = append(warns, ValidationEntry{
+				Category: "integrity", Check: CheckDependencyOrder,
+				Artifact: TasksFileName, EntityID: s.SpecID,
+				Message: fmt.Sprintf("spec %s depends on spec %s, which has a higher number: the numbers are the order the packages are implemented in, so a dependency names an earlier package", s.SpecID, dep.Spec),
+			})
+		}
+	}
+	return warns
 }
 
 // ---------------------------------------------------------------------------

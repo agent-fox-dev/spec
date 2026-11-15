@@ -21,7 +21,7 @@ A task's tests extend the test files of the code in its `touches`: the test file
 
 ## Dependencies on other specs
 
-`dependencies` lists the specs the PRD's `## Dependencies` table names, each as `{spec, reason}`. `spec` is the other spec's number alone — `"06"`, as in the example below — never its directory name (`06_router`) or its name. A number that names no existing spec makes the plan invalid. Leave the array empty when the PRD names none.
+`dependencies` lists the specs the PRD's `## Dependencies` table names, each as `{spec, reason}`. `spec` is the other spec's number alone — `"06"`, as in the example below — never its directory name (`06_router`) or its name. A number that names no existing spec makes the plan invalid. The specs are implemented in the order of their numbers, so every entry names a spec with a lower number than this one; the validator warns about one with a higher number. Leave the array empty when the PRD names none.
 
 ## Rules that make the plan invalid
 

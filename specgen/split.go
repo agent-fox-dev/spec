@@ -277,6 +277,9 @@ func splitBlock(c *splitContext) string {
 		"this PRD builds on it rather than restating it.\n")
 	b.WriteString("- Where this scope consumes what an earlier spec of this split delivers, name " +
 		"that spec in `## Dependencies` with the reason.\n")
+	b.WriteString("- The specs of the split are implemented in the order of the table. Never name a " +
+		"later scope as a dependency, and require nothing of this scope that only a later one " +
+		"delivers: say in `## Non-goals` which later scope adds it.\n")
 	b.WriteString("- The split has been decided. Do not report a `recommended_split`; if this scope " +
 		"still feels large, keep it to its foundations and say so in `## Non-goals`.\n")
 	return b.String()
@@ -328,6 +331,8 @@ func splitReviewBlock(c *splitContext) string {
 	b.WriteString("- Work that belongs to another scope of the split is not a dropped ask: judge the PRD " +
 		"against its own scope.\n")
 	b.WriteString("- Work this PRD takes from another scope, or restates from an earlier one, is a flaw.\n")
+	b.WriteString("- The specs of the split are implemented in the order of the table: a dependency on a " +
+		"later scope, or a requirement only a later scope can satisfy, is a flaw.\n")
 	return b.String()
 }
 
