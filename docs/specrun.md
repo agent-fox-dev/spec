@@ -108,6 +108,9 @@ Each step is **implement the next package**:
    retryable), and `the session ended with an error: <first line>` otherwise
    (stage `session`). A package that passed every check has landed, whatever
    the session ended with.
+5. A step that stopped is [explained](#a-stopped-step-explained): what git
+   shows of the repository, what the session said last, and what to do before
+   running `specrun` again continues it.
 
 The loop ends with exit code 0 when no package is open (`all_done`), or once
 `--max` packages have landed in this run. When packages are open and none can
@@ -336,7 +339,8 @@ commit `HEAD` was at, the process id of `specrun` and the run that started it:
 ```
 
 A step that stops or stalls stays as `running`, its `pid` 0, so that the next
-run takes it up. From its first step to its end, a loop also records itself as
+run takes it up; its stop says how it stands and what to do first
+([A stopped step explained](#a-stopped-step-explained)). From its first step to its end, a loop also records itself as
 `owner`, with its run ID as `owner_run`, so that a second `specrun` is refused
 between steps too; the refusal names that run. Started again, after a stop, a crash, a kill or a reboot,
 `specrun` reads the file and, once the base branch is up to date, checks the
@@ -363,6 +367,66 @@ directory, as the spec asks: two clones whose directories have the same name
 share them, and should each be given `--log-dir`, and run one at a time. `specrun --reset-state` removes it and does nothing
 else; with no file it says so.
 
+## A stopped step explained
+
+A step that stops and stays in the state as `running` is diagnosed from
+git ([ADR 27](adr/27-diagnose-a-stopped-step-and-say-how-to-continue.md)).
+This covers an implement, repair or reconcile step that failed a check,
+stalled, was interrupted or ended in an error. The words of a landing check
+say where the session left the work; the diagnosis says why.
+
+- `result.diagnosis` holds:
+  - the branch checked out (`branch`), whether the tree is `clean`, and the
+    first `uncommitted` paths;
+  - the base branch (`base`, `base_head`, and `base_at_start`, the commit
+    the step started from);
+  - `base_since_start`: `unchanged`; `advanced`, when it still holds that
+    commit; `rewritten`, when it does not; or `missing`;
+  - `base_vs_origin`: `same`, `ahead`, `behind`, `diverged` or `unrelated`;
+  - `base_last_move`, the newest reflog entry, when the base branch was
+    rewritten or stands apart from origin's. A move with no reflog message
+    was a direct write of the ref;
+  - for an implement step, `work_branch`, the package's
+    `feature/<NN>-<spec_name>`: `exists`, `head`, `pushed`, `merged`, and
+    `tasks_done` of `tasks_total`, read from the branch's own
+    `progress.json`.
+
+  Its `cause` words all this as one sentence, the base branch first, and
+  `error.message` ends with it.
+- `result.recovery` is what to do, in order. Each step has `do`, the command
+  as `run` when there is one, and `decide` when the step discards or
+  publishes something, so that a person makes the call. The steps are: clean
+  the working tree; put a rewritten, diverged or unrelated base branch back
+  on origin's (`git branch -f main origin/main`, or `git reset --hard
+  origin/main` when it is checked out); then `specrun`, which takes the step
+  up again. For a package finished on its branch but not merged, af-impl
+  continues that branch, finds every task done, and goes on to conformance
+  and the merge.
+- `result.stopped.session_report` is the first paragraph of the session's
+  final message, on one line, and `result.stopped.log` the file that holds
+  all of it.
+- `error.resumable` is `true`: running `specrun` again continues the step.
+
+stderr says the same for a person (a session, of the tests' fake `claude`,
+that finished `01_a` on its branch while someone replaced `main`):
+
+```
+specrun: 0001-implement-01_a stopped in 0.0 min: not on the base branch
+specrun:   cause: the base branch main was rewritten during the step: it no longer holds d08c069, the commit the step started from (now 3bf2acd, with no history shared with origin/main); it last moved to 3bf2acd at 2026-11-15 05:06:54 +0100, by a direct write of the ref, with no reflog message; 01_a is finished on feature/01-a (3 of 3 tasks done, pushed) but not merged into main
+specrun:   the session said: 01_a is finished and pushed on feature/01-a, but it is not merged. main no longer shares history with origin/main.
+specrun:   its last report: ~/.cache/agent-fox/specrun/widgets/runs/20261115T040654Z-f621/0001-implement-01_a.log
+specrun: to continue:
+specrun:   1. [your call] put main back on origin/main, which discards the commits only the local main holds (git log origin/main..main lists them, and the reflog keeps them): specrun pulls main with --ff-only and lands on top of origin's
+specrun:        $ git branch -f main origin/main
+specrun:   2. take up 01_a again: af-impl continues feature/01-a, finds every task done, and goes on to conformance and the merge
+specrun:        $ specrun
+```
+
+A base branch that cannot be pulled with `--ff-only` at the preflight is
+diagnosed the same way, with no step, so there is no `work_branch`. specrun
+never moves the base branch itself: what a rewritten branch holds may be
+someone's work.
+
 ## Watching a session
 
 `specrun` reads the session's stdout line by line as it arrives. When no line
@@ -377,6 +441,14 @@ landing checks do, and an error the session ended with only explains a check
 that failed (see step 4 above; the reconcile and repair sessions are read the
 same way). What a session leaves running when it exits is ended with
 its group.
+
+While a session runs, `specrun` also checks the base branch every 30
+seconds. A session moves it only forward, with its merge. When the branch no
+longer holds the commit the session started from, or is gone, specrun warns
+at once: code `base_rewritten`, on stderr and in the envelope, with the
+command that puts it back. The session cannot land on that branch and would
+find out only at its merge. The session is not ended: its committed work
+stands, and the branch can be put back before it gets there.
 
 ## Logs and the ledger
 
@@ -567,6 +639,14 @@ each issue with `number`, `title`, `url`, `severity` (or `untested`) and
 `created_at`, in order and capped by `--repair-max`; `[]` when it is empty,
 and absent without a forge.
 
+A step an earlier run stopped at, and keeps to take up again, comes before
+anything else, as in the loop. The dry run reads it from the state file,
+without writing it, and reports it with its [diagnosis and
+recovery](#a-stopped-step-explained). For an implement step the next start
+would run again, `next_step` is that package with `resumes: true`, and the
+summary is `specrun: dry run; the next step takes up implement <spec_dir>
+again: <cause>`. A dry run is how to see where a stopped run stands.
+
 ## The output
 
 The run above ends with:
@@ -610,8 +690,9 @@ tests; the home directory is written `~` and the hashes are cut short.)
 | `landed` | the packages that landed in this run, by directory name, in order |
 | `all_done` | true when no package is open |
 | `waiting` | the open packages that cannot start, each with `spec_dir`, `spec_id`, `waits_on` and `reason` |
-| `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, the error the session ended with, `stalled`, `interrupted`, or `the session could not start`) |
-| `dry_run`, `next_step` | under `--dry-run`: `true`, and the step it would take, `kind` and `spec_dir` |
+| `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, the error the session ended with, `stalled`, `interrupted`, or `the session could not start`); `session_report`, the first paragraph of the session's final message, and `log`, the file that holds it |
+| `diagnosis`, `recovery` | for a stop of a step kept to take up again, a failed pull of the base branch, or a dry run with such a step: where the repository stands and what to do, in order ([A stopped step explained](#a-stopped-step-explained)) |
+| `dry_run`, `next_step` | under `--dry-run`: `true`, and the step it would take, `kind` and `spec_dir`, with `resumes: true` when it takes up a stopped step |
 | `versions` | what the run runs: `specrun`, `skill_path`, `skill_sha256`, `built_skill_sha256`, `claude`, `issue` |
 | `run_id`, `run_dir` | the run's ID and its directory under the log directory; absent when the run stopped before the log directory was ready, and for a dry run |
 
@@ -619,7 +700,9 @@ A stopped run's `summary` is `specrun: stopped at <step>: <reason>; landed <n>`,
 and its `error` names the stage: `land` for a landing check, `stall`,
 `interrupt`, or `session` (the session could not start, or ended with an
 error). Its category is `api`, and `retryable` true, for an API error the
-session ended with, and `input` for every other stop.
+session ended with, and `input` for every other stop. `resumable` is true
+when the stopped step is kept to take up again, and its `message` then ends
+with the diagnosis's `cause`.
 
 ### Exit codes
 
@@ -639,6 +722,7 @@ session ended with, and `input` for every other stop.
 | `reconcile_report_missing` | low | reconcile | the reconcile session wrote no report |
 | `deviation_conflict` | low | reconcile | a deviation carries both `af:accepted` and `af:rejected`, and is left alone |
 | `trailer_missing` | low | land | a landed package's merge commit has no `AF-Run:` trailer holding one JSON object |
+| `base_rewritten` | high | land | while a session ran, the base branch stopped holding the commit the session started from, or was deleted |
 
 ## What it leaves out
 
