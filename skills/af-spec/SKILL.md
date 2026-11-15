@@ -185,11 +185,13 @@ limits; the warnings are a sign the work was not split, not a formatting nit.
 Count the areas of the PRD's `## Requirements`. If the work is larger — more
 than 6 requirements, two or more areas that could be built and tested on
 their own, or unrelated stories serving different actors — do not write an
-oversized package. Propose the split: every scope in order, each with the `snake_case`
-name its package will carry and a sentence of what it covers, the
-**foundational one first**, and ask which to write now. Then write that scope
-alone, name the later scopes in the PRD's `## Non-goals`, and say in the
-report which remain and that each is its own package, written by its own run
+oversized package. Propose the split: every scope, each with the `snake_case`
+name its package will carry and a sentence of what it covers, **in the order
+they are to be implemented**, the foundational one first: a scope builds only
+on the scopes before it. Ask which to write now, recommending the first one
+not yet written: packages are implemented in number order. Then
+write that scope alone, name the later scopes in the PRD's `## Non-goals`,
+and say in the report which remain, in order, each a package of its own run
 of this skill (`spec` splits a large PRD by itself; here the person chooses).
 
 At the other end, work of **at most three requirements** with no flow that
@@ -277,6 +279,9 @@ Read [references/tasks.md](references/tasks.md) in full before writing: it
 gives the example, every field, `test_commands`, `dependencies`, the rules that
 make a plan invalid, and the integration task the tools derive.
 
+**`dependencies` points back**: each entry names an existing package with a
+lower number, never a later one.
+
 What work to do, in what order: **one flat, ordered list** of implement
 tasks. A task is the unit of dispatch — one coder session, one task — written
 against the complete requirements. **Group by requirement, not by layer**: a
@@ -322,7 +327,7 @@ that is not the render.
 This is the format's whole verdict: the three schemas, the cross-file rules
 C1–C8, and the rules across packages. Read
 [references/verdict.md](references/verdict.md) in full for its four stages, the
-order to work in and why the stages gate each other, the two warnings worth
+order to work in and why the stages gate each other, the warnings worth
 acting on, the authoring hints in `result.hints`, and how to validate without
 `speca`.
 

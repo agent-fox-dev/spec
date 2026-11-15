@@ -140,7 +140,10 @@ across specs (format v3 §10.3) that concern it, applied to the spec root as it
 is once the package is written. They are an unknown dependency, a dependency
 cycle, and a spec it depends on whose execution paths share no actor with its
 own (where both packages have paths; a `lite` package is held to nothing
-there). A package that breaks one is on disk, in `draft`, and reported as
+there). A dependency on a spec with a higher number is the warning
+`cross_spec_dependency_order`: the specs are numbered in the order they are
+to be implemented, a split in the order of its scopes, so a dependency names
+an earlier spec ([ADR 29](adr/29-number-packages-in-implementation-order.md)). A package that breaks one is on disk, in `draft`, and reported as
 `invalid_spec` with the rule named in `result.validation`. The actor rule is applied only here: the phase that
 writes the dependencies comes after the requirements, so it could not repair it.
 A spec root that cannot be read for the check fails the run at stage
@@ -652,7 +655,8 @@ which is derived, is not counted), and:
 
 - `validation` — the format's verdict, every error naming its rule (`C1`…`C8`,
   `json_schema`, `completeness`, and across specs `cross_spec_unknown_dependency`,
-  `cross_spec_cycle`, `cross_spec_actor`)
+  `cross_spec_cycle`, `cross_spec_actor`), and every warning naming its own
+  (`cross_spec_dependency_order` among them)
 - `traceability` — derived, never stored: `criteria_covered`,
   `criteria_uncovered`, `paths_covered`, `paths_uncovered`, `criteria_unowned`
 - `open_questions` — the decisions made under uncertainty

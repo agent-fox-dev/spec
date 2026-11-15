@@ -63,6 +63,10 @@ const AffectedTestsBase = "{base}"
     AffectedTestsBase is the placeholder the affected-tests command holds
     exactly once, for the commit a change starts from.
 
+const CheckDependencyOrder = "cross_spec_dependency_order"
+    CheckDependencyOrder is the check of the warning that a package depends on
+    one with a higher number.
+
 const DefaultSpecDirName = ".specs"
     DefaultSpecDirName is where spec packages live under the repository root.
 
@@ -1576,7 +1580,8 @@ func ValidateCrossSpec(specs []*Spec, graph *DependencyGraph) ValidationResult
     ValidateCrossSpec checks the rules that span specs: every declared
     dependency exists, the dependency graph is acyclic, and each dependency
     edge between two packages that have execution paths is reflected by a shared
-    actor in their paths (error).
+    actor in their paths (error). A dependency on a package with a higher number
+    is a warning (ADR 29).
 
     The v2 glossary comparison is gone with the glossary; the v1 external-API
     signature and return-contract comparisons were gone before it.

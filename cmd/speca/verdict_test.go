@@ -124,15 +124,15 @@ func TestVerdict_KeepsTheCrossSpecFindingsOfThePackage(t *testing.T) {
 		t.Errorf("A: the cycle is reported as %+v", cycle)
 	}
 
-	// B: the cycle, and its actor error; not A's unknown dependency. The
-	// cross-spec rules raise no warning: its warnings are its own.
+	// B: the cycle, and its actor error; not A's unknown dependency. After
+	// its own warnings comes the one for its dependency on 03, a later package.
 	ownErrs, ownWarns := ownChecks(t, b)
 	errs, warns, report := verdict("02")
 	if want := append(slices.Clone(ownErrs), "cross_spec_cycle", "cross_spec_actor"); !slices.Equal(errs, want) {
 		t.Errorf("B: errors %v; want %v", errs, want)
 	}
-	if !slices.Equal(warns, ownWarns) {
-		t.Errorf("B: warnings %v; want its own, %v", warns, ownWarns)
+	if want := append(slices.Clone(ownWarns), "cross_spec_dependency_order"); !slices.Equal(warns, want) {
+		t.Errorf("B: warnings %v; want %v", warns, want)
 	}
 	for _, it := range report.Errors {
 		if it.Check == "cross_spec_unknown_dependency" {

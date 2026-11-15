@@ -229,6 +229,10 @@ spec root as it is then, before it activates the package. Of what that finds it 
   the downstream package that decides them (an unknown dependency, a missing
   shared actor), and to the package that wrote a handoff or a take;
 - the `handoff_not_taken` warnings tagged with it, as the receiver;
+- the `cross_spec_dependency_order` warnings tagged with it, on `tasks.json`:
+  one for each of its dependencies on a package with a higher number, since
+  the numbers are the order the packages are implemented in
+  ([ADR 29](adr/29-number-packages-in-implementation-order.md));
 - the dependency cycle, which names no package, when the package has an edge
   in the graph — one from it or to it — since a package with no edge cannot be
   on a cycle.

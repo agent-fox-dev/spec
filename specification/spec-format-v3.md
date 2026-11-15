@@ -601,6 +601,13 @@ No traceability array is stored, so it cannot drift.
 
 As v2 §8.2: `{spec, reason}`, at spec granularity.
 
+A dependency SHOULD name a package with a lower number than the package that
+declares it. The numbers are the order the packages are written in and, near
+enough, the order they are implemented in: a package is numbered after
+everything it builds on, and the scopes of a split are numbered in the order
+they are to be implemented. A dependency on a package with a higher number
+is the warning `cross_spec_dependency_order` (§10.3).
+
 ### 8.7 What changes after activation
 
 The three contract files change only by a lifecycle move (§9): activation
@@ -670,6 +677,11 @@ dependency graph is acyclic; and, for each dependency edge where both
 packages have execution paths, the downstream spec has at least one path step
 whose actor also appears in an upstream path (error). An actor matches by
 name, ignoring case. The v2 glossary comparison is gone with the glossary.
+
+A dependency on a package with a higher number is the warning
+`cross_spec_dependency_order`, of the package that declares it, on
+`tasks.json` (§8.6). It is never an error: the graph may still be acyclic,
+and an active package cannot be renumbered.
 
 The handoff rules (§6.4.1): a handoff's `to` names a package under the spec
 root, not the package itself, that depends on the sender directly or

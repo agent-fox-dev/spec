@@ -57,7 +57,8 @@ it against the other specs of the spec root (an unknown dependency, a cycle, a
 dependency it shares no actor with), and activates it if it validates.
 
 An input that is more than one spec's worth of work is split: the PRD phase
-reports every scope, and spec writes all of them, one package per scope, each
+reports every scope in the order they are to be implemented, and spec writes
+all of them, one package per scope, numbered in that order, each
 built on the ones before it. The scopes' PRDs are written in order; a scope's
 package is generated as soon as its PRD exists, up to --max-parallel at once. The split is recorded in the spec root as
 <first_scope>.split.json until the last package is written; a run that stops

@@ -555,6 +555,42 @@ func TestValidateCrossSpec_ReportsEachBrokenRule(t *testing.T) {
 	}
 }
 
+// A dependency should name an earlier package: one on a package with a
+// higher number is a warning of the package that declares it, and never an
+// error.
+func TestValidateCrossSpec_WarnsAboutADependencyOnALaterPackage(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		from, to   string
+		wantWarned bool
+	}{
+		{"on an earlier package", "02", "01", false},
+		{"on a later package", "01", "02", true},
+		{"on a later package past 99", "99", "100", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := loadFixture(t, fixtureValidSpec), loadFixture(t, fixtureValidSpec)
+			a.SpecID, b.SpecID = tc.from, tc.to
+			a.Tasks.Dependencies = []Dependency{{Spec: tc.to, Reason: "x"}}
+			b.Tasks.Dependencies = nil
+			graph := &DependencyGraph{Edges: []DependencyEdge{{FromSpec: tc.from, ToSpec: tc.to}}}
+			result := ValidateCrossSpec([]*Spec{a, b}, graph)
+			if !result.Valid {
+				t.Fatalf("got errors %v; the order is never an error", result.Errors)
+			}
+			warned := false
+			for _, w := range result.Warnings {
+				if w.Check == CheckDependencyOrder && w.EntityID == tc.from && w.Artifact == TasksFileName {
+					warned = true
+				}
+			}
+			if warned != tc.wantWarned {
+				t.Errorf("warned = %v, want %v; warnings: %v", warned, tc.wantWarned, result.Warnings)
+			}
+		})
+	}
+}
+
 // The actor rule holds only between two packages that have paths: a lite
 // package, on either side of the edge, is held to nothing.
 func TestValidateCrossSpec_SkipsTheActorRuleForALitePackage(t *testing.T) {
