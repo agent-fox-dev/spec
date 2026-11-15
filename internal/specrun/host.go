@@ -26,12 +26,16 @@ type host struct {
 	// the af-impl skill specrun was built with.
 	now        func() time.Time
 	builtSkill string
+	// baseWatch is how often the base branch is checked while a session
+	// runs; never when 0.
+	baseWatch time.Duration
 }
 
 // processHost is the host of the process specrun runs in.
 func processHost() host {
 	dir, _ := os.Getwd()
-	return host{dir: dir, env: os.Environ(), newForge: defaultForge, now: time.Now, builtSkill: builtSkillSHA256}
+	return host{dir: dir, env: os.Environ(), newForge: defaultForge, now: time.Now, builtSkill: builtSkillSHA256,
+		baseWatch: 30 * time.Second}
 }
 
 // lookup is the variable's value, the last of its entries winning, as a

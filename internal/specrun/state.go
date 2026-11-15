@@ -272,3 +272,41 @@ func (r *run) release() {
 		r.saveState()
 	}
 }
+
+// stoppedStep is, for a dry run, the step an earlier run stopped at and keeps
+// to take up again, read from the state file without the checks a start
+// makes and without writing it: nil when there is none, when the file cannot
+// be read, or when a live specrun runs the step.
+func (r *run) stoppedStep() *runningStep {
+	path, err := r.statePathOf()
+	if err != nil {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var st state
+	if json.Unmarshal(b, &st) != nil || st.Running == nil || st.Running.PID > 0 && isSpecrun(st.Running.PID) {
+		return nil
+	}
+	return st.Running
+}
+
+// wouldResume is the package of the stopped implement step that a start
+// would run again, as resume decides once the base branch is up to date: nil
+// for another kind of step, a package that is gone, or one that landed.
+func (r *run) wouldResume(step *runningStep) *afspec.Spec {
+	if step.Kind != kindImplement {
+		return nil
+	}
+	spec, err := afspec.LoadSpec(filepath.Join(r.root, filepath.FromSlash(step.SpecDir)))
+	if err != nil {
+		return nil
+	}
+	base := commitOf(r.root, "refs/heads/"+r.base)
+	if len(spec.OpenTasks()) == 0 && base != "" && base != step.Head && isAncestor(r.root, step.Head, base) {
+		return nil
+	}
+	return spec
+}

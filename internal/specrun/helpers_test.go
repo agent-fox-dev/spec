@@ -115,6 +115,9 @@ type fixture struct {
 	// hash it was built with.
 	now        func() time.Time
 	builtSkill string
+	// baseWatch is how often its specrun checks the base branch while a
+	// session runs; never when 0, as for every test that does not ask.
+	baseWatch time.Duration
 }
 
 // template is a bare origin and its clone on a branch main with one commit
@@ -181,7 +184,7 @@ func (f *fixture) host() host {
 	for k, v := range f.env {
 		env = append(env, k+"="+v)
 	}
-	return host{dir: f.root, env: env, newForge: f.newForge, now: f.now, builtSkill: f.builtSkill}
+	return host{dir: f.root, env: env, newForge: f.newForge, now: f.now, builtSkill: f.builtSkill, baseWatch: f.baseWatch}
 }
 
 // newFixture is the fixture of a test that runs side by side with the

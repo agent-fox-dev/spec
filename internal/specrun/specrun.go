@@ -64,6 +64,13 @@ type Result struct {
 	// directory is ready, and under --dry-run.
 	RunID  string `json:"run_id,omitempty"`
 	RunDir string `json:"run_dir,omitempty"`
+	// Diagnosis is where the repository stands, read from git, when the loop
+	// stopped at a step it keeps to take up again or the base branch could
+	// not be brought up to date; under --dry-run, for such a step.
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
+	// Recovery is what to do, in order, before running specrun again
+	// continues the work.
+	Recovery []RecoveryStep `json:"recovery,omitzero"`
 }
 
 // OpenDeviation is an open deviation that carries neither af:accepted nor
@@ -91,6 +98,10 @@ type Stopped struct {
 	Reason  string `json:"reason"`
 	// Issues are the serious defects a stop on them names.
 	Issues []StopIssue `json:"issues,omitempty"`
+	// SessionReport is the start of what the step's session said last, and
+	// Log the file that holds all of it; absent when it said nothing.
+	SessionReport string `json:"session_report,omitempty"`
+	Log           string `json:"log,omitempty"`
 }
 
 // StopIssue is an open defect the stop rule names.
@@ -110,6 +121,9 @@ type StopIssue struct {
 type NextStep struct {
 	Kind    string `json:"kind"`
 	SpecDir string `json:"spec_dir"`
+	// Resumes is true when the step takes up a step an earlier run stopped
+	// at.
+	Resumes bool `json:"resumes,omitempty"`
 }
 
 // The one kind of step in this version: implement the next package.
@@ -242,6 +256,7 @@ func (r *run) choose() (*afspec.NextPackage, *envelope.ErrorInfo) {
 // dryRun reports the next step, or why there is none, and changes nothing.
 func (r *run) dryRun() int {
 	r.result.DryRun = true
+	r.base = baseBranch(r.root)
 	if f := r.wouldDo(); f != nil {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
@@ -249,13 +264,31 @@ func (r *run) dryRun() int {
 	if f != nil && f.Stage != "waiting" {
 		return r.emit(envelope.ExitFailed, "", f)
 	}
-	if r.forge != nil && r.reconcileDue(r.result.AllDone) {
+	// A stopped step is taken up before anything else is chosen, a due
+	// reconcile included, as the loop does.
+	if step := r.stoppedStep(); step != nil {
+		r.result.Diagnosis = r.diagnose(step)
+		r.result.Recovery = r.recovery(r.result.Diagnosis, step)
+		if spec := r.wouldResume(step); spec != nil {
+			next = &afspec.NextPackage{Dir: step.SpecDir, Spec: spec}
+			r.result.NextStep = &NextStep{Kind: kindImplement, SpecDir: step.SpecDir, Resumes: true}
+			r.result.AllDone = false
+		}
+	}
+	if r.result.NextStep == nil && r.forge != nil && r.reconcileDue(r.result.AllDone) {
 		if f := r.wouldReconcile(); f != nil {
 			return r.emit(envelope.ExitFailed, "", f)
 		}
 		return r.emit(envelope.ExitOK, fmt.Sprintf("%s: dry run; the next step is a reconcile, %d issue(s) to adopt", tool, len(r.result.WouldAdopt)), nil)
 	}
 	switch {
+	case next != nil && r.result.NextStep != nil:
+		summary := fmt.Sprintf("%s: dry run; the next step takes up %s %s again", tool, kindImplement, next.Dir)
+		if c := r.result.Diagnosis.Cause; c != "" {
+			summary += ": " + c
+		}
+		r.printStop(nil)
+		return r.emit(envelope.ExitOK, summary, nil)
 	case next != nil:
 		r.result.NextStep = &NextStep{Kind: kindImplement, SpecDir: next.Dir}
 		if why := r.handoffsRefuse(next); why != "" {
@@ -357,10 +390,21 @@ func (r *run) loop() int {
 }
 
 // stop ends the loop at the step.
+//
+// A step the state keeps to take up again is explained: what git shows of
+// the repository, what the session said last, and what to do before running
+// specrun again continues it.
 func (r *run) stop(s *Stopped) int {
 	r.result.Stopped = s
+	resumable := r.explainStop(s)
+	f := failure(stopStage(s.Reason), stopCategory(s.Reason), "%s %s: %s", s.Kind, s.Subject, s.Reason)
+	if d := r.result.Diagnosis; d != nil && d.Cause != "" {
+		f.Message += ": " + d.Cause
+	}
+	f.Resumable = resumable
+	r.printStop(s)
 	return r.emit(envelope.ExitFailed, fmt.Sprintf("%s: stopped at %s: %s; landed %d", tool, s.Step, s.Reason,
-		len(r.result.Landed)), failure(stopStage(s.Reason), stopCategory(s.Reason), "%s %s: %s", s.Kind, s.Subject, s.Reason))
+		len(r.result.Landed)), f)
 }
 
 // stopCategory is the category of the failure a stopped step is reported
@@ -522,7 +566,15 @@ func (r *run) syncBase() (string, *envelope.ErrorInfo) {
 		if was != "" && was != r.base {
 			_, _ = gitOutput(r.root, "switch", "--quiet", was)
 		}
-		return "", failure("preflight", "input", "the base branch %s could not be brought up to date: %v", r.base, err)
+		f := failure("preflight", "input", "the base branch %s could not be brought up to date: %v", r.base, err)
+		r.result.Diagnosis = r.diagnose(nil)
+		if c := r.result.Diagnosis.Cause; c != "" {
+			f.Message += ": " + c
+			fmt.Fprintf(r.stderr, "%s:   cause: %s\n", tool, c)
+		}
+		r.result.Recovery = r.recovery(r.result.Diagnosis, nil)
+		printRecovery(r.stderr, r.result.Recovery)
+		return "", f
 	}
 	head, err := gitOutput(r.root, "rev-parse", "HEAD")
 	if err != nil {
@@ -633,13 +685,15 @@ func (r *run) afterLanding(specDir string) ([]StopIssue, error) {
 // its stderr to <step>.stderr in the run's directory.
 func (r *run) session(step string) *runningSession {
 	return &runningSession{session: session{dir: r.root, stall: r.opts.stall, host: r.host, runID: r.runID},
-		base: filepath.Join(r.runDir, step)}
+		base: filepath.Join(r.runDir, step), watch: func(ctx context.Context) func() { return r.watchBase(ctx, step) }}
 }
 
-// runningSession is a session whose stream and stderr are saved to files.
+// runningSession is a session whose stream and stderr are saved to files,
+// with the base branch watched while it runs.
 type runningSession struct {
 	session
-	base string
+	base  string
+	watch func(ctx context.Context) func()
 }
 
 func (s *runningSession) run(ctx context.Context, prompt string) (outcome, error) {
@@ -654,6 +708,9 @@ func (s *runningSession) run(ctx context.Context, prompt string) (outcome, error
 	}
 	defer errs.Close()
 	s.stream, s.errs = stream, errs
+	if s.watch != nil {
+		defer s.watch(ctx)()
+	}
 	return s.session.run(ctx, prompt)
 }
 

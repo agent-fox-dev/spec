@@ -194,6 +194,13 @@ func act(action, specDir string) {
 		act("merge", specDir)
 	case "dirty":
 		_ = os.WriteFile("stray.txt", []byte("stray"), 0o644)
+	case "push":
+		git("push", "-q", "-u", "origin", branch)
+	case "rewrite_base":
+		// What a person working beside the session may do: main replaced by
+		// a commit of its own, with no parent, written straight to the ref.
+		id := gitOut("-c", "user.name=Someone", "-c", "user.email=someone@example.com", "commit-tree", gitOut("mktree"), "-m", "x")
+		git("update-ref", "refs/heads/main", id)
 	case "copy_state":
 		matches, _ := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "agent-fox", "specrun", "*.json"))
 		for _, m := range matches {
