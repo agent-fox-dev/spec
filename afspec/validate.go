@@ -334,12 +334,13 @@ var (
 
 // Scope limits of §6.5.4 and §7.3.3. Exceeding one is a warning. A lite
 // package holds at most maxRequirementsLite requirements, which is an error
-// (rule C7).
+// (rule C7). The package limits are set by how long a package takes to land,
+// about 12 minutes a task (ADR 28).
 const (
-	maxRequirementsPerSpec = 10
+	maxRequirementsPerSpec = 6
 	maxCriteriaPerReq      = 8
 	maxStepsPerTask        = 12
-	maxTasksPerSpec        = 12
+	maxTasksPerSpec        = 6
 	maxRequirementsLite    = 3
 )
 
