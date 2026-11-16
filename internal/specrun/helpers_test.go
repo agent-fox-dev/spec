@@ -24,6 +24,10 @@ import (
 // an absolute path.
 var example, _ = filepath.Abs(filepath.Join("..", "..", "afspec", "testdata", "v3_example"))
 
+// schemas is the directory of the published JSON Schemas, by an absolute
+// path.
+var schemas, _ = filepath.Abs(filepath.Join("..", "..", "specification", "schemas"))
+
 // fakeClaude is the fake claude, built once per run of the package's tests.
 var fakeClaude struct {
 	once sync.Once

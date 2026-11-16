@@ -497,6 +497,20 @@ run at stage `preflight`.
       0003-reconcile-reconcile.…
 ```
 
+The two JSON files `specrun` writes there have a JSON Schema each, in
+`specification/schemas/`:
+
+| File | Schema | It describes |
+|---|---|---|
+| `ledger.jsonl` | `specrun-ledger.v1.json` | one line: a step |
+| `runs/<run ID>/run.json` | `specrun-run.v1.json` | the whole file: a run |
+
+Neither file names its schema. The ledger's `gate` and `open_items` are
+copied from a trailer and the run's `envelope.result` is specrun's own (see
+[The output](#the-output)): the schemas leave the three open. The other
+files have no schema: `<step>.jsonl` is the stream as `claude` wrote it, and
+`<step>.log`, `<step>.stderr` and a reconcile's report are text.
+
 ### Runs
 
 Every loop is a run, and has a run ID: the UTC time it started, to the second,

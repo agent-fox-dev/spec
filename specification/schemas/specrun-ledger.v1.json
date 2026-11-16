@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-fox.dev/schemas/specrun-ledger.v1.json",
+  "title": "Specrun ledger line",
+  "description": "Schema for one line of ledger.jsonl, the file in specrun's log directory that holds one JSON object per step of every run, in the order the steps ended. A step's number is the number of its line, counted from 1 across all runs; its files are named <number, four digits>-<kind>-<subject> in the directory of the run that started its session. Written by specrun, never by hand. A reader skips a line that does not parse.",
+  "type": "object",
+  "properties": {
+    "run_id": { "$ref": "#/$defs/run_id", "description": "The run that wrote the line. Absent on a line written before runs had IDs." },
+    "kind": { "type": "string", "enum": ["implement", "reconcile", "repair"], "description": "What the step did: implement a package, reconcile the open items with the base branch, or repair one issue." },
+    "subject": { "type": "string", "minLength": 1, "description": "What the step was for: the package's directory name for an implement step, the word reconcile for a reconcile, the issue number in decimal for a repair." },
+    "started_at": { "type": "string", "format": "date-time", "description": "When the step started, RFC 3339 in UTC, to the second." },
+    "ended_at": { "type": "string", "format": "date-time", "description": "When the step ended, or when a later run found it had ended, RFC 3339 in UTC, to the second." },
+    "wall_minutes": { "type": "number", "description": "ended_at less started_at, in minutes. 0 on a repair's line that a later run wrote from what the forge shows." },
+    "outcome": { "type": "string", "enum": ["landed", "reconciled", "fixed", "already_fixed", "failed", "stopped", "stalled"], "description": "How the step ended. stopped and stalled end a step of any kind; the other outcomes each belong to one kind." },
+    "resumed_from": { "$ref": "#/$defs/run_id", "description": "On a line that records what a session of an earlier run did, a landing or a repair found on restart: the run that started the step, whose directory holds the step's files." },
+    "claude_session_id": { "type": "string", "minLength": 1, "description": "The first session_id of the step's claude stream, which claude --resume takes. Absent when the stream gave none, and on a line with resumed_from." },
+    "gate": { "description": "The gate value of the AF-Run trailer of a landed package's merge commit, copied as the trailer gave it: normally an object of what speca --gate-report counted. This schema does not constrain it. Absent without a trailer that holds it." },
+    "open_items": { "description": "The open_items value of the AF-Run trailer of a landed package's merge commit, copied as the trailer gave it: normally an object with opened, closed, passed_on and reclassified, each counts by kind. This schema does not constrain it. Absent without a trailer that holds it." },
+    "issues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/issue" },
+      "minItems": 1,
+      "description": "The serious defects a landed package left open, which stopped the loop. Absent when it left none."
+    },
+    "adopted": { "type": "integer", "minimum": 0, "description": "For a reconcile whose rules ran: the issues of its adopt file that carry a kind." },
+    "closed": { "type": "integer", "minimum": 0, "description": "For a reconcile whose rules ran: the issues open before it and closed after it." },
+    "settled": { "type": "integer", "minimum": 0, "description": "For a reconcile whose rules ran: the deviations accepted or rejected." }
+  },
+  "required": ["kind", "subject", "started_at", "ended_at", "wall_minutes", "outcome"],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "implement" } }, "required": ["kind"] },
+      "then": { "properties": { "outcome": { "enum": ["landed", "stopped", "stalled"] } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "reconcile" } }, "required": ["kind"] },
+      "then": { "properties": { "subject": { "const": "reconcile" }, "outcome": { "enum": ["reconciled", "stopped", "stalled"] } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "repair" } }, "required": ["kind"] },
+      "then": { "properties": { "subject": { "pattern": "^[1-9][0-9]*$" }, "outcome": { "enum": ["fixed", "already_fixed", "failed", "stopped", "stalled"] } } }
+    }
+  ],
+  "$defs": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$",
+      "description": "A run ID, which is also the name of the run's directory under runs/: the UTC time the run started, to the second, then the milliseconds as three digits and one hex digit drawn at random. Earlier runs have four random hex digits after the time."
+    },
+    "issue": {
+      "type": "object",
+      "properties": {
+        "number": { "type": "integer", "minimum": 1, "description": "The issue's number on the forge." },
+        "url": { "type": "string", "description": "The issue's page on the forge." },
+        "title": { "type": "string" },
+        "severity": { "type": "string", "enum": ["security", "data-loss", "correctness", "minor"], "description": "The defect's severity, from its af:severity- label." }
+      },
+      "required": ["number", "severity"],
+      "additionalProperties": false
+    }
+  }
+}

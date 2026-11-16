@@ -13,7 +13,7 @@ specification/              # The format (no code)
   spec-format-v3.md         #   The current format reference
   spec-format-v2.md         #   Version 2, superseded, kept for reference
   spec-format.md            #   Version 1.3, kept for reference
-  schemas/                  #   Canonical JSON Schemas, v1, v2 and v3
+  schemas/                  #   Canonical JSON Schemas, v1, v2 and v3, and those of specrun's ledger and run.json
 afspec/                     # The reference library, package afspec
   schemas/                  #   Embedded copies of the v3 schemas
   testdata/                 #   Spec package fixtures for the tests
