@@ -500,8 +500,9 @@ run at stage `preflight`.
 ### Runs
 
 Every loop is a run, and has a run ID: the UTC time it started, to the second,
-then four hex digits drawn at random (`20261112T180047Z-7f3a`), so that the
-runs sort by when they started. Once the log directory is ready the run makes
+then the milliseconds as three digits and one hex digit drawn at random
+(`20261112T180047Z-0427`, started 42 ms past the second), so that the runs
+sort by when they started, two in the same second included. Once the log directory is ready the run makes
 its directory, `runs/<run ID>`, and says on stderr where it is
 (`specrun: run 20261112T180047Z-7f3a; its logs are in …`). A dry run, the
 ledger table and `--reset-state` are no run: they get no ID and make no

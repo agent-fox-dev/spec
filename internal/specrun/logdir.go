@@ -2,7 +2,6 @@ package specrun
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,7 +83,7 @@ func (r *run) prepareLogDir() (int, *envelope.ErrorInfo) {
 	if err := os.MkdirAll(runs, 0o755); err != nil {
 		return envelope.ExitFailed, failure("preflight", "environment", "the runs directory %s could not be created: %v", runs, err)
 	}
-	// Two runs that start in the same second may draw the same digits:
+	// Two runs that start in the same millisecond may draw the same digit:
 	// a directory that exists already is never shared.
 	var id string
 	for range 8 {
@@ -109,13 +108,15 @@ func (r *run) prepareLogDir() (int, *envelope.ErrorInfo) {
 // per run, named by its run ID.
 const runsDirName = "runs"
 
-// newRunID names a run: the UTC time it started, to the second, then four
-// hex digits drawn at random. The runs' directories sort by when they
-// started, and a person can read the time off the name.
+// newRunID names a run: the UTC time it started, to the second, then the
+// milliseconds as three digits and one hex digit drawn at random. The runs'
+// directories sort by when they started, two runs in one second included,
+// and a person can read the time off the name.
 func newRunID(started time.Time) string {
-	var b [2]byte
+	var b [1]byte
 	_, _ = rand.Read(b[:])
-	return started.UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(b[:])
+	t := started.UTC()
+	return fmt.Sprintf("%s-%03d%x", t.Format("20060102T150405Z"), t.Nanosecond()/int(time.Millisecond), b[0]&0xf)
 }
 
 // runRecord is run.json in a run's directory: written when the run starts,

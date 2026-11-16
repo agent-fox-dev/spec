@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Whatever a session prints, stdout holds one envelope, and stderr one line
@@ -305,6 +306,21 @@ func TestMain_RefusesAPackageThatLeavesAHandoffUntakenUntilItsPlanTakesIt(t *tes
 	}
 	if got := specDirs(f.starts(t)); strings.Join(got, ",") != ".specs/02_b" {
 		t.Errorf("sessions %v; want 02 started", got)
+	}
+}
+
+// Run IDs sort by when the runs started, two runs a millisecond apart in the
+// same second included, and a person can read the time off them.
+func TestMain_RunIDsSortByWhenTheRunsStarted(t *testing.T) {
+	start := time.Date(2026, 11, 16, 7, 37, 40, 0, time.UTC)
+	for _, at := range []time.Duration{0, time.Millisecond, 42 * time.Millisecond, 999 * time.Millisecond, time.Second} {
+		earlier, later := newRunID(start.Add(at)), newRunID(start.Add(at+time.Millisecond))
+		if earlier >= later {
+			t.Errorf("%v past the second: %q does not sort before %q, a millisecond later", at, earlier, later)
+		}
+	}
+	if id := newRunID(start.Add(42 * time.Millisecond)); !regexp.MustCompile(`^20261116T073740Z-042[0-9a-f]$`).MatchString(id) {
+		t.Errorf("run ID %q; want the time and the milliseconds", id)
 	}
 }
 
