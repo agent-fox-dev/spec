@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-fox.dev/schemas/specrun-run.v1.json",
+  "title": "Specrun run record",
+  "description": "Schema for run.json, the file in a run's directory (runs/<run ID>/ under specrun's log directory) that says what the run was. Written by specrun when the run starts, and again when it ends, then with ended_at and envelope. Never written by hand.",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$",
+      "description": "The run's ID, which is also the name of its directory: the UTC time the run started, to the second, then the milliseconds as three digits and one hex digit drawn at random."
+    },
+    "started_at": { "type": "string", "format": "date-time", "description": "When the run started, RFC 3339 in UTC, to the second." },
+    "ended_at": { "type": "string", "format": "date-time", "description": "When the run ended, RFC 3339 in UTC, to the second. Absent while the run is going, and for good on a run that never ended, as after a crash, a kill or a reboot." },
+    "pid": { "type": "integer", "minimum": 1, "description": "The process ID of the specrun that made the run." },
+    "settings": { "$ref": "#/$defs/settings" },
+    "versions": { "$ref": "#/$defs/versions" },
+    "envelope": { "$ref": "#/$defs/envelope" }
+  },
+  "required": ["run_id", "started_at", "pid", "settings"],
+  "dependentRequired": { "ended_at": ["envelope"], "envelope": ["ended_at"] },
+  "additionalProperties": false,
+  "$defs": {
+    "severities": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["security", "data-loss", "correctness", "minor"] },
+      "uniqueItems": true
+    },
+    "settings": {
+      "type": "object",
+      "description": "The settings the run ran with, each flag as its environment variable and its default resolved it.",
+      "properties": {
+        "max": { "type": "integer", "minimum": 0, "description": "--max: the packages the run may land; 0 is no limit." },
+        "stall": { "type": "string", "minLength": 1, "description": "--stall: how long a session may write nothing before it counts as stalled, as a Go duration (30m0s)." },
+        "log_dir": { "type": "string", "minLength": 1, "description": "The log directory as it resolved, an absolute path: the directory that holds ledger.jsonl and runs/." },
+        "reconcile_every": { "type": "integer", "minimum": 0, "description": "--reconcile-every: the landed packages after which a reconcile runs; 0 leaves only the reconcile at the end." },
+        "stop_on": { "$ref": "#/$defs/severities", "description": "--stop-on: the severities of an open defect that stop the loop after the package that opened it; empty stops on none." },
+        "repair": { "type": "boolean", "description": "--repair: whether the run repairs each open defect of a severity in stop_on that a landed package left, instead of stopping." },
+        "repair_on": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["security", "data-loss", "correctness", "minor", "untested"] },
+          "uniqueItems": true,
+          "description": "--repair-on: what a reconcile queues for repair, defects by severity and untested items; empty queues nothing."
+        },
+        "repair_max": { "type": "integer", "minimum": 0, "description": "--repair-max: the most repairs after one reconcile; 0 repairs nothing there." },
+        "repair_security": { "type": "boolean", "description": "--repair-security: whether security defects are repaired too; without it one never is." },
+        "strict_skills": { "type": "boolean", "description": "--strict-skills: whether an af-impl skill other than the one specrun was built with refuses the run." },
+        "strict_handoffs": { "type": "boolean", "description": "--strict-handoffs: whether a package that leaves an inbound handoff untaken is refused." }
+      },
+      "required": ["max", "stall", "log_dir", "reconcile_every", "stop_on", "repair", "repair_on", "repair_max", "repair_security", "strict_skills", "strict_handoffs"],
+      "additionalProperties": false
+    },
+    "versions": {
+      "type": "object",
+      "description": "What the run ran. Absent when the run stopped before it found them.",
+      "properties": {
+        "specrun": { "type": "string", "description": "specrun's build identity." },
+        "skill_path": { "type": "string", "description": "The af-impl SKILL.md a session in the repository loads: the project's own copy before the user's." },
+        "skill_sha256": { "type": "string", "description": "The SHA-256 of that file in hex, or the words not installed." },
+        "built_skill_sha256": { "type": "string", "description": "The SHA-256 of the af-impl skill specrun was built with, in hex, or the word unknown." },
+        "claude": { "type": "string", "description": "What the claude command gives as its version." },
+        "issue": { "type": "string", "description": "What the issue command gives as its version." }
+      },
+      "required": ["specrun", "skill_path", "skill_sha256", "built_skill_sha256", "claude", "issue"],
+      "additionalProperties": false
+    },
+    "envelope": {
+      "type": "object",
+      "description": "The envelope the run wrote to stdout, whole. This schema names the fields every command's envelope has; result is specrun's own (see the envelope section of docs/specrun.md), and neither it nor the other fields are constrained here.",
+      "properties": {
+        "tool": { "type": "string", "const": "specrun" },
+        "version": { "type": "string", "description": "specrun's build identity." },
+        "ok": { "type": "boolean", "description": "True only when the run did the whole job it was asked to do." },
+        "status": { "type": "string", "enum": ["done", "failed", "usage"], "description": "The outcome in words, from exit_code." },
+        "exit_code": { "type": "integer", "enum": [0, 1, 2], "description": "The process exit code: 0 done, 1 failed, 2 usage error." },
+        "summary": { "type": "string", "description": "One sentence on the outcome." },
+        "error": { "type": "object", "description": "What failed and where; present exactly when ok is false." },
+        "warnings": { "type": "array", "items": { "type": "object" } },
+        "result": { "type": "object", "description": "What the run did: what landed, where it stopped, the diagnosis, the run's ID and directory." },
+        "side_effects": { "type": "array", "items": { "type": "object" } },
+        "next": { "type": "array", "items": { "type": "object" } },
+        "duration_ms": { "type": "integer", "minimum": 0, "description": "Wall-clock time of the run, in milliseconds." },
+        "started_at": { "type": "string", "format": "date-time", "description": "When the run started, RFC 3339 in UTC." }
+      },
+      "required": ["tool", "version", "ok", "status", "exit_code", "summary", "duration_ms", "started_at"]
+    }
+  }
+}

@@ -3,10 +3,13 @@ package specrun
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // Every step adds one ledger line with the run that wrote it, its kind,
@@ -215,5 +218,57 @@ func TestLedger_WarnsWhenTheTrailerIsMissing(t *testing.T) {
 				t.Errorf("warning %q does not name the merge commit %s", env.Warnings[1].Message, head)
 			}
 		})
+	}
+}
+
+// Someone reads the logs with a tool of their own, written against the
+// published schemas: every ledger line and every run.json of a run that
+// lands packages, reconciles and repairs matches its schema.
+func TestLedger_AndTheRunRecordMatchTheirSchemas(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "archive/00_zero", "00", "done")
+	f.addPackage(t, "01_a", "01", "pending")
+	f.addPackage(t, "02_b", "02", "pending")
+	f.forge.add("00_zero: the order is not tested", "open", "af:untested", "af:from-00")
+	f.forge.add("00_zero: the order is wrong", "open", "af:defect", "af:severity-correctness", "af:from-00")
+	repairPlan(t, f, map[string]any{"merge": true, "outcome": "fixed", "close": true},
+		map[string]any{"merge": true, "outcome": "already_fixed", "close": true})
+	if _, code, stderr := runMain(t, "--reconcile-every", "1", "--max", "2", "--repair-max", "5"); code != 0 {
+		t.Fatalf("code %d\n%s", code, stderr)
+	}
+
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	matches := func(schema, name string, doc []byte) {
+		t.Helper()
+		s, err := c.Compile(filepath.Join(schemas, schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := jsonschema.UnmarshalJSON(bytes.NewReader(doc))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := s.Validate(v); err != nil {
+			t.Errorf("%s does not match %s: %v\n%s", name, schema, err, doc)
+		}
+	}
+	ledger, err := os.ReadFile(filepath.Join(f.logDir(), "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(ledger), []byte("\n"))
+	if len(lines) < 5 {
+		t.Fatalf("%d ledger lines; want the two packages, a reconcile and the two repairs:\n%s", len(lines), ledger)
+	}
+	for i, line := range lines {
+		matches("specrun-ledger.v1.json", fmt.Sprintf("ledger line %d", i+1), line)
+	}
+	for _, dir := range f.runDirs(t) {
+		record, err := os.ReadFile(filepath.Join(dir, "run.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		matches("specrun-run.v1.json", filepath.Join(filepath.Base(dir), "run.json"), record)
 	}
 }
