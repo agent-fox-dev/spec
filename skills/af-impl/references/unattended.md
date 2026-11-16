@@ -8,7 +8,8 @@ in one session, for a person watching.
 
 Only where a task's work happens moves. This session, the orchestrating
 one, still surveys, claims, records, commits, runs the integration task, the
-conformance pass and the landing. Only the implement tasks run in subagents,
+documentation, the conformance pass and the landing. Only the implement
+tasks run in subagents,
 one at a time, in this working tree: never in an isolated worktree, whose
 work this session's commit would not hold.
 
@@ -65,12 +66,13 @@ is not a stop.
 ## What the subagent does and returns
 
 It does steps 3 to 8 of §5 for its one task (orient, test first, implement,
-check narrowly, documentation, never the spec), then runs the gate,
+check narrowly, no reference documentation, never the spec), then runs the
+gate,
 `speca <package> --gate task --base <commit>`. It reads the brief and the
 earlier tasks' commits, never the orchestrator's transcript, and not the
 repository's ADRs, errata, PRDs or reference documentation to orient
-itself: the brief holds what it needs of the first two, and step 7 says how
-it opens the last.
+itself: the brief holds what it needs of the first two, and no task writes
+the last (step 7).
 
 It does not claim, record or commit, and starts no other task. In a package
 that requires evidence it records the failing runs itself, with
