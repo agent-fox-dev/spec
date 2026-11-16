@@ -87,8 +87,9 @@ is missing.
   conflict stops the landing: `git merge --abort`, stay on the base branch,
   and report the conflicting files. Without a conflict, run
   `speca <package> --gate full` on the merged tree (often `reused` from the
-  branch tip's full gate), then the repository's thorough target, such as
-  `make check`, where it has one ([gate.md](gate.md)). In a package that
+  branch tip's full gate, and then a pass with nothing run again), then the
+  repository's thorough target, such as `make check`, where it has one,
+  without the tests the gate has just answered for ([gate.md](gate.md)). In a package that
   requires evidence, then run `speca <package> --verify-evidence` on the
   merged tree, which runs every recorded test of every done task again, and
   write its `evidence_check.verdict` (and each test not `pass`) in the

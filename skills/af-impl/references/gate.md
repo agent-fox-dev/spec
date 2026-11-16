@@ -40,17 +40,42 @@ Read a failure from the failing command's `tail`, its last 40 lines. Open its
 it, not the log.
 
 A gate whose tree, directory, level, commands and environment match a
-recorded pass answers `pass` with `reused` and runs nothing. It is a pass. Report it as
+recorded pass answers `pass` with `reused` and runs nothing. It is a pass:
+never run the linter or the suite by hand to confirm it. Report it as
 "reused the gate of `<commit>`, `<date>`", from `reused.commit` (short) and
 `reused.at`. A `gate_not_recorded` warning means the verdict is true and only
 the reuse and the report miss this run; say so in the report.
+
+## A test that fails and is not the change's
+
+A gate that fails only in tests of code the change did not touch may have
+met a flaky test. Do not run the gate or the suite again to find out: run
+each failing test alone, once, in the suite's targeted form
+(`go test ./pkg -run Name`).
+
+- One that fails alone is a real failure, and the verdict stands.
+- When every one of them passes alone, run the gate once more. A pass is the
+  verdict, and each of those tests is flaky: name it, with the gate's `tail`,
+  in the task's report and commit body. A second failure is a failed gate,
+  whatever passes alone.
+
+This never applies to a test the change wrote or to a test of a file it
+touched: that failure is the change's until shown otherwise, and a test of
+the branch's own that needs a rerun is fixed in the task, not rerun. At the
+landing each flaky test not already tracked becomes one `defect` item of
+severity `minor`, titled with the test's name, so that a repair makes it
+deterministic once and no later gate meets it.
 
 ## The thorough target
 
 The gate runs the spec's `test_commands` and nothing else. A more thorough
 repository target, such as `make check` (formatting, vet, lint, tests), runs
 **once**, on the merged tree, after its full gate and before the merge is
-committed (§7). This order takes precedence over a project instruction to
+committed (§7). The gate has run the tests on that tree, or reused their
+pass, so the thorough target is not what runs them again: where it is made of
+steps (`check: fmt vet lint test`), run every step but the one that runs the
+gate's `all_tests` (`make fmt vet lint`); run the whole target only when it
+cannot be taken apart, or its test step runs more than `all_tests` does. This order takes precedence over a project instruction to
 substitute the thorough target for every check: formatting and tidiness cannot
 change a test's result, and the gate on the merged tree decides what lands. A
 thorough target that fails on the merged tree is a verdict that is not

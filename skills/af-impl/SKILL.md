@@ -283,13 +283,10 @@ must all be `done` first):
    changed, in the suite's targeted form (`go test ./pkg -run Name`,
    `pytest tests/test_x.py::test_y`, `npm test -- <file>`). The full suite
    is the gate's job, once, after the task.
-7. **Documentation.** Update what the change makes wrong, from the code:
-   every quoted string, field name, exit code and sample payload is copied
-   from the code or a test, not from the PRD, and you can say which line it
-   came from. When the code does not do what the spec asks, the docs say
-   what the code does. The steering file's documentation table, if there is
-   one, names the files. Search them for the names the change alters; do
-   not read them through.
+7. **No reference documentation yet.** It is written once, from the
+   finished code, before the conformance pass (§6), whatever the project's
+   instructions say about a session. A task changes a document only where
+   a test or the build reads it.
 8. **Never edit the spec package.** The task's state, written by `speca`,
    is the one change it takes. If the implementation has to diverge
    from a criterion, its contract or a survey decision, do what is
@@ -367,16 +364,16 @@ package has none.
 
 Every task was verified by the checks; before anything is merged, ask what the
 checks cannot: does the finished branch do what the spec says? Read
-[references/conformance.md](references/conformance.md) in full before
-measuring, and measure the whole diff from the base branch — its structure, its
+[references/conformance.md](references/conformance.md) in full first. Write
+the documentation, as one `docs:` commit, then measure the whole diff from the base branch — its structure, its
 tests, its scope, the package itself, a clean environment, and a review of the
 diff against the spec on a fresh footing.
 
 `missing`, `different`, `tautological`, `no_assertions`, `not_followed`, a
 contradicted document and a clean-environment failure are **blocking**. Fix
-what can be fixed in one `fix: <subject>` commit with a
-`Spec: <NN_name>, conformance` trailer, landed only on checks that still pass;
-declare what cannot, with a recorded decision. Documentation findings and files
+what can be fixed, a defect of this branch included, in one `fix: <subject>`
+commit with a `Spec: <NN_name>, conformance` trailer, landed only on checks
+that still pass; declare what cannot, with a recorded decision. Documentation findings and files
 out of scope can only be fixed.
 
 What remains is the `unmet` list: every **open item**, meaning what the branch
