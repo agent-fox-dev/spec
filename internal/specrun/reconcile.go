@@ -109,6 +109,9 @@ func hasAfLabel(labels []string) bool {
 // and, when the session left the repository as it was, the rules. It
 // returns the stop, or nil.
 func (r *run) reconcile() *Stopped {
+	if s := r.askedToStop(kindReconcile, kindReconcile); s != nil {
+		return s
+	}
 	before, f := r.syncBase()
 	if f != nil {
 		return &Stopped{Kind: kindReconcile, Subject: kindReconcile, Step: kindReconcile, Reason: f.Message}

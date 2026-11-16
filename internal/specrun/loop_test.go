@@ -283,7 +283,8 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 	for name, tc := range map[string]struct {
 		setup   func(t *testing.T, f *fixture)
 		says    string
-		recover string // the first recovery step's command, when there is one
+		cause   string // what the diagnosis finds, when there is one
+		recover string // the first recovery step's command
 	}{
 		"a local main that diverged from origin": {func(t *testing.T, f *fixture) {
 			other := filepath.Join(f.scratch, "other")
@@ -293,7 +294,7 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			git(t, other, "push", "-q")
 			writeFile(t, filepath.Join(f.root, "README.md"), "ours\n")
 			f.commit(t, "ours")
-		}, "git pull", "git reset --hard origin/main"},
+		}, "git pull", "have diverged", "git reset --hard origin/main"},
 		"a diverged main, started on another branch": {func(t *testing.T, f *fixture) {
 			other := filepath.Join(f.scratch, "other")
 			git(t, f.scratch, "clone", "-q", f.origin, other)
@@ -303,18 +304,18 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			writeFile(t, filepath.Join(f.root, "README.md"), "ours\n")
 			f.commit(t, "ours")
 			git(t, f.root, "switch", "-q", "-c", "elsewhere")
-		}, "git pull", "git branch -f main origin/main"},
+		}, "git pull", "have diverged", "git branch -f main origin/main"},
 		"a dirty tree on another branch": {func(t *testing.T, f *fixture) {
 			git(t, f.root, "switch", "-q", "-c", "other")
 			writeFile(t, filepath.Join(f.root, "README.md"), "other\n")
 			f.commit(t, "other")
 			writeFile(t, filepath.Join(f.root, "README.md"), "uncommitted\n")
-		}, "git switch", ""},
+		}, "not clean", "the working tree on other has uncommitted changes (README.md)", "git status"},
 		"no claude on PATH": {func(t *testing.T, f *fixture) {
 			f.setenv("PATH", strings.Join(slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(d string) bool {
 				return exists(filepath.Join(d, "claude"))
 			}), string(os.PathListSeparator)))
-		}, "claude", ""},
+		}, "claude", "", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
@@ -329,8 +330,8 @@ func TestLoop_StopsBeforeASessionWhenThePreflightFails(t *testing.T) {
 			}
 			if tc.recover != "" {
 				rec := env.Result.Recovery
-				if !strings.Contains(env.Error.Message, "have diverged") || len(rec) != 2 || rec[0].Run != tc.recover || !rec[0].Decide {
-					t.Errorf("message %q, recovery %+v; want the divergence named and %q first", env.Error.Message, rec, tc.recover)
+				if !strings.Contains(env.Error.Message, tc.cause) || len(rec) != 2 || rec[0].Run != tc.recover || !rec[0].Decide {
+					t.Errorf("message %q, recovery %+v; want %q named and %q first", env.Error.Message, rec, tc.cause, tc.recover)
 				}
 			}
 			if len(f.starts(t)) != 0 {

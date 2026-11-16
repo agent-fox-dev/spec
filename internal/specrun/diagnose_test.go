@@ -47,6 +47,11 @@ func TestDiagnose_ExplainsAStoppedStepAndHowToContinue(t *testing.T) {
 				t.Errorf("diagnosis %+v", d)
 			}
 		}, []string{"the working tree on main has uncommitted changes (stray.txt)"}, []string{"git status", "specrun"}},
+		"a task left unfinished in the working tree": {map[string]any{"events": 1, "actions": []string{"branch", "done_one", "dirty"}}, func(t *testing.T, d *Diagnosis) {
+			if d.Clean || d.Branch != "feature/01-a" || !slices.Equal(d.Uncommitted, []string{"stray.txt"}) {
+				t.Errorf("diagnosis %+v", d)
+			}
+		}, []string{"the working tree on feature/01-a has uncommitted changes (stray.txt)"}, []string{"git stash push --include-untracked", "specrun"}},
 		"a session that does nothing": {map[string]any{"events": 1}, func(t *testing.T, d *Diagnosis) {
 			if d.WorkBranch == nil || d.WorkBranch.Exists {
 				t.Errorf("work branch %+v; want one that does not exist", d.WorkBranch)
@@ -171,5 +176,30 @@ func TestDiagnose_WarnsWhileASessionRunsWhenTheBaseIsRewritten(t *testing.T) {
 				t.Errorf("warnings %v; want one, on stderr too, naming main and the step\n%s", warned, stderr)
 			}
 		})
+	}
+}
+
+// A start on a working tree that is not clean, as an interrupted task leaves
+// it, changes nothing and says why, with the stopped step's branch, and how
+// to set the changes aside; once they are, the step is taken up again.
+func TestDiagnose_AStartOnAnUncleanTreeSaysHowToSetTheChangesAside(t *testing.T) {
+	f := newFixture(t)
+	f.addPackage(t, "01_a", "01", "pending")
+	f.plan(t, map[string]any{"events": 1, "actions": []string{"branch", "done_one", "dirty"}}, land(0))
+	if _, code, _ := runMain(t); code != 1 {
+		t.Fatalf("code %d; want the step to stop", code)
+	}
+	env, code, stderr := runMain(t)
+	rec := env.Result.Recovery
+	if code != 1 || env.Error == nil || env.Error.Stage != "preflight" || !strings.Contains(env.Error.Message, "not clean") ||
+		!strings.Contains(env.Error.Message, "01_a has 1 of") || len(rec) != 2 || rec[0].Run != "git stash push --include-untracked" {
+		t.Fatalf("code %d, error %+v, recovery %+v; want a preflight stop naming the step's branch and the stash first\n%s", code, env.Error, rec, stderr)
+	}
+	if len(f.starts(t)) != 1 || git(t, f.root, "branch", "--show-current") != "feature/01-a" {
+		t.Fatal("the start changed something: a session started or the branch moved")
+	}
+	git(t, f.root, "stash", "push", "--include-untracked")
+	if env, code, stderr := runMain(t); code != 0 || !slices.Equal(env.Result.Landed, []string{"01_a"}) {
+		t.Fatalf("after the stash: code %d, result %+v, error %+v\n%s", code, env.Result, env.Error, stderr)
 	}
 }
