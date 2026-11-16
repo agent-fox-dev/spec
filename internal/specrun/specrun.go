@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -71,6 +73,9 @@ type Result struct {
 	// Recovery is what to do, in order, before running specrun again
 	// continues the work.
 	Recovery []RecoveryStep `json:"recovery,omitzero"`
+	// StoppedAsAsked is true when an interrupt asked the loop to stop and it
+	// stopped between steps, with no step left to take up again.
+	StoppedAsAsked bool `json:"stopped_as_asked,omitempty"`
 }
 
 // OpenDeviation is an open deviation that carries neither af:accepted nor
@@ -154,6 +159,8 @@ type run struct {
 	repo      issuex.Repo
 	result    *Result
 	warnings  []envelope.Warning
+	// asked is set by the first interrupt: the loop starts no further step.
+	asked atomic.Bool
 }
 
 // failure is a call that did not do its job: the stage, the category and the
@@ -171,11 +178,13 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 
 // runOn is Main on the host h.
 func runOn(h host, argv []string, stdout, stderr io.Writer) int {
-	// An interrupt or a termination ends the session with everything it
-	// started, and the step is left to be taken up again.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The stderr of a run is written by the loop, the base branch's watch and
+	// the signal handler.
+	stderr = &lockedWriter{w: stderr}
 	r := &run{host: h, ctx: ctx, stdout: stdout, stderr: stderr, started: time.Now()}
+	defer r.handleSignals(cancel)()
 	opts, err := parseOptions(argv, h.lookup)
 	if errors.Is(err, flag.ErrHelp) {
 		printUsage(stderr)
@@ -205,6 +214,62 @@ func runOn(h host, argv []string, stdout, stderr io.Writer) int {
 	}
 	defer r.release()
 	return r.loop()
+}
+
+// handleSignals makes an interrupt a request to stop between steps, and a
+// second interrupt or a termination an immediate stop: that ends the session
+// with everything it started, and the step is left to be taken up again.
+// Stopping between steps loses nothing, where an immediate stop loses the
+// work of the task in progress and leaves it in the working tree. The
+// session runs in a process group of its own, so the terminal's interrupt
+// does not reach it. The returned function stops the handling.
+func (r *run) handleSignals(cancel context.CancelFunc) func() {
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case sig := <-ch:
+				if sig == os.Interrupt && r.asked.CompareAndSwap(false, true) {
+					fmt.Fprintf(r.stderr, "%s: stopping once the step in progress ends; interrupt again to stop now\n", tool)
+					continue
+				}
+				cancel()
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(ch)
+		close(done)
+	}
+}
+
+// reasonAsked is the reason of a step not started because an interrupt asked
+// the loop to stop.
+const reasonAsked = "stopped as asked"
+
+// askedToStop is the stop of a step about to start, when an interrupt asked
+// the loop to stop; nil otherwise.
+func (r *run) askedToStop(kind, subject string) *Stopped {
+	if !r.asked.Load() {
+		return nil
+	}
+	return &Stopped{Kind: kind, Subject: subject, Reason: reasonAsked}
+}
+
+// lockedWriter serialises the writes of several goroutines to one writer.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // locate finds the repository the working directory is in, and its spec root.
@@ -395,6 +460,16 @@ func (r *run) loop() int {
 // the repository, what the session said last, and what to do before running
 // specrun again continues it.
 func (r *run) stop(s *Stopped) int {
+	if s.Reason == reasonAsked {
+		// Nothing stopped: the step was not started, and the state holds
+		// nothing to take up again.
+		r.result.StoppedAsAsked = true
+		next := s.Kind
+		if s.Subject != "" && s.Subject != s.Kind {
+			next += " " + s.Subject
+		}
+		return r.emit(envelope.ExitOK, fmt.Sprintf("%s: stopped as asked, before %s; landed %d", tool, next, len(r.result.Landed)), nil)
+	}
 	r.result.Stopped = s
 	resumable := r.explainStop(s)
 	f := failure(stopStage(s.Reason), stopCategory(s.Reason), "%s %s: %s", s.Kind, s.Subject, s.Reason)
@@ -551,14 +626,21 @@ func baseBranch(root string) string {
 }
 
 // syncBase checks out the base branch, when it is not checked out already,
-// and pulls it with --ff-only, and returns the commit HEAD is at then. A failure of either is the preflight's,
-// in git's own words.
+// and pulls it with --ff-only, and returns the commit HEAD is at then. A
+// working tree that is not clean, or a failure of either, is the
+// preflight's, in git's own words and explained from git.
 func (r *run) syncBase() (string, *envelope.ErrorInfo) {
 	at, _ := worktreeOf(r.root)
 	was := at.branch
+	// Every step leaves the tree clean. Changes in it are a person's, or the
+	// unfinished task of an interrupted session; checking out the base
+	// branch would carry them along, or fail on them.
+	if !at.clean {
+		return "", r.baseFailure("the working tree is not clean, so the base branch %s was not checked out", r.base)
+	}
 	if was != r.base {
 		if _, err := gitOutput(r.root, "switch", "--quiet", r.base); err != nil {
-			return "", failure("preflight", "input", "the base branch %s could not be checked out: %v", r.base, err)
+			return "", r.baseFailure("the base branch %s could not be checked out: %v", r.base, err)
 		}
 	}
 	if _, err := gitOutput(r.root, "pull", "--quiet", "--ff-only", "origin", r.base); err != nil {
@@ -566,15 +648,7 @@ func (r *run) syncBase() (string, *envelope.ErrorInfo) {
 		if was != "" && was != r.base {
 			_, _ = gitOutput(r.root, "switch", "--quiet", was)
 		}
-		f := failure("preflight", "input", "the base branch %s could not be brought up to date: %v", r.base, err)
-		r.result.Diagnosis = r.diagnose(nil)
-		if c := r.result.Diagnosis.Cause; c != "" {
-			f.Message += ": " + c
-			fmt.Fprintf(r.stderr, "%s:   cause: %s\n", tool, c)
-		}
-		r.result.Recovery = r.recovery(r.result.Diagnosis, nil)
-		printRecovery(r.stderr, r.result.Recovery)
-		return "", f
+		return "", r.baseFailure("the base branch %s could not be brought up to date: %v", r.base, err)
 	}
 	head, err := gitOutput(r.root, "rev-parse", "HEAD")
 	if err != nil {
@@ -583,12 +657,31 @@ func (r *run) syncBase() (string, *envelope.ErrorInfo) {
 	return head, nil
 }
 
+// baseFailure is the preflight's failure to make the base branch ready,
+// explained as a stopped step is (ADR 27): the diagnosis, which covers the
+// step the state keeps to take up again when there is one, and what to do.
+func (r *run) baseFailure(format string, args ...any) *envelope.ErrorInfo {
+	f := failure("preflight", "input", format, args...)
+	step := r.state.Running
+	r.result.Diagnosis = r.diagnose(step)
+	if c := r.result.Diagnosis.Cause; c != "" {
+		f.Message += ": " + c
+		fmt.Fprintf(r.stderr, "%s:   cause: %s\n", tool, c)
+	}
+	r.result.Recovery = r.recovery(r.result.Diagnosis, step)
+	printRecovery(r.stderr, r.result.Recovery)
+	return f
+}
+
 // implement runs the step that implements the package next: one session,
 // its stream and final message saved, then the landing checks, and the
 // step's ledger line. It returns the stop, or nil when the package landed.
 func (r *run) implement(next *afspec.NextPackage, before string) *Stopped {
 	earlier, _ := readLedger(r.logDir)
 	subject := filepath.Base(next.Dir)
+	if s := r.askedToStop(kindImplement, subject); s != nil {
+		return s
+	}
 	step := stepName(len(earlier)+1, kindImplement, subject)
 	if why := r.handoffsRefuse(next); why != "" {
 		fmt.Fprintf(r.stderr, "%s: %s not started: %s\n", tool, subject, why)
@@ -789,6 +882,7 @@ func worktreeOf(dir string) (worktree, error) {
 func gitOutput(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	detach(cmd) // the interrupt that asks the loop to stop is not git's
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

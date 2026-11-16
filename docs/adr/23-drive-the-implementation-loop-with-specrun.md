@@ -41,7 +41,10 @@ cannot hold.
   step to its end.
 - **An interrupt or a termination of `specrun` ends the session's process
   group**, since the session runs in a group of its own that the terminal's
-  signals do not reach; the step is left to be taken up again.
+  signals do not reach; the step is left to be taken up again. (Since
+  [ADR 29](29-stop-the-loop-between-steps-on-an-interrupt.md), the first
+  interrupt stops the loop between steps, and a second one, or a
+  termination, does this.)
 - **A session that writes nothing for `--stall` (30 minutes) is ended** with
   its process group, and `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` is set to the
   same time, so that a session never waits on its subagents longer than

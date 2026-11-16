@@ -5,6 +5,7 @@ package specrun
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -91,30 +92,75 @@ func TestSession_IsEndedWhenAProcessOutsideItsGroupHoldsItsOutput(t *testing.T) 
 	pidsAlive(t, pids) // ends what the session left
 }
 
-// An interrupt ends the session with what it started, records the step as
-// stopped, and leaves it to be taken up again.
-func TestSession_IsEndedWhenSpecrunIsInterrupted(t *testing.T) {
+// A second interrupt, or a termination, ends the session with what it
+// started, records the step as stopped, and leaves it to be taken up again.
+func TestSession_IsEndedWhenSpecrunIsInterruptedTwiceOrTerminated(t *testing.T) {
+	for name, signals := range map[string][]syscall.Signal{
+		"two interrupts": {syscall.SIGINT, syscall.SIGINT},
+		"a termination":  {syscall.SIGTERM},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newSerialFixture(t) // the signal goes to the whole test process
+			f.addPackage(t, "01_a", "01", "pending")
+			pids := filepath.Join(f.scratch, "pids")
+			f.setenv("SPECRUN_FAKE_PIDS", pids)
+			f.plan(t, map[string]any{"events": 1, "child": true, "silence_s": 60})
+			go signalOnce(pids, signals...)
+			env, code, _ := runMain(t)
+			if code != 1 || env.Result == nil || env.Result.Stopped == nil || env.Result.Stopped.Reason != "interrupted" {
+				t.Fatalf("code %d, result %+v, error %+v; want an interrupted stop", code, env.Result, env.Error)
+			}
+			if alive := pidsAlive(t, pids); len(alive) != 0 {
+				t.Errorf("processes %v of the session are alive", alive)
+			}
+			if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "stopped" {
+				t.Errorf("ledger %v", got)
+			}
+		})
+	}
+}
+
+// One interrupt lets the step in progress finish and starts no other: the
+// package lands, the loop ends with nothing to take up again, and the next
+// start goes on with the next package.
+func TestSession_AnInterruptStopsTheLoopOnceTheStepEnds(t *testing.T) {
 	f := newSerialFixture(t) // the interrupt goes to the whole test process
 	f.addPackage(t, "01_a", "01", "pending")
-	pids := filepath.Join(f.scratch, "pids")
-	f.setenv("SPECRUN_FAKE_PIDS", pids)
-	f.plan(t, map[string]any{"events": 1, "child": true, "silence_s": 60})
-	go func() {
-		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			if exists(pids) {
-				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-				return
+	f.addPackage(t, "02_b", "02", "pending")
+	first := land(0)
+	first["silence_s"] = 2 // the interrupt comes while the session runs
+	f.plan(t, first, land(0))
+	go signalOnce(f.record, syscall.SIGINT)
+	env, code, stderr := runMain(t)
+	if code != 0 || !env.Result.StoppedAsAsked || env.Result.Stopped != nil || !slices.Equal(env.Result.Landed, []string{"01_a"}) ||
+		!strings.Contains(env.Summary, "stopped as asked") {
+		t.Fatalf("code %d, summary %q, result %+v, error %+v; want 01_a landed and a stop as asked", code, env.Summary, env.Result, env.Error)
+	}
+	if !strings.Contains(stderr, "stopping once the step in progress ends; interrupt again to stop now") {
+		t.Errorf("stderr does not say the loop stops once the step ends:\n%s", stderr)
+	}
+	if got := specDirs(f.starts(t)); !slices.Equal(got, []string{".specs/01_a"}) {
+		t.Errorf("sessions %v; want 01_a's alone", got)
+	}
+	if dry, _, _ := runMain(t, "--dry-run"); dry.Result.NextStep == nil || dry.Result.NextStep.Resumes {
+		t.Errorf("next step %+v; want a new one, nothing taken up again", dry.Result.NextStep)
+	}
+	env, code, _ = runMain(t)
+	if code != 0 || !slices.Equal(env.Result.Landed, []string{"02_b"}) {
+		t.Errorf("the next start: code %d, landed %v; want 02_b", code, env.Result.Landed)
+	}
+}
+
+// signalOnce sends the signals to the test process, one after another, once
+// the file exists: a session has started.
+func signalOnce(file string, signals ...syscall.Signal) {
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if exists(file) {
+			for _, sig := range signals {
+				_ = syscall.Kill(os.Getpid(), sig)
+				time.Sleep(50 * time.Millisecond)
 			}
+			return
 		}
-	}()
-	env, code, _ := runMain(t)
-	if code != 1 || env.Result == nil || env.Result.Stopped == nil || env.Result.Stopped.Reason != "interrupted" {
-		t.Fatalf("code %d, result %+v, error %+v; want an interrupted stop", code, env.Result, env.Error)
-	}
-	if alive := pidsAlive(t, pids); len(alive) != 0 {
-		t.Errorf("processes %v of the session are alive", alive)
-	}
-	if got := outcomes(f.ledgerLines(t)); strings.Join(got, ",") != "stopped" {
-		t.Errorf("ledger %v", got)
 	}
 }

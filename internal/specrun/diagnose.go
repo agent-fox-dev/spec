@@ -193,7 +193,12 @@ func (d *Diagnosis) cause(step *runningStep) string {
 // then specrun itself, which takes the stopped step up again.
 func (r *run) recovery(d *Diagnosis, step *runningStep) []RecoveryStep {
 	var out []RecoveryStep
-	if !d.Clean {
+	switch w := d.WorkBranch; {
+	case d.Clean:
+	case w != nil && w.Exists && d.Branch == w.Name:
+		out = append(out, RecoveryStep{Decide: true, Run: "git stash push --include-untracked",
+			Do: fmt.Sprintf("set aside the uncommitted changes on %s, the unfinished work of the task in progress when the step stopped: af-impl starts that task again from the branch's last commit, and specrun starts only on a clean working tree (git stash drop discards them for good)", w.Name)})
+	default:
 		out = append(out, RecoveryStep{Decide: true, Run: "git status",
 			Do: "commit, stash or remove the uncommitted changes: specrun starts only on a clean working tree"})
 	}
@@ -268,17 +273,24 @@ func (r *run) workBranch(specDir, baseHead string) *WorkBranch {
 	return w
 }
 
-// uncommitted is the first n paths git status shows as not committed.
+// uncommitted is the first n paths git status shows as not committed. The
+// second version of the porcelain starts every line with its kind, where the
+// first starts some with a space that trimming the output would take.
 func (r *run) uncommitted(n int) []string {
-	out, err := gitOutput(r.root, "status", "--porcelain")
+	out, err := gitOutput(r.root, "status", "--porcelain=v2")
 	if err != nil {
 		return nil
 	}
+	fields := map[string]int{"1": 9, "2": 10, "u": 11, "?": 2}
 	var paths []string
 	for _, line := range strings.Split(out, "\n") {
-		if len(line) > 3 && len(paths) < n {
-			paths = append(paths, line[3:])
+		kind, _, _ := strings.Cut(line, " ")
+		parts := strings.SplitN(line, " ", fields[kind])
+		if fields[kind] == 0 || len(parts) < fields[kind] || len(paths) == n {
+			continue
 		}
+		path, _, _ := strings.Cut(parts[len(parts)-1], "\t") // a rename's new path
+		paths = append(paths, path)
 	}
 	return paths
 }

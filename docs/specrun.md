@@ -70,7 +70,10 @@ and a label that cannot be created otherwise refuses the run at stage
 Each step is **implement the next package**:
 
 1. Check out the base branch and pull it with `--ff-only`. The base branch is
-   the branch `refs/remotes/origin/HEAD` names, else `main`.
+   the branch `refs/remotes/origin/HEAD` names, else `main`. The working tree
+   must be clean first: every step leaves it so, and changes in it are a
+   person's or the unfinished task of an interrupted session, which checking
+   out the base branch would carry along.
 2. Ask `afspec` for the next package: the first open package in dependency
    order, ties broken by number, whose every dependency is finished.
 3. Start the session in the repository:
@@ -117,9 +120,9 @@ The loop ends with exit code 0 when no package is open (`all_done`), or once
 start, because each waits on a dependency that is not finished or does not
 load, it stops with exit code 1 at stage `waiting`, and `result.waiting` gives
 each package's reason as `speca --next` words it; when the dependencies form a
-cycle it stops at stage `graph`, naming the cycle. A base branch that cannot be
-checked out or pulled, and a missing `git` or `claude`, stop it at stage
-`preflight` before any session.
+cycle it stops at stage `graph`, naming the cycle. A working tree that is not
+clean, a base branch that cannot be checked out or pulled, and a missing `git`
+or `claude` stop it at stage `preflight` before any session.
 
 ### The check after a landing
 
@@ -396,7 +399,8 @@ say where the session left the work; the diagnosis says why.
 - `result.recovery` is what to do, in order. Each step has `do`, the command
   as `run` when there is one, and `decide` when the step discards or
   publishes something, so that a person makes the call. The steps are: clean
-  the working tree; put a rewritten, diverged or unrelated base branch back
+  the working tree (on the package's branch, by setting the unfinished task
+  aside with `git stash push --include-untracked`); put a rewritten, diverged or unrelated base branch back
   on origin's (`git branch -f main origin/main`, or `git reset --hard
   origin/main` when it is checked out); then `specrun`, which takes the step
   up again. For a package finished on its branch but not merged, af-impl
@@ -422,10 +426,14 @@ specrun:   2. take up 01_a again: af-impl continues feature/01-a, finds every ta
 specrun:        $ specrun
 ```
 
-A base branch that cannot be pulled with `--ff-only` at the preflight is
-diagnosed the same way, with no step, so there is no `work_branch`. specrun
-never moves the base branch itself: what a rewritten branch holds may be
-someone's work.
+A working tree that is not clean, and a base branch that cannot be checked
+out or pulled with `--ff-only`, are diagnosed the same way at the preflight,
+for the step the state keeps to take up again when there is one. The changes
+an interrupted task leaves on its package's branch get their own first step,
+`git stash push --include-untracked`: af-impl starts that task again from the
+branch's last commit, so they are set aside, and `git stash drop` discards
+them for good. specrun never moves the base branch or the working tree
+itself: what they hold may be someone's work.
 
 ## Watching a session
 
@@ -433,10 +441,25 @@ someone's work.
 arrives for `--stall` (default 30 minutes), it ends the session's process
 group, stops reading its output (even when a process that left the group still
 holds it open), records the step as `stalled`, and stops the loop with exit
-code 1 at stage `stall`. An interrupt or a termination of `specrun` (Ctrl-C,
-`SIGTERM`) ends the session's process group the same way, records the step as
+code 1 at stage `stall`.
+
+An interrupt (Ctrl-C) asks the loop to stop between steps
+([ADR 29](adr/29-stop-the-loop-between-steps-on-an-interrupt.md)). specrun
+says `stopping once the step in progress ends; interrupt again to stop now`,
+lets the session finish, and starts no further step: no implement, reconcile
+or repair session. It ends with exit code 0, `result.stopped_as_asked`, and
+the summary `specrun: stopped as asked, before <the step it did not start>;
+landed <n>`. The state holds nothing to take up again, and the next start
+goes on where the loop would have: a due reconcile, the repair queue, the
+next package. The session and the `git` commands specrun runs are in process
+groups of their own, so the terminal's interrupt reaches specrun alone.
+
+A second interrupt, or a termination (`SIGTERM`), stops at once: it ends the
+session's process group the same way as a stall, records the step as
 `stopped` with the reason `interrupted`, and stops at stage `interrupt`; the
-step is taken up by the next run. The session's exit code decides nothing: the
+step is taken up by the next run. What the task in progress had not
+committed stays in the working tree, and the next start refuses it until it
+is set aside ([A stopped step explained](#a-stopped-step-explained)). The session's exit code decides nothing: the
 landing checks do, and an error the session ended with only explains a check
 that failed (see step 4 above; the reconcile and repair sessions are read the
 same way). What a session leaves running when it exits is ended with
@@ -691,9 +714,10 @@ tests; the home directory is written `~` and the hashes are cut short.)
 | `all_done` | true when no package is open |
 | `waiting` | the open packages that cannot start, each with `spec_dir`, `spec_id`, `waits_on` and `reason` |
 | `stopped` | the step the loop stopped at: `step` (`0003-implement-19_speca_gate`), `kind`, `subject` and `reason` (a landing check, the error the session ended with, `stalled`, `interrupted`, or `the session could not start`); `session_report`, the first paragraph of the session's final message, and `log`, the file that holds it |
-| `diagnosis`, `recovery` | for a stop of a step kept to take up again, a failed pull of the base branch, or a dry run with such a step: where the repository stands and what to do, in order ([A stopped step explained](#a-stopped-step-explained)) |
+| `diagnosis`, `recovery` | for a stop of a step kept to take up again, a preflight that found the working tree not clean or could not check out or pull the base branch, or a dry run with such a step: where the repository stands and what to do, in order ([A stopped step explained](#a-stopped-step-explained)) |
 | `dry_run`, `next_step` | under `--dry-run`: `true`, and the step it would take, `kind` and `spec_dir`, with `resumes: true` when it takes up a stopped step |
 | `versions` | what the run runs: `specrun`, `skill_path`, `skill_sha256`, `built_skill_sha256`, `claude`, `issue` |
+| `stopped_as_asked` | true when an interrupt asked the loop to stop and it stopped between steps, with nothing to take up again |
 | `run_id`, `run_dir` | the run's ID and its directory under the log directory; absent when the run stopped before the log directory was ready, and for a dry run |
 
 A stopped run's `summary` is `specrun: stopped at <step>: <reason>; landed <n>`,
@@ -708,7 +732,7 @@ with the diagnosis's `cause`.
 
 | Code | `status` | Meaning |
 |---|---|---|
-| `0` | `done` | every package is done, `--max` packages landed, the dry run reported, the ledger was printed, or the state file was removed |
+| `0` | `done` | every package is done, `--max` packages landed, an interrupt asked the loop to stop and it stopped between steps, the dry run reported, the ledger was printed, or the state file was removed |
 | `1` | `failed` | a step stopped (stage `land`, `stall`, `interrupt` or `session`), a label rule's forge call failed (`forge`), a landed package left a serious defect open or a repair of one failed (`defect`), the next package does not validate under `--strict-handoffs` (`validate`), no package can start (`waiting`, or `graph` for a cycle), the preflight failed (`preflight`: the base branch, `git`, `claude`, the log directory, `--strict-skills`), or the state file refused the start (`state`) |
 | `2` | `usage` | a flag or variable that cannot hold, a positional argument, two operations, a `--run` without `--ledger` or with no ID, or a log directory inside the working tree |
 

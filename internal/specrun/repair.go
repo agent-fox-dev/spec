@@ -172,6 +172,10 @@ func (r *run) buildQueue() ([]queued, error) {
 func (r *run) drainQueue() *Stopped {
 	for len(r.state.RepairQueue) > 0 {
 		q := r.state.RepairQueue[0]
+		// The issue stays in the queue, for the next start.
+		if s := r.askedToStop(kindRepair, strconv.Itoa(q.Number)); s != nil {
+			return s
+		}
 		r.state.RepairQueue = r.state.RepairQueue[1:]
 		// The queue may come from an earlier run, under other flags.
 		is, err := r.findIssue(q.Number)
@@ -340,11 +344,14 @@ func (r *run) repairOutcome(issue int) string {
 // recorded; dropped when this run may not repair it; and run again
 // otherwise.
 func (r *run) rerunRepair(issue int) *Stopped {
+	subject := strconv.Itoa(issue)
 	is, err := r.findIssue(issue)
 	if err != nil {
+		if s := r.askedToStop(kindRepair, subject); s != nil {
+			return s
+		}
 		return r.repair(issue)
 	}
-	subject := strconv.Itoa(issue)
 	earlier, _ := readLedger(r.logDir)
 	step := stepName(len(earlier)+1, kindRepair, subject)
 	record := func(outcome string) {
@@ -371,6 +378,9 @@ func (r *run) rerunRepair(issue int) *Stopped {
 		r.state.Running = nil
 		r.saveState()
 		return nil
+	}
+	if s := r.askedToStop(kindRepair, subject); s != nil {
+		return s
 	}
 	return r.repair(issue)
 }
