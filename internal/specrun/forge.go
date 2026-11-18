@@ -186,17 +186,21 @@ func incompleteLabels(issues []issuex.Issue, id, base string) []labelChange {
 }
 
 // awaitsFinished is the rule awaits-finished over the open issues labelled
-// af:awaits: one whose af:awaits-<NN> names a package that is finished, or no
-// package at all, will never be taken up, and becomes a correctness defect:
-// its awaits labels removed, af:defect and af:severity-correctness added, and
-// a comment naming the rule, the package and the base commit. known reports
-// whether a package with the id exists, and whether it is finished.
+// af:awaits: one whose every af:awaits-<NN> names a package that is finished,
+// or no package at all, will never be taken up, and becomes a correctness
+// defect: its awaits labels removed, af:defect and af:severity-correctness
+// added, and a comment naming the rule, the packages and the base commit. One
+// that still awaits a package that is not finished is left alone, since that
+// package may yet take it up. known reports whether a package with the id
+// exists, and whether it is finished.
 func awaitsFinished(issues []issuex.Issue, known func(id string) (exists, finished bool), base string) []labelChange {
 	var out []labelChange
 	for _, is := range issues {
 		if is.State != "open" || !slices.Contains(is.Labels, "af:awaits") {
 			continue
 		}
+		remove := []string{"af:awaits"}
+		var why []string
 		for _, l := range is.Labels {
 			id, ok := strings.CutPrefix(l, "af:awaits-")
 			if !ok {
@@ -204,23 +208,28 @@ func awaitsFinished(issues []issuex.Issue, known func(id string) (exists, finish
 			}
 			exists, finished := known(id)
 			if exists && !finished {
-				continue
+				why = nil
+				break
 			}
-			why := "the package " + id + " it awaited has landed"
-			if !exists {
-				why = "no package " + id + " exists to take it up"
+			remove = append(remove, l)
+			if exists {
+				why = append(why, "the package "+id+" it awaited has landed")
+			} else {
+				why = append(why, "no package "+id+" exists to take it up")
 			}
-			c := labelChange{Issue: is.Number, Rule: ruleAwaitsFinished, Remove: []string{"af:awaits", l},
-				Comment: fmt.Sprintf("specrun, rule awaits-finished, on %s: %s, so nothing will close it. "+
-					"It is now a correctness defect.", base, why)}
-			for _, add := range []string{"af:defect", "af:severity-correctness"} {
-				if !slices.Contains(is.Labels, add) {
-					c.Add = append(c.Add, add)
-				}
-			}
-			out = append(out, c)
-			break
 		}
+		if len(why) == 0 {
+			continue
+		}
+		c := labelChange{Issue: is.Number, Rule: ruleAwaitsFinished, Remove: remove,
+			Comment: fmt.Sprintf("specrun, rule awaits-finished, on %s: %s, so nothing will close it. "+
+				"It is now a correctness defect.", base, strings.Join(why, ", and "))}
+		for _, add := range []string{"af:defect", "af:severity-correctness"} {
+			if !slices.Contains(is.Labels, add) {
+				c.Add = append(c.Add, add)
+			}
+		}
+		out = append(out, c)
 	}
 	return out
 }
