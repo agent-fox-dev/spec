@@ -113,8 +113,8 @@ is missing.
   (`issue <ref> --edit --add-label af:awaits-<MM> --remove-label
   af:awaits-<NN>`) with a comment saying why, or, when no package owns it,
   relabelled `af:defect` with `af:severity-correctness` and a comment saying
-  so. specrun turns an item still awaiting a finished package into such a
-  defect itself (rule `awaits-finished`).
+  so. specrun turns an item whose awaited packages are all finished into
+  such a defect itself (rule `awaits-finished`).
 - **Push the base branch** (`git push origin <base>`), unless the branch
   stays local. A rejected push is never forced: leave the merge commit in
   place and report the rejection. Stay on the base branch for the next

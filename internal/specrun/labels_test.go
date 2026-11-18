@@ -277,18 +277,20 @@ func awaitsFixture(t *testing.T) (*fixture, map[string]int) {
 	f.addPackage(t, "02_b", "02", "pending")
 	f.addPackage(t, "03_c", "03", "pending")
 	return f, map[string]int{
-		"awaits a package that just landed": f.forge.add("01_a: x", "open", "af:awaits", "af:awaits-02", "af:from-01"),
-		"awaits an archived package":        f.forge.add("02_b: y", "open", "af:awaits", "af:awaits-01", "af:from-02"),
-		"awaits no package":                 f.forge.add("02_b: z", "open", "af:awaits", "af:awaits-09", "af:from-02"),
-		"awaits an open package":            f.forge.add("02_b: w", "open", "af:awaits", "af:awaits-03", "af:from-02"),
-		"closed":                            f.forge.add("02_b: v", "closed", "af:awaits", "af:awaits-02", "af:from-02"),
-		"a defect with a stray awaits":      f.forge.add("02_b: u", "open", "af:defect", "af:severity-minor", "af:awaits-02", "af:from-02"),
+		"awaits a package that just landed":     f.forge.add("01_a: x", "open", "af:awaits", "af:awaits-02", "af:from-01"),
+		"awaits an archived package":            f.forge.add("02_b: y", "open", "af:awaits", "af:awaits-01", "af:from-02"),
+		"awaits no package":                     f.forge.add("02_b: z", "open", "af:awaits", "af:awaits-09", "af:from-02"),
+		"awaits an open package":                f.forge.add("02_b: w", "open", "af:awaits", "af:awaits-03", "af:from-02"),
+		"awaits a finished and an open package": f.forge.add("02_b: t", "open", "af:awaits", "af:awaits-02", "af:awaits-03", "af:from-02"),
+		"awaits only finished packages":         f.forge.add("02_b: s", "open", "af:awaits", "af:awaits-01", "af:awaits-02", "af:from-02"),
+		"closed":                                f.forge.add("02_b: v", "closed", "af:awaits", "af:awaits-02", "af:from-02"),
+		"a defect with a stray awaits":          f.forge.add("02_b: u", "open", "af:defect", "af:severity-minor", "af:awaits-02", "af:from-02"),
 	}
 }
 
-// An open awaits issue whose package is finished, or is no package, becomes a
-// correctness defect with a comment; one that awaits an open package, a closed
-// one and one that is not awaits are left alone.
+// An open awaits issue whose packages are all finished, or are no package,
+// becomes a correctness defect with a comment; one that still awaits an open
+// package, a closed one and one that is not awaits are left alone.
 func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
 	f, issues := awaitsFixture(t)
 	f.plan(t, land(0))
@@ -298,14 +300,16 @@ func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
 	base := git(t, f.root, "rev-parse", "main")
 	for name, want := range map[string]struct {
 		labels string
-		awaits string // the package the comment names; "" for no write
+		awaits string // the packages the comment names, space-separated; "" for no write
 	}{
-		"awaits a package that just landed": {"af:defect,af:from-01,af:severity-correctness", "02"},
-		"awaits an archived package":        {"af:defect,af:from-02,af:severity-correctness", "01"},
-		"awaits no package":                 {"af:defect,af:from-02,af:severity-correctness", "09"},
-		"awaits an open package":            {"", ""},
-		"closed":                            {"", ""},
-		"a defect with a stray awaits":      {"", ""},
+		"awaits a package that just landed":     {"af:defect,af:from-01,af:severity-correctness", "02"},
+		"awaits an archived package":            {"af:defect,af:from-02,af:severity-correctness", "01"},
+		"awaits no package":                     {"af:defect,af:from-02,af:severity-correctness", "09"},
+		"awaits an open package":                {"", ""},
+		"awaits a finished and an open package": {"", ""},
+		"awaits only finished packages":         {"af:defect,af:from-02,af:severity-correctness", "01 02"},
+		"closed":                                {"", ""},
+		"a defect with a stray awaits":          {"", ""},
 	} {
 		n := issues[name]
 		if want.awaits == "" {
@@ -320,8 +324,14 @@ func TestLabels_AnItemAwaitingAFinishedPackageBecomesADefect(t *testing.T) {
 			t.Errorf("%s: labels %s; want %s", name, got, want.labels)
 		}
 		c := f.forge.comments[n]
-		if len(c) != 1 || !strings.Contains(c[0], "awaits-finished") || !strings.Contains(c[0], "package "+want.awaits) || !strings.Contains(c[0], base) {
+		if len(c) != 1 || !strings.Contains(c[0], "awaits-finished") || !strings.Contains(c[0], base) {
 			t.Errorf("%s: comments %q", name, c)
+			continue
+		}
+		for _, id := range strings.Fields(want.awaits) {
+			if !strings.Contains(c[0], "package "+id) {
+				t.Errorf("%s: the comment %q does not name package %s", name, c[0], id)
+			}
 		}
 	}
 }

@@ -155,17 +155,17 @@ checked there; one found nowhere is left unchecked, with a note.
 ### Items that await a finished package
 
 After the check above, `specrun` lists every open issue labelled
-`af:awaits`, whatever package opened it. One whose `af:awaits-<NN>` names a
-package that is finished (sealed, superseded or archived, under `archive/`,
-or with no task pending or in progress, as `afspec`'s `IsFinished` says), or
-names no package at all, will never be taken up: the rule `awaits-finished`
-removes `af:awaits` and `af:awaits-<NN>`, adds `af:defect` and
-`af:severity-correctness`, and comments, naming the package and the commit of
-the base branch. An item awaiting a package that is still open, or that is there
-but does not load (whether it is finished is not known), a closed issue, and
-one that is not `af:awaits` are not touched; the rule changes
-nothing the second time, and its forge failures stop the loop as the other
-rule's do.
+`af:awaits`, whatever package opened it. One whose every `af:awaits-<NN>`
+names a package that is finished (sealed, superseded or archived, under
+`archive/`, or with no task pending or in progress, as `afspec`'s
+`IsFinished` says), or names no package at all, will never be taken up: the
+rule `awaits-finished` removes `af:awaits` and its `af:awaits-<NN>` labels,
+adds `af:defect` and `af:severity-correctness`, and comments, naming the
+packages and the commit of the base branch. An item that still awaits one
+package that is open, or that is there but does not load (whether it is
+finished is not known), is not touched, whatever else it awaits; nor are a
+closed issue and one that is not `af:awaits`. The rule changes nothing the
+second time, and its forge failures stop the loop as the other rule's do.
 
 ### Stopping on a serious defect
 
