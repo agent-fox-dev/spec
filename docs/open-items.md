@@ -22,7 +22,8 @@ are in [specrun.md](specrun.md); the decisions are
   `unmet` list, and each entry gets one issue, titled
   `<NN_name>: <what is missing>`. Its body says what is missing and why, the
   criteria it concerns, the evidence (`file:line`, a check's output), the ADR
-  that records the decision when there is one, and **what closes it**.
+  or erratum that records the decision when there is one, and **what closes
+  it**.
 - **Adoption.** An issue opened before the label scheme existed, with no
   `af:` label and a title that starts with a package's `NN_name:`, is handed
   to the next reconcile session, which reads its body and labels it.
@@ -123,27 +124,30 @@ unchanged code:
 ### `af:deviation` — a person must decide
 
 The code deliberately does something other than what the spec says, and the
-decision is recorded in an ADR. The implementing session made the call; a
+decision is recorded: in an ADR by default, or where the repository's
+instructions say decisions go, which in some repositories is an erratum
+(`docs/errata/<NN>_*.md`). The spec itself is never edited. The
+implementing session made the call; a
 person must approve or overrule it. A deviation never stops the loop and is
 never repaired automatically: it stays open, and every reconcile lists the
 unsettled deviations, oldest first, in `result.open_deviations` and on
 stderr.
 
-A deviation that is recorded in an ADR and still leaves every criterion met is
-not an open item: it is reported with the landing and gets no issue.
+A recorded deviation that still leaves every criterion met is not an open
+item: it is reported with the landing and gets no issue.
 
 `af:deviation` is also where an **unclear** item ends up: one adopted from
 before the label scheme whose body does not settle its kind (rule
 `adoption-unsettled`), or one with incomplete labels (rule
-`incomplete-labels`). Such an item usually cites no ADR; its comment names
+`incomplete-labels`). Such an item usually cites no ADR or erratum; its comment names
 the rule that put it there.
 
-How it is resolved: a person reads the issue and the ADR it cites, then adds
+How it is resolved: a person reads the issue and the ADR or erratum it cites, then adds
 **one** label. The next reconcile does the rest:
 
 | The person adds | Meaning | At the next reconcile |
 |---|---|---|
-| `af:accepted` | The deviation stands. | The issue is closed, with a comment naming the ADR it cites (or saying it cites none). The spec is not edited: the ADR and the closed issue are the record. |
+| `af:accepted` | The deviation stands. | The issue is closed, with a comment naming the first ADR or erratum its body cites (or saying it cites none). The spec is not edited: the ADR or erratum and the closed issue are the record. |
 | `af:rejected` | The code must do what the spec says. | `af:deviation` and `af:rejected` are removed, `af:defect` and `af:severity-correctness` added, with a comment. From then on it is a defect like any other and is repaired as one. |
 
 An issue with both labels is nobody's decision: it is left as it is, with a

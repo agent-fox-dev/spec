@@ -227,7 +227,7 @@ the base branch:
 | Rule | What it does |
 |---|---|
 | `adoption-unsettled` | an issue of the adopt file still open with no kind gets `af:deviation` and `af:from-<NN>` of the package its title names |
-| `deviation-accepted` | an open `af:deviation` with `af:accepted` (and not `af:rejected`) is closed, the comment naming the first `docs/adr/….md` its body cites, or saying it cites none |
+| `deviation-accepted` | an open `af:deviation` with `af:accepted` (and not `af:rejected`) is closed, the comment naming the first ADR or erratum (`docs/adr/….md`, `docs/errata/….md`) its body cites, or saying it cites none |
 | `deviation-rejected` | an open `af:deviation` with `af:rejected` (and not `af:accepted`) loses both labels and gets `af:defect` and `af:severity-correctness` |
 | `incomplete-labels`, `awaits-finished` | as after a landing, for every package under the spec root and its archive |
 
