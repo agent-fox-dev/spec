@@ -161,6 +161,7 @@ follows are in [docs/development.md](docs/development.md).
 - [The format](specification/spec-format-v3.md) — every field, the EARS patterns, the checks, the validation rules, rendering and the migration from version 3
 - [The `spec` command](docs/cli.md), [the `specr` command](docs/specr.md) and [the `speca` command](docs/speca.md) — input, flags, the output envelope, errors and warnings
 - [The `specrun` command](docs/specrun.md) — the implementation loop: the landing checks, the state and resume, the stall, the logs and the ledger
+- [Open items and their labels](docs/open-items.md) — every `af:` label on an issue, what it means and how an item is resolved, by the loop or by a person
 - [Architecture](docs/architecture.md), [configuration](docs/configuration.md) and [the public Go API](docs/api.md)
 - [Comparison with other spec kits](docs/spec-kit-comparison.md) — where this kit is stronger, where it is weaker, and what it borrowed
 - [Decisions](docs/adr/) — one ADR per choice, from running the generator on the AgentKit driver to migrating the format to version 3
