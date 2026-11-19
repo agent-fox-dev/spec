@@ -221,7 +221,7 @@ func TestReconcile_LabelsAnAdoptionTheSessionLeftUnsettled(t *testing.T) {
 }
 
 // A person settles a deviation with af:accepted or af:rejected: accepted is
-// closed naming the ADR it cites, rejected becomes a correctness defect, both
+// closed naming the ADR or erratum it cites, rejected becomes a correctness defect, both
 // is left alone with a warning.
 func TestReconcile_SettlesTheDeviationsAPersonDecided(t *testing.T) {
 	f := newFixture(t)
@@ -229,6 +229,8 @@ func TestReconcile_SettlesTheDeviationsAPersonDecided(t *testing.T) {
 	f.addPackage(t, "02_b", "02", "pending") // open, so 02's items are not reconsidered
 	cites := f.forge.add("02_b: a", "open", "af:deviation", "af:accepted", "af:from-02")
 	f.forge.issue(cites).Body = "Recorded in docs/adr/07-x.md, and docs/adr/09-y.md."
+	erratum := f.forge.add("02_b: g", "open", "af:deviation", "af:accepted", "af:from-02")
+	f.forge.issue(erratum).Body = "- Erratum: `docs/errata/02_b.md`"
 	plain := f.forge.add("02_b: b", "open", "af:deviation", "af:accepted", "af:from-02")
 	rejected := f.forge.add("02_b: c", "open", "af:deviation", "af:rejected", "af:from-02")
 	open := f.forge.add("02_b: d", "open", "af:deviation", "af:from-02")
@@ -244,7 +246,10 @@ func TestReconcile_SettlesTheDeviationsAPersonDecided(t *testing.T) {
 		!strings.Contains(strings.Join(f.forge.comments[cites], ""), "deviation-accepted") || !strings.Contains(strings.Join(f.forge.comments[cites], ""), base) {
 		t.Errorf("the accepted deviation citing an ADR: %s, %q", is.State, f.forge.comments[cites])
 	}
-	if is := f.forge.issue(plain); is.State != "closed" || !strings.Contains(strings.Join(f.forge.comments[plain], ""), "cites no ADR") {
+	if is := f.forge.issue(erratum); is.State != "closed" || !strings.Contains(strings.Join(f.forge.comments[erratum], ""), "recorded in docs/errata/02_b.md") {
+		t.Errorf("the accepted deviation citing an erratum: %s, %q", is.State, f.forge.comments[erratum])
+	}
+	if is := f.forge.issue(plain); is.State != "closed" || !strings.Contains(strings.Join(f.forge.comments[plain], ""), "cites no ADR or erratum") {
 		t.Errorf("the accepted deviation citing none: %s, %q", is.State, f.forge.comments[plain])
 	}
 	if got := strings.Join(f.forge.labelsOf(rejected), ","); f.forge.issue(rejected).State != "open" || got != "af:defect,af:from-02,af:severity-correctness" ||

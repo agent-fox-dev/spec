@@ -236,8 +236,10 @@ const (
 	warnDeviationConflict envelope.WarnCode = "deviation_conflict"
 )
 
-// adrPath finds the first ADR an issue's body cites.
-var adrPath = regexp.MustCompile(`docs/adr/[A-Za-z0-9._-]+\.md`)
+// recordPath finds the first ADR or erratum an issue's body cites: af-impl
+// records a deviation in an ADR, or where the repository's instructions say
+// decisions go, which in some repositories is an erratum.
+var recordPath = regexp.MustCompile(`docs/(?:adr|errata)/[A-Za-z0-9._-]+\.md`)
 
 // hasKind reports whether the labels hold one of the kinds.
 func hasKind(labels []string) bool {
@@ -268,8 +270,8 @@ func adoptionUnsettled(adopt []adoptEntry, issues map[int]issuex.Issue, ids map[
 }
 
 // deviationRules are the rules deviation-accepted and deviation-rejected over
-// the open issues: a deviation a person accepted is closed, naming the ADR it
-// cites; one a person rejected becomes a correctness defect. One both
+// the open issues: a deviation a person accepted is closed, naming the ADR or
+// erratum it cites; one a person rejected becomes a correctness defect. One both
 // accepted and rejected is nobody's decision, and is returned apart.
 func deviationRules(issues []issuex.Issue, base string) (changes []labelChange, conflicts []issuex.Issue) {
 	for _, is := range issues {
@@ -281,12 +283,12 @@ func deviationRules(issues []issuex.Issue, base string) (changes []labelChange, 
 		case accepted && rejected:
 			conflicts = append(conflicts, is)
 		case accepted:
-			adr := "it cites no ADR"
-			if p := adrPath.FindString(is.Body); p != "" {
-				adr = "its decision is recorded in " + p
+			record := "it cites no ADR or erratum"
+			if p := recordPath.FindString(is.Body); p != "" {
+				record = "its decision is recorded in " + p
 			}
 			changes = append(changes, labelChange{Issue: is.Number, Rule: ruleDeviationAccepted, Close: true,
-				Comment: fmt.Sprintf("specrun, rule deviation-accepted, on %s: a person accepted this deviation; %s.", base, adr)})
+				Comment: fmt.Sprintf("specrun, rule deviation-accepted, on %s: a person accepted this deviation; %s.", base, record)})
 		case rejected:
 			c := labelChange{Issue: is.Number, Rule: ruleDeviationRejected, Remove: []string{"af:deviation", "af:rejected"},
 				Comment: fmt.Sprintf("specrun, rule deviation-rejected, on %s: a person rejected this deviation, "+
