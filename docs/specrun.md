@@ -65,6 +65,9 @@ and a label that cannot be created otherwise refuses the run at stage
 | `af:accepted`, `af:rejected`, `af:repair-failed` | what a person decided about a deviation, and a repair that did not land |
 | `af:from-<NN>`, `af:awaits-<NN>` | for every package under the spec root and `archive/` that loads: the package that opened an item, and the package an `awaits` item waits for |
 
+What each label means, who sets it and how an item labelled with it is
+resolved, a person's part included, is in [open-items.md](open-items.md).
+
 ## The loop
 
 Each step is **implement the next package**:
