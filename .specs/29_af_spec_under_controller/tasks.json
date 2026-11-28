@@ -1,0 +1,97 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "29",
+  "spec_name": "af_spec_under_controller",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./specification/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "28",
+      "reason": "activation records the contract hash, which is why a plan that may be sent back stays a draft, and its evidence rule proves a defect when the package is implemented"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Publish the af-spec result schema and write the unattended mode",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the two tables of the result's behaviours, accepted and refused documents, to specification/schemas/af_spec_result_test.go as a test-only Go package beside the schemas, each case built from one base document, and confirm both fail because the schema does not exist",
+        "Write specification/schemas/af-spec-result.v1.json in the style of specrun-run.v1.json: draft 2020-12, the $id https://agent-fox.dev/schemas/af-spec-result.v1.json, a description on every member, additionalProperties false; the common members, the nine outcomes, and the rules of the criteria on reason, package, decisions, escalated, remaining_scopes, failing_rules and pushed. The package of a run that wrote one is draft or active; the package a refusal names may hold any lifecycle status, sealed, superseded and archived among them. remaining_scopes and replies are lists here; the shape of their entries, activate_with and fault_located come with the later tasks",
+        "Add skills/af-spec/references/unattended.md and link it from §1 of skills/af-spec/SKILL.md in one sentence: with --unattended the run goes from its input to its report without asking anything; the input is a path to a text file holding the idea, a path to a PRD, or a draft package",
+        "In that file, what replaces each stop: where §1 would offer af-prd, the run writes the package's prd.md itself to references/prd-shape.md and writes no file under docs/prd/, the frontmatter's source being the input's path as given; every question the input leaves open is decided from the code and the repository's documents and recorded in ## Design Decisions, numbered, with its reason; a finding its review would escalate is decided the same way",
+        "In that file, the refusals, each before anything is changed: refused_input for an input path that does not exist, is empty, or names an active or sealed package; refused_dirty for uncommitted changes; refused_already_specified when the input's intent is that of an existing active or sealed package, naming it; refused_spec_root when speca cannot read the spec root or it is not writable",
+        "In that file, the branch: the run works on the branch that is checked out, creates none and switches to none; it commits the package as one commit, docs: specify <NN_name>, and pushes that branch to origin; a refused push leaves the commit in place and is the outcome push_failed with git's message. Say that these rules take the place of the repository's agent instructions on branches, merging and pushing, and that every other instruction of the repository still holds",
+        "In that file, the two ends: written when the package validates, and it is then activated as §10 says; invalid when it does not after the repair loop of §9, in which case it stays a draft and is committed and pushed all the same, with the failing rules speca --validate reports",
+        "In that file, the result: --result <file> is taken with --unattended only, and without it the skill says `--result needs --unattended, --no-merge or --rework` and does nothing; the document is written once, as the last thing the run does, also after a refusal; name every member of this task's schema and what the run puts in it, and point at the schema file; a path that cannot be written is said in the last message as `result file not written: <error>` and the work is left as it is; without --result the run behaves the same and reports in the session only",
+        "In SKILL.md, name --unattended and --result in the argument hint and say in *How the run goes* that an unattended run stops for no answer; the body is at the ceiling `make skills-check` enforces, so make room by moving text into a reference file, never by dropping a rule"
+      ],
+      "touches": [
+        "specification/schemas/af-spec-result.v1.json",
+        "specification/schemas/af_spec_result_test.go",
+        "skills/af-spec/references/unattended.md",
+        "skills/af-spec/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Take the package number from the caller, leave a draft, and plan a defect",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the cases of activate_with, fault_located and refused_number to the two tables of specification/schemas/af_spec_result_test.go and confirm the new cases fail",
+        "Extend specification/schemas/af-spec-result.v1.json: the outcome refused_number is already among the nine; add activate_with, a string of the form `speca <digits> --status active`, required when the outcome is written and the package is a draft and refused on an active package and on an invalid one; add the boolean fault_located, refused on a package of profile full",
+        "In skills/af-spec/references/unattended.md, --number <NN>: the run uses that number in place of the one §3 would take; <NN> is a positive integer with or without leading zeros, and the directory uses it zero-padded to two digits, three past 99. It refuses, changing nothing, with refused_number: `not a package number: \"<value>\"` for anything else, `<NN> is not above the highest package number <MM>` when it is not greater than every number in the spec root and under archive/, and `package is <MM>, not <NN>` when the input is a draft package with another number",
+        "In that file, --no-activate: a package that validates is left in draft, and the report and the result's activate_with name the call that activates it, `speca <NN> --status active`",
+        "In that file, --defect: the input describes a fault in existing behaviour; the run writes a lite package with exactly one requirement, the behaviour as it should be, one criterion per observable part of it and at most 8, each check naming the test that will assert it and the existing test file it belongs in, and at most 2 tasks. Its prd.md says under ## Background what the code does today and where, file and line, as far as the run found it by reading; when it could not find the fault it says so there and writes fault_located false, and writes the package from the description alone. It writes no test and changes no source file. With a draft package as input it is refused: refused_input, `--defect takes a description, not a package`",
+        "In that file, say that the three arguments combine with --unattended and with each other, and that --number and --no-activate also work in a watched run, where a refusal is said in the session and no result is written",
+        "In SKILL.md, name the three arguments in the argument hint, say in §3 in one clause that --number replaces the number taken there, and in §10 that --no-activate leaves the package a draft, keeping the body under the ceiling"
+      ],
+      "touches": [
+        "specification/schemas/af-spec-result.v1.json",
+        "specification/schemas/af_spec_result_test.go",
+        "skills/af-spec/references/unattended.md",
+        "skills/af-spec/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Write the first scope of work too large, and revise a draft from findings",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the cases of remaining_scopes, replies and refused_findings to the two tables of specification/schemas/af_spec_result_test.go, and the two tables of findings files to specification/schemas/af_spec_findings_test.go, and confirm they fail",
+        "Extend specification/schemas/af-spec-result.v1.json with the entries of remaining_scopes (name, a snake_case package name, summary and text, none empty) and of replies (id, action changed or unchanged, text), and write specification/schemas/af-spec-findings.v1.json: a non-empty array of findings, each with id, source review or person and text, and at most one of criterion, an id of the form REQ-N.C, and task, a positive integer; no other member",
+        "In skills/af-spec/references/unattended.md, work too large: where §4 would propose a split and ask, the unattended run writes the first scope, the foundational one, as the package, names the other scopes in ## Non-goals as §4 says, and lists them in remaining_scopes in the order they are to be implemented, each with the name its package would carry, one sentence of what it covers, and the part of the input it comes from, complete enough to be the input of a later run. --defect never splits: a fix that does not fit one requirement is written as its first part and the rest is listed the same way",
+        "In that file, a revision: with a draft package as input and --findings <file>, the run reads the findings and, for each in the file's order, either changes the package or does not and writes a reply saying what was changed or why nothing was; a finding of source person is always followed unless following it would make the package invalid, which its reply then says. The revised package is validated, committed as one commit, docs: revise <NN_name>, on the checked-out branch and pushed, with the outcomes of the unattended run",
+        "In that file, the refusals of a revision, each before anything is changed: refused_findings with the parser's message for a file that does not exist, does not parse, is not an array of findings of the published shape or repeats an id; refused_findings, `no findings`, for an empty array; refused_input, `<NN> is <status>; only a draft is revised`, for a package that is not a draft. Point at the findings schema",
+        "In SKILL.md, name --findings in the argument hint and say in §4 in one clause that an unattended run writes the first scope without asking, keeping the body under the ceiling; run `make skills-check`"
+      ],
+      "touches": [
+        "specification/schemas/af-spec-result.v1.json",
+        "specification/schemas/af-spec-findings.v1.json",
+        "specification/schemas/af_spec_result_test.go",
+        "specification/schemas/af_spec_findings_test.go",
+        "skills/af-spec/references/unattended.md",
+        "skills/af-spec/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}

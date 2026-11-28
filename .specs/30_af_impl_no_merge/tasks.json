@@ -1,0 +1,112 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "30",
+  "spec_name": "af_impl_no_merge",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./specification/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "29",
+      "reason": "the result file's common members, the conventions of its schema, and the test-only package and its helper under specification/schemas/"
+    },
+    {
+      "spec": "27",
+      "reason": "af-impl --unattended, which --no-merge combines with and does not change"
+    },
+    {
+      "spec": "21",
+      "reason": "the kinds and severities of an open item, which the result's open_items carry"
+    },
+    {
+      "spec": "22",
+      "reason": "the survey's read of open items from the forge, which --no-merge leaves out"
+    },
+    {
+      "spec": "19",
+      "reason": "the full gate and the shape of its answer, which the result copies"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Publish the af-impl result schema and start a run on the checked-out branch",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the two tables of the result's behaviours, accepted and refused documents, to specification/schemas/af_impl_result_test.go in the test-only package beside the schemas, each case built from one base document and compiled with the helper the af-spec result's tests use, and confirm both fail because the schema does not exist",
+        "Write specification/schemas/af-impl-result.v1.json in the style of af-spec-result.v1.json: the $id https://agent-fox.dev/schemas/af-impl-result.v1.json, a description on every member, additionalProperties false; the common members, the nine outcomes of the mode no_merge, and the rules of the criteria on reason, package, tasks, deviations, open_items, summary, run, pushed, parked and gate. tasks, deviations and open_items are lists and run and gate objects here; the shape of what they hold comes with the later tasks",
+        "Add skills/af-impl/references/no-merge.md and link it from §1 of skills/af-impl/SKILL.md in one sentence: `<package> --no-merge` implements the package on the branch that is checked out and ends when that branch is pushed; it combines with --unattended; --base <branch> names the base branch, a branch of origin, and without it the base is origin's default branch. The run fetches the base and never checks it out; it uses it to tell the work branch from it, for the diff the conformance pass measures and as the gate's base",
+        "In that file, where the run starts, in place of §2's branch check and all of §4: the checked-out branch is the work branch; it must not be the base branch, refused_branch with `checked out on the base branch <name>`; the package must resolve with speca in the checked-out tree; the branch may already hold commits ahead of the base, the package's own and earlier work of the same package, which the run continues as §4 describes, dropping a wip: commit at the tip; the run creates no branch and switches to none",
+        "In that file, the refusals, each before anything is changed and each with a reason that says which: refused_dirty for a working tree that is not clean; refused_package for a required file that is missing, a package speca cannot resolve on the branch or that does not validate, a status that is not draft or active, intent or contract drift, or a refused dry run of the first task move; refused_dependency, naming the package, for a dependency that is neither sealed nor has its last task done, judged with speca on the work branch",
+        "In that file, the forge: the run calls no forge command, neither issue nor gh nor glab; the survey reads no open items and its brief says so in the place where references/survey.md lists them; no issue is opened, closed, commented on or relabelled",
+        "Say in that file that its rules on branches, merging and pushing take the place of the repository's agent instructions on those points and that every other instruction of the repository still holds, and that a run without --no-merge is unchanged",
+        "In SKILL.md, name `<package> --no-merge [--base <branch>] [--result <file>]` in the argument hint and keep the body under the ceiling `make skills-check` enforces by moving text into a reference file, never by dropping a rule"
+      ],
+      "touches": [
+        "specification/schemas/af-impl-result.v1.json",
+        "specification/schemas/af_impl_result_test.go",
+        "skills/af-impl/references/no-merge.md",
+        "skills/af-impl/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "End the run at the push and write its record into the result",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the cases of tasks, deviations, run and gate to the two tables of specification/schemas/af_impl_result_test.go and confirm the new cases fail",
+        "Extend specification/schemas/af-impl-result.v1.json with the entries of tasks and deviations and the objects run and gate, as the criteria give them; gate is the one object that may carry members the schema does not name, since it is speca's answer copied",
+        "In skills/af-impl/references/no-merge.md, the end, in place of §7 and references/landing.md: after the conformance pass the run takes `speca <package> --gate full` on the tip of the work branch and, in a package that requires evidence, `speca <package> --verify-evidence` after it; on a landable verdict of both it pushes the work branch to origin and stops there, on the work branch. It does not check out, merge into or push the base branch, runs no merge and writes no merge commit",
+        "In that file, the record: what the merge commit's message would have held, section by section as references/landing.md gives it (the open items first, the deviations, one entry per task with its commit, files, test verdicts and criterion-to-test map, the verification with the gate report, the conformance findings), is written as Markdown into summary; run is the object of the AF-Run trailer, its gate copied from `speca <package> --gate-report --since <baseline commit>` and its open_items.opened counting the result's open items by kind, a defect as defect:<severity>, with closed, passed_on and reclassified empty",
+        "In that file, the outcomes: complete when every task is done or dropped, both verdicts are landable, the branch is pushed and no open item remains; complete_with_open_items the same with open items; parked when a task failed twice, its wip: commit staying at the tip of the work branch, which is pushed, with the task's number and the check's output; gate_failed when every task is done and the full gate or the evidence check on the tip is not landable, the branch pushed all the same and gate holding speca's answer; push_failed when the push is refused, with git's message, the commits staying local. A parked run stays on the work branch instead of returning to the base branch",
+        "In that file, the result: --result <file> is taken with --no-merge, and without it or --rework the skill says `--result needs --unattended, --no-merge or --rework` and does nothing; the document is written once, as the last thing the run does, also after a refusal; name every member and what the run puts in it, a task's outcome being its state and its verdict the row of §5's table, and point at the schema file; a path that cannot be written is said in the last message as `result file not written: <error>` and the work is left as it is; without --result the run behaves the same and reports in the session only",
+        "In that file, continuing: the same command run again on a branch that was parked, or whose push failed, continues it as §4 continues a branch",
+        "In SKILL.md, say in *Run to the end* and in *Never* in one clause each that with --no-merge the run ends at the push of the work branch and commits nothing to the base branch, keeping the body under the ceiling"
+      ],
+      "touches": [
+        "specification/schemas/af-impl-result.v1.json",
+        "specification/schemas/af_impl_result_test.go",
+        "skills/af-impl/references/no-merge.md",
+        "skills/af-impl/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Hand the open items to the caller in place of the forge",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the cases of open items to the two tables of specification/schemas/af_impl_result_test.go and confirm they fail",
+        "Extend specification/schemas/af-impl-result.v1.json with the entry of open_items: kind, severity on a defect only, awaits on an awaits item only, a title of at most 60 characters, missing, why, ids, evidence, adr where there is one, and closes",
+        "In skills/af-impl/references/no-merge.md, the open items: every entry of the unmet list of references/conformance.md is one entry of open_items, with the kind and, for a defect, the severity the conformance pass gave it; title is what the issue's title would say after `<NN_name>: `, in at most 60 characters; missing and why are the entry's words; ids are the ids it concerns; evidence is its file:line references and check output; adr is the ADR that records the decision, where there is one; closes says what would close it, and for an awaits item names the receiving package",
+        "In that file, the handoffs: each outbound handoff of the package that its receiver does not take yet is an awaits entry, awaits holding the receiver's id, as in a landing; when `speca <MM>` says the receiver is sealed or its last task is done, the entry is a defect of severity correctness with the note `handoff to a package that has already landed`",
+        "In that file, what the mode leaves out of a landing: no issue is looked for or opened, nothing the survey would have listed is closed, and nothing that awaited this package is passed on; the report of §8 lists the open items from the result in place of issue links, and says that whoever lands the work files them",
+        "In references/conformance.md, say in one clause where it names §7 that with --no-merge the unmet list goes to the result; in SKILL.md say the same in §6 and in the last entry of *Never*, keeping the body under the ceiling; run `make skills-check`"
+      ],
+      "touches": [
+        "specification/schemas/af-impl-result.v1.json",
+        "specification/schemas/af_impl_result_test.go",
+        "skills/af-impl/references/no-merge.md",
+        "skills/af-impl/references/conformance.md",
+        "skills/af-impl/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}

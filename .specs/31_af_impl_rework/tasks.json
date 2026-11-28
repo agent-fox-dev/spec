@@ -1,0 +1,107 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/tasks.v3.json",
+  "spec_id": "31",
+  "spec_name": "af_impl_rework",
+  "schema_version": 3,
+  "test_commands": {
+    "all_tests": "make test",
+    "linter": "make lint",
+    "spec_tests": "go test ./specification/... -count=1"
+  },
+  "dependencies": [
+    {
+      "spec": "30",
+      "reason": "everything --rework implies about the work branch, the base, the forge and the end, the result schema this package extends with the mode rework, and the shape of open_items"
+    },
+    {
+      "spec": "29",
+      "reason": "the result file's common members, the af-spec findings schema whose style the af-impl one follows, and the test-only package under specification/schemas/"
+    },
+    {
+      "spec": "27",
+      "reason": "af-impl --unattended, whose subagent per unit of work a rework reuses for a finding"
+    },
+    {
+      "spec": "19",
+      "reason": "the full gate and the shape of its answer"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Publish the findings schema and start a rework on finished work",
+      "criteria": [
+        "REQ-1"
+      ],
+      "steps": [
+        "Add the two tables of findings files, accepted and refused, to specification/schemas/af_impl_findings_test.go in the test-only package beside the schemas and confirm they fail because the schema does not exist",
+        "Write specification/schemas/af-impl-findings.v1.json in the style of af-spec-findings.v1.json: a non-empty array of findings, each with id, source (gate, review, person, health or conflict) and text, and optionally file, line (a positive integer, only with file), criterion (an id of the form REQ-N.C), output and binding; a description on every member and no other member",
+        "Add skills/af-impl/references/rework.md and link it from §1 of skills/af-impl/SKILL.md in one sentence: `<package> --rework <findings file>` changes finished work in answer to findings; it implies everything references/no-merge.md says about the work branch, the base, the forge and ending at the push, and takes --base, --result and --unattended",
+        "In that file, what a rework is not: it implements no task and moves no task state, never edits prd.md, requirements.json or tasks.json, and writes progress.json not at all; a package with open tasks is continued with --no-merge instead. §2's rule that a package with no next task has nothing to implement does not apply to it, and the dry run of a task move is left out",
+        "In that file, the refusals, each before anything is changed: refused_findings, with what is wrong, for a findings file that does not exist, does not parse, is not an array of findings of the published shape, repeats an id or is empty; refused_open_tasks when a task of the package is pending or in_progress, the reason naming the task and saying to run `af-impl <package> --no-merge`; and the refusals of references/no-merge.md: refused_branch, refused_dirty, refused_package and refused_dependency",
+        "In that file, before the first finding: read the package's render and the diff of the work branch from the base, as a session resumed after a gap does, and take the baseline `speca <package> --gate full` on the unchanged tip; the findings are then taken in the file's order, a finding of source conflict before every other",
+        "In SKILL.md, name `<package> --rework <findings file>` in the argument hint, keeping the body under the ceiling `make skills-check` enforces"
+      ],
+      "touches": [
+        "specification/schemas/af-impl-findings.v1.json",
+        "specification/schemas/af_impl_findings_test.go",
+        "skills/af-impl/references/rework.md",
+        "skills/af-impl/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Fix each finding test-first and reply to it",
+      "criteria": [
+        "REQ-2"
+      ],
+      "steps": [
+        "Add the cases of a rework's replies to the two tables of specification/schemas/af_impl_result_test.go and confirm they fail: the schema knows no mode rework yet",
+        "Extend specification/schemas/af-impl-result.v1.json with the mode rework, its ten outcomes (reworked, nothing_changed, rework_failed, push_failed, refused_findings, refused_open_tasks and the four refusals of no_merge), and replies: a non-empty list on every rework document that is not a refusal, each entry with id, action (fixed, declined, not_reproduced or failed) and text, commit on a fixed one, commit and test on a not_reproduced one. Leave what holds an outcome to its replies, its gate and pushed to the next task, and every rule of the mode no_merge as it is",
+        "In skills/af-impl/references/rework.md, a finding about behaviour, where the code does something else than the package asks or than the finding's text shows it should: write the behaviour as a test first, at the level where it lives, in the test file of the area it exercises and named for the behaviour as references/test-first.md says, and run it on the unchanged code. When it fails, fix the code until it passes: the finding is fixed. When it passes on the unchanged code, fix nothing, keep the test as one `test: <subject>` commit, and the finding is not_reproduced",
+        "In that file, a finding that is not about behaviour, such as a document, a name, a structure or a test that asserts too little: fix it directly, or decline it",
+        "In that file, declining: a declined finding is answered with the reason. A finding of source person, and one with binding true, cannot be declined: when the run cannot fix it, the finding is failed, and its reply says what was tried and why it did not work",
+        "In that file, the commit: each fix is one `fix: <subject>` commit whose body names the finding's id and the test, ending in the trailer `Spec: <NN_name>, rework`; a not_reproduced finding's test commit has the same body and trailer; reference documentation that a fix makes wrong is corrected in the same commit; no spec, requirement, criterion or finding id goes into code, a test name or a comment",
+        "In that file, the reply, one per finding in the file's order: the finding's id, the action, text saying what was done or why not, and commit and test where there are any",
+        "In that file, with --unattended: each finding's fix runs in a subagent, one at a time, in this working tree, given the finding, the package's render, the files the finding names and the replies so far; it returns the reply, the commit's subject and body and the test it saw fail, and this session commits, as references/unattended.md has it for a task"
+      ],
+      "touches": [
+        "specification/schemas/af-impl-result.v1.json",
+        "specification/schemas/af_impl_result_test.go",
+        "skills/af-impl/references/rework.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Rebase for a conflict, gate, push and say how the rework ended",
+      "criteria": [
+        "REQ-3"
+      ],
+      "steps": [
+        "Add the cases of a rework's outcomes to the two tables of specification/schemas/af_impl_result_test.go and confirm the new cases fail",
+        "Extend specification/schemas/af-impl-result.v1.json with the rules of the criteria: each outcome held to its mode, package and open_items on a rework that got past its refusals, reason on a refusal and on push_failed, and reworked, nothing_changed and rework_failed held to their replies, their gate and pushed",
+        "In skills/af-impl/references/rework.md, a finding of source conflict: before any other finding the run fetches the base branch, notes where origin's work branch is, and rebases the work branch onto the base, resolving the conflicts with the finding's report in view; it never merges the base branch into the work branch. The finding is fixed when the rebase completed and the gate passed, its reply's commit being the tip of the rebased branch; a rebase the run cannot complete is aborted and the finding is failed",
+        "In that file, the gate: after the last finding the run takes `speca <package> --gate full` on the tip and, in a package that requires evidence, `speca <package> --verify-evidence`. When a verdict is not landable, it fixes what the gate names once more, in a fix: commit of the same form, and takes the gate again; a second verdict that is not landable ends the run as rework_failed",
+        "In that file, the push: on a landable verdict with at least one finding fixed the run pushes the work branch; after a rebase the push replaces the branch on origin with `git push --force-with-lease=<branch>:<commit fetched>`, so only when origin's branch is still where the run fetched it. Say that this is the one case in which af-impl rewrites pushed commits, that it rewrites none of the base branch, and that a refused push is push_failed with git's message",
+        "In that file, the outcomes: reworked when at least one finding is fixed, none failed, the verdicts are landable and the branch is pushed; nothing_changed when every finding is declined or not_reproduced, in which case nothing is pushed and a test commit stays local; rework_failed when a finding is failed or the gate is not landable after the second try, the commits staying local, nothing pushed and gate holding speca's answer; push_failed; and the refusals",
+        "In that file, the result: skill af-impl, mode rework, the common members as references/no-merge.md gives them, replies, and open_items in the shape of --no-merge for what the rework itself leaves open: a declined finding that is a real gap, a fix whose attempt was taken out. No tasks, deviations, summary or run. Point at the schema file",
+        "In SKILL.md, say in *Never* in one clause that the replacing push of a rework after a rebase is the one exception to never force-pushing, keeping the body under the ceiling; run `make skills-check`"
+      ],
+      "touches": [
+        "specification/schemas/af-impl-result.v1.json",
+        "specification/schemas/af_impl_result_test.go",
+        "skills/af-impl/references/rework.md",
+        "skills/af-impl/SKILL.md"
+      ],
+      "done_when": [
+        "`make skills-check` passes"
+      ]
+    }
+  ]
+}

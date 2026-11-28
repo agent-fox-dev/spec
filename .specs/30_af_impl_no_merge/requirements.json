@@ -1,0 +1,229 @@
+{
+  "$schema": "https://agent-fox.dev/schemas/requirements.v3.json",
+  "spec_id": "30",
+  "spec_name": "af_impl_no_merge",
+  "schema_version": 3,
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "title": "Say how a run that stopped at the pushed branch ended",
+      "rationale": "The controller lands the work, files the open items and starts the next step from this file alone.",
+      "system": "af-impl result schema",
+      "criteria": [
+        {
+          "id": "REQ-1.1",
+          "pattern": "ubiquitous",
+          "action": "for any result document of a `--no-merge` run that got past its refusals, accept it: `skill` is `af-impl`, `mode` is `no_merge`, `outcome` is `complete`, `complete_with_open_items`, `parked`, `gate_failed` or `push_failed`, `package` holds its six members, `branch` and `head` are non-empty strings, `pushed` is a boolean, and `tasks`, `deviations` and `open_items` are lists",
+          "contract": "validating the document against the schema returns no error",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema compiled from specification/schemas/af-impl-result.v1.json with github.com/santhosh-tekuri/jsonschema/v6, by the helper specification/schemas/af_spec_result_test.go already has",
+              "a base document built in the test: skill 'af-impl', mode 'no_merge', outcome 'complete', a package of spec_dir '.specs/62_retry_budget', spec_id '62', spec_name 'retry_budget', a title, status 'active' and profile 'full', branch 'work/62', a 40-digit hex head, pushed true, tasks holding {number: 1, outcome: 'done', commit, verdict: 'pass'}, empty deviations and open_items, a summary, and run holding the gate and open_items objects of the AF-Run trailer that skills/af-impl/references/landing.md shows, with opened {}"
+            ],
+            "pseudocode": "in specification/schemas/af_impl_result_test.go (new), one table of documents the schema accepts, each the base document with a change: {unchanged; a package of status 'draft' and profile 'lite'; outcome 'complete_with_open_items' with open_items [{kind: 'untested', title: 'no test of the retry cap', missing, why, ids: ['REQ-2.3'], evidence: ['retry/budget.go:41'], closes}]; outcome 'parked' with parked {task: 2, output}, tasks of outcomes done, in_progress and pending, and neither summary nor run; outcome 'gate_failed' with gate {level: 'full', verdict: 'fail', commands: [{name: 'all_tests', exit_code: 1, seconds: 3.2, tail}]}; outcome 'push_failed' with pushed false and a reason; outcome 'push_failed' with pushed false, a reason and neither summary nor run; each of refused_branch, refused_dependency, refused_dirty and refused_package with a reason and no package, tasks, deviations, open_items, summary or run; refused_package with a reason and a package of status 'sealed'; refused_dependency with a reason, a package and pushed false}: assert schema.Validate(document) returns no error"
+          }
+        },
+        {
+          "id": "REQ-1.2",
+          "pattern": "event_driven",
+          "condition": "a result document's `outcome` is `refused_branch`, `refused_dependency`, `refused_dirty` or `refused_package` and it carries a non-empty `reason`",
+          "action": "accept the document without `package`, `tasks`, `deviations`, `open_items`, `summary` and `run`, with `pushed` either `true` or `false`, and with a `package` of any lifecycle status when it carries one",
+          "contract": "validating the document returns no error",
+          "check": {
+            "same_as": "REQ-1.1"
+          }
+        },
+        {
+          "id": "REQ-1.3",
+          "pattern": "unwanted",
+          "condition": "a result document lacks `skill`, `mode`, `outcome`, `branch`, `head` or `pushed`, or its `skill` is not `af-impl`, its `mode` is not `no_merge`, its `outcome` is none of `complete`, `complete_with_open_items`, `parked`, `gate_failed`, `push_failed`, `refused_branch`, `refused_dependency`, `refused_dirty` and `refused_package`, its `branch` or `head` is empty, its `pushed` is not a boolean, or it carries a member the schema does not name",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error whose text names the member that is missing, wrong or unknown",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema compiled from specification/schemas/af-impl-result.v1.json with github.com/santhosh-tekuri/jsonschema/v6, by the helper specification/schemas/af_spec_result_test.go already has",
+              "a base document built in the test: skill 'af-impl', mode 'no_merge', outcome 'complete', a package of spec_dir '.specs/62_retry_budget', spec_id '62', spec_name 'retry_budget', a title, status 'active' and profile 'full', branch 'work/62', a 40-digit hex head, pushed true, tasks holding {number: 1, outcome: 'done', commit, verdict: 'pass'}, empty deviations and open_items, a summary, and run holding the gate and open_items objects of the AF-Run trailer that skills/af-impl/references/landing.md shows, with opened {}"
+            ],
+            "pseudocode": "in specification/schemas/af_impl_result_test.go, one table of documents the schema refuses, each the base document with one change and the member the error must name: {skill, mode, outcome, branch, head and pushed removed in turn; skill 'af-spec'; mode 'unattended'; outcome 'written'; outcome 'merged'; branch ''; head ''; pushed 1; an added member 'merge_commit'; outcome 'refused_branch' without reason; outcome 'refused_dirty' with reason ''; outcome 'push_failed' with pushed false and no reason; package, tasks, deviations and open_items removed in turn; package.status 'sealed'; package.profile 'small'; summary removed; run removed; outcome 'gate_failed' with a gate and no summary; outcome 'complete' with open_items [{kind: 'untested', title: 'no test of the retry cap', missing, why, ids: ['REQ-2.3'], evidence: ['retry/budget.go:41'], closes}]; outcome 'complete_with_open_items' with open_items []; pushed false on the base; outcome 'parked' with parked {task: 2, output} and pushed false; outcome 'gate_failed' with a gate and pushed false; outcome 'push_failed' with a reason and pushed true; outcome 'parked' without parked; parked {task: 2} and parked {output} and parked {task: 0, output}; outcome 'gate_failed' without gate; outcome 'complete' with a gate of verdict 'fail'}: assert schema.Validate(document) returns an error, and that the error's text names the member the case gives"
+          }
+        },
+        {
+          "id": "REQ-1.4",
+          "pattern": "unwanted",
+          "condition": "a result document's `outcome` begins `refused_` or is `push_failed` and it has no `reason`, or an empty one",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names `reason`",
+          "check": {
+            "same_as": "REQ-1.3"
+          }
+        },
+        {
+          "id": "REQ-1.5",
+          "pattern": "unwanted",
+          "condition": "a result document's `outcome` is `complete`, `complete_with_open_items`, `parked`, `gate_failed` or `push_failed` and it lacks `package`, `tasks`, `deviations` or `open_items`, or its `package.status` is neither `draft` nor `active`, or its `outcome` is `complete`, `complete_with_open_items` or `gate_failed` and it lacks `summary` or `run`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names the missing or wrong member",
+          "check": {
+            "same_as": "REQ-1.3"
+          }
+        },
+        {
+          "id": "REQ-1.6",
+          "pattern": "unwanted",
+          "condition": "a result document's `outcome` is `complete` and its `open_items` is not empty, or its `outcome` is `complete_with_open_items` and its `open_items` is empty",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names `open_items`",
+          "check": {
+            "same_as": "REQ-1.3"
+          }
+        },
+        {
+          "id": "REQ-1.7",
+          "pattern": "unwanted",
+          "condition": "a result document's `outcome` is `complete`, `complete_with_open_items`, `parked` or `gate_failed` and its `pushed` is `false`, or its `outcome` is `push_failed` and its `pushed` is `true`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names `pushed`",
+          "check": {
+            "same_as": "REQ-1.3"
+          }
+        },
+        {
+          "id": "REQ-1.8",
+          "pattern": "unwanted",
+          "condition": "a result document's `outcome` is `parked` and it has no `parked` member holding a `task` of at least 1 and an `output`, or its `outcome` is `gate_failed` and it has no `gate`, or its `outcome` is `complete` or `complete_with_open_items` and it carries a `gate` whose `verdict` is not `pass`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names `parked` or `gate`",
+          "check": {
+            "same_as": "REQ-1.3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-2",
+      "title": "Carry the record a merge commit would have held",
+      "rationale": "Without a merge commit, the tasks, the deviations and the gate's numbers have no other place a caller can read them from.",
+      "system": "af-impl result schema",
+      "criteria": [
+        {
+          "id": "REQ-2.1",
+          "pattern": "ubiquitous",
+          "action": "for any result document whose `tasks`, `deviations`, `run` and `gate` are as a run writes them, accept it: a task entry holds `number`, at least 1, and `outcome`, one of `done`, `dropped`, `in_progress` and `pending`, and a `done` one also `commit` and `verdict`, one of `pass`, `pass_baseline_failing`, `regressed`, `still_failing` and `gate_failed`; a deviation holds `key`, `reason` and `adr`; `run` holds `gate` and `open_items`; `gate` holds `verdict` and `commands`",
+          "contract": "validating the document returns no error, and a `gate` object may carry members of `speca`'s gate answer the schema does not name",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema compiled from specification/schemas/af-impl-result.v1.json with github.com/santhosh-tekuri/jsonschema/v6, by the helper specification/schemas/af_spec_result_test.go already has",
+              "a base document built in the test: skill 'af-impl', mode 'no_merge', outcome 'complete', a package of spec_dir '.specs/62_retry_budget', spec_id '62', spec_name 'retry_budget', a title, status 'active' and profile 'full', branch 'work/62', a 40-digit hex head, pushed true, tasks holding {number: 1, outcome: 'done', commit, verdict: 'pass'}, empty deviations and open_items, a summary, and run holding the gate and open_items objects of the AF-Run trailer that skills/af-impl/references/landing.md shows, with opened {}"
+            ],
+            "pseudocode": "in specification/schemas/af_impl_result_test.go, in the table of accepted documents, the cases: {tasks of {number: 1, outcome: 'done', commit, verdict: 'pass_baseline_failing'}, {number: 2, outcome: 'dropped'} and {number: 3, outcome: 'done', commit, verdict: 'pass'}; deviations [{key: 'D-2', reason, adr: 'docs/adr/31-cap-the-retries.md'}]; run.open_items.opened {'untested': 1, 'defect:minor': 2} on a complete_with_open_items document with three open items; a gate of verdict 'pass' carrying level, clean_env, seconds, a reused object, commands [] and slowest, as docs/speca.md shows a reused full gate; a gate command carrying log and tail}: assert schema.Validate(document) returns no error"
+          }
+        },
+        {
+          "id": "REQ-2.2",
+          "pattern": "unwanted",
+          "condition": "an entry of `tasks` lacks `number` or `outcome`, has a `number` below 1, an `outcome` outside the four, a `verdict` outside the five, an empty `commit`, a member the schema does not name, or is `done` without `commit` or `verdict`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names the entry's missing or wrong member",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema compiled from specification/schemas/af-impl-result.v1.json with github.com/santhosh-tekuri/jsonschema/v6, by the helper specification/schemas/af_spec_result_test.go already has",
+              "a base document built in the test: skill 'af-impl', mode 'no_merge', outcome 'complete', a package of spec_dir '.specs/62_retry_budget', spec_id '62', spec_name 'retry_budget', a title, status 'active' and profile 'full', branch 'work/62', a 40-digit hex head, pushed true, tasks holding {number: 1, outcome: 'done', commit, verdict: 'pass'}, empty deviations and open_items, a summary, and run holding the gate and open_items objects of the AF-Run trailer that skills/af-impl/references/landing.md shows, with opened {}"
+            ],
+            "pseudocode": "in specification/schemas/af_impl_result_test.go, in the table of refused documents, the cases, each with the member the error must name: {a task without number and without outcome in turn; number 0; outcome 'parked'; a done task without commit and without verdict in turn; verdict 'green'; commit ''; a task with an added member 'title'; a deviation without key, without reason and without adr in turn; a deviation with reason ''; run without gate and without open_items in turn; run.gate without full; run.gate.full without runs; run.open_items without opened; run.open_items.opened {'untested': 'one'}; a gate without verdict and without commands in turn; a gate of verdict 'green'; a gate command without name, without exit_code and without seconds in turn}: assert schema.Validate(document) returns an error whose text names that member"
+          }
+        },
+        {
+          "id": "REQ-2.3",
+          "pattern": "unwanted",
+          "condition": "an entry of `deviations` lacks `key`, `reason` or `adr`, or has an empty one",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names the entry's missing or empty member",
+          "check": {
+            "same_as": "REQ-2.2"
+          }
+        },
+        {
+          "id": "REQ-2.4",
+          "pattern": "unwanted",
+          "condition": "`run` lacks `gate` or `open_items`, its `gate` lacks `full`, `task`, `baseline_full_seconds` or `last_full_seconds`, `full` or `task` lacks `runs`, `seconds` or `reused`, its `open_items` lacks `opened`, `closed`, `passed_on` or `reclassified`, or one of those four holds a value that is not a count",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names the missing or wrong member of `run`",
+          "check": {
+            "same_as": "REQ-2.2"
+          }
+        },
+        {
+          "id": "REQ-2.5",
+          "pattern": "unwanted",
+          "condition": "`gate` lacks `verdict` or `commands`, its `verdict` is none of `pass`, `fail` and `not_run`, or an entry of `commands` lacks `name`, `exit_code` or `seconds`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names the missing or wrong member of `gate`",
+          "check": {
+            "same_as": "REQ-2.2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "REQ-3",
+      "title": "List every open item with its kind",
+      "rationale": "Whoever lands the work files the open items; an entry that lacks its kind, its severity or the package it awaits cannot be labelled.",
+      "system": "af-impl result schema",
+      "criteria": [
+        {
+          "id": "REQ-3.1",
+          "pattern": "ubiquitous",
+          "action": "for any open item that holds `kind`, one of `awaits`, `defect`, `untested` and `deviation`, a `title` of 1 to 60 characters, `missing`, `why`, a non-empty list `ids`, a list `evidence` and `closes`, with `severity`, one of `security`, `data-loss`, `correctness` and `minor`, on a `defect` and on no other kind, `awaits`, a package id, on an `awaits` item and on no other kind, and `adr` where there is one, accept the document that lists it",
+          "contract": "validating the document returns no error",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema compiled from specification/schemas/af-impl-result.v1.json with github.com/santhosh-tekuri/jsonschema/v6, by the helper specification/schemas/af_spec_result_test.go already has",
+              "a base document built in the test: skill 'af-impl', mode 'no_merge', outcome 'complete', a package of spec_dir '.specs/62_retry_budget', spec_id '62', spec_name 'retry_budget', a title, status 'active' and profile 'full', branch 'work/62', a 40-digit hex head, pushed true, tasks holding {number: 1, outcome: 'done', commit, verdict: 'pass'}, empty deviations and open_items, a summary, and run holding the gate and open_items objects of the AF-Run trailer that skills/af-impl/references/landing.md shows, with opened {}"
+            ],
+            "pseudocode": "in specification/schemas/af_impl_result_test.go, in the table of accepted documents, complete_with_open_items documents whose one open item is: {an untested item; a defect of each of the four severities in turn; an awaits item with awaits '31'; a deviation with adr 'docs/adr/31-cap-the-retries.md'; an item whose title has exactly 60 characters; an item with evidence []; an item with ids ['REQ-2.3', 'PATH-1', 'D-3']}: assert schema.Validate(document) returns no error"
+          }
+        },
+        {
+          "id": "REQ-3.2",
+          "pattern": "unwanted",
+          "condition": "an entry of `open_items` lacks `kind`, `title`, `missing`, `why`, `ids`, `evidence` or `closes`, has a `kind` outside the four, a `title` that is empty or longer than 60 characters, an empty `ids`, `missing`, `why` or `closes`, or a member the schema does not name",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names the entry's missing or wrong member",
+          "check": {
+            "kind": "unit",
+            "setup": [
+              "the schema compiled from specification/schemas/af-impl-result.v1.json with github.com/santhosh-tekuri/jsonschema/v6, by the helper specification/schemas/af_spec_result_test.go already has",
+              "a base document built in the test: skill 'af-impl', mode 'no_merge', outcome 'complete', a package of spec_dir '.specs/62_retry_budget', spec_id '62', spec_name 'retry_budget', a title, status 'active' and profile 'full', branch 'work/62', a 40-digit hex head, pushed true, tasks holding {number: 1, outcome: 'done', commit, verdict: 'pass'}, empty deviations and open_items, a summary, and run holding the gate and open_items objects of the AF-Run trailer that skills/af-impl/references/landing.md shows, with opened {}"
+            ],
+            "pseudocode": "in specification/schemas/af_impl_result_test.go, in the table of refused documents, complete_with_open_items documents whose one open item is the untested item with one change, each with the member the error must name: {kind, title, missing, why, ids, evidence and closes removed in turn; kind 'todo'; title ''; a title of 61 characters; ids []; ids 'REQ-2.3'; missing ''; closes ''; an added member 'issue'; kind 'defect' without severity; kind 'defect' with severity 'major'; severity 'minor' on the untested item; kind 'awaits' without awaits; kind 'awaits' with awaits 31 as a number; kind 'awaits' with awaits '31_af_impl_rework'; awaits '31' on the untested item}: assert schema.Validate(document) returns an error whose text names that member"
+          }
+        },
+        {
+          "id": "REQ-3.3",
+          "pattern": "unwanted",
+          "condition": "an open item of kind `defect` has no `severity` or one outside `security`, `data-loss`, `correctness` and `minor`, or an item of another kind carries `severity`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names `severity`",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
+        },
+        {
+          "id": "REQ-3.4",
+          "pattern": "unwanted",
+          "condition": "an open item of kind `awaits` has no `awaits` or one that is not a string of two or more digits, or an item of another kind carries `awaits`",
+          "action": "refuse the document",
+          "contract": "validating the document returns an error that names `awaits`",
+          "check": {
+            "same_as": "REQ-3.2"
+          }
+        }
+      ]
+    }
+  ]
+}
